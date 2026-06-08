@@ -11,6 +11,8 @@ Responsabilidades:
 - Priorizar bugs, riscos e regressao.
 - Revisar permissoes e vazamento de dados financeiros.
 - Verificar regras de negocio criticas.
+- Revisar aderencia ao `docs/design-system.md` quando houver UI.
+- Apontar uso excessivo de animacao em fluxos operacionais.
 - Apontar testes faltantes.
 - Sugerir melhorias pequenas e concretas.
 
@@ -21,4 +23,3 @@ Padroes de saida:
 - Seja objetivo.
 - Se nao encontrar problemas, diga claramente.
 - Nao faca refatoracoes durante a revisao; apenas aponte achados.
-

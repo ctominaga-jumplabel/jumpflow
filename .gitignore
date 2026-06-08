@@ -22,13 +22,15 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+.logs/
 
 # OS / editor
 .DS_Store
 Thumbs.db
 .vscode/
 *.swp
+__pycache__/
+*.pyc
 
 # Vercel
 .vercel/
-

@@ -91,6 +91,25 @@ Arquivos principais:
 - `apps/web/`, quando existir.
 - `packages/ui/`, quando existir.
 
+### `jump-design-system`
+
+Use para:
+
+- identidade visual;
+- design system;
+- tokens;
+- uso de Motion;
+- avaliacao de componentes 21st.dev;
+- acabamento premium;
+- auditoria visual.
+
+Arquivos principais:
+
+- `docs/design-system.md`
+- `.claude/skills/ui-ux-pro-max/`
+- `apps/web/`, quando existir.
+- `packages/ui/`, quando existir.
+
 ### `jump-qa-engineer`
 
 Use para:
@@ -155,9 +174,10 @@ Arquivos principais:
 
 1. `jump-product-owner` confirma objetivo e persona.
 2. `jump-frontend-ux` desenha fluxo e implementa UI.
-3. `jump-fullstack-engineer` conecta dados e regras.
-4. `jump-qa-engineer` valida fluxo.
-5. `jump-code-reviewer` revisa.
+3. `jump-design-system` revisa acabamento visual, movimento e consistencia.
+4. `jump-fullstack-engineer` conecta dados e regras.
+5. `jump-qa-engineer` valida fluxo.
+6. `jump-code-reviewer` revisa.
 
 ### Mudanca no Banco
 
@@ -187,6 +207,7 @@ Arquivos principais:
 - Para tarefas pequenas, um unico agente pode resolver.
 - Para tarefas grandes, divida em produto, dados, implementacao, testes e revisao.
 - O `jump-code-reviewer` deve ser usado no final de mudancas relevantes.
+- O `jump-design-system` deve ser usado antes de finalizar telas importantes.
 - O `jump-devops` deve ser chamado antes de qualquer mudanca em deploy, ambiente ou secrets.
 - O `jump-data-modeler` deve ser chamado antes de alterar schema Prisma.
 - O `jump-product-owner` deve ser chamado quando houver duvida de escopo.
@@ -210,5 +231,5 @@ Arquivos principais:
 - Backlog: `docs/backlog-mvp.md`
 - Dados: `docs/modelo-dados.md`
 - Arquitetura: `docs/arquitetura.md`
+- Design system: `docs/design-system.md`
 - Agentes: `.claude/agents/`
-

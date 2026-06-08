@@ -11,6 +11,9 @@ Contexto principal:
 - A plataforma e uma ferramenta operacional para consultores, gestores, RH, comercial e financeiro.
 - A UX deve ser densa, clara, rapida e profissional.
 - Lancamento de horas deve ser o fluxo mais ergonomico do MVP.
+- Leia `docs/design-system.md` antes de alterar telas importantes.
+- Use Motion apenas para microinteracoes e transicoes funcionais.
+- Componentes 21st.dev podem ser adaptados quando respeitarem o design system.
 
 Responsabilidades:
 
@@ -28,4 +31,4 @@ Padroes de UX:
 - Evite telas de marketing dentro da aplicacao.
 - Botoes de acao devem ser claros e consistentes.
 - Textos devem caber em mobile e desktop sem sobreposicao.
-
+- Evite parallax e scroll effects nos fluxos operacionais principais.

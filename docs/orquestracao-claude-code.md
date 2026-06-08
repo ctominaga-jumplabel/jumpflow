@@ -12,7 +12,8 @@ Para toda historia relevante:
 2. Confirmar a historia e criterios de aceite.
 3. Verificar impacto em `docs/modelo-dados.md`.
 4. Verificar arquitetura em `docs/arquitetura.md`.
-5. Escolher os agentes adequados.
+5. Verificar design system em `docs/design-system.md`, se houver UI.
+6. Escolher os agentes adequados.
 
 ## 3. Prompt Base para Claude Code
 
@@ -56,6 +57,12 @@ Use o agente jump-fullstack-engineer para implementar a historia [ID] de ponta a
 Use o agente jump-frontend-ux para revisar e melhorar a experiencia da tela/fluxo da historia [ID].
 ```
 
+### Design System
+
+```text
+Use o agente jump-design-system para auditar identidade visual, Motion, componentes 21st.dev e acabamento premium da historia [ID].
+```
+
 ### QA
 
 ```text
@@ -93,4 +100,3 @@ Nao usar como padrao para tarefas pequenas e localizadas.
 8. Implementar alocacoes.
 9. Implementar lancamento semanal de horas.
 10. Implementar aprovacao/reprovacao.
-
