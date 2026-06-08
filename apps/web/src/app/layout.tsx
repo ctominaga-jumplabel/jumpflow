@@ -14,7 +14,10 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: appConfig.name,
+  title: {
+    default: appConfig.name,
+    template: `%s · ${appConfig.name}`,
+  },
   description: "Plataforma Jump para horas, consultores, skills e alocacoes.",
 };
 

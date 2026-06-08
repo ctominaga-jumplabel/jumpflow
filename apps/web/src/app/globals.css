@@ -1,26 +1,66 @@
 @import "tailwindcss";
 
+/*
+ * JumpFlow design tokens.
+ * Source of truth: docs/design-system.md (paleta premium operacional, light).
+ * Operational workflows stay on a neutral light canvas — no auto dark inversion.
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f6f7f2;
+  --foreground: #111814;
 }
 
 @theme inline {
+  /* Surfaces */
+  --color-canvas: #f6f7f2;
+  --color-surface: #ffffff;
+  --color-surface-muted: #eef3f7;
+
+  /* Text */
+  --color-strong: #111814;
+  --color-medium: #4b6358;
+  --color-soft: #6f7f77;
+
+  /* Lines */
+  --color-border: #d9ded4;
+
+  /* Action / brand */
+  --color-brand: #2563eb;
+  --color-brand-dark: #1d4ed8;
+  --color-brand-soft: #dbeafe;
+
+  /* Semantic states */
+  --color-success: #16a34a;
+  --color-success-soft: #dcfce7;
+  --color-warning: #d97706;
+  --color-warning-soft: #fef3c7;
+  --color-danger: #dc2626;
+  --color-danger-soft: #fee2e2;
+
+  /* Aliases used by base elements */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  /* Low radius, premium-by-finish */
+  --radius-card: 8px;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+/* Respect users who prefer reduced motion across the operational app. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
