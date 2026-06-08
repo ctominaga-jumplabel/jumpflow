@@ -1,0 +1,324 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum RoleName {
+  ADMIN
+  CONSULTANT
+  PROJECT_MANAGER
+  AREA_MANAGER
+  FINANCE
+  PEOPLE
+  SALES
+}
+
+enum ConsultantStatus {
+  ACTIVE
+  INACTIVE
+  ON_LEAVE
+}
+
+enum Seniority {
+  INTERN
+  JUNIOR
+  MID_LEVEL
+  SENIOR
+  SPECIALIST
+  PRINCIPAL
+}
+
+enum ClientStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum SkillStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum ProjectStatus {
+  PROPOSAL
+  ACTIVE
+  PAUSED
+  CLOSED
+}
+
+enum AllocationStatus {
+  ACTIVE
+  PLANNED
+  ENDED
+  CANCELLED
+}
+
+enum TimesheetPeriodStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  CLOSED
+}
+
+enum TimeEntryStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  CLOSED
+}
+
+enum SkillLevel {
+  BASIC
+  INTERMEDIATE
+  ADVANCED
+  SPECIALIST
+}
+
+enum ValidationStatus {
+  PENDING
+  VALIDATED
+  REJECTED
+}
+
+enum ApprovalStatus {
+  APPROVED
+  REJECTED
+}
+
+enum ApprovableEntityType {
+  TIME_ENTRY
+  CONSULTANT_SKILL
+  CERTIFICATE
+}
+
+enum MonthlyClosingStatus {
+  OPEN
+  CLOSED
+  CANCELLED
+}
+
+model User {
+  id          String       @id @default(cuid())
+  name        String
+  email       String       @unique
+  status      UserStatus   @default(ACTIVE)
+  roles       UserRole[]
+  consultant  Consultant?
+  auditEvents AuditEvent[] @relation("AuditActor")
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+}
+
+model Role {
+  id        String     @id @default(cuid())
+  name      RoleName   @unique
+  users     UserRole[]
+  createdAt DateTime   @default(now())
+}
+
+model UserRole {
+  userId String
+  roleId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role   Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+}
+
+model Consultant {
+  id          String             @id @default(cuid())
+  userId      String?            @unique
+  user        User?              @relation(fields: [userId], references: [id])
+  name        String
+  email       String             @unique
+  jobTitle    String?
+  seniority   Seniority
+  area        String?
+  status      ConsultantStatus   @default(ACTIVE)
+  hourlyCost  Decimal?           @db.Decimal(12, 2)
+  allocations Allocation[]
+  periods     TimesheetPeriod[]
+  timeEntries TimeEntry[]
+  skills      ConsultantSkill[]
+  certificates Certificate[]
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+}
+
+model Client {
+  id        String       @id @default(cuid())
+  name      String
+  document  String?
+  status    ClientStatus @default(ACTIVE)
+  projects  Project[]
+  closings  MonthlyClosing[]
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+}
+
+model Project {
+  id                String           @id @default(cuid())
+  clientId          String
+  client            Client           @relation(fields: [clientId], references: [id])
+  name              String
+  description       String?
+  status            ProjectStatus    @default(PROPOSAL)
+  startDate         DateTime
+  endDate           DateTime?
+  managerUserId     String?
+  billingHourlyRate Decimal?         @db.Decimal(12, 2)
+  budgetHours       Decimal?         @db.Decimal(10, 2)
+  costCenter        String?
+  allocations       Allocation[]
+  timeEntries       TimeEntry[]
+  closings          MonthlyClosing[]
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+}
+
+model Allocation {
+  id                String           @id @default(cuid())
+  consultantId      String
+  consultant        Consultant       @relation(fields: [consultantId], references: [id])
+  projectId         String
+  project           Project          @relation(fields: [projectId], references: [id])
+  role              String
+  allocationPercent Int
+  startDate         DateTime
+  endDate           DateTime?
+  status            AllocationStatus @default(PLANNED)
+  timeEntries       TimeEntry[]
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+}
+
+model TimesheetPeriod {
+  id           String                 @id @default(cuid())
+  consultantId String
+  consultant   Consultant             @relation(fields: [consultantId], references: [id])
+  startDate    DateTime
+  endDate      DateTime
+  status       TimesheetPeriodStatus  @default(DRAFT)
+  submittedAt  DateTime?
+  entries      TimeEntry[]
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
+
+  @@unique([consultantId, startDate, endDate])
+}
+
+model TimeEntry {
+  id           String          @id @default(cuid())
+  periodId     String
+  period       TimesheetPeriod @relation(fields: [periodId], references: [id])
+  consultantId String
+  consultant   Consultant      @relation(fields: [consultantId], references: [id])
+  projectId    String
+  project      Project         @relation(fields: [projectId], references: [id])
+  allocationId String?
+  allocation   Allocation?     @relation(fields: [allocationId], references: [id])
+  date         DateTime
+  hours        Decimal         @db.Decimal(5, 2)
+  activityType String
+  description  String?
+  billable     Boolean         @default(true)
+  status       TimeEntryStatus @default(DRAFT)
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+}
+
+model Approval {
+  id             String               @id @default(cuid())
+  entityType     ApprovableEntityType
+  entityId       String
+  approverUserId String
+  status         ApprovalStatus
+  comment        String?
+  createdAt      DateTime             @default(now())
+}
+
+model Skill {
+  id          String            @id @default(cuid())
+  name        String
+  category    String?
+  status      SkillStatus       @default(ACTIVE)
+  consultants ConsultantSkill[]
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@unique([name, category])
+}
+
+model ConsultantSkill {
+  id              String           @id @default(cuid())
+  consultantId    String
+  consultant      Consultant       @relation(fields: [consultantId], references: [id])
+  skillId         String
+  skill           Skill            @relation(fields: [skillId], references: [id])
+  level           SkillLevel
+  yearsExperience Decimal?         @db.Decimal(4, 1)
+  lastUsedAt      DateTime?
+  validationStatus ValidationStatus @default(PENDING)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@unique([consultantId, skillId])
+}
+
+model Certificate {
+  id           String           @id @default(cuid())
+  consultantId String
+  consultant   Consultant       @relation(fields: [consultantId], references: [id])
+  name         String
+  issuer       String
+  issuedAt     DateTime
+  expiresAt    DateTime?
+  credentialId String?
+  credentialUrl String?
+  fileUrl      String?
+  status       ValidationStatus @default(PENDING)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+}
+
+model MonthlyClosing {
+  id             String               @id @default(cuid())
+  clientId       String
+  client         Client               @relation(fields: [clientId], references: [id])
+  projectId      String
+  project        Project              @relation(fields: [projectId], references: [id])
+  month          Int
+  year           Int
+  status         MonthlyClosingStatus @default(OPEN)
+  totalHours     Decimal              @db.Decimal(10, 2)
+  totalAmount    Decimal              @db.Decimal(12, 2)
+  closedByUserId String?
+  closedAt       DateTime?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  @@unique([projectId, month, year])
+}
+
+model AuditEvent {
+  id          String   @id @default(cuid())
+  actorUserId String?
+  actor       User?    @relation("AuditActor", fields: [actorUserId], references: [id])
+  entityType  String
+  entityId    String
+  action      String
+  before      Json?
+  after       Json?
+  createdAt   DateTime @default(now())
+}

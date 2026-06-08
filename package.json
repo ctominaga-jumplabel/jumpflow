@@ -1,0 +1,22 @@
+{
+  "name": "jumpflow",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @jumpflow/web",
+    "build": "npm run build --workspace @jumpflow/web",
+    "lint": "npm run lint --workspace @jumpflow/web",
+    "db:generate": "npm run db:generate --workspace @jumpflow/database",
+    "db:migrate": "npm run db:migrate --workspace @jumpflow/database",
+    "db:studio": "npm run db:studio --workspace @jumpflow/database"
+  },
+  "devDependencies": {
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.3"
+  }
+}
+
