@@ -80,6 +80,7 @@ export default function Home() {
             </div>
           </aside>
         </div>
-      </main>
+      </section>
+    </main>
   );
 }
