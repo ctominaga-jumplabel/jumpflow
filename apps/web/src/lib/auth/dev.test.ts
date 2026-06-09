@@ -19,6 +19,20 @@ describe("isDevAuthEnabled", () => {
     expect(isDevAuthEnabled()).toBe(false);
   });
 
+  it("stays false in production unless the explicit escape hatch is set", () => {
+    vi.stubEnv("AUTH_DEV_MODE", "true");
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("ALLOW_DEV_AUTH_IN_PRODUCTION", "false");
+    expect(isDevAuthEnabled()).toBe(false);
+  });
+
+  it("can be enabled in production via the explicit escape hatch", () => {
+    vi.stubEnv("AUTH_DEV_MODE", "true");
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("ALLOW_DEV_AUTH_IN_PRODUCTION", "true");
+    expect(isDevAuthEnabled()).toBe(true);
+  });
+
   it("is false when the flag is not set", () => {
     vi.stubEnv("AUTH_DEV_MODE", "");
     vi.stubEnv("NODE_ENV", "development");
