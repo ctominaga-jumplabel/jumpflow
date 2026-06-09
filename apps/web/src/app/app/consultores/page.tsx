@@ -1,21 +1,18 @@
 import type { Metadata } from "next";
-import { Users } from "lucide-react";
-import { ModulePlaceholder } from "@/components/ui/ModulePlaceholder";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { ConsultantDirectory } from "@/components/consultants/ConsultantDirectory";
 
 export const metadata: Metadata = { title: "Consultores" };
 
 export default function ConsultoresPage() {
   return (
-    <ModulePlaceholder
-      title="Consultores"
-      description="Cadastro de consultores com senioridade, área, status e disponibilidade para alocação em projetos."
-      icon={Users}
-      steps={[
-        "Cadastro de consultores com senioridade e área.",
-        "Visão de disponibilidade e percentual alocado.",
-        "Histórico de projetos e alocações.",
-        "Busca por skill, senioridade e disponibilidade.",
-      ]}
-    />
+    <div className="space-y-6">
+      <PageHeader
+        eyebrow="Pessoas"
+        title="Consultores"
+        description="Diretório de consultores com senioridade, área, disponibilidade e principais skills."
+      />
+      <ConsultantDirectory />
+    </div>
   );
 }

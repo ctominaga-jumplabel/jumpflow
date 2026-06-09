@@ -1,21 +1,23 @@
 import type { Metadata } from "next";
-import { GraduationCap } from "lucide-react";
-import { ModulePlaceholder } from "@/components/ui/ModulePlaceholder";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { SkillMatrix } from "@/components/skills/SkillMatrix";
+import { SkillCoveragePanel } from "@/components/skills/SkillCoveragePanel";
+import { skills } from "@/lib/mock-data/skills";
 
 export const metadata: Metadata = { title: "Skills" };
 
 export default function SkillsPage() {
   return (
-    <ModulePlaceholder
-      title="Skills"
-      description="Matriz de competências técnicas e comportamentais dos consultores, com nível, experiência e validação por gestor."
-      icon={GraduationCap}
-      steps={[
-        "Catálogo de skills por categoria.",
-        "Skills do consultor com nível e anos de experiência.",
-        "Validação de skills declaradas por gestor.",
-        "Matriz de skills e busca para alocação comercial.",
-      ]}
-    />
+    <div className="space-y-6">
+      <PageHeader
+        eyebrow="Pessoas"
+        title="Skills"
+        description="Matriz de competências por categoria, níveis e gaps de cobertura do time."
+      />
+      <div className="grid gap-6 lg:grid-cols-[1fr_360px] lg:items-start">
+        <SkillMatrix skills={skills} />
+        <SkillCoveragePanel skills={skills} />
+      </div>
+    </div>
   );
 }

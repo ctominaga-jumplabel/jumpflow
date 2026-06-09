@@ -10,6 +10,13 @@ import type { RoleName } from "./roles";
 /** `"ALL"` means any authenticated user may access. */
 export type RouteAccess = RoleName[] | "ALL";
 
+/**
+ * Roles allowed to see financial fields (valor hora, custo hora, budget) and
+ * the Financeiro module. Single source of truth so route guards and in-page
+ * field masking (e.g. Projetos) never drift apart.
+ */
+export const FINANCIAL_ROLES: RoleName[] = ["ADMIN", "AREA_MANAGER", "FINANCE"];
+
 interface RouteRule {
   prefix: string;
   access: RouteAccess;
@@ -25,7 +32,7 @@ interface RouteRule {
  * expands.
  */
 export const routePermissions: RouteRule[] = [
-  { prefix: "/app/financeiro", access: ["ADMIN", "AREA_MANAGER", "FINANCE"] },
+  { prefix: "/app/financeiro", access: FINANCIAL_ROLES },
   {
     prefix: "/app/aprovacoes",
     access: ["ADMIN", "AREA_MANAGER", "PROJECT_MANAGER"],

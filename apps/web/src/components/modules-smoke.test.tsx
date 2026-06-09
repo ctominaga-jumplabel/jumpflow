@@ -1,0 +1,73 @@
+import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { TimesheetWeekView } from "@/components/timesheet/TimesheetWeekView";
+import { ConsultantDirectory } from "@/components/consultants/ConsultantDirectory";
+import { CertificateList } from "@/components/certificates/CertificateList";
+import { CertificateSummary } from "@/components/certificates/CertificateSummary";
+import { SkillMatrix } from "@/components/skills/SkillMatrix";
+import { SkillCoveragePanel } from "@/components/skills/SkillCoveragePanel";
+import { FinancialOverview } from "@/components/financial/FinancialOverview";
+import { certificates } from "@/lib/mock-data/certificates";
+import { skills } from "@/lib/mock-data/skills";
+
+describe("Horas — TimesheetWeekView", () => {
+  it("renders the week grid and prepared actions", () => {
+    render(<TimesheetWeekView />);
+    expect(screen.getByText(/Semana 24/)).toBeInTheDocument();
+    expect(screen.getByText("Lançamentos da semana")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Enviar para aprovação/ }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Em breve")).not.toBeInTheDocument();
+  });
+});
+
+describe("Consultores — ConsultantDirectory", () => {
+  it("renders consultants and filters by search", () => {
+    render(<ConsultantDirectory />);
+    expect(screen.getByText("Bruno Lima")).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText(/Buscar por nome/), {
+      target: { value: "marina" },
+    });
+    expect(screen.getByText("Marina Alves")).toBeInTheDocument();
+    expect(screen.queryByText("Bruno Lima")).not.toBeInTheDocument();
+  });
+});
+
+describe("Certificados — list and summary", () => {
+  it("renders the summary cards", () => {
+    render(<CertificateSummary certificates={certificates} />);
+    expect(screen.getByText("Certificados")).toBeInTheDocument();
+    expect(screen.getByText("Vencidos")).toBeInTheDocument();
+  });
+
+  it("renders the urgency-sorted list", () => {
+    render(<CertificateList certificates={certificates} />);
+    expect(
+      screen.getByText(/AWS Solutions Architect – Associate/),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("Skills — matrix and coverage", () => {
+  it("renders the matrix", () => {
+    render(<SkillMatrix skills={skills} />);
+    expect(screen.getByText("Matriz de skills")).toBeInTheDocument();
+    expect(screen.getByText("React")).toBeInTheDocument();
+  });
+
+  it("renders the coverage gaps panel", () => {
+    render(<SkillCoveragePanel skills={skills} />);
+    expect(screen.getByText("Gaps de cobertura")).toBeInTheDocument();
+  });
+});
+
+describe("Financeiro — FinancialOverview", () => {
+  it("renders revenue KPIs and the closing table", () => {
+    render(<FinancialOverview />);
+    expect(screen.getByText("Receita estimada")).toBeInTheDocument();
+    expect(screen.getByText("Fechamento mensal")).toBeInTheDocument();
+    // Atlas appears in the closing.
+    expect(screen.getByText("Atlas")).toBeInTheDocument();
+  });
+});

@@ -1,21 +1,21 @@
 import type { Metadata } from "next";
-import { Award } from "lucide-react";
-import { ModulePlaceholder } from "@/components/ui/ModulePlaceholder";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { CertificateSummary } from "@/components/certificates/CertificateSummary";
+import { CertificateList } from "@/components/certificates/CertificateList";
+import { certificates } from "@/lib/mock-data/certificates";
 
 export const metadata: Metadata = { title: "Certificados" };
 
 export default function CertificadosPage() {
   return (
-    <ModulePlaceholder
-      title="Certificados"
-      description="Cadastro de certificações com emissor, validade, anexos e alertas de vencimento para People."
-      icon={Award}
-      steps={[
-        "Cadastro de certificados com emissor e datas.",
-        "Anexo de comprovantes.",
-        "Alertas de certificados próximos do vencimento.",
-        "Validação por RH/People.",
-      ]}
-    />
+    <div className="space-y-6">
+      <PageHeader
+        eyebrow="Pessoas"
+        title="Certificados"
+        description="Certificações do time com emissor, validade e destaque para vencidos e próximos do vencimento."
+      />
+      <CertificateSummary certificates={certificates} />
+      <CertificateList certificates={certificates} />
+    </div>
   );
 }
