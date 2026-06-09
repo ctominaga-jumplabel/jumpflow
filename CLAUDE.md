@@ -58,6 +58,14 @@ docs/
 - Keep animation functional and restrained in core workflows.
 - Avoid parallax/scroll effects in timesheet, approval, allocation and financial workflows.
 
+## Authentication & Authorization
+
+- Auth uses Auth.js (NextAuth v5) with Microsoft Entra ID configured via env vars; keep auth decoupled from business rules.
+- Authorization lives in `apps/web/src/lib/auth/`: use `getCurrentUser`, `requireUser`, `requireRole` and the route-permission map. Check permissions on the server.
+- `/app/*` is protected by `apps/web/src/proxy.ts` (Next 16 proxy convention, successor to middleware); unauthenticated users go to `/login`.
+- Local development without real credentials uses `AUTH_DEV_MODE=true`, which is ignored in production (never a silent fallback). See `docs/auth-foundation.md`.
+- Do not implement password-based auth. Keep `AppUser`/RBAC independent from the provider.
+
 ## Agent Usage
 
 - Use `jump-product-owner` for scope, stories and criteria.

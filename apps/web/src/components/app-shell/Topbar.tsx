@@ -1,7 +1,8 @@
 "use client";
 
-import { Bell, Menu, Search } from "lucide-react";
-import { mockUser } from "@/lib/mock-data/user";
+import { Bell, LogOut, Menu, Search } from "lucide-react";
+import type { AppUser } from "@/lib/auth/types";
+import { primaryRoleLabel } from "@/lib/auth/roles";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { cn } from "@/lib/utils";
 import { focusRing, focusRingInput } from "@/lib/styles";
@@ -10,12 +11,23 @@ const iconButton =
   "grid size-9 place-items-center rounded-md border border-border text-medium transition-colors hover:bg-surface-muted hover:text-strong";
 
 export interface TopbarProps {
+  user: AppUser;
+  /** Server action that signs the user out. */
+  logoutAction: () => void | Promise<void>;
   /** Opens the mobile navigation drawer. */
   onMenuClick: () => void;
 }
 
-/** Top application bar: mobile menu, search, environment flag and mock user. */
-export function Topbar({ onMenuClick }: TopbarProps) {
+/** Build up to two-letter initials from a display name. */
+function initialsFromName(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+/** Top application bar: mobile menu, search, environment flag, user and logout. */
+export function Topbar({ user, logoutAction, onMenuClick }: TopbarProps) {
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-border bg-surface/90 px-4 backdrop-blur sm:px-6">
       <button
@@ -63,15 +75,25 @@ export function Topbar({ onMenuClick }: TopbarProps) {
 
         <div className="flex items-center gap-3 rounded-md border border-transparent py-1 pl-2 sm:border-border sm:pl-1 sm:pr-3">
           <span className="grid size-8 place-items-center rounded-full bg-brand text-xs font-semibold text-white">
-            {mockUser.initials}
+            {initialsFromName(user.name)}
           </span>
           <span className="hidden flex-col leading-tight sm:flex">
-            <span className="text-sm font-medium text-strong">
-              {mockUser.name}
+            <span className="text-sm font-medium text-strong">{user.name}</span>
+            <span className="text-xs text-soft">
+              {primaryRoleLabel(user.roles)}
             </span>
-            <span className="text-xs text-soft">{mockUser.role}</span>
           </span>
         </div>
+
+        <form action={logoutAction}>
+          <button
+            type="submit"
+            aria-label="Sair"
+            className={cn(iconButton, focusRing)}
+          >
+            <LogOut aria-hidden="true" className="size-5" />
+          </button>
+        </form>
       </div>
     </header>
   );

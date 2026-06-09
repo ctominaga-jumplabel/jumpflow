@@ -1,10 +1,14 @@
 import type { Metadata } from "next";
 import { ClipboardCheck } from "lucide-react";
 import { ModulePlaceholder } from "@/components/ui/ModulePlaceholder";
+import { requireRole } from "@/lib/auth/guards";
 
 export const metadata: Metadata = { title: "Aprovações" };
 
-export default function AprovacoesPage() {
+export default async function AprovacoesPage() {
+  // Approvals are role-protected; keep in sync with route-permissions map.
+  await requireRole(["ADMIN", "AREA_MANAGER", "PROJECT_MANAGER"]);
+
   return (
     <ModulePlaceholder
       title="Aprovações"

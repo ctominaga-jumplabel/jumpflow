@@ -2,29 +2,51 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { AppShell } from "@/components/app-shell/AppShell";
 import { primaryNavigation } from "@/lib/navigation";
-import { mockUser } from "@/lib/mock-data/user";
+import type { AppUser } from "@/lib/auth/types";
 
 // The shell reads the current route via next/navigation; stub it for jsdom.
 vi.mock("next/navigation", () => ({
   usePathname: () => "/app/dashboard",
 }));
 
+const testUser: AppUser = {
+  id: "u1",
+  name: "Ana Martins",
+  email: "ana.martins@jumplabel.com.br",
+  roles: ["AREA_MANAGER"],
+};
+
+const noopLogout = async () => {};
+
+function renderShell() {
+  return render(
+    <AppShell user={testUser} logoutAction={noopLogout}>
+      conteudo
+    </AppShell>,
+  );
+}
+
 describe("AppShell", () => {
   it("renders every primary navigation item", () => {
-    render(<AppShell>conteudo</AppShell>);
+    renderShell();
     for (const item of primaryNavigation) {
       expect(screen.getAllByText(item.label).length).toBeGreaterThan(0);
     }
   });
 
-  it("renders the mocked user in the topbar", () => {
-    render(<AppShell>conteudo</AppShell>);
-    expect(screen.getByText(mockUser.name)).toBeInTheDocument();
-    expect(screen.getByText(mockUser.role)).toBeInTheDocument();
+  it("renders the current user and role label in the topbar", () => {
+    renderShell();
+    expect(screen.getByText(testUser.name)).toBeInTheDocument();
+    expect(screen.getByText("Gestor de Área")).toBeInTheDocument();
+  });
+
+  it("exposes a logout control", () => {
+    renderShell();
+    expect(screen.getByRole("button", { name: /sair/i })).toBeInTheDocument();
   });
 
   it("links to the dashboard", () => {
-    render(<AppShell>conteudo</AppShell>);
+    renderShell();
     const dashboardLinks = screen.getAllByRole("link", { name: /dashboard/i });
     expect(
       dashboardLinks.some(
@@ -34,12 +56,16 @@ describe("AppShell", () => {
   });
 
   it("renders its children in the main region", () => {
-    render(<AppShell>conteudo de teste</AppShell>);
+    render(
+      <AppShell user={testUser} logoutAction={noopLogout}>
+        conteudo de teste
+      </AppShell>,
+    );
     expect(screen.getByRole("main")).toHaveTextContent("conteudo de teste");
   });
 
   it("opens the mobile drawer and makes the main column inert", () => {
-    render(<AppShell>conteudo</AppShell>);
+    renderShell();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /abrir navegação/i }));
@@ -50,7 +76,7 @@ describe("AppShell", () => {
   });
 
   it("closes the mobile drawer on Escape", async () => {
-    render(<AppShell>conteudo</AppShell>);
+    renderShell();
     fireEvent.click(screen.getByRole("button", { name: /abrir navegação/i }));
     expect(screen.getByRole("dialog")).toBeInTheDocument();
 

@@ -1,9 +1,13 @@
 # Auth Foundation - JumpFlow
 
-Documento de preparacao para a proxima rodada (Auth Foundation). Nesta etapa
-**nao** implementamos autenticacao real: o objetivo e registrar opcoes,
-recomendacao provisoria, modelo de papeis, estrategia de protecao de rotas e
-decisoes pendentes, para que a implementacao comece com direcao clara.
+Status: a fundacao de autenticacao/autorizacao foi **implementada** com
+Auth.js (v5) e provider Microsoft Entra ID via env, sessao JWT, middleware de
+protecao de `/app/*`, camada de autorizacao (RBAC) isolada e um **modo de
+desenvolvimento** explicito que dispensa credenciais reais. Ainda **nao** ha
+banco de dados, adapter Prisma nem provisionamento real de papeis.
+
+Este documento registra as opcoes avaliadas, a decisao implementada, o modelo
+de papeis, a protecao de rotas e as decisoes pendentes.
 
 Fontes de verdade relacionadas:
 
@@ -60,10 +64,11 @@ Herdados de `docs/arquitetura.md`:
 - Contras: a arquitetura pede para **evitar** depender de recursos exclusivos do
   Supabase, pensando na migracao para Render; aumentaria o acoplamento.
 
-## 4. Recomendacao Provisoria
+## 4. Decisao Implementada
 
-**Auth.js (NextAuth) com provider de Entra ID quando confirmado o uso de
-Microsoft 365**, mantendo a abstracao de sessao e RBAC no nosso codigo.
+**Auth.js (NextAuth v5) com provider Microsoft Entra ID via env**, sessao JWT,
+sem adapter de banco nesta rodada. A abstracao de sessao e o RBAC vivem no nosso
+codigo, nao no provedor.
 
 Justificativa:
 
@@ -73,7 +78,54 @@ Justificativa:
 - Nao cria dependencia de Supabase Auth, preservando a migracao para Render.
 - Custo baixo e bom encaixe com Next.js App Router e Server Actions.
 
-Decisao final depende da confirmacao do ambiente corporativo (ver secao 9).
+Estrutura de arquivos implementada (em `apps/web/src`):
+
+- `auth.config.ts`: configuracao edge-safe (provider condicional a env,
+  `pages.signIn`, callback `authorized` para proteger `/app/*`, callbacks
+  `jwt`/`session` para papeis). `isEntraConfigured()` indica se o provider tem
+  todas as env vars.
+- `auth.ts`: instancia central do Auth.js (`handlers`, `auth`, `signIn`,
+  `signOut`).
+- `proxy.ts`: protege `/app/:path*` reutilizando o callback `authorized`
+  (convencao `proxy` do Next 16, sucessora de `middleware`).
+- `app/api/auth/[...nextauth]/route.ts`: handlers de rota do Auth.js.
+- `lib/auth/types.ts`: `AppUser` (desacoplado do provedor).
+- `lib/auth/roles.ts`: `RoleName`, `ROLE_NAMES`, labels e `primaryRoleLabel`.
+- `lib/auth/route-permissions.ts`: mapa central rota->papeis e funcoes puras
+  `hasRole`, `canAccess`, `accessForPath`, `canAccessPath`.
+- `lib/auth/dev.ts`: `isDevAuthEnabled()`, `DEV_USER`, cookie de logout dev.
+- `lib/auth/current-user.ts`: `getCurrentUser()`.
+- `lib/auth/guards.ts`: `requireUser()`, `requireRole()` (e reexporta
+  `hasRole`).
+- `lib/auth/actions.ts`: server actions `loginWithEntra`, `devLogin`, `logout`.
+- `app/login/` e `app/access-denied/`: telas premium.
+
+A decisao final de provider depende da confirmacao do ambiente corporativo
+(ver secao 9). A estrutura ja permite trocar/adicionar provider sem reescrever
+o RBAC.
+
+## 4.1 Modo de Desenvolvimento (sem credenciais reais)
+
+- Flag `AUTH_DEV_MODE=true` ativa o modo dev **somente** quando
+  `NODE_ENV !== "production"`. Em producao a flag e ignorada — nao ha fallback
+  silencioso.
+- Em modo dev, `getCurrentUser()` retorna o `DEV_USER` (com todos os papeis,
+  para que todas as telas sejam alcancaveis) e o middleware libera `/app/*`.
+- O logout em modo dev grava um cookie (`jf_dev_logout`) que faz o usuario ser
+  tratado como deslogado; o botao de login dev limpa o cookie.
+- Em producao sem provider configurado, `/login` exibe um aviso claro de
+  "autenticacao nao configurada" (sem botao funcional).
+
+### Como rodar localmente
+
+1. Copie `.env.example` para `.env` (ou `.env.local`).
+2. Defina `AUTH_SECRET` (gere com `npx auth secret`).
+3. Mantenha `AUTH_DEV_MODE="true"` e deixe as `AUTH_MICROSOFT_ENTRA_ID_*`
+   vazias.
+4. `npm run dev` e acesse `/login` -> "Entrar (ambiente de desenvolvimento)".
+
+Para testar com Entra ID real: preencha as tres `AUTH_MICROSOFT_ENTRA_ID_*` e
+defina `AUTH_DEV_MODE="false"`.
 
 ## 5. Modelo de Papeis (RBAC)
 
@@ -111,38 +163,44 @@ Apenas orientativo; sera refinado na implementacao com `jump-product-owner`.
 
 ## 6. Protecao de Rotas
 
-Estrategia planejada (a implementar na proxima rodada):
+Estrategia implementada:
 
-- **Middleware** (`apps/web/src/middleware.ts`) para barrar acesso nao
-  autenticado a `/app/*` e redirecionar para login.
-- **Checagem no servidor** em Server Actions e Route Handlers para toda
-  operacao privada (nao confiar apenas no middleware nem no cliente).
+- **Proxy/middleware** (`apps/web/src/proxy.ts`) barra acesso nao autenticado a
+  `/app/*` e redireciona para `/login` preservando `callbackUrl`.
+- **Checagem no servidor** em Server Components/Actions para operacoes privadas
+  via `requireUser`/`requireRole` (nao confiar apenas no proxy nem no cliente);
+  ex.: `/app/financeiro` exige `requireRole(["ADMIN","AREA_MANAGER","FINANCE"])`.
 - **Helper de sessao/autorizacao** centralizado (ex.: `requireUser()`,
   `requireRole(...)`) em uma camada de auth isolada, sem espalhar a logica.
 - **RBAC por modulo e acao**, derivado do mapa da secao 5.
 - Esconder/desabilitar na UI o que o papel nao pode acessar, mantendo a
   checagem real no servidor.
 
-## 7. Usuario Mockado Atual
+## 7. Usuario Atual e Dev User
 
-- Arquivo: `apps/web/src/lib/mock-data/user.ts`.
-- Estrutura `MockUser`: `name`, `email`, `role`, `initials`.
-- Uso atual: somente exibicao na topbar (`Topbar.tsx`).
-- Na transicao: substituir por dados de sessao reais, mantendo um adaptador para
-  que a UI continue lendo de uma mesma forma (ex.: `getCurrentUser()`), evitando
-  espalhar a dependencia direta do mock.
+- A UI consome `getCurrentUser()` (em `lib/auth/current-user.ts`); a topbar
+  recebe um `AppUser` via props do layout do `/app` (server).
+- O antigo `mock-data/user.ts` foi removido. O usuario mockado agora e o
+  `DEV_USER` em `lib/auth/dev.ts`, usado **somente** quando `isDevAuthEnabled()`.
+- Em producao com provider real, `getCurrentUser()` mapeia a sessao do Auth.js
+  para `AppUser`. Papeis reais ainda nao sao provisionados (ver secao 8).
 
-## 8. Plano da Proxima Rodada (resumo)
+## 8. Concluido Nesta Rodada / Proximos Passos
 
-1. Definir provider (ver decisoes pendentes).
-2. Adicionar camada de auth isolada (sessao + RBAC) sem acoplar regra de
-   negocio.
-3. Criar tela de login (institucional; movimento permitido, ver design system).
-4. Adicionar middleware de protecao de `/app/*`.
-5. Criar helpers `requireUser` / `requireRole` e aplicar nas operacoes privadas.
-6. Substituir `mockUser` por sessao real via adaptador.
-7. Persistir `User` e `Role` (somente quando a rodada de banco autorizar).
-8. Auditar mudancas de permissao.
+Concluido:
+
+1. Camada de auth isolada (sessao Auth.js + RBAC) sem acoplar regra de negocio.
+2. Telas `/login` e `/access-denied` (institucionais, movimento contido).
+3. Proxy de protecao de `/app/*` com `callbackUrl`.
+4. Helpers `requireUser` / `requireRole` (aplicado em `/app/financeiro`).
+5. `mockUser` substituido por `getCurrentUser()` + `DEV_USER` explicito.
+
+Proximos passos:
+
+- Provisionar papeis reais (Entra app roles/groups ou DB) no callback `jwt`.
+- Persistir `User` e `Role` (quando a rodada de banco autorizar) e avaliar
+  adapter Prisma para sessao em banco.
+- Auditar mudancas de permissao.
 
 ## 9. Decisoes Pendentes
 

@@ -1,0 +1,65 @@
+import type { AppUser } from "./types";
+import type { RoleName } from "./roles";
+
+/**
+ * Pure RBAC primitives and the central route → roles map.
+ * No server-only imports, so this is safe to unit test and to import on the
+ * edge. Async guards (requireUser/requireRole) live in `guards.ts`.
+ */
+
+/** `"ALL"` means any authenticated user may access. */
+export type RouteAccess = RoleName[] | "ALL";
+
+interface RouteRule {
+  prefix: string;
+  access: RouteAccess;
+}
+
+/**
+ * Central access map for operational routes. Order matters: more specific
+ * prefixes must come before the broad `/app` rule.
+ *
+ * NOTE: this round, the middleware only enforces authentication for `/app/*`.
+ * Per-route role enforcement is applied where it matters (e.g. financeiro via
+ * `requireRole`) and this map is the single source of truth as enforcement
+ * expands.
+ */
+export const routePermissions: RouteRule[] = [
+  { prefix: "/app/financeiro", access: ["ADMIN", "AREA_MANAGER", "FINANCE"] },
+  {
+    prefix: "/app/aprovacoes",
+    access: ["ADMIN", "AREA_MANAGER", "PROJECT_MANAGER"],
+  },
+  { prefix: "/app", access: "ALL" },
+];
+
+/** Resolve the access requirement for a pathname. */
+export function accessForPath(pathname: string): RouteAccess {
+  const rule = routePermissions.find(
+    (r) => pathname === r.prefix || pathname.startsWith(`${r.prefix}/`),
+  );
+  return rule ? rule.access : "ALL";
+}
+
+/** Whether a user holds at least one of the required roles. */
+export function hasRole(
+  user: AppUser | null,
+  roles: RoleName | RoleName[],
+): boolean {
+  if (!user) return false;
+  const required = Array.isArray(roles) ? roles : [roles];
+  if (required.length === 0) return true;
+  return required.some((role) => user.roles.includes(role));
+}
+
+/** Whether a user satisfies an access requirement. */
+export function canAccess(user: AppUser | null, access: RouteAccess): boolean {
+  if (!user) return false;
+  if (access === "ALL") return true;
+  return hasRole(user, access);
+}
+
+/** Whether a user may access a given path, per the route map. */
+export function canAccessPath(user: AppUser | null, pathname: string): boolean {
+  return canAccess(user, accessForPath(pathname));
+}

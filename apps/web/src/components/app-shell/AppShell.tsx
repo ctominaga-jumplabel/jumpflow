@@ -5,18 +5,23 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { focusRing } from "@/lib/styles";
+import type { AppUser } from "@/lib/auth/types";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
 
 export interface AppShellProps {
+  /** Current authenticated user (real or dev), resolved on the server. */
+  user: AppUser;
+  /** Server action that signs the user out. */
+  logoutAction: () => void | Promise<void>;
   children: React.ReactNode;
 }
 
 /**
- * Authenticated (mocked) application shell: persistent sidebar on desktop,
- * off-canvas drawer on mobile, and a sticky topbar.
+ * Authenticated application shell: persistent sidebar on desktop, off-canvas
+ * drawer on mobile, and a sticky topbar.
  */
-export function AppShell({ children }: AppShellProps) {
+export function AppShell({ user, logoutAction, children }: AppShellProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const reduce = useReducedMotion();
   const drawerRef = useRef<HTMLDivElement>(null);
@@ -97,7 +102,11 @@ export function AppShell({ children }: AppShellProps) {
 
       {/* Main column */}
       <div className="lg:pl-64" inert={mobileOpen || undefined}>
-        <Topbar onMenuClick={() => setMobileOpen(true)} />
+        <Topbar
+          user={user}
+          logoutAction={logoutAction}
+          onMenuClick={() => setMobileOpen(true)}
+        />
         <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
           {children}
         </main>

@@ -1,10 +1,14 @@
 import type { Metadata } from "next";
 import { Wallet } from "lucide-react";
 import { ModulePlaceholder } from "@/components/ui/ModulePlaceholder";
+import { requireRole } from "@/lib/auth/guards";
 
 export const metadata: Metadata = { title: "Financeiro" };
 
-export default function FinanceiroPage() {
+export default async function FinanceiroPage() {
+  // Financial data is role-protected; non-authorized users go to /access-denied.
+  await requireRole(["ADMIN", "AREA_MANAGER", "FINANCE"]);
+
   return (
     <ModulePlaceholder
       title="Financeiro"
