@@ -3,6 +3,11 @@
 import { Bell, Menu, Search } from "lucide-react";
 import { mockUser } from "@/lib/mock-data/user";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import { cn } from "@/lib/utils";
+import { focusRing, focusRingInput } from "@/lib/styles";
+
+const iconButton =
+  "grid size-9 place-items-center rounded-md border border-border text-medium transition-colors hover:bg-surface-muted hover:text-strong";
 
 export interface TopbarProps {
   /** Opens the mobile navigation drawer. */
@@ -17,7 +22,7 @@ export function Topbar({ onMenuClick }: TopbarProps) {
         type="button"
         onClick={onMenuClick}
         aria-label="Abrir navegação"
-        className="grid size-9 place-items-center rounded-md border border-border text-medium outline-none transition-colors hover:bg-surface-muted hover:text-strong focus-visible:ring-2 focus-visible:ring-brand lg:hidden"
+        className={cn(iconButton, focusRing, "lg:hidden")}
       >
         <Menu aria-hidden="true" className="size-5" />
       </button>
@@ -32,7 +37,10 @@ export function Topbar({ onMenuClick }: TopbarProps) {
           type="search"
           placeholder="Buscar projetos, consultores, horas..."
           aria-label="Buscar"
-          className="h-9 w-full rounded-md border border-border bg-canvas pl-9 pr-3 text-sm text-strong placeholder:text-soft outline-none transition-colors focus:border-brand focus:bg-surface focus-visible:ring-2 focus-visible:ring-brand/40"
+          className={cn(
+            "h-9 w-full rounded-md border border-border bg-canvas pl-9 pr-3 text-sm text-strong placeholder:text-soft transition-colors focus:bg-surface",
+            focusRingInput,
+          )}
         />
       </div>
 
@@ -44,7 +52,7 @@ export function Topbar({ onMenuClick }: TopbarProps) {
         <button
           type="button"
           aria-label="Notificações"
-          className="relative grid size-9 place-items-center rounded-md border border-border text-medium outline-none transition-colors hover:bg-surface-muted hover:text-strong focus-visible:ring-2 focus-visible:ring-brand"
+          className={cn(iconButton, focusRing, "relative")}
         >
           <Bell aria-hidden="true" className="size-5" />
           <span

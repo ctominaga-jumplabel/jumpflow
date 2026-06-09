@@ -10,6 +10,9 @@
     "dev": "npm run dev --workspace @jumpflow/web",
     "build": "npm run build --workspace @jumpflow/web",
     "lint": "npm run lint --workspace @jumpflow/web",
+    "typecheck": "npm run typecheck --workspace @jumpflow/web",
+    "test": "npm run test --workspace @jumpflow/web",
+    "test:watch": "npm run test:watch --workspace @jumpflow/web",
     "db:generate": "npm run db:generate --workspace @jumpflow/database",
     "db:migrate": "npm run db:migrate --workspace @jumpflow/database",
     "db:studio": "npm run db:studio --workspace @jumpflow/database"

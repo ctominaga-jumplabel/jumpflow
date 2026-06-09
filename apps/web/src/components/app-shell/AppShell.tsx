@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { X } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { focusRing } from "@/lib/styles";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
 
@@ -80,7 +82,10 @@ export function AppShell({ children }: AppShellProps) {
                 type="button"
                 onClick={() => setMobileOpen(false)}
                 aria-label="Fechar navegação"
-                className="absolute right-3 top-4 z-10 grid size-9 place-items-center rounded-md text-medium outline-none transition-colors hover:bg-surface-muted hover:text-strong focus-visible:ring-2 focus-visible:ring-brand"
+                className={cn(
+                  "absolute right-3 top-4 z-10 grid size-9 place-items-center rounded-md text-medium transition-colors hover:bg-surface-muted hover:text-strong",
+                  focusRing,
+                )}
               >
                 <X aria-hidden="true" className="size-5" />
               </button>

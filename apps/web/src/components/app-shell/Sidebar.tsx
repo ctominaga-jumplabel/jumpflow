@@ -5,6 +5,7 @@ import Link from "next/link";
 import { appConfig } from "@/config/app";
 import { findActiveNav, primaryNavigation } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
+import { focusRing } from "@/lib/styles";
 import { NavItem } from "./NavItem";
 
 export interface SidebarProps {
@@ -24,7 +25,8 @@ export function Sidebar({ onNavigate, className }: SidebarProps) {
         <Link
           href="/app/dashboard"
           onClick={onNavigate}
-          className="flex items-center gap-3 outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-surface rounded-md"
+          aria-label={`${appConfig.name} — ir para o dashboard`}
+          className={cn("flex items-center gap-3 rounded-md", focusRing)}
         >
           <span className="grid size-9 place-items-center rounded-md bg-brand text-sm font-bold text-white">
             {appConfig.monogram}
