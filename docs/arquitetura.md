@@ -280,3 +280,8 @@ Responsavel por:
 - ADR05: Docker nao sera requisito local no MVP.
 - ADR06: Render + PostgreSQL sera destino futuro planejado.
 - ADR07: Agentes Claude Code serao definidos em `.claude/agents/`.
+- ADR08: Jobs de automacao (aprovacao automatica, relatorios) serao Route Handlers cron-friendly no MVP (`/api/jobs/*`), sem fila/worker. Gatilho de migracao: volume/timeout/integracoes (secao 6).
+- ADR09: Idempotencia por transicao de status atomica (`updateMany where status=SUBMITTED`) + `AutomationEmailLog @@unique(type, referenceKey)`. Sem fila exactly-once no MVP.
+- ADR10: Aprovacao automatica e registrada como `Approval` de sistema auditavel (`approverUserId` nullable + FK SetNull, `isAutomatic`, `ruleKey`) + `AuditEvent` (actor null) na mesma transacao. Casos inconclusivos permanecem `SUBMITTED` (pendente manual).
+- ADR11: Caminho futuro — jobs com conexao `DIRECT_URL` dedicada e advisory lock para locks confiaveis fora do PgBouncer. No MVP usa-se o client pooled compartilhado (divida documentada).
+- ADR12: `EmailTransport` abstrato; transporte `console` no MVP, provider real por env. Sem acoplar a provider de email do Supabase.

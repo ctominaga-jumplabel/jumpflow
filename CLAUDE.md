@@ -72,6 +72,7 @@ docs/
 - Use `jump-architect` for architecture and ADR-level decisions.
 - Use `jump-data-modeler` before changing Prisma schema or data rules.
 - Use `jump-fullstack-engineer` for feature implementation.
+- Use `jump-workflow-automation` for rule engines, automatic approvals, scheduled jobs, notifications, email, spreadsheets, idempotency and operational logs.
 - Use `jump-frontend-ux` for screens, flows and usability.
 - Use `jump-design-system` for visual identity, Motion, premium polish and component consistency.
 - Use `.claude/skills/ui-ux-pro-max/` as supporting design intelligence when useful, while keeping `docs/design-system.md` as the project source of truth.

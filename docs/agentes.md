@@ -75,6 +75,24 @@ Arquivos principais:
 - `packages/shared/`, quando existir.
 - `packages/database/`, quando existir.
 
+### `jump-workflow-automation`
+
+Use para:
+
+- motores de regras;
+- aprovacoes automaticas;
+- jobs agendados;
+- notificacoes e emails;
+- geracao de planilhas/CSV;
+- idempotencia, retries e logs operacionais.
+
+Arquivos principais:
+
+- `apps/web/`, para Route Handlers, Server Actions e jobs no MVP.
+- `packages/database/`, quando houver estados, logs ou configuracoes persistidas.
+- `docs/modelo-dados.md`
+- `docs/arquitetura.md`
+
 ### `jump-frontend-ux`
 
 Use para:
@@ -165,10 +183,11 @@ Arquivos principais:
 1. `jump-product-owner` refina historia e criterios.
 2. `jump-architect` valida impacto arquitetural, se necessario.
 3. `jump-data-modeler` valida schema, se houver dados novos.
-4. `jump-fullstack-engineer` implementa.
-5. `jump-frontend-ux` melhora a experiencia, se houver tela.
-6. `jump-qa-engineer` cria ou ajusta testes.
-7. `jump-code-reviewer` revisa antes de finalizar.
+4. `jump-workflow-automation` valida regras, jobs e notificacoes, se houver automacao.
+5. `jump-fullstack-engineer` implementa.
+6. `jump-frontend-ux` melhora a experiencia, se houver tela.
+7. `jump-qa-engineer` cria ou ajusta testes.
+8. `jump-code-reviewer` revisa antes de finalizar.
 
 ### Nova Tela
 
@@ -186,6 +205,16 @@ Arquivos principais:
 3. `jump-fullstack-engineer` aplica no codigo.
 4. `jump-qa-engineer` cobre regras afetadas.
 5. `jump-code-reviewer` revisa.
+
+### Automacao, Jobs e Notificacoes
+
+1. `jump-product-owner` confirma regra de negocio, destinatarios e excecoes.
+2. `jump-workflow-automation` define motor de regras, agenda, idempotencia e logs.
+3. `jump-data-modeler` modela configuracoes, execucoes e auditoria, se necessario.
+4. `jump-architect` valida o caminho MVP e a migracao futura para worker/fila.
+5. `jump-fullstack-engineer` implementa servicos, jobs e integracoes.
+6. `jump-qa-engineer` cobre cenarios positivos, negativos e reprocessamento.
+7. `jump-code-reviewer` revisa riscos antes de finalizar.
 
 ### Deploy ou Ambiente
 
@@ -210,6 +239,7 @@ Arquivos principais:
 - O `jump-design-system` deve ser usado antes de finalizar telas importantes.
 - O `jump-devops` deve ser chamado antes de qualquer mudanca em deploy, ambiente ou secrets.
 - O `jump-data-modeler` deve ser chamado antes de alterar schema Prisma.
+- O `jump-workflow-automation` deve ser chamado antes de criar aprovacoes automaticas, jobs, notificacoes ou emails.
 - O `jump-product-owner` deve ser chamado quando houver duvida de escopo.
 
 ## 5. Ordem Inicial de Construcao

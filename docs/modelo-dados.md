@@ -375,6 +375,24 @@ Regras:
 - Registrar alteracoes financeiras, aprovacoes, permissoes e fechamentos.
 - `before` e `after` podem ser JSON.
 
+### Entidades de Automacao (aprovacao automatica e relatorios)
+
+Detalhes em `docs/aprovacao-automatica.md`.
+
+- **AutoApprovalException**: lista configuravel de excecoes por
+  `consultantId + projectId + type` (`ANY_HOURS` dispensa o total de 8h;
+  `WEEKEND` libera sabado/domingo) com `active`. `@@unique(consultantId,
+  projectId, type)`. Evita hardcode de listas.
+- **AutomationConfig**: singleton (`id = "default"`) com tunables
+  (`autoApprovalEnabled`, `requiredDailyMinutes`, `approvalDelayMinutes`,
+  `reportRecipientEmail`).
+- **AutomationEmailLog**: log de envio com `@@unique(type, referenceKey)` como
+  chave de idempotencia (um relatorio por periodo).
+- **Approval** (evolucao): `approverUserId` passou a nullable + FK para `User`
+  (`onDelete: SetNull`); novos campos `isAutomatic` e `ruleKey` para registrar
+  aprovacoes automaticas e qual regra disparou.
+- **TimeEntry** (evolucao): novo `submittedAt` como ancora do atraso de 5 min.
+
 ## 3. Relacionamentos Resumidos
 
 ```text

@@ -191,6 +191,28 @@ Critérios de aceite:
 - Consultor recebe a pendencia de correcao.
 - Lancamento reprovado pode ser corrigido e reenviado.
 
+#### US07.03 - Aprovacao automatica de horas
+
+Como gestor, quero que lancamentos que cumprem regras pre-definidas sejam aprovados automaticamente apos uma janela minima, para reduzir esforco manual sem perder rastreabilidade.
+
+Criterios de aceite:
+
+- Regra padrao aprova lancamento em dia util quando o total diario do consultor e 08:00, sem duplicidade e apos 5 minutos do envio.
+- Regra de excecao (lista consultor+projeto) permite qualquer quantidade de horas; regra FDS (lista consultor+projeto) permite sabado/domingo; ambas exigem sem duplicidade e 5 minutos.
+- Lancamento inconclusivo permanece pendente para aprovacao manual; o motor nunca reprova.
+- Toda aprovacao automatica registra auditoria indicando qual regra disparou.
+- Rodar o processo duas vezes nao aprova em duplicidade (idempotente).
+
+#### US07.04 - Configuracao de excecoes de aprovacao automatica
+
+Como ADMIN/Gestor de Area, quero gerenciar as listas de excecao (qualquer hora e FDS) por consultor+projeto, para controlar quais combinacoes fogem da regra padrao.
+
+Criterios de aceite:
+
+- As listas e os parametros (total diario, atraso, destinatario do relatorio) ficam em banco, sem hardcode.
+- Alteracao passa a valer para execucoes futuras; nao reprocessa aprovacoes ja efetivadas.
+- (MVP) gestao via dados/seed; tela de CRUD e evolucao.
+
 ### EP08 - Skills
 
 Permitir cadastrar e consultar competencias dos consultores.
@@ -262,6 +284,17 @@ Critérios de aceite:
 - Relatorio filtra por cliente, projeto, consultor e periodo.
 - Relatorio inclui horas aprovadas, valor hora e total estimado.
 - Relatorio pode ser exportado em CSV no MVP.
+
+#### US10.03 - Relatorio de consultores sem lancamento por email
+
+Como ADMIN/RH-People, quero receber por email um CSV dos consultores ativos que nao lancaram horas no periodo, para cobrar apontamentos pendentes.
+
+Criterios de aceite:
+
+- Identifica consultores ativos sem nenhum lancamento no periodo avaliado.
+- Gera CSV com colunas estaveis (consultor, email, area, senioridade, periodo).
+- Envia para um destinatario administrativo configuravel (sem hardcode).
+- Rodar duas vezes para o mesmo periodo nao reenvia email (idempotente); falha de envio permite retentativa.
 
 ## 4. Fora do MVP
 

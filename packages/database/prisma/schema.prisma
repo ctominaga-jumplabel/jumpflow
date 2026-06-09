@@ -108,6 +108,20 @@ enum MonthlyClosingStatus {
   CANCELLED
 }
 
+enum AutoApprovalExceptionType {
+  ANY_HOURS
+  WEEKEND
+}
+
+enum AutomationEmailType {
+  MISSING_TIMESHEET_REPORT
+}
+
+enum EmailDeliveryStatus {
+  SENT
+  FAILED
+}
+
 model User {
   id          String       @id @default(cuid())
   name        String
@@ -116,6 +130,7 @@ model User {
   roles       UserRole[]
   consultant  Consultant?
   auditEvents AuditEvent[] @relation("AuditActor")
+  approvals   Approval[]   @relation("ApprovalApprover")
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 }
@@ -152,6 +167,7 @@ model Consultant {
   timeEntries TimeEntry[]
   skills      ConsultantSkill[]
   certificates Certificate[]
+  autoApprovalExceptions AutoApprovalException[]
   createdAt   DateTime           @default(now())
   updatedAt   DateTime           @updatedAt
 }
@@ -183,6 +199,7 @@ model Project {
   allocations       Allocation[]
   timeEntries       TimeEntry[]
   closings          MonthlyClosing[]
+  autoApprovalExceptions AutoApprovalException[]
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
 
@@ -240,6 +257,7 @@ model TimeEntry {
   description  String?
   billable     Boolean         @default(true)
   status       TimeEntryStatus @default(DRAFT)
+  submittedAt  DateTime?
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
 
@@ -247,15 +265,20 @@ model TimeEntry {
   @@index([consultantId])
   @@index([projectId])
   @@index([allocationId])
+  @@index([consultantId, date, status])
+  @@index([status, submittedAt])
 }
 
 model Approval {
   id             String               @id @default(cuid())
   entityType     ApprovableEntityType
   entityId       String
-  approverUserId String
+  approverUserId String?
+  approver       User?                @relation("ApprovalApprover", fields: [approverUserId], references: [id], onDelete: SetNull)
   status         ApprovalStatus
   comment        String?
+  isAutomatic    Boolean              @default(false)
+  ruleKey        String?
   createdAt      DateTime             @default(now())
 
   @@index([entityType, entityId])
@@ -342,5 +365,52 @@ model AuditEvent {
 
   @@index([entityType, entityId])
   @@index([actorUserId])
+  @@index([createdAt])
+}
+
+/// Configurable list of (consultant, project) exceptions to the default
+/// auto-approval rule. ANY_HOURS skips the daily 8h total; WEEKEND allows
+/// Saturday/Sunday entries. Rules live in the DB so they change without deploy.
+model AutoApprovalException {
+  id           String                    @id @default(cuid())
+  consultantId String
+  consultant   Consultant                @relation(fields: [consultantId], references: [id])
+  projectId    String
+  project      Project                   @relation(fields: [projectId], references: [id])
+  type         AutoApprovalExceptionType
+  active       Boolean                   @default(true)
+  note         String?
+  createdAt    DateTime                  @default(now())
+  updatedAt    DateTime                  @updatedAt
+
+  @@unique([consultantId, projectId, type])
+  @@index([projectId])
+}
+
+/// Singleton tunables for the automation engine. Always read/written via
+/// upsert on id = "default".
+model AutomationConfig {
+  id                   String   @id @default("default")
+  autoApprovalEnabled  Boolean  @default(true)
+  requiredDailyMinutes Int      @default(480)
+  approvalDelayMinutes Int      @default(5)
+  reportRecipientEmail String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
+
+/// Delivery log for automated emails. The unique (type, referenceKey) is the
+/// idempotency key: a given report period is sent at most once.
+model AutomationEmailLog {
+  id           String              @id @default(cuid())
+  type         AutomationEmailType
+  referenceKey String
+  recipient    String
+  status       EmailDeliveryStatus
+  error        String?
+  meta         Json?
+  createdAt    DateTime            @default(now())
+
+  @@unique([type, referenceKey])
   @@index([createdAt])
 }

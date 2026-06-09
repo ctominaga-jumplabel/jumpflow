@@ -51,6 +51,12 @@ Use o agente jump-architect para revisar impacto tecnico da historia [ID] e conf
 Use o agente jump-fullstack-engineer para implementar a historia [ID] de ponta a ponta.
 ```
 
+### Automacao
+
+```text
+Use o agente jump-workflow-automation para definir motores de regra, jobs agendados, notificacoes, emails, planilhas, idempotencia e logs operacionais da historia [ID].
+```
+
 ### UX
 
 ```text
