@@ -128,6 +128,23 @@ Arquivos principais:
 - `apps/web/`, quando existir.
 - `packages/ui/`, quando existir.
 
+### `jump-visual-identity`
+
+Use para:
+
+- exploracao de identidade visual;
+- direcao criativa Playful Ops;
+- Neo Brutalism controlado;
+- avaliacao de uso de Three.js, Rive, Spline, assets bitmap, CSS ou SVG;
+- moodboards textuais;
+- decidir onde a interface pode ser mais divertida e onde deve ser mais operacional.
+
+Arquivos principais:
+
+- `docs/identidade-visual-playful-ops.md`
+- `docs/design-system.md`
+- `apps/web/`, quando existir.
+
 ### `jump-qa-engineer`
 
 Use para:
@@ -192,11 +209,22 @@ Arquivos principais:
 ### Nova Tela
 
 1. `jump-product-owner` confirma objetivo e persona.
-2. `jump-frontend-ux` desenha fluxo e implementa UI.
-3. `jump-design-system` revisa acabamento visual, movimento e consistencia.
-4. `jump-fullstack-engineer` conecta dados e regras.
-5. `jump-qa-engineer` valida fluxo.
-6. `jump-code-reviewer` revisa.
+2. `jump-visual-identity` define direcao visual quando houver mudanca de identidade.
+3. `jump-frontend-ux` desenha fluxo e implementa UI.
+4. `jump-design-system` revisa acabamento visual, movimento e consistencia.
+5. `jump-fullstack-engineer` conecta dados e regras.
+6. `jump-qa-engineer` valida fluxo.
+7. `jump-code-reviewer` revisa.
+
+### Mudanca de Identidade Visual
+
+1. `jump-product-owner` confirma objetivo, publico e limites de escopo.
+2. `jump-visual-identity` define direcao criativa e uso de assets/3D.
+3. `jump-design-system` converte direcao em tokens, componentes e regras.
+4. `jump-frontend-ux` aplica nas telas preservando ergonomia.
+5. `jump-fullstack-engineer` ajusta rotas, dependencias e integracao, se necessario.
+6. `jump-qa-engineer` valida acessibilidade, responsividade e testes.
+7. `jump-code-reviewer` revisa antes de finalizar.
 
 ### Mudanca no Banco
 
@@ -237,6 +265,7 @@ Arquivos principais:
 - Para tarefas grandes, divida em produto, dados, implementacao, testes e revisao.
 - O `jump-code-reviewer` deve ser usado no final de mudancas relevantes.
 - O `jump-design-system` deve ser usado antes de finalizar telas importantes.
+- O `jump-visual-identity` deve ser usado antes de mudancas grandes de linguagem visual, uso de 3D/assets ou exploracao criativa.
 - O `jump-devops` deve ser chamado antes de qualquer mudanca em deploy, ambiente ou secrets.
 - O `jump-data-modeler` deve ser chamado antes de alterar schema Prisma.
 - O `jump-workflow-automation` deve ser chamado antes de criar aprovacoes automaticas, jobs, notificacoes ou emails.
@@ -262,4 +291,5 @@ Arquivos principais:
 - Dados: `docs/modelo-dados.md`
 - Arquitetura: `docs/arquitetura.md`
 - Design system: `docs/design-system.md`
+- Identidade visual: `docs/identidade-visual-playful-ops.md`
 - Agentes: `.claude/agents/`

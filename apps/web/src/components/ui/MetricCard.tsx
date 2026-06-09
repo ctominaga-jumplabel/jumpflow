@@ -50,14 +50,14 @@ export function MetricCard({
       initial={reduce ? false : { opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: "easeOut", delay: index * 0.05 }}
-      whileHover={reduce ? undefined : { y: -2 }}
+      whileHover={reduce ? undefined : { y: -3 }}
       className={cn(
-        "rounded-[var(--radius-card)] border border-border bg-surface p-5 transition-shadow hover:shadow-sm",
+        "rounded-[var(--radius-card)] border-2 border-ink bg-surface p-5 shadow-[4px_4px_0_0_var(--color-ink)]",
         className,
       )}
     >
       <div className="flex items-start justify-between">
-        <span className="grid size-10 place-items-center rounded-md bg-brand-soft text-brand-dark">
+        <span className="grid size-10 place-items-center rounded-md border-2 border-ink bg-brand-soft text-brand-dark shadow-[2px_2px_0_0_var(--color-ink)]">
           <Icon aria-hidden="true" className="size-5" />
         </span>
         {trend && TrendIcon ? (

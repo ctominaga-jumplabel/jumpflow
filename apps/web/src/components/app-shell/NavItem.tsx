@@ -22,11 +22,11 @@ export function NavItem({ item, active, onNavigate }: NavItemProps) {
       onClick={onNavigate}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "group flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+        "group flex items-center gap-3 rounded-md border-2 px-3 py-2 text-sm font-medium transition-[background-color,color,box-shadow]",
         focusRing,
         active
-          ? "bg-brand-soft text-brand-dark"
-          : "text-medium hover:bg-surface-muted hover:text-strong",
+          ? "border-ink bg-brand-soft font-semibold text-brand-dark shadow-[2px_2px_0_0_var(--color-ink)]"
+          : "border-transparent text-medium hover:bg-surface-muted hover:text-strong",
       )}
     >
       <Icon

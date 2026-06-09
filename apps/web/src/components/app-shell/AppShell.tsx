@@ -55,7 +55,7 @@ export function AppShell({ user, logoutAction, children }: AppShellProps) {
   return (
     <div className="min-h-screen bg-canvas">
       {/* Desktop sidebar */}
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 border-r border-border lg:block">
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 border-r-2 border-ink lg:block">
         <Sidebar />
       </aside>
 
@@ -81,7 +81,7 @@ export function AppShell({ user, logoutAction, children }: AppShellProps) {
               role="dialog"
               aria-modal="true"
               aria-label="Navegação"
-              className="fixed inset-y-0 left-0 z-50 w-72 max-w-[85%] border-r border-border shadow-xl"
+              className="fixed inset-y-0 left-0 z-50 w-72 max-w-[85%] border-r-2 border-ink shadow-[6px_0_0_0_rgba(17,24,20,0.12)]"
             >
               <button
                 type="button"

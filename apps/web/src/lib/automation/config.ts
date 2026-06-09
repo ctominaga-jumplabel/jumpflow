@@ -1,6 +1,7 @@
 import { prisma } from "@jumpflow/database";
 import {
   DEFAULT_AUTO_APPROVAL_SETTINGS,
+  parseRecipients,
   type AutoApprovalSettings,
 } from "@jumpflow/shared";
 import { isDatabaseConfigured } from "@/lib/db/config";
@@ -9,22 +10,25 @@ import { isDatabaseConfigured } from "@/lib/db/config";
 export interface AutomationRuntimeConfig {
   autoApprovalEnabled: boolean;
   settings: AutoApprovalSettings;
-  reportRecipientEmail: string | null;
+  reportRecipients: string[];
 }
 
 /**
  * Load the singleton {@link AutomationConfig} (upserting the default row) and
  * merge it with code defaults and env fallbacks. Without a database, returns
  * safe defaults so callers (guarded separately) don't crash.
+ *
+ * Recipients precedence: the DB config list overrides the env. When the DB list
+ * parses to empty (unset/blank/garbage), we fall back to AUTOMATION_REPORT_EMAIL.
  */
 export async function loadAutomationConfig(): Promise<AutomationRuntimeConfig> {
-  const envRecipient = process.env.AUTOMATION_REPORT_EMAIL?.trim() || null;
+  const envRecipients = parseRecipients(process.env.AUTOMATION_REPORT_EMAIL);
 
   if (!isDatabaseConfigured()) {
     return {
       autoApprovalEnabled: true,
       settings: DEFAULT_AUTO_APPROVAL_SETTINGS,
-      reportRecipientEmail: envRecipient,
+      reportRecipients: envRecipients,
     };
   }
 
@@ -34,6 +38,8 @@ export async function loadAutomationConfig(): Promise<AutomationRuntimeConfig> {
     create: { id: "default" },
   });
 
+  const dbRecipients = parseRecipients(row.reportRecipientEmail);
+
   return {
     autoApprovalEnabled: row.autoApprovalEnabled,
     settings: {
@@ -41,6 +47,6 @@ export async function loadAutomationConfig(): Promise<AutomationRuntimeConfig> {
       requiredDailyMinutes: row.requiredDailyMinutes,
       maxEntryHours: DEFAULT_AUTO_APPROVAL_SETTINGS.maxEntryHours,
     },
-    reportRecipientEmail: row.reportRecipientEmail ?? envRecipient,
+    reportRecipients: dbRecipients.length > 0 ? dbRecipients : envRecipients,
   };
 }

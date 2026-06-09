@@ -1,9 +1,10 @@
 # Aprovação Automática de Horas + Relatório de Ausência
 
-Status: **implementado** o motor de aprovação automática de `TimeEntry` e a base
-do relatório por email de consultores sem lançamento. Regras e config vivem no
-banco (não hardcoded), jobs são idempotentes e o caminho para worker/fila está
-documentado como evolução.
+Status: **implementado** o motor de aprovação automática de `TimeEntry` e o
+relatório semanal por email de ausência de lançamento **por projeto**, com
+provider de email real (Resend) e **múltiplos destinatários** (lista separada
+por vírgula). Regras e config vivem no banco (não hardcoded), jobs são
+idempotentes e o caminho para worker/fila está documentado como evolução.
 
 Fontes relacionadas: `docs/modelo-dados.md`, `docs/arquitetura.md`
 (ADR08–ADR12), `docs/database-foundation.md`, `docs/backlog-mvp.md`
@@ -97,7 +98,12 @@ julgamento humano. Detecção considera `SUBMITTED` + `APPROVED` do dia.
 | `autoApprovalEnabled`  | `true`  | Liga/desliga o motor sem deploy.           |
 | `requiredDailyMinutes` | `480`   | Total diário exigido pela regra padrão.    |
 | `approvalDelayMinutes` | `5`     | Atraso mínimo após o envio.                |
-| `reportRecipientEmail` | `null`  | Destinatário do relatório (fallback: env). |
+| `reportRecipientEmail` | `null`  | Destinatário(s) do relatório (fallback: env). |
+
+> `reportRecipientEmail` é interpretado como **lista separada por vírgula**
+> (ex: `"a@x.com,b@y.com"`). O código faz parse/normalize/dedupe dos endereços.
+> Quando definido no banco, **sobrepõe** o env `AUTOMATION_REPORT_EMAIL` (que
+> também aceita lista por vírgula).
 
 Listas de exceção: tabela `AutoApprovalException` (consultor + projeto + tipo +
 `active`). Gestão via CRUD/tela é dívida futura (US07.04).
@@ -119,35 +125,86 @@ curl -X POST https://<host>/api/jobs/missing-timesheets \
   -d '{"periodStart":"2026-06-01","periodEnd":"2026-06-08"}'
 ```
 
-### Vercel Cron (exemplo `vercel.json` — adicionar quando for agendar)
+### Vercel Cron
+
+O bloco `crons` **já está no `vercel.json` do repositório** com a agenda real:
 
 ```json
 {
   "crons": [
     { "path": "/api/jobs/auto-approval", "schedule": "*/10 * * * *" },
-    { "path": "/api/jobs/missing-timesheets", "schedule": "0 9 * * 1" }
+    { "path": "/api/jobs/missing-timesheets", "schedule": "0 12 * * 1" }
   ]
 }
 ```
 
+- `auto-approval`: a cada 10 min (`*/10 * * * *`) — **requer plano Vercel Pro**;
+  em Hobby use frequência diária/horária.
+- `missing-timesheets`: segunda 12:00 UTC = **09:00 BRT** (`0 12 * * 1`).
+
 O Vercel Cron envia `Authorization: Bearer $CRON_SECRET` automaticamente quando
-`CRON_SECRET` está nas env vars do projeto.
+`CRON_SECRET` está nas env vars do projeto. O agendador dispara o path por
+**GET** (sem corpo), então cada rota exporta um handler `GET` (alias do `POST`)
+além do `POST` manual — sem `GET`, o run agendado retornaria 405. No `GET` o
+relatório usa o default de semana anterior; o `POST` aceita período via corpo.
+
+A route do relatório (`/api/jobs/missing-timesheets`) declara `maxDuration = 60`
+porque agrega alocações/lançamentos por projeto numa única query; isso evita
+estourar o timeout serverless padrão.
 
 ## 6. Email e CSV
 
-- `EmailTransport` abstrato; transporte `console` no MVP (loga e retorna id).
-  Provider real selecionado por `EMAIL_PROVIDER` (sem acoplar ao Supabase).
-- CSV com colunas estáveis (`periodStart,periodEnd,consultantId,consultantName,
-  consultantEmail,area,seniority,generatedAt`), BOM UTF-8 para Excel e header
-  presente mesmo com zero linhas.
+### Provider de email
+
+- `EmailTransport` abstrato; selecionado por `EMAIL_PROVIDER` (sem acoplar ao
+  Supabase).
+- `console` (default/fallback): loga a mensagem e retorna um id. Também é o
+  fallback quando o provider real está mal configurado.
+- `resend` (`EMAIL_PROVIDER=resend`): envia de verdade via `POST
+  https://api.resend.com/emails` por `fetch` nativo (sem SDK npm). Requer
+  `RESEND_API_KEY` e `RESEND_FROM_EMAIL` (remetente verificado no Resend). O CSV
+  vai como **anexo base64**. Suporta **múltiplos destinatários** (`to: string[]`).
+- Destinatários: `AutomationConfig.reportRecipientEmail` (lista por vírgula no
+  banco) sobrepõe `AUTOMATION_REPORT_EMAIL` (lista por vírgula no env);
+  parse/normalize/dedupe no código.
+
+### CSV por projeto
+
+O relatório é **semanal por projeto alocado**. Cada linha é a combinação
+consultor × projeto. Colunas (estáveis, BOM UTF-8 para Excel, header presente
+mesmo com zero linhas):
+
+`periodStart, periodEnd, consultantId, consultantName, consultantEmail, area,
+seniority, projectId, projectName, status, loggedInOtherProject, generatedAt`
+
+- `status`:
+  - `SEM_LANCAMENTO_NO_PROJETO`: nenhum lançamento do consultor no projeto no
+    período.
+  - `RASCUNHO_NAO_ENVIADO_NO_PROJETO`: existe lançamento no projeto, mas só em
+    `DRAFT`/`REJECTED` (não submetido efetivamente).
+- `loggedInOtherProject`: o consultor fez submissão efetiva
+  (`SUBMITTED`/`APPROVED`/`CLOSED`) em **outro** projeto no período.
+
+### Regra de geração
+
+Universo = consultor `ACTIVE` × alocação `ACTIVE`/`PLANNED` que **intersecta o
+período** × projeto `ACTIVE`/`PAUSED`. Para cada par consultor×projeto:
+
+- **compliant** (não entra no relatório): houve submissão efetiva no projeto
+  (`SUBMITTED`/`APPROVED`/`CLOSED`);
+- rascunho/rejeitado no projeto → `RASCUNHO_NAO_ENVIADO_NO_PROJETO`;
+- nenhum lançamento no projeto → `SEM_LANCAMENTO_NO_PROJETO`;
+- `loggedInOtherProject` é marcado quando há submissão efetiva em outro projeto.
 
 ## 7. Variáveis de Ambiente
 
-| Var                      | Uso                                              |
-| ------------------------ | ------------------------------------------------ |
-| `CRON_SECRET`            | Protege os endpoints de job (Bearer).            |
-| `EMAIL_PROVIDER`         | Transporte de email (`console` no MVP).          |
-| `AUTOMATION_REPORT_EMAIL`| Destinatário fallback do relatório.              |
+| Var                      | Uso                                                          |
+| ------------------------ | ------------------------------------------------------------ |
+| `CRON_SECRET`            | Protege os endpoints de job (Bearer).                        |
+| `EMAIL_PROVIDER`         | Transporte de email: `console` (default) ou `resend`.        |
+| `RESEND_API_KEY`         | Server-only. Obrigatório quando `EMAIL_PROVIDER="resend"`.   |
+| `RESEND_FROM_EMAIL`      | Remetente verificado no Resend (ex: `JumpFlow <no-reply@…>`).|
+| `AUTOMATION_REPORT_EMAIL`| Destinatário(s) fallback — lista separada por vírgula.       |
 
 ## 8. Testes
 
@@ -190,8 +247,10 @@ npm run db:seed     # roles + dev user (idempotente)
   `isAutomatic`/`approverUserId`/`ruleKey` ficam para uma migration SQL futura.
 - **Dia misto** (projeto exceção + normal no mesmo dia): a checagem de 8h é
   por-lançamento; a regra `strictMixedDay` configurável é evolução.
-- **Relatório**: período fixo (semana anterior) e destinatário único; múltiplos
-  destinatários, dias úteis esperados e datas faltantes são evolução.
+- **Relatório**: o relatório semanal **por projeto** e os **múltiplos
+  destinatários** (lista por vírgula) já estão implementados. Continuam dívida:
+  dias úteis esperados, datas faltantes específicas e janelas de período
+  configuráveis (hoje o default é a semana anterior completa, seg–dom).
 - **Worker/fila**: ao crescer volume/integrações, mover os runners para um worker
   (BullMQ/Render). O domínio puro migra intacto; troca-se só o orquestrador.
 

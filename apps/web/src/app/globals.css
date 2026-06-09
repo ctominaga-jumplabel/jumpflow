@@ -1,41 +1,50 @@
 @import "tailwindcss";
 
 /*
- * JumpFlow design tokens.
- * Source of truth: docs/design-system.md (paleta premium operacional, light).
- * Operational workflows stay on a neutral light canvas — no auto dark inversion.
+ * JumpFlow design tokens — direction: "Playful Ops".
+ * Source of truth: docs/identidade-visual-playful-ops.md and docs/design-system.md.
+ * Controlled Neo Brutalism on a warm operational canvas: strong borders and hard
+ * shadows reserved for high-value elements (CTA, KPIs, key cards, empty states);
+ * lists, tables and forms stay clean and scannable. No auto dark inversion.
  */
 :root {
-  --background: #f6f7f2;
+  --background: #f7f5ea;
   --foreground: #111814;
 }
 
 @theme inline {
   /* Surfaces */
-  --color-canvas: #f6f7f2;
+  --color-canvas: #f7f5ea;
   --color-surface: #ffffff;
-  --color-surface-muted: #eef3f7;
+  --color-surface-muted: #eceff3;
 
   /* Text */
   --color-strong: #111814;
-  --color-medium: #4b6358;
-  --color-soft: #6f7f77;
+  --color-medium: #42524a;
+  --color-soft: #6d756f;
 
-  /* Lines */
-  --color-border: #d9ded4;
+  /* Lines — soft 1px line for dense UI, ink for Playful Ops strong borders */
+  --color-border: #d7d8cf;
+  --color-ink: #111814;
 
   /* Action / brand */
-  --color-brand: #2563eb;
-  --color-brand-dark: #1d4ed8;
-  --color-brand-soft: #dbeafe;
+  --color-brand: #2457ff;
+  --color-brand-dark: #1237b8;
+  --color-brand-soft: #dde4ff;
 
-  /* Semantic states */
-  --color-success: #16a34a;
-  --color-success-soft: #dcfce7;
-  --color-warning: #d97706;
-  --color-warning-soft: #fef3c7;
-  --color-danger: #dc2626;
-  --color-danger-soft: #fee2e2;
+  /* Semantic states — text tones meet WCAG AA (>=4.5:1) on their soft fills */
+  --color-success: #166534;
+  --color-success-soft: #d6f7e4;
+  --color-warning: #92400e;
+  --color-warning-soft: #fff0c2;
+  --color-danger: #b91c1c;
+  --color-danger-soft: #ffe1e2;
+
+  /* Playful Ops accents — for blocks, markers and icon chips (not body text) */
+  --color-flow: #32d583;
+  --color-marker: #ffd43b;
+  --color-cyan: #39c6d6;
+  --color-accent: #a78bfa;
 
   /* Aliases used by base elements */
   --color-background: var(--background);

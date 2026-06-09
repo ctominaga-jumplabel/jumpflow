@@ -25,3 +25,7 @@ export async function POST(request: Request) {
     );
   }
 }
+
+// Vercel Cron triggers the endpoint with a GET. Reuse the same handler so the
+// scheduled run works; the CRON_SECRET Bearer guard still applies.
+export const GET = POST;

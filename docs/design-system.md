@@ -2,9 +2,18 @@
 
 ## 1. Direcao Visual
 
-JumpFlow deve parecer uma aplicacao SaaS empresarial premium: clara, precisa, moderna e operacional. A experiencia deve transmitir confianca, velocidade e dominio tecnico, sem virar uma landing page animada.
+> Direcao atual: **Playful Ops** (implementada). Detalhes em `docs/identidade-visual-playful-ops.md`. Este documento permanece como fonte de verdade dos principios operacionais; a camada Playful Ops define paleta, tokens e tratamento visual ativos.
+
+JumpFlow deve parecer uma aplicacao de trabalho interna rapida e confiavel, com energia visual inspirada em Neo Brutalism controlado: bordas fortes e sombras duras reservadas para elementos de alto valor (CTA, KPIs, cards principais e estados vazios), enquanto listas, tabelas e formularios permanecem limpos e escaneaveis. A experiencia deve transmitir confianca, velocidade e dominio tecnico, sem virar uma landing page de marketing.
 
 Usar o portal da Jump como base de marca, mas nao como copia direta de layout. O portal e institucional; o JumpFlow e uma ferramenta de trabalho diario.
+
+### Tokens e utilitarios
+
+- Tokens vivem em `apps/web/src/app/globals.css` (`@theme inline`).
+- Cor `--color-ink` (#111814) e a borda forte e a cor das sombras brutalistas.
+- Fragmentos reutilizaveis em `apps/web/src/lib/styles.ts`: `brutalBorder`, `brutalShadow`, `brutalShadowSm`, `brutalShadowPressed`, `tactileButton`, alem de `focusRing` e `focusRingInput`.
+- Aplicar borda forte + sombra dura apenas em elementos de alto valor; nunca em linhas de tabela, itens de lista ou campos de formulario.
 
 ## 2. Principios
 
@@ -36,25 +45,38 @@ Usar o portal da Jump como base de marca, mas nao como copia direta de layout. O
 - Limpo, com contraste forte e detalhes refinados.
 - Superficies discretas, bordas de 1px e raio baixo.
 
-## 4. Paleta Inicial
+## 4. Paleta (Playful Ops)
 
 ### Cores Base
 
-- Background principal: `#f6f7f2`
+- Canvas: `#f7f5ea`
 - Surface: `#ffffff`
-- Surface secundaria: `#eef3f7`
-- Texto forte: `#111814`
-- Texto medio: `#4b6358`
-- Texto suave: `#6f7f77`
-- Borda: `#d9ded4`
+- Surface secundaria: `#eceff3`
+- Texto forte / Ink: `#111814`
+- Texto medio: `#42524a`
+- Texto suave: `#6d756f`
+- Borda suave (1px): `#d7d8cf`
+- Borda forte / Ink (2px e sombras): `#111814`
 
 ### Cores de Acao
 
-- Azul acao: `#2563eb`
-- Azul escuro: `#1d4ed8`
-- Verde sucesso: `#16a34a`
-- Amarelo alerta: `#d97706`
-- Vermelho erro: `#dc2626`
+- Azul acao: `#2457ff`
+- Azul escuro: `#1237b8`
+- Azul suave: `#dde4ff`
+- Verde sucesso (texto): `#166534`
+- Amarelo alerta (texto): `#92400e`
+- Vermelho erro (texto): `#b91c1c`
+
+Tons semanticos de texto sao escurecidos para garantir contraste AA (>= 4.5:1) sobre os fundos `*-soft`.
+
+### Acentos Playful Ops (blocos e marcadores, nao texto)
+
+Os acentos vivos abaixo (incluindo o coral `#ff5a5f` da identidade) sao para blocos, chips e marcadores. Nao usar como cor de texto em fundo claro — o contraste e insuficiente.
+
+- Flow green: `#32d583`
+- Marker yellow: `#ffd43b`
+- Cyan info: `#39c6d6`
+- Lilac accent: `#a78bfa`
 
 ### Uso
 

@@ -13,7 +13,8 @@ Para toda historia relevante:
 3. Verificar impacto em `docs/modelo-dados.md`.
 4. Verificar arquitetura em `docs/arquitetura.md`.
 5. Verificar design system em `docs/design-system.md`, se houver UI.
-6. Escolher os agentes adequados.
+6. Verificar identidade visual em `docs/identidade-visual-playful-ops.md`, se houver mudanca de linguagem visual.
+7. Escolher os agentes adequados.
 
 ## 3. Prompt Base para Claude Code
 
@@ -67,6 +68,12 @@ Use o agente jump-frontend-ux para revisar e melhorar a experiencia da tela/flux
 
 ```text
 Use o agente jump-design-system para auditar identidade visual, Motion, componentes 21st.dev e acabamento premium da historia [ID].
+```
+
+### Identidade Visual
+
+```text
+Use o agente jump-visual-identity para refinar a direcao Playful Ops, avaliar Neo Brutalism controlado, decidir uso de Three.js/assets e indicar onde a interface deve ser mais divertida ou mais operacional.
 ```
 
 ### QA

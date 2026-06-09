@@ -38,8 +38,8 @@ export function ModulePlaceholder({
           description="Esta área faz parte do MVP e ainda não tem dados nem ações disponíveis. A estrutura visual já segue o design system do JumpFlow."
         />
 
-        <section className="rounded-[var(--radius-card)] border border-border bg-surface">
-          <div className="flex items-center gap-2 border-b border-border px-5 py-4">
+        <section className="rounded-[var(--radius-card)] border-2 border-ink bg-surface shadow-[4px_4px_0_0_var(--color-ink)]">
+          <div className="flex items-center gap-2 border-b-2 border-ink px-5 py-4">
             <Rocket aria-hidden="true" className="size-4 text-brand" />
             <h2 className="text-sm font-semibold text-strong">
               Próximos passos
@@ -48,7 +48,7 @@ export function ModulePlaceholder({
           <ol className="space-y-3 px-5 py-4">
             {steps.map((step, index) => (
               <li key={step} className="flex items-start gap-3 text-sm">
-                <span className="grid size-6 shrink-0 place-items-center rounded-md bg-brand-soft text-xs font-semibold text-brand-dark">
+                <span className="grid size-6 shrink-0 place-items-center rounded-md border-2 border-ink bg-brand-soft text-xs font-semibold text-brand-dark">
                   {index + 1}
                 </span>
                 <span className="leading-6 text-medium">{step}</span>

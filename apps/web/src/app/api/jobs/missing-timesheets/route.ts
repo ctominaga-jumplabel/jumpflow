@@ -7,6 +7,8 @@ import {
 import { isCronAuthorized } from "@/lib/automation/job-auth";
 
 export const dynamic = "force-dynamic";
+// Report query may need headroom on serverless.
+export const maxDuration = 60;
 
 const bodySchema = z
   .object({
@@ -61,3 +63,7 @@ export async function POST(request: Request) {
     );
   }
 }
+
+// Vercel Cron triggers the endpoint with a GET (no body), so it uses the
+// previous-week default. The same CRON_SECRET Bearer guard applies.
+export const GET = POST;

@@ -1,8 +1,10 @@
 import { prisma } from "@jumpflow/database";
 import {
   buildMissingTimesheetCsv,
+  buildMissingTimesheetRows,
   missingTimesheetReferenceKey,
-  type MissingTimesheetRow,
+  type AllocationInput,
+  type TimeEntryInput,
 } from "@jumpflow/shared";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { loadAutomationConfig } from "./config";
@@ -17,10 +19,12 @@ export interface MissingTimesheetResult {
     | "no-recipient"
     | "kept-failed";
   referenceKey: string;
-  recipient: string | null;
+  recipients: string[];
   rowCount: number;
   emailed: boolean;
   status?: "SENT" | "FAILED";
+  messageId?: string | null;
+  provider?: string | null;
 }
 
 /** Prisma unique-constraint violation, detected without importing the class. */
@@ -49,12 +53,16 @@ export function previousWeekRange(now: Date): { start: Date; end: Date } {
 }
 
 /**
- * Build and email the "active consultants without any time entry in the period"
- * report. Idempotent per period via the unique (type, referenceKey) on
+ * Build and email the weekly "absence of time entry per allocated project"
+ * report. One row per non-compliant (consultant, project): a project with no
+ * effective submission (SUBMITTED/APPROVED/CLOSED) in the period is reported,
+ * classified as a missing draft or a total absence.
+ *
+ * Idempotent per period via the unique (type, referenceKey) on
  * {@link AutomationEmailLog}: a SENT log short-circuits re-sends; a FAILED log
  * is retried on the next run (upsert promotes FAILED → SENT).
  *
- * When there are no missing consultants, no email is sent but the period is
+ * When there are no non-compliant rows, no email is sent but the period is
  * still logged as processed (rowCount 0) so it is not recomputed/spammed.
  */
 export async function runMissingTimesheetReport(params: {
@@ -71,7 +79,7 @@ export async function runMissingTimesheetReport(params: {
       skipped: true,
       reason: "no-database",
       referenceKey,
-      recipient: null,
+      recipients: [],
       rowCount: 0,
       emailed: false,
     };
@@ -93,20 +101,21 @@ export async function runMissingTimesheetReport(params: {
       skipped: true,
       reason: "already-sent",
       referenceKey,
-      recipient: existing.recipient,
+      recipients: [],
       rowCount: 0,
       emailed: false,
     };
   }
 
+  // Read the effective recipient list ONCE and reuse it throughout the run.
   const config = await loadAutomationConfig();
-  const recipient = config.reportRecipientEmail;
-  if (!recipient) {
+  const recipients = config.reportRecipients;
+  if (recipients.length === 0) {
     return {
       skipped: true,
       reason: "no-recipient",
       referenceKey,
-      recipient: null,
+      recipients: [],
       rowCount: 0,
       emailed: false,
     };
@@ -122,7 +131,7 @@ export async function runMissingTimesheetReport(params: {
         data: {
           type: "MISSING_TIMESHEET_REPORT",
           referenceKey,
-          recipient,
+          recipient: recipients.join(","),
           status: "FAILED",
           meta: { reserved: true },
         },
@@ -133,7 +142,7 @@ export async function runMissingTimesheetReport(params: {
           skipped: true,
           reason: "already-claimed",
           referenceKey,
-          recipient,
+          recipients,
           rowCount: 0,
           emailed: false,
         };
@@ -149,24 +158,66 @@ export async function runMissingTimesheetReport(params: {
     },
   };
 
-  const missing = await prisma.consultant.findMany({
+  // Allocations active within the period: ACTIVE/PLANNED allocation that starts
+  // before the window ends and is still open or ends within/after it, for an
+  // ACTIVE consultant on an ACTIVE/PAUSED project.
+  const allocations = await prisma.allocation.findMany({
     where: {
-      status: "ACTIVE",
-      timeEntries: { none: { date: { gte: periodStart, lt: periodEnd } } },
+      status: { in: ["ACTIVE", "PLANNED"] },
+      startDate: { lt: periodEnd },
+      OR: [{ endDate: null }, { endDate: { gte: periodStart } }],
+      consultant: { status: "ACTIVE" },
+      project: { status: { in: ["ACTIVE", "PAUSED"] } },
     },
-    select: { id: true, name: true, email: true, area: true, seniority: true },
-    orderBy: { name: "asc" },
+    select: {
+      projectId: true,
+      project: { select: { name: true } },
+      consultantId: true,
+      consultant: {
+        select: { name: true, email: true, area: true, seniority: true },
+      },
+    },
   });
 
-  const rows: MissingTimesheetRow[] = missing.map((c) => ({
-    consultantId: c.id,
-    consultantName: c.name,
-    consultantEmail: c.email,
-    area: c.area,
-    seniority: c.seniority,
+  const involvedConsultantIds = [
+    ...new Set(allocations.map((a) => a.consultantId)),
+  ];
+
+  // Period boundaries are UTC midnight. This matches the automation domain
+  // convention that TimeEntry.date is stored as a date-only value normalized to
+  // UTC midnight (see docs/aprovacao-automatica.md §10 — same basis the
+  // auto-approval engine uses for dailyTotalKey/isWeekend), so the week window
+  // compares cleanly without timezone drift.
+  const entries =
+    involvedConsultantIds.length === 0
+      ? []
+      : await prisma.timeEntry.findMany({
+          where: {
+            consultantId: { in: involvedConsultantIds },
+            date: { gte: periodStart, lt: periodEnd },
+          },
+          select: { consultantId: true, projectId: true, status: true },
+        });
+
+  const allocationInputs: AllocationInput[] = allocations.map((a) => ({
+    consultantId: a.consultantId,
+    consultantName: a.consultant.name,
+    consultantEmail: a.consultant.email,
+    area: a.consultant.area,
+    seniority: String(a.consultant.seniority),
+    projectId: a.projectId,
+    projectName: a.project.name,
   }));
 
-  // No missing consultants: mark the period processed (no email). But never mask
+  const entryInputs: TimeEntryInput[] = entries.map((e) => ({
+    consultantId: e.consultantId,
+    projectId: e.projectId,
+    status: String(e.status),
+  }));
+
+  const rows = buildMissingTimesheetRows(allocationInputs, entryInputs);
+
+  // No non-compliant rows: mark the period processed (no email). But never mask
   // a prior real failure — a pre-existing FAILED stays FAILED for inspection.
   if (rows.length === 0) {
     if (existing?.status === "FAILED") {
@@ -174,7 +225,7 @@ export async function runMissingTimesheetReport(params: {
         skipped: true,
         reason: "kept-failed",
         referenceKey,
-        recipient,
+        recipients,
         rowCount: 0,
         emailed: false,
         status: "FAILED",
@@ -183,7 +234,7 @@ export async function runMissingTimesheetReport(params: {
     await prisma.automationEmailLog.update({
       where: whereKey,
       data: {
-        recipient,
+        recipient: recipients.join(","),
         status: "SENT",
         error: null,
         meta: { rowCount: 0, emailed: false },
@@ -192,7 +243,7 @@ export async function runMissingTimesheetReport(params: {
     return {
       skipped: false,
       referenceKey,
-      recipient,
+      recipients,
       rowCount: 0,
       emailed: false,
       status: "SENT",
@@ -208,23 +259,25 @@ export async function runMissingTimesheetReport(params: {
   let status: "SENT" | "FAILED" = "SENT";
   let error: string | null = null;
   let messageId: string | null = null;
+  let provider: string | null = null;
 
   try {
     const sent = await getEmailTransport().send({
-      to: recipient,
-      subject: `JumpFlow — Consultores sem lançamento (${referenceKey})`,
+      to: recipients,
+      subject: `JumpFlow — Ausência de lançamento por projeto (${referenceKey})`,
       text:
-        `Relatório de consultores ativos sem lançamento de horas no período ` +
-        `${referenceKey}. Total: ${rows.length}. CSV em anexo.`,
+        `Relatório semanal de ausência de lançamento por projeto ` +
+        `(${referenceKey}). Linhas: ${rows.length}. CSV em anexo.`,
       attachments: [
         {
-          filename: `consultores-sem-lancamento-${referenceKey}.csv`,
+          filename: `ausencia-lancamento-${referenceKey}.csv`,
           content: csv,
           contentType: "text/csv; charset=utf-8",
         },
       ],
     });
     messageId = sent.id;
+    provider = sent.provider;
   } catch (e) {
     status = "FAILED";
     error = e instanceof Error ? e.message : String(e);
@@ -233,19 +286,27 @@ export async function runMissingTimesheetReport(params: {
   await prisma.automationEmailLog.update({
     where: whereKey,
     data: {
-      recipient,
+      recipient: recipients.join(","),
       status,
       error,
-      meta: { rowCount: rows.length, emailed: status === "SENT", messageId },
+      meta: {
+        rowCount: rows.length,
+        emailed: status === "SENT",
+        messageId,
+        provider,
+        recipients,
+      },
     },
   });
 
   return {
     skipped: false,
     referenceKey,
-    recipient,
+    recipients,
     rowCount: rows.length,
     emailed: status === "SENT",
     status,
+    messageId,
+    provider,
   };
 }

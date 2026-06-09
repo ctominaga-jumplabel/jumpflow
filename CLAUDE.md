@@ -13,6 +13,7 @@ The product name is currently `JumpFlow`, but it must stay easy to rename. Prefe
 - Data model: `docs/modelo-dados.md`
 - Architecture: `docs/arquitetura.md`
 - Design system: `docs/design-system.md`
+- Visual identity: `docs/identidade-visual-playful-ops.md`
 - Agent guide: `docs/agentes.md`
 - Claude subagents: `.claude/agents/`
 - Claude UI/UX skill: `.claude/skills/ui-ux-pro-max/`
@@ -21,6 +22,7 @@ The product name is currently `JumpFlow`, but it must stay easy to rename. Prefe
 
 - MVP stack: Next.js, React, TypeScript, Tailwind CSS, Prisma and PostgreSQL.
 - UI direction: enterprise SaaS premium, inspired by Jump brand, optimized for operational workflows.
+- Current visual identity exploration: JumpFlow Playful Ops, with controlled Neo Brutalism energy for internal productivity.
 - Motion library: use `motion` and import from `motion/react` for functional microinteractions.
 - 21st.dev components may be used as inspiration or adapted components when they fit the design system.
 - UI/UX Pro Max skill is installed locally and may be used to generate, review or audit visual direction.
@@ -75,6 +77,7 @@ docs/
 - Use `jump-workflow-automation` for rule engines, automatic approvals, scheduled jobs, notifications, email, spreadsheets, idempotency and operational logs.
 - Use `jump-frontend-ux` for screens, flows and usability.
 - Use `jump-design-system` for visual identity, Motion, premium polish and component consistency.
+- Use `jump-visual-identity` for Playful Ops direction, controlled Neo Brutalism, 3D/assets decisions and creative exploration.
 - Use `.claude/skills/ui-ux-pro-max/` as supporting design intelligence when useful, while keeping `docs/design-system.md` as the project source of truth.
 - Use `jump-qa-engineer` for test strategy and critical scenarios.
 - Use `jump-devops` for Vercel, Supabase, Render and environments.

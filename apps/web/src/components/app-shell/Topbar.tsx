@@ -74,7 +74,7 @@ export function Topbar({ user, logoutAction, onMenuClick }: TopbarProps) {
         </button>
 
         <div className="flex items-center gap-3 rounded-md border border-transparent py-1 pl-2 sm:border-border sm:pl-1 sm:pr-3">
-          <span className="grid size-8 place-items-center rounded-full bg-brand text-xs font-semibold text-white">
+          <span className="grid size-8 place-items-center rounded-full border-2 border-ink bg-brand text-xs font-semibold text-white">
             {initialsFromName(user.name)}
           </span>
           <span className="hidden flex-col leading-tight sm:flex">

@@ -3,5 +3,9 @@
   "framework": "nextjs",
   "installCommand": "npm install",
   "buildCommand": "npm run db:generate && npm run build",
-  "outputDirectory": "apps/web/.next"
+  "outputDirectory": "apps/web/.next",
+  "crons": [
+    { "path": "/api/jobs/auto-approval", "schedule": "*/10 * * * *" },
+    { "path": "/api/jobs/missing-timesheets", "schedule": "0 12 * * 1" }
+  ]
 }
