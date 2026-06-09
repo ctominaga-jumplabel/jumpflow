@@ -185,6 +185,9 @@ model Project {
   closings          MonthlyClosing[]
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
+
+  @@index([clientId])
+  @@index([managerUserId])
 }
 
 model Allocation {
@@ -201,6 +204,9 @@ model Allocation {
   timeEntries       TimeEntry[]
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
+
+  @@index([consultantId])
+  @@index([projectId])
 }
 
 model TimesheetPeriod {
@@ -236,6 +242,11 @@ model TimeEntry {
   status       TimeEntryStatus @default(DRAFT)
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
+
+  @@index([periodId])
+  @@index([consultantId])
+  @@index([projectId])
+  @@index([allocationId])
 }
 
 model Approval {
@@ -246,6 +257,9 @@ model Approval {
   status         ApprovalStatus
   comment        String?
   createdAt      DateTime             @default(now())
+
+  @@index([entityType, entityId])
+  @@index([approverUserId])
 }
 
 model Skill {
@@ -274,6 +288,7 @@ model ConsultantSkill {
   updatedAt       DateTime         @updatedAt
 
   @@unique([consultantId, skillId])
+  @@index([skillId])
 }
 
 model Certificate {
@@ -290,6 +305,8 @@ model Certificate {
   status       ValidationStatus @default(PENDING)
   createdAt    DateTime         @default(now())
   updatedAt    DateTime         @updatedAt
+
+  @@index([consultantId])
 }
 
 model MonthlyClosing {
@@ -309,6 +326,7 @@ model MonthlyClosing {
   updatedAt      DateTime             @updatedAt
 
   @@unique([projectId, month, year])
+  @@index([clientId])
 }
 
 model AuditEvent {
@@ -321,4 +339,8 @@ model AuditEvent {
   before      Json?
   after       Json?
   createdAt   DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([actorUserId])
+  @@index([createdAt])
 }
