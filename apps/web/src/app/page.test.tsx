@@ -32,13 +32,13 @@ async function runHome(): Promise<void> {
 }
 
 describe("/ (Home) — internal entrypoint redirect", () => {
-  it("sends authenticated users to the dashboard", async () => {
+  it("sends authenticated users to the launcher", async () => {
     getCurrentUserMock.mockResolvedValue(DEV_USER);
 
     await runHome();
 
     expect(redirectMock).toHaveBeenCalledTimes(1);
-    expect(redirectMock).toHaveBeenCalledWith("/app/dashboard");
+    expect(redirectMock).toHaveBeenCalledWith("/app");
   });
 
   it("sends unauthenticated users to login", async () => {

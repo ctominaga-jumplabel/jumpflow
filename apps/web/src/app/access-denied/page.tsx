@@ -24,7 +24,7 @@ export default function AccessDeniedPage() {
 
         <div className="mt-7 flex flex-col items-stretch gap-3 sm:flex-row sm:justify-center">
           <Link
-            href="/app/dashboard"
+            href="/app"
             className={cn(
               "inline-flex items-center justify-center gap-2 rounded-md bg-brand px-5 py-2.5 text-sm font-semibold text-white hover:bg-brand-dark",
               tactileButton,
@@ -32,7 +32,7 @@ export default function AccessDeniedPage() {
             )}
           >
             <ArrowLeft aria-hidden="true" className="size-4" />
-            Voltar ao dashboard
+            Voltar ao início
           </Link>
           <form action={logout} className="sm:contents">
             <button

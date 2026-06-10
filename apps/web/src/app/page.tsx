@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth/current-user";
+import { DEFAULT_APP_PATH } from "@/lib/auth/redirects";
 
 // JumpFlow is an internal tool — `/` is not a public landing page.
 // Send authenticated users straight to the app and everyone else to login.
@@ -14,5 +15,5 @@ export default async function Home() {
   } catch {
     isAuthenticated = false;
   }
-  redirect(isAuthenticated ? "/app/dashboard" : "/login");
+  redirect(isAuthenticated ? DEFAULT_APP_PATH : "/login");
 }
