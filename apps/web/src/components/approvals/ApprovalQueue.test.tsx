@@ -1,6 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { ApprovalQueue } from "./ApprovalQueue";
+
+// Default items are all mock-sourced, so decisions stay local; mocking the
+// actions module keeps server-only imports out of the jsdom test tree.
+vi.mock("@/app/app/horas/actions", () => ({
+  decideHours: vi.fn(),
+}));
 
 describe("ApprovalQueue", () => {
   it("renders the pending queue and a decision panel", () => {

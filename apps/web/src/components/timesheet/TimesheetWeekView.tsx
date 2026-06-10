@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import {
   CalendarDays,
   ChevronLeft,
@@ -8,6 +9,7 @@ import {
   CopyPlus,
   Plus,
   Send,
+  TriangleAlert,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ActionButton } from "@/components/ui/ActionButton";
@@ -16,22 +18,32 @@ import { StatusBadge } from "@/components/ui/StatusBadge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { FeedbackBanner, useFeedback } from "@/components/ui/Feedback";
 import { formatHours } from "@/lib/format";
+import {
+  copyPreviousWeek as copyPreviousWeekAction,
+  createTimeEntry,
+  deleteTimeEntry,
+  submitWeek as submitWeekAction,
+  updateTimeEntry,
+} from "@/app/app/horas/actions";
 import { projects as allProjects } from "@/lib/mock-data/projects";
+import {
+  DEFAULT_WEEK_INDEX,
+  timesheetWeeks,
+} from "@/lib/mock-data/timesheet";
 import {
   cloneWeek,
   dayTotal,
-  DEFAULT_WEEK_INDEX,
   deriveWeekStatus,
   isRowCopyable,
   isRowEditable,
   rowTotal,
   statusCounts,
   timeEntryStatusLabels,
-  timesheetWeeks,
   weekTotal,
   type TimeEntryRow as TimeEntryRowData,
   type TimesheetWeek,
-} from "@/lib/mock-data/timesheet";
+} from "@/lib/timesheet/types";
+import { addDays, parseIsoDateUtc, toIsoDate } from "@/lib/timesheet/week";
 import { TimeEntryRow } from "./TimeEntryRow";
 import { TimeEntryStatusBadge } from "./TimeEntryStatusBadge";
 import {
@@ -42,61 +54,82 @@ import {
 
 const WEEKLY_TARGET = 40;
 
-/** Projects a consultant may log to (not closed). */
-const formProjects: TimeEntryFormProject[] = allProjects
+/** Demo-mode projects a consultant may log to (not closed). */
+const demoProjects: TimeEntryFormProject[] = allProjects
   .filter((p) => p.status !== "CLOSED")
   .map((p) => ({ id: p.id, name: p.name, clientName: p.client.name }));
 
 export interface TimesheetWeekViewProps {
-  /** Override the navigable weeks (mainly for tests). */
+  /**
+   * "demo": no database configured — all mutations stay in local state.
+   * "db": data comes from Prisma and mutations call the server actions.
+   */
+  mode: "demo" | "db";
+  /** db mode: the week loaded on the server. */
+  week?: TimesheetWeek;
+  /** db mode: projects with an active allocation in the week. */
+  projects?: TimeEntryFormProject[];
+  /** demo mode: override the navigable weeks (mainly for tests). */
   weeks?: TimesheetWeek[];
-  /** Index of the week shown first. */
+  /** demo mode: index of the week shown first. */
   initialIndex?: number;
 }
 
 /**
  * Weekly time-entry grid (Playful Productivity center per the visual identity).
  *
- * MVP scope: data is mocked and all mutations happen in LOCAL state — new entry,
- * edit, copy previous week, week navigation and submit-for-approval. Nothing is
- * persisted yet (no Prisma/server action); actions report honestly through the
- * feedback live region. The shapes mirror TimesheetPeriod/TimeEntry so wiring a
- * Server Action later is mechanical.
+ * In db mode every mutation goes through the Horas server actions and the
+ * server re-renders the route (revalidatePath); week navigation is
+ * server-driven via `?semana=`. Demo mode keeps the original local-state
+ * behavior so the app works without a database.
  */
-export function TimesheetWeekView({
-  weeks = timesheetWeeks,
-  initialIndex = DEFAULT_WEEK_INDEX,
-}: TimesheetWeekViewProps) {
+export function TimesheetWeekView(props: TimesheetWeekViewProps) {
+  const isDemo = props.mode === "demo";
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+
   const [localWeeks, setLocalWeeks] = useState<TimesheetWeek[]>(() =>
-    weeks.map(cloneWeek),
+    (props.weeks ?? timesheetWeeks).map(cloneWeek),
   );
-  const [index, setIndex] = useState(initialIndex);
+  const [index, setIndex] = useState(props.initialIndex ?? DEFAULT_WEEK_INDEX);
   const [formOpen, setFormOpen] = useState(false);
-  const [editingRowId, setEditingRowId] = useState<string | null>(null);
+  const [editingRow, setEditingRow] = useState<TimeEntryRowData | null>(null);
   const [editInitial, setEditInitial] = useState<TimeEntryFormValue | null>(null);
   const { feedback, notify } = useFeedback();
   const idCounter = useRef(0);
 
-  const week = localWeeks[index];
+  const week = isDemo ? localWeeks[index] : (props.week as TimesheetWeek);
+  const formProjects = isDemo ? demoProjects : (props.projects ?? []);
   const counts = useMemo(() => statusCounts(week), [week]);
   const total = useMemo(() => weekTotal(week), [week]);
 
-  /** Immutably update the currently displayed week. */
+  /** Immutably update the currently displayed week (demo mode only). */
   function updateWeek(fn: (w: TimesheetWeek) => TimesheetWeek) {
     setLocalWeeks((prev) => prev.map((w, i) => (i === index ? fn(w) : w)));
   }
 
   function navigate(delta: number) {
-    const target = index + delta;
-    if (target < 0 || target >= localWeeks.length) {
-      notify("info", "Não há mais semanas disponíveis nesta demonstração.");
+    if (isDemo) {
+      const target = index + delta;
+      if (target < 0 || target >= localWeeks.length) {
+        notify("info", "Não há mais semanas disponíveis nesta demonstração.");
+        return;
+      }
+      setIndex(target);
       return;
     }
-    setIndex(target);
+    const start = parseIsoDateUtc(week.startDate);
+    if (!start) return;
+    const target = toIsoDate(addDays(start, delta * 7));
+    router.push(`/app/horas?semana=${target}`);
+  }
+
+  function dayIndexOf(date: string): number {
+    return week.days.findIndex((d) => d.date === date);
   }
 
   function openNew() {
-    setEditingRowId(null);
+    setEditingRow(null);
     setEditInitial(null);
     setFormOpen(true);
   }
@@ -106,11 +139,11 @@ export function TimesheetWeekView({
       0,
       row.hours.findIndex((h) => h > 0),
     );
-    setEditingRowId(row.id);
+    setEditingRow(row);
     setEditInitial({
       projectId: row.projectId,
       activity: row.activity,
-      dayIndex,
+      date: week.days[dayIndex]?.date ?? week.startDate,
       hours: row.hours[dayIndex] ?? 0,
       description: row.description ?? "",
       billable: row.billable,
@@ -119,8 +152,66 @@ export function TimesheetWeekView({
   }
 
   function handleSubmitEntry(value: TimeEntryFormValue) {
+    if (isDemo) {
+      handleSubmitEntryDemo(value);
+      return;
+    }
+    startTransition(async () => {
+      const dayIndex = dayIndexOf(value.date);
+      const existingId = editingRow?.entryIds?.[dayIndex] ?? null;
+      const result = existingId
+        ? await updateTimeEntry({
+            id: existingId,
+            hours: value.hours,
+            description: value.description,
+            billable: value.billable,
+            date: value.date,
+          })
+        : await createTimeEntry({
+            projectId: editingRow?.projectId ?? value.projectId,
+            activityType: editingRow?.activity ?? value.activity,
+            date: value.date,
+            hours: value.hours,
+            description: value.description,
+            billable: value.billable,
+          });
+      if (result.ok) {
+        setFormOpen(false);
+        notify(
+          "success",
+          existingId
+            ? "Lançamento atualizado como rascunho."
+            : "Lançamento salvo como rascunho.",
+        );
+      } else {
+        notify("warning", result.message);
+      }
+    });
+  }
+
+  function handleDeleteEntry(value: TimeEntryFormValue) {
+    if (isDemo || !editingRow) return;
+    const entryId = editingRow.entryIds?.[dayIndexOf(value.date)] ?? null;
+    if (!entryId) {
+      notify("info", "Não há lançamento salvo neste dia para excluir.");
+      return;
+    }
+    startTransition(async () => {
+      const result = await deleteTimeEntry({ id: entryId });
+      if (result.ok) {
+        setFormOpen(false);
+        notify("success", "Lançamento excluído.");
+      } else {
+        notify("warning", result.message);
+      }
+    });
+  }
+
+  function handleSubmitEntryDemo(value: TimeEntryFormValue) {
     const project = formProjects.find((p) => p.id === value.projectId);
     if (!project) return;
+    const valueDayIndex = Math.max(0, dayIndexOf(value.date));
+    const editingRowId = editingRow?.id ?? null;
 
     updateWeek((w) => {
       let rows = w.rows;
@@ -135,7 +226,7 @@ export function TimesheetWeekView({
                 description: value.description,
                 billable: value.billable,
                 hours: r.hours.map((h, i) =>
-                  i === value.dayIndex ? value.hours : h,
+                  i === valueDayIndex ? value.hours : h,
                 ),
               }
             : r,
@@ -158,7 +249,7 @@ export function TimesheetWeekView({
                   description: value.description || r.description,
                   billable: value.billable,
                   hours: r.hours.map((h, i) =>
-                    i === value.dayIndex ? value.hours : h,
+                    i === valueDayIndex ? value.hours : h,
                   ),
                 }
               : r,
@@ -166,7 +257,7 @@ export function TimesheetWeekView({
         } else {
           idCounter.current += 1;
           const hours = Array.from({ length: w.days.length }, (_, i) =>
-            i === value.dayIndex ? value.hours : 0,
+            i === valueDayIndex ? value.hours : 0,
           );
           rows = [
             ...rows,
@@ -199,6 +290,37 @@ export function TimesheetWeekView({
   }
 
   function copyPreviousWeek() {
+    if (!isDemo) {
+      startTransition(async () => {
+        const result = await copyPreviousWeekAction({
+          weekStart: week.startDate,
+        });
+        if (!result.ok) {
+          notify("warning", result.message);
+          return;
+        }
+        const { copied, skippedExisting, skippedIneligible } = result.data;
+        if (copied === 0 && skippedExisting === 0 && skippedIneligible === 0) {
+          notify(
+            "info",
+            "A semana anterior não tem lançamentos elegíveis para cópia.",
+          );
+          return;
+        }
+        const parts = [`${copied} lançamento(s) copiado(s)`];
+        if (skippedExisting > 0) {
+          parts.push(`${skippedExisting} já existia(m) na semana`);
+        }
+        if (skippedIneligible > 0) {
+          parts.push(
+            `${skippedIneligible} sem alocação ativa ou com projeto encerrado`,
+          );
+        }
+        notify(copied > 0 ? "success" : "info", `${parts.join(" · ")}.`);
+      });
+      return;
+    }
+
     if (index === 0) {
       notify("info", "Não há semana anterior para copiar nesta demonstração.");
       return;
@@ -234,6 +356,21 @@ export function TimesheetWeekView({
   }
 
   function submitWeek() {
+    if (!isDemo) {
+      startTransition(async () => {
+        const result = await submitWeekAction({ weekStart: week.startDate });
+        if (result.ok) {
+          notify(
+            "success",
+            `${result.data.submitted} lançamento(s) enviado(s) para aprovação.`,
+          );
+        } else {
+          notify("warning", result.message);
+        }
+      });
+      return;
+    }
+
     const submittable = week.rows.filter(
       (r) => r.status === "DRAFT" && rowTotal(r) > 0,
     );
@@ -263,6 +400,15 @@ export function TimesheetWeekView({
 
   return (
     <div className="space-y-4">
+      {isDemo ? (
+        <div className="flex items-center gap-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm font-medium text-warning">
+          <TriangleAlert aria-hidden="true" className="size-4 shrink-0" />
+          <span>
+            Modo demonstração: banco não configurado. Nada será persistido.
+          </span>
+        </div>
+      ) : null}
+
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center gap-3">
           <span className="grid size-10 shrink-0 place-items-center rounded-md border-2 border-ink bg-marker text-ink shadow-[2px_2px_0_0_var(--color-ink)]">
@@ -302,11 +448,18 @@ export function TimesheetWeekView({
             variant="secondary"
             size="sm"
             icon={CopyPlus}
+            disabled={isPending}
             onClick={copyPreviousWeek}
           >
             Copiar semana anterior
           </ActionButton>
-          <ActionButton variant="primary" size="sm" icon={Plus} onClick={openNew}>
+          <ActionButton
+            variant="primary"
+            size="sm"
+            icon={Plus}
+            disabled={isPending}
+            onClick={openNew}
+          >
             Novo lançamento
           </ActionButton>
         </div>
@@ -315,7 +468,7 @@ export function TimesheetWeekView({
       <FeedbackBanner message={feedback} />
 
       <div className="flex flex-wrap items-center gap-2">
-        {(["DRAFT", "SUBMITTED", "APPROVED", "REJECTED"] as const).map(
+        {(["DRAFT", "SUBMITTED", "APPROVED", "REJECTED", "CLOSED"] as const).map(
           (status) =>
             counts[status] > 0 ? (
               <StatusBadge
@@ -344,6 +497,7 @@ export function TimesheetWeekView({
             variant="primary"
             size="sm"
             icon={Send}
+            disabled={isPending}
             onClick={submitWeek}
           >
             Enviar para aprovação
@@ -445,6 +599,8 @@ export function TimesheetWeekView({
         days={week.days}
         initial={editInitial}
         onSubmit={handleSubmitEntry}
+        onDelete={!isDemo && editingRow ? handleDeleteEntry : undefined}
+        busy={isPending}
       />
     </div>
   );

@@ -1,76 +1,33 @@
 /**
- * Mocked weekly timesheet for the MVP "Horas" module.
+ * Mocked weekly timesheet for the "Horas" DEMO mode (no database configured).
  *
- * NOTE: not connected to the database yet. Shapes mirror `TimesheetPeriod` /
- * `TimeEntry` in docs/modelo-dados.md (weekly period, one row per
- * project+activity, hours per weekday). Swap for Prisma queries later.
+ * Round 2 moved the shared types and pure helpers to `@/lib/timesheet/types`
+ * so the real (Prisma-backed) mode never imports mock modules. Everything is
+ * re-exported here to keep existing imports working.
  */
 
-export type TimeEntryStatus = "DRAFT" | "SUBMITTED" | "APPROVED" | "REJECTED";
+import type { TimesheetWeek } from "@/lib/timesheet/types";
 
-export type ActivityType =
-  | "DEVELOPMENT"
-  | "MEETING"
-  | "DISCOVERY"
-  | "SUPPORT"
-  | "DOCS";
-
-export const activityLabels: Record<ActivityType, string> = {
-  DEVELOPMENT: "Desenvolvimento",
-  MEETING: "Reunião",
-  DISCOVERY: "Discovery",
-  SUPPORT: "Suporte",
-  DOCS: "Documentação",
-};
-
-export const timeEntryStatusLabels: Record<TimeEntryStatus, string> = {
-  DRAFT: "Rascunho",
-  SUBMITTED: "Enviado",
-  APPROVED: "Aprovado",
-  REJECTED: "Reprovado",
-};
-
-export interface WeekDay {
-  /** Short weekday label, e.g. "Seg". */
-  label: string;
-  /** ISO date yyyy-mm-dd. */
-  date: string;
-  weekend: boolean;
-}
-
-export interface TimeEntryRow {
-  id: string;
-  projectId: string;
-  projectName: string;
-  clientName: string;
-  activity: ActivityType;
-  billable: boolean;
-  status: TimeEntryStatus;
-  /** Optional note about the work logged on this row. */
-  description?: string;
-  /** Hours per weekday, aligned with `weekDays` (length 7, Mon→Sun). */
-  hours: number[];
-}
-
-/** Activity options, in the order shown in the entry form. */
-export const activityOrder: ActivityType[] = [
-  "DEVELOPMENT",
-  "MEETING",
-  "DISCOVERY",
-  "SUPPORT",
-  "DOCS",
-];
-
-export interface TimesheetWeek {
-  /** Human label for the period, e.g. "Semana 24 · 08–14 jun". */
-  label: string;
-  startDate: string;
-  endDate: string;
-  /** Overall period status, derived from the rows. */
-  status: TimeEntryStatus;
-  days: WeekDay[];
-  rows: TimeEntryRow[];
-}
+export {
+  ACTIVITY_TYPES,
+  activityLabels,
+  activityOrder,
+  cloneWeek,
+  dayTotal,
+  deriveWeekStatus,
+  isActivityType,
+  isRowCopyable,
+  isRowEditable,
+  rowTotal,
+  statusCounts,
+  timeEntryStatusLabels,
+  weekTotal,
+  type ActivityType,
+  type TimeEntryRow,
+  type TimeEntryStatus,
+  type TimesheetWeek,
+  type WeekDay,
+} from "@/lib/timesheet/types";
 
 /** Current mocked week (Mon 2026-06-08 → Sun 2026-06-14). */
 export const currentWeek: TimesheetWeek = {
@@ -199,62 +156,3 @@ export const timesheetWeeks: TimesheetWeek[] = [
 
 /** Index of the week shown by default (the current week). */
 export const DEFAULT_WEEK_INDEX = 1;
-
-/** Deep clone a week so local edits never mutate the shared mock. */
-export function cloneWeek(week: TimesheetWeek): TimesheetWeek {
-  return {
-    ...week,
-    days: week.days.map((d) => ({ ...d })),
-    rows: week.rows.map((r) => ({ ...r, hours: [...r.hours] })),
-  };
-}
-
-/** A row is editable by the consultant only while in DRAFT or REJECTED. */
-export function isRowEditable(row: TimeEntryRow): boolean {
-  return row.status === "DRAFT" || row.status === "REJECTED";
-}
-
-/** Whether a row may be carried over when copying the previous week. */
-export function isRowCopyable(row: TimeEntryRow): boolean {
-  // Skip rejected rows and empty rows (copying a zero-hour line just clutters
-  // the new week).
-  return row.status !== "REJECTED" && rowTotal(row) > 0;
-}
-
-/** Derive the overall period status from its rows (worst-case wins). */
-export function deriveWeekStatus(week: TimesheetWeek): TimeEntryStatus {
-  if (week.rows.length === 0) return "DRAFT";
-  if (week.rows.some((r) => r.status === "REJECTED")) return "REJECTED";
-  if (week.rows.some((r) => r.status === "DRAFT")) return "DRAFT";
-  if (week.rows.some((r) => r.status === "SUBMITTED")) return "SUBMITTED";
-  return "APPROVED";
-}
-
-/** Total hours logged in a single row across the week. */
-export function rowTotal(row: TimeEntryRow): number {
-  return row.hours.reduce((sum, h) => sum + h, 0);
-}
-
-/** Total hours logged across all rows for a given weekday index (0–6). */
-export function dayTotal(week: TimesheetWeek, dayIndex: number): number {
-  return week.rows.reduce((sum, row) => sum + (row.hours[dayIndex] ?? 0), 0);
-}
-
-/** Grand total of hours logged in the week. */
-export function weekTotal(week: TimesheetWeek): number {
-  return week.rows.reduce((sum, row) => sum + rowTotal(row), 0);
-}
-
-/** Count of rows by status, for the week summary chips. */
-export function statusCounts(
-  week: TimesheetWeek,
-): Record<TimeEntryStatus, number> {
-  const counts: Record<TimeEntryStatus, number> = {
-    DRAFT: 0,
-    SUBMITTED: 0,
-    APPROVED: 0,
-    REJECTED: 0,
-  };
-  for (const row of week.rows) counts[row.status] += 1;
-  return counts;
-}

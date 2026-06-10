@@ -22,21 +22,21 @@ rodada intermediaria de schema/storage.
 Despesas (Rodada 3) vem em seguida; as pendencias de storage podem ser
 decididas em paralelo sem bloquear a Rodada 2.
 
-## Decisoes que o usuario deve confirmar antes de iniciar
+## Decisoes confirmadas para iniciar
 
-1. **Gate de banco**: autorizar `npm run db:deploy` (aplica
-   `20260609120000_init` + `20260609130000_automation_auto_approval`) e
+1. **Gate de banco**: autorizado aplicar `npm run db:deploy` e
    `npm run db:seed` no Supabase real.
-2. **Ambiente de validacao**: com `ALLOW_DEV_AUTH_IN_PRODUCTION=true`, todo
-   visitante escreve como `DEV_USER` (todos os papeis) no mesmo banco.
-   Aceitavel para validacao, ou manter persistencia apenas local ate ativar o
-   Entra ID?
-3. **Seed operacional**: clientes/projetos/alocacoes reais da Jump ou
-   ficticios de validacao?
-4. **Regra de alocacao**: aplicar "lancamento so com alocacao ativa" de forma
-   estrita ja na Rodada 2 (recomendado) ou tolerante no inicio?
-5. **Aprovacao automatica**: `autoApprovalEnabled` comeca `true` no ambiente
-   de validacao?
+2. **Ambiente de validacao**: persistencia permitida enquanto os dados forem
+   ficticios de validacao. Como producao ainda usa
+   `AUTH_DEV_MODE=true` + `ALLOW_DEV_AUTH_IN_PRODUCTION=true`, nao inserir dados
+   reais da Jump ate ativar Entra ID.
+3. **Seed operacional**: usar clientes, projetos, consultores e alocacoes
+   ficticios de validacao.
+4. **Regra de alocacao**: aplicar de forma estrita desde a Rodada 2. Consultor
+   so lanca horas em projeto com alocacao ativa, salvo permissao administrativa
+   explicita.
+5. **Aprovacao automatica**: iniciar `autoApprovalEnabled=true` no ambiente de
+   validacao, usando apenas dados ficticios e logs/auditoria.
 
 ## Prompt sugerido para a proxima execucao
 
@@ -61,17 +61,17 @@ Objetivo desta rodada:
 Rodada 2 - Persistencia real de Horas, em duas sub-rodadas.
 
 Sub-rodada 2.0 - Fundacao de banco aplicada:
-- Confirmar comigo antes de aplicar qualquer coisa no Supabase.
 - `npm run db:deploy` e `npm run db:seed`.
 - Estender o seed (idempotente) com clientes, projetos, alocacoes e o
-  registro Consultant vinculado ao usuario dev.
+  registro Consultant vinculado ao usuario dev, sempre com dados ficticios de
+  validacao.
 - Smoke: login dev + leitura de papeis persistidos.
 - Atencao (Windows): parar o dev server antes de `prisma generate` (EPERM na
   DLL do query engine).
 
 Sub-rodada 2.1 - Persistencia de Horas:
 - US-COR-01: novo lancamento via Server Action, validacao Zod no servidor,
-  vinculo a TimesheetPeriod semanal, regra de alocacao ativa.
+  vinculo a TimesheetPeriod semanal, regra de alocacao ativa estrita.
 - US-COR-02: copiar semana anterior persistido e idempotente.
 - US-COR-03: enviar horas (DRAFT -> SUBMITTED, submittedAt, bloqueio de
   edicao no servidor, integra com aprovacao automatica existente).
@@ -94,6 +94,7 @@ Agentes:
 
 Criterios de pronto:
 - Migrations aplicadas e seed idempotente executado.
+- Seed usa apenas dados ficticios.
 - Horas sobrevivem a reload (criar, editar, copiar, enviar).
 - Toda mutacao com Zod + RBAC no servidor; consultor so altera os proprios
   lancamentos DRAFT/REJECTED.

@@ -2,13 +2,14 @@ import { StatusBadge, type StatusTone } from "@/components/ui/StatusBadge";
 import {
   timeEntryStatusLabels,
   type TimeEntryStatus,
-} from "@/lib/mock-data/timesheet";
+} from "@/lib/timesheet/types";
 
 const toneByStatus: Record<TimeEntryStatus, StatusTone> = {
   DRAFT: "neutral",
   SUBMITTED: "info",
   APPROVED: "success",
   REJECTED: "danger",
+  CLOSED: "neutral",
 };
 
 export interface TimeEntryStatusBadgeProps {

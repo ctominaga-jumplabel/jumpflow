@@ -29,10 +29,20 @@ export const approvalKindLabels: Record<ApprovalKind, string> = {
   EXPENSE: "Despesas",
 };
 
+/** Where the item lives: real database rows or local demo data. */
+export type ApprovalSource = "db" | "mock";
+
 export interface ApprovalItem {
   id: string;
   /** Horas or despesas — the queue can be filtered by kind. */
   type: ApprovalKind;
+  /**
+   * "db" items are decided via the decideHours server action; "mock" items
+   * remain local demo state (e.g. expenses, or hours without a database).
+   */
+  source: ApprovalSource;
+  /** TimeEntry ids behind a db-backed HOURS item (decision payload). */
+  entryIds?: string[];
   consultantName: string;
   projectName: string;
   clientName: string;
@@ -55,7 +65,7 @@ export interface ApprovalItem {
   comment?: string;
 }
 
-export const approvalItems: ApprovalItem[] = [
+const mockApprovalItems: Omit<ApprovalItem, "source">[] = [
   {
     id: "ap-1",
     type: "HOURS",
@@ -194,6 +204,12 @@ export const approvalItems: ApprovalItem[] = [
     comment: "Falta o comprovante fiscal detalhado; reenviar com a NF.",
   },
 ];
+
+/** Demo items, all flagged as local ("mock") so decisions stay client-side. */
+export const approvalItems: ApprovalItem[] = mockApprovalItems.map((item) => ({
+  ...item,
+  source: "mock" as const,
+}));
 
 /** Filter the queue by kind (`"ALL"` keeps everything). */
 export function filterApprovalsByKind(

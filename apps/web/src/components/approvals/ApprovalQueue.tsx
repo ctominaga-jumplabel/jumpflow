@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { ClipboardCheck } from "lucide-react";
+import { useMemo, useState, useTransition } from "react";
+import { ClipboardCheck, TriangleAlert } from "lucide-react";
 import { SectionPanel } from "@/components/ui/SectionPanel";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -10,6 +10,7 @@ import { FeedbackBanner, useFeedback } from "@/components/ui/Feedback";
 import { cn } from "@/lib/utils";
 import { focusRing } from "@/lib/styles";
 import { formatCurrency, formatHours } from "@/lib/format";
+import { decideHours } from "@/app/app/horas/actions";
 import {
   approvalItems as defaultItems,
   decidedApprovals,
@@ -33,14 +34,45 @@ const KIND_FILTERS: { value: KindFilter; label: string }[] = [
 
 export interface ApprovalQueueProps {
   items?: ApprovalItem[];
+  /** Show the "no database" warning banner (demo mode). */
+  demoBanner?: boolean;
 }
 
-/** Triage queue: pending items on the left, decision panel on the right. */
-export function ApprovalQueue({ items: seed = defaultItems }: ApprovalQueueProps) {
-  const [items, setItems] = useState<ApprovalItem[]>(seed);
+/**
+ * Triage queue: pending items on the left, decision panel on the right.
+ *
+ * Items with `source: "db"` are decided through the decideHours server action
+ * (Approval + AuditEvent in one transaction; the route revalidates after).
+ * Items with `source: "mock"` (expenses, or hours without a database) keep the
+ * original local behavior with honest "(local)" feedback.
+ */
+export function ApprovalQueue({
+  items: seed = defaultItems,
+  demoBanner = false,
+}: ApprovalQueueProps) {
+  // Local decisions apply only to mock items; db items refresh via the server.
+  const [mockDecisions, setMockDecisions] = useState<
+    Record<string, { status: "APPROVED" | "REJECTED"; comment?: string }>
+  >({});
   const [tab, setTab] = useState<Tab>("PENDING");
   const [kind, setKind] = useState<KindFilter>("ALL");
   const { feedback, notify } = useFeedback();
+  const [isPending, startTransition] = useTransition();
+
+  const items = useMemo(
+    () =>
+      seed.map((item) => {
+        const decision = mockDecisions[item.id];
+        return decision && item.source === "mock"
+          ? {
+              ...item,
+              status: decision.status,
+              comment: decision.comment || item.comment,
+            }
+          : item;
+      }),
+    [seed, mockDecisions],
+  );
 
   const byKind = useMemo(
     () => filterApprovalsByKind(items, kind),
@@ -57,27 +89,70 @@ export function ApprovalQueue({ items: seed = defaultItems }: ApprovalQueueProps
   const list = tab === "PENDING" ? pending : history;
   const selected = items.find((i) => i.id === selectedId) ?? null;
 
-  function decide(id: string, status: "APPROVED" | "REJECTED", comment: string) {
-    setItems((prev) =>
-      prev.map((i) =>
-        i.id === id
-          ? { ...i, status, comment: comment || i.comment }
-          : i,
-      ),
-    );
-    // Move selection to the next pending item so triage keeps flowing.
-    const remaining = pending.filter((i) => i.id !== id);
+  function selectNextPending(decidedId: string) {
+    const remaining = pending.filter((i) => i.id !== decidedId);
     setSelectedId(remaining[0]?.id ?? null);
+  }
+
+  function decide(id: string, status: "APPROVED" | "REJECTED", comment: string) {
+    const item = items.find((i) => i.id === id);
+    if (!item) return;
+
+    if (item.source === "db" && item.entryIds && item.entryIds.length > 0) {
+      const entryIds = item.entryIds;
+      startTransition(async () => {
+        const result = await decideHours({ entryIds, decision: status, comment });
+        if (!result.ok) {
+          notify("warning", result.message);
+          return;
+        }
+        const { decided, alreadyDecided } = result.data;
+        if (decided === 0) {
+          notify(
+            "info",
+            "Nenhum lançamento decidido: já havia(m) sido decidido(s) por outro aprovador.",
+          );
+        } else {
+          const suffix =
+            alreadyDecided > 0
+              ? ` ${alreadyDecided} já havia(m) sido decidido(s).`
+              : "";
+          notify(
+            status === "APPROVED" ? "success" : "info",
+            status === "APPROVED"
+              ? `${decided} lançamento(s) aprovado(s).${suffix}`
+              : `${decided} lançamento(s) reprovado(s) com justificativa.${suffix}`,
+          );
+        }
+        selectNextPending(id);
+      });
+      return;
+    }
+
+    setMockDecisions((prev) => ({
+      ...prev,
+      [id]: { status, comment: comment || undefined },
+    }));
+    selectNextPending(id);
     notify(
       status === "APPROVED" ? "success" : "info",
       status === "APPROVED"
-        ? "Item aprovado (local). Auditoria/persistência virão na rodada de banco."
+        ? "Item aprovado (local). Persistência de despesas virá em rodada futura."
         : "Item reprovado com justificativa (local).",
     );
   }
 
   return (
     <div className="space-y-4">
+      {demoBanner ? (
+        <div className="flex items-center gap-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm font-medium text-warning">
+          <TriangleAlert aria-hidden="true" className="size-4 shrink-0" />
+          <span>
+            Modo demonstração: banco não configurado. Nada será persistido.
+          </span>
+        </div>
+      ) : null}
+
       <div className="flex flex-wrap items-center gap-2">
         <StatusBadge tone="warning">{counts.pending} pendentes</StatusBadge>
         <StatusBadge tone="success">{counts.approved} aprovadas</StatusBadge>
@@ -166,6 +241,11 @@ export function ApprovalQueue({ items: seed = defaultItems }: ApprovalQueueProps
                             <StatusBadge tone={isExpense ? "warning" : "info"}>
                               {isExpense ? "Despesa" : "Horas"}
                             </StatusBadge>
+                            {!demoBanner && item.source === "mock" ? (
+                              // Mixed queue: flag fictitious items so decisions
+                              // on real data are never confused with demo ones.
+                              <StatusBadge tone="neutral">Demo</StatusBadge>
+                            ) : null}
                           </div>
                           <p className="truncate text-xs text-soft">
                             {item.projectName} · {item.clientName} ·{" "}
@@ -191,6 +271,7 @@ export function ApprovalQueue({ items: seed = defaultItems }: ApprovalQueueProps
 
         <ApprovalDecisionPanel
           item={selected}
+          busy={isPending}
           onApprove={(id, comment) => decide(id, "APPROVED", comment)}
           onReject={(id, comment) => decide(id, "REJECTED", comment)}
         />

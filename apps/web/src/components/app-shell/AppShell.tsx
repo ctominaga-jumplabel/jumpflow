@@ -14,6 +14,8 @@ export interface AppShellProps {
   user: AppUser;
   /** Server action that signs the user out. */
   logoutAction: () => void | Promise<void>;
+  /** Whether a real database connection is configured (resolved on the server). */
+  databaseConfigured?: boolean;
   children: React.ReactNode;
 }
 
@@ -21,7 +23,12 @@ export interface AppShellProps {
  * Authenticated application shell: persistent sidebar on desktop, off-canvas
  * drawer on mobile, and a sticky topbar.
  */
-export function AppShell({ user, logoutAction, children }: AppShellProps) {
+export function AppShell({
+  user,
+  logoutAction,
+  databaseConfigured = false,
+  children,
+}: AppShellProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const reduce = useReducedMotion();
   const drawerRef = useRef<HTMLDivElement>(null);
@@ -56,7 +63,7 @@ export function AppShell({ user, logoutAction, children }: AppShellProps) {
     <div className="min-h-screen bg-canvas">
       {/* Desktop sidebar */}
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 border-r-2 border-ink lg:block">
-        <Sidebar />
+        <Sidebar databaseConfigured={databaseConfigured} />
       </aside>
 
       {/* Mobile drawer */}
@@ -94,7 +101,10 @@ export function AppShell({ user, logoutAction, children }: AppShellProps) {
               >
                 <X aria-hidden="true" className="size-5" />
               </button>
-              <Sidebar onNavigate={() => setMobileOpen(false)} />
+              <Sidebar
+                onNavigate={() => setMobileOpen(false)}
+                databaseConfigured={databaseConfigured}
+              />
             </motion.aside>
           </div>
         ) : null}

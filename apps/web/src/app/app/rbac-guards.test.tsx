@@ -18,6 +18,14 @@ const requireRoleMock = vi.fn(async (roles: unknown) => {
 
 vi.mock("@/lib/auth/guards", () => ({
   requireRole: (roles: unknown) => requireRoleMock(roles),
+  // ApprovalQueue imports the Horas actions module, which also pulls
+  // requireUser from this module; provide it so the mock stays complete.
+  requireUser: vi.fn(async () => ({
+    id: "u1",
+    name: "Ana",
+    email: "ana@jumplabel.com.br",
+    roles: ["ADMIN" as const],
+  })),
 }));
 
 import FinanceiroPage from "./financeiro/page";

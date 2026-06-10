@@ -1,6 +1,7 @@
 import { AppShell } from "@/components/app-shell/AppShell";
 import { requireUser } from "@/lib/auth/guards";
 import { logout } from "@/lib/auth/actions";
+import { isDatabaseConfigured } from "@/lib/db/config";
 
 export default async function AppLayout({
   children,
@@ -8,7 +9,11 @@ export default async function AppLayout({
   const user = await requireUser();
 
   return (
-    <AppShell user={user} logoutAction={logout}>
+    <AppShell
+      user={user}
+      logoutAction={logout}
+      databaseConfigured={isDatabaseConfigured()}
+    >
       {children}
     </AppShell>
   );

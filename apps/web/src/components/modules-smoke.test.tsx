@@ -1,6 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { TimesheetWeekView } from "@/components/timesheet/TimesheetWeekView";
+
+// Demo mode never calls the server actions or navigates; mock both so the
+// component tree stays free of server-only imports in jsdom.
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+}));
+vi.mock("@/app/app/horas/actions", () => ({
+  createTimeEntry: vi.fn(),
+  updateTimeEntry: vi.fn(),
+  deleteTimeEntry: vi.fn(),
+  copyPreviousWeek: vi.fn(),
+  submitWeek: vi.fn(),
+  decideHours: vi.fn(),
+}));
 import { ConsultantDirectory } from "@/components/consultants/ConsultantDirectory";
 import { CertificateList } from "@/components/certificates/CertificateList";
 import { CertificateSummary } from "@/components/certificates/CertificateSummary";
@@ -12,7 +26,7 @@ import { skills } from "@/lib/mock-data/skills";
 
 describe("Horas — TimesheetWeekView", () => {
   it("renders the week grid and prepared actions", () => {
-    render(<TimesheetWeekView />);
+    render(<TimesheetWeekView mode="demo" />);
     expect(screen.getByText(/Semana 24/)).toBeInTheDocument();
     expect(screen.getByText("Lançamentos da semana")).toBeInTheDocument();
     expect(

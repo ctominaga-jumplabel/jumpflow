@@ -1,5 +1,6 @@
 import { prisma } from "@jumpflow/database";
 import { isRoleName, type RoleName } from "@/lib/auth/roles";
+import type { AppUser } from "@/lib/auth/types";
 
 /**
  * User persistence + persisted RBAC.
@@ -64,6 +65,30 @@ export async function syncUserFromAuth(
     email: user.email,
     roles: mapPersistedRoles(user.roles),
   };
+}
+
+/**
+ * Resolve the persisted `User` row behind a session {@link AppUser}.
+ *
+ * Constraint: in dev mode the session id is the synthetic "dev-user", which
+ * never exists in the database, while the seeded data is linked to the REAL
+ * cuid of the same email. So we try the id first (production path) and fall
+ * back to the unique email. Use the returned id whenever a REAL FK is needed
+ * (e.g. `Approval.approverUserId`, `AuditEvent.actorUserId`) — never the
+ * session id.
+ */
+export async function resolveDbUser(
+  user: AppUser,
+): Promise<{ id: string; name: string; email: string } | null> {
+  const byId = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { id: true, name: true, email: true },
+  });
+  if (byId) return byId;
+  return prisma.user.findUnique({
+    where: { email: user.email.trim().toLowerCase() },
+    select: { id: true, name: true, email: true },
+  });
 }
 
 /**

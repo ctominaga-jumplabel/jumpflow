@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Save } from "lucide-react";
+import { Save, Trash2 } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import { ActionButton } from "@/components/ui/ActionButton";
 import { cn } from "@/lib/utils";
@@ -11,12 +11,13 @@ import {
   activityOrder,
   type ActivityType,
   type WeekDay,
-} from "@/lib/mock-data/timesheet";
+} from "@/lib/timesheet/types";
 
 export interface TimeEntryFormValue {
   projectId: string;
   activity: ActivityType;
-  dayIndex: number;
+  /** ISO date (yyyy-mm-dd) of the day being logged. */
+  date: string;
   hours: number;
   description: string;
   billable: boolean;
@@ -36,6 +37,13 @@ export interface TimeEntryFormProps {
   /** Pre-filled values when editing an existing entry. */
   initial?: TimeEntryFormValue | null;
   onSubmit: (value: TimeEntryFormValue) => void;
+  /**
+   * Delete the entry behind the currently selected day (db mode only). The
+   * view resolves which persisted entry the value points at.
+   */
+  onDelete?: (value: TimeEntryFormValue) => void;
+  /** Disable actions while a server action is in flight. */
+  busy?: boolean;
 }
 
 const inputClass = (invalid: boolean) =>
@@ -47,10 +55,10 @@ const inputClass = (invalid: boolean) =>
 
 const labelClass = "mb-1 block text-xs font-semibold text-medium";
 
-const emptyValue = (): TimeEntryFormValue => ({
+const emptyValue = (days: WeekDay[]): TimeEntryFormValue => ({
   projectId: "",
   activity: "DEVELOPMENT",
-  dayIndex: 0,
+  date: days[0]?.date ?? "",
   hours: 0,
   description: "",
   billable: true,
@@ -58,8 +66,8 @@ const emptyValue = (): TimeEntryFormValue => ({
 
 /**
  * New/edit time-entry form (modal). One entry = a project+activity for a given
- * weekday. Validates project and hours (> 0, ≤ 24). Saving mutates local state
- * as a DRAFT in the MVP (no persistence yet).
+ * date. Client-side validation (project required, hours > 0 and ≤ 24) is a
+ * pre-check only — the server action is the authority.
  */
 export function TimeEntryForm({
   open,
@@ -68,9 +76,11 @@ export function TimeEntryForm({
   days,
   initial,
   onSubmit,
+  onDelete,
+  busy = false,
 }: TimeEntryFormProps) {
   const [value, setValue] = useState<TimeEntryFormValue>(
-    initial ?? emptyValue(),
+    initial ?? emptyValue(days),
   );
   const [hoursText, setHoursText] = useState(
     initial && initial.hours > 0 ? String(initial.hours) : "",
@@ -87,7 +97,7 @@ export function TimeEntryForm({
   if (session.open !== open || session.initial !== initial) {
     setSession({ open, initial });
     if (open) {
-      const next = initial ?? emptyValue();
+      const next = initial ?? emptyValue(days);
       setValue(next);
       setHoursText(next.hours > 0 ? String(next.hours) : "");
       setShowErrors(false);
@@ -126,13 +136,31 @@ export function TimeEntryForm({
       description="Informe projeto, atividade, dia e horas."
       footer={
         <>
-          <ActionButton variant="secondary" size="sm" onClick={onClose}>
+          {isEditing && onDelete ? (
+            <ActionButton
+              variant="danger"
+              size="sm"
+              icon={Trash2}
+              disabled={busy}
+              onClick={() => onDelete({ ...value, hours: hoursValue })}
+              className="mr-auto"
+            >
+              Excluir
+            </ActionButton>
+          ) : null}
+          <ActionButton
+            variant="secondary"
+            size="sm"
+            disabled={busy}
+            onClick={onClose}
+          >
             Cancelar
           </ActionButton>
           <ActionButton
             variant="primary"
             size="sm"
             icon={Save}
+            disabled={busy}
             onClick={handleSubmit}
           >
             Salvar
@@ -207,14 +235,14 @@ export function TimeEntryForm({
             </label>
             <select
               id="entry-day"
-              value={value.dayIndex}
+              value={value.date}
               onChange={(e) =>
-                setValue((v) => ({ ...v, dayIndex: Number(e.target.value) }))
+                setValue((v) => ({ ...v, date: e.target.value }))
               }
               className={inputClass(false)}
             >
-              {days.map((day, index) => (
-                <option key={day.date} value={index}>
+              {days.map((day) => (
+                <option key={day.date} value={day.date}>
                   {day.label} · {day.date.slice(8, 10)}/{day.date.slice(5, 7)}
                 </option>
               ))}

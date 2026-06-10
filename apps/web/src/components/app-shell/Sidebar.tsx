@@ -11,11 +11,17 @@ import { NavItem } from "./NavItem";
 export interface SidebarProps {
   /** Called after navigating (closes the mobile drawer). */
   onNavigate?: () => void;
+  /** Whether a real database connection is configured. */
+  databaseConfigured?: boolean;
   className?: string;
 }
 
 /** Primary navigation rail. Shared by the desktop rail and mobile drawer. */
-export function Sidebar({ onNavigate, className }: SidebarProps) {
+export function Sidebar({
+  onNavigate,
+  databaseConfigured = false,
+  className,
+}: SidebarProps) {
   const pathname = usePathname();
   const activeHref = findActiveNav(pathname)?.href;
 
@@ -58,7 +64,9 @@ export function Sidebar({ onNavigate, className }: SidebarProps) {
 
       <div className="border-t border-border px-5 py-4">
         <p className="text-xs leading-5 text-soft">
-          Ambiente de demonstração. Dados mockados, sem conexão com banco.
+          {databaseConfigured
+            ? "Ambiente de validação. Dados fictícios persistidos em banco."
+            : "Ambiente de demonstração. Dados mockados, sem conexão com banco."}
         </p>
       </div>
     </div>

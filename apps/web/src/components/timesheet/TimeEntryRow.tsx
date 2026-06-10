@@ -9,7 +9,7 @@ import {
   rowTotal,
   type TimeEntryRow as TimeEntryRowData,
   type WeekDay,
-} from "@/lib/mock-data/timesheet";
+} from "@/lib/timesheet/types";
 import { formatHours } from "@/lib/format";
 import { TimeEntryStatusBadge } from "./TimeEntryStatusBadge";
 

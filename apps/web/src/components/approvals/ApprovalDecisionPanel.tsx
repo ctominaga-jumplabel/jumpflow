@@ -16,10 +16,12 @@ import { ApprovalStatusBadge } from "./ApprovalStatusBadge";
 
 export interface ApprovalDecisionPanelProps {
   item: ApprovalItem | null;
-  /** Approve the selected item (optional comment). Local/mock in the MVP. */
+  /** Approve the selected item (optional comment). */
   onApprove: (id: string, comment: string) => void;
   /** Reject the selected item — comment is required (enforced here too). */
   onReject: (id: string, comment: string) => void;
+  /** Disable actions while a server decision is in flight. */
+  busy?: boolean;
 }
 
 /**
@@ -27,15 +29,15 @@ export interface ApprovalDecisionPanelProps {
  * rejection requires a justification (the "Reprovar" button stays disabled
  * until a comment is typed).
  *
- * MVP scope: approve/reject mutate LOCAL state (lifted into ApprovalQueue) and
- * report through feedback — they do not yet call a Server Action. The real flow
- * records an Approval + AuditEvent in a single transaction
- * (docs/aprovacao-automatica.md); the handler contract is ready for that swap.
+ * The handlers live in ApprovalQueue: db-backed items go through the
+ * decideHours server action (Approval + AuditEvent in one transaction); mock
+ * items mutate local state with honest "(local)" feedback.
  */
 export function ApprovalDecisionPanel({
   item,
   onApprove,
   onReject,
+  busy = false,
 }: ApprovalDecisionPanelProps) {
   const [comment, setComment] = useState("");
 
@@ -132,7 +134,7 @@ export function ApprovalDecisionPanel({
             variant="success"
             size="sm"
             icon={Check}
-            disabled={item.status !== "PENDING"}
+            disabled={item.status !== "PENDING" || busy}
             onClick={() => onApprove(item.id, comment.trim())}
           >
             Aprovar
@@ -141,7 +143,7 @@ export function ApprovalDecisionPanel({
             variant="danger"
             size="sm"
             icon={X}
-            disabled={item.status !== "PENDING" || !canReject}
+            disabled={item.status !== "PENDING" || !canReject || busy}
             onClick={() => onReject(item.id, comment.trim())}
           >
             Reprovar
