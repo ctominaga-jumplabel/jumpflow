@@ -6,6 +6,7 @@ import {
 import { formatMonth } from "@/lib/format";
 import { RevenueSummaryCards } from "./RevenueSummaryCards";
 import { MonthlyClosingTable } from "./MonthlyClosingTable";
+import { ExpensesFinancePanel } from "./ExpensesFinancePanel";
 
 export interface FinancialOverviewProps {
   closing?: MonthlyClosing;
@@ -31,6 +32,7 @@ export function FinancialOverview({
         monthLabel={monthLabel}
       />
       <MonthlyClosingTable rows={closing.rows} monthLabel={monthLabel} />
+      <ExpensesFinancePanel />
     </div>
   );
 }

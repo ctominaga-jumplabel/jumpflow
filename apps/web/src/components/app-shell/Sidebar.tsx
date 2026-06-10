@@ -23,9 +23,9 @@ export function Sidebar({ onNavigate, className }: SidebarProps) {
     <div className={cn("flex h-full flex-col bg-surface", className)}>
       <div className="flex h-16 items-center gap-3 border-b-2 border-ink px-5">
         <Link
-          href="/app/dashboard"
+          href="/app"
           onClick={onNavigate}
-          aria-label={`${appConfig.name} — ir para o dashboard`}
+          aria-label={`${appConfig.name} — ir para a tela inicial`}
           className={cn("flex items-center gap-3 rounded-md", focusRing)}
         >
           <span className="grid size-9 place-items-center rounded-md border-2 border-ink bg-brand text-sm font-bold text-white shadow-[2px_2px_0_0_var(--color-ink)]">

@@ -37,6 +37,9 @@ export const routePermissions: RouteRule[] = [
     prefix: "/app/aprovacoes",
     access: ["ADMIN", "AREA_MANAGER", "PROJECT_MANAGER"],
   },
+  // Despesas are open to any authenticated user (consultants log their own).
+  // Payment-status changes are gated in-page by FINANCIAL_ROLES, not here.
+  { prefix: "/app/despesas", access: "ALL" },
   { prefix: "/app", access: "ALL" },
 ];
 

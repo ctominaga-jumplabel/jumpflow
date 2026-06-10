@@ -10,6 +10,12 @@ describe("findActiveNav", () => {
     expect(findActiveNav("/app/projetos/abc")?.href).toBe("/app/projetos");
   });
 
+  it("matches the launcher only on the exact /app path", () => {
+    expect(findActiveNav("/app")?.href).toBe("/app");
+    // A nested route must resolve to its own item, not the exact launcher.
+    expect(findActiveNav("/app/horas")?.href).toBe("/app/horas");
+  });
+
   it("returns undefined for an unknown route", () => {
     expect(findActiveNav("/app/inexistente")).toBeUndefined();
   });
@@ -23,7 +29,8 @@ describe("findActiveNav", () => {
   it("exposes one entry per operational module", () => {
     expect(primaryNavigation.length).toBeGreaterThanOrEqual(8);
     for (const item of primaryNavigation) {
-      expect(item.href.startsWith("/app/")).toBe(true);
+      // Every item lives under /app (the launcher is exactly "/app").
+      expect(item.href === "/app" || item.href.startsWith("/app/")).toBe(true);
     }
   });
 });

@@ -14,6 +14,9 @@ export type ApprovalStatus =
   | "REJECTED"
   | "AUTO_APPROVED";
 
+/** What kind of submission is under approval. */
+export type ApprovalKind = "HOURS" | "EXPENSE";
+
 export const approvalStatusLabels: Record<ApprovalStatus, string> = {
   PENDING: "Pendente",
   APPROVED: "Aprovado",
@@ -21,15 +24,24 @@ export const approvalStatusLabels: Record<ApprovalStatus, string> = {
   AUTO_APPROVED: "Auto-aprovado",
 };
 
+export const approvalKindLabels: Record<ApprovalKind, string> = {
+  HOURS: "Horas",
+  EXPENSE: "Despesas",
+};
+
 export interface ApprovalItem {
   id: string;
+  /** Horas or despesas — the queue can be filtered by kind. */
+  type: ApprovalKind;
   consultantName: string;
   projectName: string;
   clientName: string;
   /** Period label, e.g. "Semana 23 · 01–07 jun". */
   period: string;
-  /** Total hours under this request. */
+  /** Total hours under this request (HOURS only). */
   hours: number;
+  /** Amount in BRL (EXPENSE only). */
+  amount?: number;
   /** Dominant activity for quick scanning. */
   activitySummary: string;
   /** ISO datetime the consultant submitted for approval. */
@@ -46,6 +58,7 @@ export interface ApprovalItem {
 export const approvalItems: ApprovalItem[] = [
   {
     id: "ap-1",
+    type: "HOURS",
     consultantName: "Carlos Nunes",
     projectName: "Atlas",
     clientName: "Vix Energia",
@@ -58,6 +71,7 @@ export const approvalItems: ApprovalItem[] = [
   },
   {
     id: "ap-2",
+    type: "HOURS",
     consultantName: "Pedro Santana",
     projectName: "Órion",
     clientName: "Banco Sul",
@@ -70,6 +84,7 @@ export const approvalItems: ApprovalItem[] = [
   },
   {
     id: "ap-3",
+    type: "HOURS",
     consultantName: "Marina Alves",
     projectName: "Atlas",
     clientName: "Vix Energia",
@@ -81,7 +96,36 @@ export const approvalItems: ApprovalItem[] = [
     isAutomatic: false,
   },
   {
+    id: "ap-exp-1",
+    type: "EXPENSE",
+    consultantName: "Carlos Nunes",
+    projectName: "Atlas",
+    clientName: "Vix Energia",
+    period: "03 jun 2026",
+    hours: 0,
+    amount: 184.9,
+    activitySummary: "Deslocamento · NF-20493",
+    submittedAt: "2026-06-04T13:10:00Z",
+    status: "PENDING",
+    isAutomatic: false,
+  },
+  {
+    id: "ap-exp-2",
+    type: "EXPENSE",
+    consultantName: "Rafael Moreira",
+    projectName: "Órion",
+    clientName: "Banco Sul",
+    period: "08 jun 2026",
+    hours: 0,
+    amount: 73.5,
+    activitySummary: "Material de oficina",
+    submittedAt: "2026-06-09T08:30:00Z",
+    status: "PENDING",
+    isAutomatic: false,
+  },
+  {
     id: "ap-4",
+    type: "HOURS",
     consultantName: "Bruno Lima",
     projectName: "Helios",
     clientName: "Vix Energia",
@@ -95,6 +139,7 @@ export const approvalItems: ApprovalItem[] = [
   },
   {
     id: "ap-5",
+    type: "HOURS",
     consultantName: "Rafael Moreira",
     projectName: "Órion",
     clientName: "Banco Sul",
@@ -106,7 +151,22 @@ export const approvalItems: ApprovalItem[] = [
     isAutomatic: false,
   },
   {
+    id: "ap-exp-3",
+    type: "EXPENSE",
+    consultantName: "Marina Alves",
+    projectName: "Órion",
+    clientName: "Banco Sul",
+    period: "28 mai 2026",
+    hours: 0,
+    amount: 320,
+    activitySummary: "Almoço com stakeholders · NF-19877",
+    submittedAt: "2026-05-29T09:00:00Z",
+    status: "APPROVED",
+    isAutomatic: false,
+  },
+  {
     id: "ap-6",
+    type: "HOURS",
     consultantName: "Carlos Nunes",
     projectName: "Vega",
     clientName: "Loja Norte",
@@ -118,7 +178,30 @@ export const approvalItems: ApprovalItem[] = [
     isAutomatic: false,
     comment: "Lançamento sem descrição da atividade; ajustar e reenviar.",
   },
+  {
+    id: "ap-exp-4",
+    type: "EXPENSE",
+    consultantName: "Pedro Santana",
+    projectName: "Atlas",
+    clientName: "Vix Energia",
+    period: "15 mai 2026",
+    hours: 0,
+    amount: 1240,
+    activitySummary: "Hospedagem · NF-18540",
+    submittedAt: "2026-05-16T11:20:00Z",
+    status: "REJECTED",
+    isAutomatic: false,
+    comment: "Falta o comprovante fiscal detalhado; reenviar com a NF.",
+  },
 ];
+
+/** Filter the queue by kind (`"ALL"` keeps everything). */
+export function filterApprovalsByKind(
+  list: ApprovalItem[],
+  kind: ApprovalKind | "ALL",
+): ApprovalItem[] {
+  return kind === "ALL" ? list : list.filter((i) => i.type === kind);
+}
 
 /** Items still awaiting a manual decision. */
 export function pendingApprovals(list: ApprovalItem[]): ApprovalItem[] {

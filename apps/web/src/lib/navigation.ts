@@ -5,7 +5,9 @@ import {
   Clock,
   FolderKanban,
   GraduationCap,
+  Home,
   LayoutDashboard,
+  Receipt,
   Users,
   Wallet,
 } from "lucide-react";
@@ -19,6 +21,12 @@ export interface NavItemDef {
   icon: LucideIcon;
   /** Short operational description used on placeholder pages. */
   description: string;
+  /**
+   * When true, the item is active only on an exact pathname match (not on
+   * descendant routes). Used by the launcher ("/app") so it does not light up
+   * on every nested page.
+   */
+  exact?: boolean;
 }
 
 /**
@@ -26,6 +34,13 @@ export interface NavItemDef {
  * Order follows the MVP operational cycle (docs/backlog-mvp.md).
  */
 export const primaryNavigation: NavItemDef[] = [
+  {
+    label: "Início",
+    href: "/app",
+    icon: Home,
+    description: "Atalhos operacionais e pendências por perfil.",
+    exact: true,
+  },
   {
     label: "Dashboard",
     href: "/app/dashboard",
@@ -37,6 +52,12 @@ export const primaryNavigation: NavItemDef[] = [
     href: "/app/horas",
     icon: Clock,
     description: "Lançamento semanal e acompanhamento de horas.",
+  },
+  {
+    label: "Despesas",
+    href: "/app/despesas",
+    icon: Receipt,
+    description: "Lançamento de despesas, comprovantes e reembolsos.",
   },
   {
     label: "Projetos",
@@ -78,7 +99,9 @@ export const primaryNavigation: NavItemDef[] = [
 
 /** Find the active navigation entry for a given pathname. */
 export function findActiveNav(pathname: string): NavItemDef | undefined {
-  return primaryNavigation.find(
-    (item) => pathname === item.href || pathname.startsWith(`${item.href}/`),
+  return primaryNavigation.find((item) =>
+    item.exact
+      ? pathname === item.href
+      : pathname === item.href || pathname.startsWith(`${item.href}/`),
   );
 }

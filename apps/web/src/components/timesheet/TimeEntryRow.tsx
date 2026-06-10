@@ -1,6 +1,11 @@
+"use client";
+
+import { Pencil } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { focusRing } from "@/lib/styles";
 import {
   activityLabels,
+  isRowEditable,
   rowTotal,
   type TimeEntryRow as TimeEntryRowData,
   type WeekDay,
@@ -11,18 +16,42 @@ import { TimeEntryStatusBadge } from "./TimeEntryStatusBadge";
 export interface TimeEntryRowProps {
   row: TimeEntryRowData;
   days: WeekDay[];
+  /** Called to edit the row; only wired when the row is editable. */
+  onEdit?: (row: TimeEntryRowData) => void;
 }
 
 /**
- * One project+activity line in the weekly timesheet grid. Hours per weekday are
- * read-only cells in the MVP (editing is a prepared action). Kept as a plain
- * table row so it composes inside the week table.
+ * One project+activity line in the weekly timesheet grid. Editable rows (DRAFT
+ * or REJECTED) expose an edit affordance; submitted/approved/closed rows render
+ * as read-only so they never look editable to the consultant.
  */
-export function TimeEntryRow({ row, days }: TimeEntryRowProps) {
+export function TimeEntryRow({ row, days, onEdit }: TimeEntryRowProps) {
+  const editable = isRowEditable(row) && Boolean(onEdit);
+
   return (
     <tr className="transition-colors hover:bg-surface-muted/60">
       <td className="px-4 py-3 align-middle">
-        <p className="text-sm font-medium text-strong">{row.projectName}</p>
+        {editable ? (
+          <button
+            type="button"
+            onClick={() => onEdit?.(row)}
+            className={cn(
+              "group flex items-center gap-1.5 rounded-md text-left",
+              focusRing,
+            )}
+            aria-label={`Editar lançamento de ${row.projectName} · ${activityLabels[row.activity]}`}
+          >
+            <span className="text-sm font-medium text-strong group-hover:text-brand">
+              {row.projectName}
+            </span>
+            <Pencil
+              aria-hidden="true"
+              className="size-3.5 text-soft group-hover:text-brand"
+            />
+          </button>
+        ) : (
+          <p className="text-sm font-medium text-strong">{row.projectName}</p>
+        )}
         <p className="text-xs text-soft">{row.clientName}</p>
       </td>
       <td className="px-4 py-3 align-middle">

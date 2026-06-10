@@ -46,9 +46,20 @@ export interface TimeEntryRow {
   activity: ActivityType;
   billable: boolean;
   status: TimeEntryStatus;
+  /** Optional note about the work logged on this row. */
+  description?: string;
   /** Hours per weekday, aligned with `weekDays` (length 7, Mon→Sun). */
   hours: number[];
 }
+
+/** Activity options, in the order shown in the entry form. */
+export const activityOrder: ActivityType[] = [
+  "DEVELOPMENT",
+  "MEETING",
+  "DISCOVERY",
+  "SUPPORT",
+  "DOCS",
+];
 
 export interface TimesheetWeek {
   /** Human label for the period, e.g. "Semana 24 · 08–14 jun". */
@@ -119,6 +130,105 @@ export const currentWeek: TimesheetWeek = {
     },
   ],
 };
+
+/** Previous mocked week (Mon 2026-06-01 → Sun 2026-06-07), already approved. */
+export const previousWeek: TimesheetWeek = {
+  label: "Semana 23 · 01–07 jun 2026",
+  startDate: "2026-06-01",
+  endDate: "2026-06-07",
+  status: "APPROVED",
+  days: [
+    { label: "Seg", date: "2026-06-01", weekend: false },
+    { label: "Ter", date: "2026-06-02", weekend: false },
+    { label: "Qua", date: "2026-06-03", weekend: false },
+    { label: "Qui", date: "2026-06-04", weekend: false },
+    { label: "Sex", date: "2026-06-05", weekend: false },
+    { label: "Sáb", date: "2026-06-06", weekend: true },
+    { label: "Dom", date: "2026-06-07", weekend: true },
+  ],
+  rows: [
+    {
+      id: "te-prev-1",
+      projectId: "prj-atlas",
+      projectName: "Atlas",
+      clientName: "Vix Energia",
+      activity: "DEVELOPMENT",
+      billable: true,
+      status: "APPROVED",
+      description: "Evolução do módulo de faturamento.",
+      hours: [8, 8, 8, 8, 8, 0, 0],
+    },
+    {
+      id: "te-prev-2",
+      projectId: "prj-orion",
+      projectName: "Órion",
+      clientName: "Banco Sul",
+      activity: "MEETING",
+      billable: true,
+      status: "APPROVED",
+      description: "Rituais ágeis e alinhamento com o cliente.",
+      hours: [2, 2, 2, 2, 2, 0, 0],
+    },
+  ],
+};
+
+/** Next mocked week (Mon 2026-06-15 → Sun 2026-06-21), still empty. */
+export const nextWeek: TimesheetWeek = {
+  label: "Semana 25 · 15–21 jun 2026",
+  startDate: "2026-06-15",
+  endDate: "2026-06-21",
+  status: "DRAFT",
+  days: [
+    { label: "Seg", date: "2026-06-15", weekend: false },
+    { label: "Ter", date: "2026-06-16", weekend: false },
+    { label: "Qua", date: "2026-06-17", weekend: false },
+    { label: "Qui", date: "2026-06-18", weekend: false },
+    { label: "Sex", date: "2026-06-19", weekend: false },
+    { label: "Sáb", date: "2026-06-20", weekend: true },
+    { label: "Dom", date: "2026-06-21", weekend: true },
+  ],
+  rows: [],
+};
+
+/** Ordered weeks available for navigation, current week in the middle. */
+export const timesheetWeeks: TimesheetWeek[] = [
+  previousWeek,
+  currentWeek,
+  nextWeek,
+];
+
+/** Index of the week shown by default (the current week). */
+export const DEFAULT_WEEK_INDEX = 1;
+
+/** Deep clone a week so local edits never mutate the shared mock. */
+export function cloneWeek(week: TimesheetWeek): TimesheetWeek {
+  return {
+    ...week,
+    days: week.days.map((d) => ({ ...d })),
+    rows: week.rows.map((r) => ({ ...r, hours: [...r.hours] })),
+  };
+}
+
+/** A row is editable by the consultant only while in DRAFT or REJECTED. */
+export function isRowEditable(row: TimeEntryRow): boolean {
+  return row.status === "DRAFT" || row.status === "REJECTED";
+}
+
+/** Whether a row may be carried over when copying the previous week. */
+export function isRowCopyable(row: TimeEntryRow): boolean {
+  // Skip rejected rows and empty rows (copying a zero-hour line just clutters
+  // the new week).
+  return row.status !== "REJECTED" && rowTotal(row) > 0;
+}
+
+/** Derive the overall period status from its rows (worst-case wins). */
+export function deriveWeekStatus(week: TimesheetWeek): TimeEntryStatus {
+  if (week.rows.length === 0) return "DRAFT";
+  if (week.rows.some((r) => r.status === "REJECTED")) return "REJECTED";
+  if (week.rows.some((r) => r.status === "DRAFT")) return "DRAFT";
+  if (week.rows.some((r) => r.status === "SUBMITTED")) return "SUBMITTED";
+  return "APPROVED";
+}
 
 /** Total hours logged in a single row across the week. */
 export function rowTotal(row: TimeEntryRow): number {
