@@ -5,12 +5,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
  * The proxy only checks authentication, and route-permissions.ts is a pure map;
  * without this test, dropping `requireRole` from a page would pass unnoticed.
  */
-const requireRoleMock = vi.fn(async (_roles: unknown) => ({
-  id: "u1",
-  name: "Ana",
-  email: "ana@jumplabel.com.br",
-  roles: ["ADMIN" as const],
-}));
+const requireRoleMock = vi.fn(async (roles: unknown) => {
+  void roles;
+
+  return {
+    id: "u1",
+    name: "Ana",
+    email: "ana@jumplabel.com.br",
+    roles: ["ADMIN" as const],
+  };
+});
 
 vi.mock("@/lib/auth/guards", () => ({
   requireRole: (roles: unknown) => requireRoleMock(roles),
