@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { formatCurrency, formatHours } from "@/lib/format";
 import {
   approvalKindLabels,
+  approvalStageLabels,
   type ApprovalItem,
 } from "@/lib/mock-data/approvals";
 import { ApprovalStatusBadge } from "./ApprovalStatusBadge";
@@ -70,10 +71,15 @@ export function ApprovalDecisionPanel({
       action={<ApprovalStatusBadge status={item.status} />}
     >
       <div className="space-y-4 px-5 py-4">
-        <div>
+        <div className="flex flex-wrap items-center gap-2">
           <StatusBadge tone={isExpense ? "warning" : "info"}>
             {approvalKindLabels[item.type]}
           </StatusBadge>
+          {isExpense && item.stage ? (
+            <StatusBadge tone="neutral">
+              Etapa: {approvalStageLabels[item.stage]}
+            </StatusBadge>
+          ) : null}
         </div>
         <dl className="grid grid-cols-2 gap-3 text-sm">
           <div>

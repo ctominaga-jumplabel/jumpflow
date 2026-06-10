@@ -4,7 +4,7 @@ import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
-const [roles, users, clients, projects, allocations, consultants, timeEntries, periods, automationConfig] =
+const [roles, users, clients, projects, allocations, consultants, timeEntries, periods, automationConfig, expenses, expenseApprovals, expenseAttachments] =
   await Promise.all([
     prisma.role.count(),
     prisma.user.count(),
@@ -15,11 +15,14 @@ const [roles, users, clients, projects, allocations, consultants, timeEntries, p
     prisma.timeEntry.count(),
     prisma.timesheetPeriod.count(),
     prisma.automationConfig.count(),
+    prisma.expense.count(),
+    prisma.approval.count({ where: { entityType: "EXPENSE" } }),
+    prisma.expenseAttachment.count(),
   ]);
 
 console.log(
   JSON.stringify(
-    { roles, users, clients, projects, allocations, consultants, timeEntries, periods, automationConfig },
+    { roles, users, clients, projects, allocations, consultants, timeEntries, periods, automationConfig, expenses, expenseApprovals, expenseAttachments },
     null,
     2,
   ),

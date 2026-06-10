@@ -41,13 +41,15 @@ describe("module RBAC guards", () => {
     expect(requireRoleMock).toHaveBeenCalledWith(FINANCIAL_ROLES);
   });
 
-  it("Aprovações requires manager/admin roles", async () => {
+  it("Aprovações requires manager/admin/finance roles", async () => {
     await AprovacoesPage();
     expect(requireRoleMock).toHaveBeenCalledTimes(1);
+    // FINANCE entered in Round 3: it decides the finance stage of expenses.
     expect(requireRoleMock).toHaveBeenCalledWith([
       "ADMIN",
       "AREA_MANAGER",
       "PROJECT_MANAGER",
+      "FINANCE",
     ]);
   });
 });

@@ -11,8 +11,10 @@ import { cn } from "@/lib/utils";
 import { focusRing } from "@/lib/styles";
 import { formatCurrency, formatHours } from "@/lib/format";
 import { decideHours } from "@/app/app/horas/actions";
+import { decideAsFinance, decideAsManager } from "@/app/app/despesas/actions";
 import {
   approvalItems as defaultItems,
+  approvalStageLabels,
   decidedApprovals,
   filterApprovalsByKind,
   pendingApprovals,
@@ -98,6 +100,33 @@ export function ApprovalQueue({
     const item = items.find((i) => i.id === id);
     if (!item) return;
 
+    if (item.source === "db" && item.type === "EXPENSE" && item.expenseId) {
+      // Two-stage chain: the stage label tells which action decides the item.
+      const decideExpense =
+        item.stage === "FINANCE" ? decideAsFinance : decideAsManager;
+      const expenseId = item.expenseId;
+      const stageLabel = approvalStageLabels[item.stage ?? "MANAGER"];
+      startTransition(async () => {
+        const result = await decideExpense({
+          expenseId,
+          decision: status,
+          comment,
+        });
+        if (!result.ok) {
+          notify("warning", result.message);
+          return;
+        }
+        notify(
+          status === "APPROVED" ? "success" : "info",
+          status === "APPROVED"
+            ? `Despesa aprovada na etapa ${stageLabel}.`
+            : `Despesa reprovada na etapa ${stageLabel} com justificativa.`,
+        );
+        selectNextPending(id);
+      });
+      return;
+    }
+
     if (item.source === "db" && item.entryIds && item.entryIds.length > 0) {
       const entryIds = item.entryIds;
       startTransition(async () => {
@@ -137,7 +166,7 @@ export function ApprovalQueue({
     notify(
       status === "APPROVED" ? "success" : "info",
       status === "APPROVED"
-        ? "Item aprovado (local). Persistência de despesas virá em rodada futura."
+        ? "Item aprovado (local). Nada é persistido sem banco configurado."
         : "Item reprovado com justificativa (local).",
     );
   }
@@ -241,6 +270,11 @@ export function ApprovalQueue({
                             <StatusBadge tone={isExpense ? "warning" : "info"}>
                               {isExpense ? "Despesa" : "Horas"}
                             </StatusBadge>
+                            {isExpense && item.stage ? (
+                              <StatusBadge tone="neutral">
+                                Etapa: {approvalStageLabels[item.stage]}
+                              </StatusBadge>
+                            ) : null}
                             {!demoBanner && item.source === "mock" ? (
                               // Mixed queue: flag fictitious items so decisions
                               // on real data are never confused with demo ones.

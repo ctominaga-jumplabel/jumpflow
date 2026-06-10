@@ -110,7 +110,8 @@ export const launcherShortcuts: LauncherShortcut[] = [
     description: "Triagem de horas e despesas pendentes.",
     href: "/app/aprovacoes",
     icon: ClipboardCheck,
-    access: ["ADMIN", "AREA_MANAGER", "PROJECT_MANAGER"],
+    // Mirrors the route map: FINANCE decides the finance stage of expenses.
+    access: ["ADMIN", "AREA_MANAGER", "PROJECT_MANAGER", "FINANCE"],
     badge:
       pendingApprovalCount > 0
         ? { count: pendingApprovalCount, tone: "info", label: "aguardando" }

@@ -135,29 +135,11 @@ export function weekTotal(week: TimesheetWeek): number {
 }
 
 /**
- * Error contract of the Horas server actions. UNEXPECTED is the catch-all for
- * unforeseen failures (actions never throw to the client).
+ * Error/result contract of the server actions. The canonical definition moved
+ * to `lib/actions/result.ts` (shared with Despesas); re-exported here so
+ * existing Horas imports keep working.
  */
-export type ErrorCode =
-  | "NO_DATABASE"
-  | "NO_CONSULTANT"
-  | "INVALID_INPUT"
-  | "NOT_FOUND"
-  | "FORBIDDEN"
-  | "NO_ACTIVE_ALLOCATION"
-  | "PROJECT_CLOSED"
-  | "NOT_EDITABLE"
-  | "DUPLICATE_ENTRY"
-  | "PERIOD_CLOSED"
-  | "NOTHING_TO_SUBMIT"
-  | "ALREADY_DECIDED"
-  | "COMMENT_REQUIRED"
-  | "UNEXPECTED";
-
-/** Uniform result of every Horas server action. */
-export type ActionResult<T> =
-  | { ok: true; data: T }
-  | { ok: false; error: ErrorCode; message: string };
+export type { ActionResult, ErrorCode } from "@/lib/actions/result";
 
 /** Count of rows by status, for the week summary chips. */
 export function statusCounts(

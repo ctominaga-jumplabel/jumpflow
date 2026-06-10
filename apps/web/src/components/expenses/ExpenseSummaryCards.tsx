@@ -3,16 +3,16 @@
 import { CheckCircle2, CircleDollarSign, Clock, Wallet } from "lucide-react";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { formatCurrency } from "@/lib/format";
-import type { ExpenseTotals } from "@/lib/mock-data/expenses";
+import type { ExpenseTotals } from "@/lib/expenses/types";
 
 export interface ExpenseSummaryCardsProps {
   totals: ExpenseTotals;
 }
 
 /**
- * KPI tiles summarizing expenses by status and amount. The paid total is shown
- * to everyone here (it is the consultant's own reimbursement visibility); the
- * ability to CHANGE payment status is gated separately by role.
+ * KPI tiles summarizing expenses along the single status chain. The paid
+ * total is shown to everyone here (it is the consultant's own reimbursement
+ * visibility); payment actions live in the role-gated Financeiro module.
  */
 export function ExpenseSummaryCards({ totals }: ExpenseSummaryCardsProps) {
   return (
@@ -22,15 +22,15 @@ export function ExpenseSummaryCards({ totals }: ExpenseSummaryCardsProps) {
     >
       <MetricCard
         label="Aguardando aprovação"
-        value={String(totals.submitted)}
-        hint="Despesas enviadas"
+        value={String(totals.awaiting)}
+        hint="Na fila do gestor ou do financeiro"
         icon={Clock}
         index={0}
       />
       <MetricCard
-        label="Aprovadas"
-        value={String(totals.approved)}
-        hint={formatCurrency(totals.approvedAmount)}
+        label="A pagar"
+        value={formatCurrency(totals.toPayAmount + totals.scheduledAmount)}
+        hint={`${totals.toPay + totals.scheduled} aprovada(s) pelo financeiro`}
         icon={CheckCircle2}
         index={1}
       />

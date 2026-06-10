@@ -9,13 +9,21 @@ import { approvalItems, type ApprovalItem } from "@/lib/mock-data/approvals";
 export const metadata: Metadata = { title: "Aprovações" };
 
 /**
- * Aprovações: HOURS items come from the database (real queue + history) and
- * EXPENSE items remain local demo data. PROJECT_MANAGER only sees entries of
- * projects they manage; ADMIN/AREA_MANAGER see everything.
+ * Aprovações: with a database the queue is fully real — HOURS items decided
+ * via decideHours and EXPENSE items via decideAsManager/decideAsFinance, with
+ * a visible stage label. Scope per role: PROJECT_MANAGER sees only its
+ * projects (manager stage); FINANCE sees only the finance stage of expenses;
+ * ADMIN/AREA_MANAGER see everything. Without a database, the original mock
+ * queue keeps the screen usable (explicit banner).
  */
 export default async function AprovacoesPage() {
-  // Approvals are role-protected; keep in sync with the route-permissions map.
-  const user = await requireRole(["ADMIN", "AREA_MANAGER", "PROJECT_MANAGER"]);
+  // Keep in sync with the route-permissions map (/app/aprovacoes).
+  const user = await requireRole([
+    "ADMIN",
+    "AREA_MANAGER",
+    "PROJECT_MANAGER",
+    "FINANCE",
+  ]);
 
   let items: ApprovalItem[] = approvalItems;
   const databaseConfigured = isDatabaseConfigured();
@@ -23,19 +31,35 @@ export default async function AprovacoesPage() {
   if (databaseConfigured) {
     // Lazy import so Prisma is never loaded on code paths without a database.
     const { listHoursApprovalItems } = await import("@/lib/db/timesheet");
+    const { listExpenseApprovalItems } = await import("@/lib/db/expenses");
     const { resolveDbUser } = await import("@/lib/db/users");
 
     const unrestricted = hasRole(user, ["ADMIN", "AREA_MANAGER"]);
-    let scope = {};
-    if (!unrestricted) {
+    const isProjectManager = hasRole(user, "PROJECT_MANAGER");
+    const isFinance = hasRole(user, "FINANCE");
+
+    let managerUserId: string | undefined;
+    if (!unrestricted && isProjectManager) {
       // Dev session ids never match db rows; resolve the REAL user id for the
-      // manager scope. An unresolvable manager sees an empty queue (fail closed).
+      // manager scope. An unresolvable manager sees an empty stage (fail closed).
       const dbUser = await resolveDbUser(user);
-      scope = { managerUserId: dbUser?.id ?? "__no-manager__" };
+      managerUserId = dbUser?.id ?? "__no-manager__";
     }
 
-    const hoursItems = await listHoursApprovalItems(scope);
-    const expenseItems = approvalItems.filter((i) => i.type === "EXPENSE");
+    // FINANCE without a manager role never sees the hours queue (it cannot
+    // decide hours); the expense scope mirrors section 7 of the spec.
+    const seesHours = unrestricted || isProjectManager;
+    const hoursItems = seesHours
+      ? await listHoursApprovalItems(managerUserId ? { managerUserId } : {})
+      : [];
+    const expenseItems = await listExpenseApprovalItems({
+      includeManagerStage: unrestricted || isProjectManager,
+      includeFinanceStage: unrestricted || isFinance,
+      managerUserId,
+    });
+
+    // Real data only: mock items never mix into a db-backed queue, so the
+    // counters always reflect actual pending work.
     items = [...hoursItems, ...expenseItems];
   }
 
@@ -44,7 +68,7 @@ export default async function AprovacoesPage() {
       <PageHeader
         eyebrow="Operação"
         title="Aprovações"
-        description="Triagem de horas pendentes com aprovação, reprovação justificada e histórico de decisões."
+        description="Triagem de horas e despesas pendentes com aprovação, reprovação justificada e histórico de decisões."
       />
       <ApprovalQueue items={items} demoBanner={!databaseConfigured} />
     </div>

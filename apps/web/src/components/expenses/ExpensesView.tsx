@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
-import { Plus } from "lucide-react";
+import { useMemo, useRef, useState, useTransition } from "react";
+import { ExternalLink, Plus, TriangleAlert } from "lucide-react";
 import { ActionButton } from "@/components/ui/ActionButton";
 import { FilterChip } from "@/components/ui/FilterChip";
 import { SectionPanel } from "@/components/ui/SectionPanel";
@@ -10,23 +10,34 @@ import { FeedbackBanner, useFeedback } from "@/components/ui/Feedback";
 import { cn } from "@/lib/utils";
 import { focusRingInput } from "@/lib/styles";
 import { formatCurrency, formatDate } from "@/lib/format";
+import {
+  attachReceipt,
+  createExpense as createExpenseAction,
+  deleteExpense as deleteExpenseAction,
+  getReceiptUrl,
+  replaceReceipt,
+  submitExpense as submitExpenseAction,
+  updateExpense as updateExpenseAction,
+} from "@/app/app/despesas/actions";
 import { projects as allProjects } from "@/lib/mock-data/projects";
 import {
-  createExpense,
+  createExpense as createMockExpense,
   expenses as seedExpenses,
+} from "@/lib/mock-data/expenses";
+import {
   expenseStatusLabels,
   filterExpenses,
   summarizeExpenses,
   type Expense,
   type ExpenseFilter,
-  type ExpensePaymentStatus,
   type ExpenseStatus,
-} from "@/lib/mock-data/expenses";
+} from "@/lib/expenses/types";
 import { ExpenseSummaryCards } from "./ExpenseSummaryCards";
 import { ExpenseList } from "./ExpenseList";
 import {
   ExpenseForm,
   type ExpenseFormProject,
+  type ExpenseFormValue,
   type ExpenseSubmitMode,
 } from "./ExpenseForm";
 
@@ -34,47 +45,66 @@ const STATUS_FILTERS: (ExpenseStatus | "ALL")[] = [
   "ALL",
   "DRAFT",
   "SUBMITTED",
-  "APPROVED",
-  "REJECTED",
+  "MANAGER_APPROVED",
+  "FINANCE_APPROVED",
+  "MANAGER_REJECTED",
+  "FINANCE_REJECTED",
+  "PAYMENT_SCHEDULED",
+  "PAID",
 ];
 
 const statusFilterLabel = (status: ExpenseStatus | "ALL") =>
   status === "ALL" ? "Todas" : expenseStatusLabels[status];
 
-/** Projects a consultant may log expenses to (not closed). */
-const formProjects: ExpenseFormProject[] = allProjects
+/** Demo-mode projects a consultant may log expenses to (not closed). */
+const demoProjects: ExpenseFormProject[] = allProjects
   .filter((p) => p.status !== "CLOSED")
   .map((p) => ({ id: p.id, name: p.name, clientName: p.client.name }));
 
 export interface ExpensesViewProps {
+  /**
+   * "demo": no database configured — all mutations stay in local state.
+   * "db": data comes from Prisma and mutations call the server actions.
+   */
+  mode: "demo" | "db";
   consultantName: string;
-  /** Financial roles may change the payment status of approved expenses. */
-  canManagePayments: boolean;
   /** Today's date (yyyy-mm-dd), resolved on the server for determinism. */
   today: string;
+  /** db mode: the consultant's expenses loaded on the server. */
+  expenses?: Expense[];
+  /** db mode: projects with an ACTIVE allocation (server-resolved). */
+  projects?: ExpenseFormProject[];
+  /** db mode: whether the receipt storage is configured. */
+  storageAvailable?: boolean;
 }
 
 /**
- * Despesas module orchestrator. Holds the expense list in LOCAL state (mock,
- * not persisted) and wires the MVP actions: new expense (draft/submit), filter
- * by status/project/period, view comprovante metadata, and — for financial
- * roles — change the payment status. Every action reports honestly through the
- * feedback live region; nothing fakes a server round-trip.
+ * Despesas module orchestrator. In db mode every mutation goes through the
+ * server actions (revalidatePath re-renders the route); demo mode keeps the
+ * original local-state behavior with an explicit banner. Every action reports
+ * honestly through the feedback live region.
  */
-export function ExpensesView({
-  consultantName,
-  canManagePayments,
-  today,
-}: ExpensesViewProps) {
-  const [items, setItems] = useState<Expense[]>(seedExpenses);
+export function ExpensesView(props: ExpensesViewProps) {
+  const isDemo = props.mode === "demo";
+  const storageAvailable = isDemo ? true : (props.storageAvailable ?? false);
+  const [localItems, setLocalItems] = useState<Expense[]>(seedExpenses);
   const [status, setStatus] = useState<ExpenseStatus | "ALL">("ALL");
   const [projectId, setProjectId] = useState<string>("ALL");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<Expense | null>(null);
   const [attachmentOf, setAttachmentOf] = useState<Expense | null>(null);
   const { feedback, notify } = useFeedback();
+  const [isPending, startTransition] = useTransition();
   const idCounter = useRef(0);
+
+  const dbItems = props.expenses;
+  const items = useMemo(
+    () => (isDemo ? localItems : (dbItems ?? [])),
+    [isDemo, localItems, dbItems],
+  );
+  const formProjects = isDemo ? demoProjects : (props.projects ?? []);
 
   const filter: ExpenseFilter = useMemo(
     () => ({ status, projectId, from: from || undefined, to: to || undefined }),
@@ -86,44 +116,203 @@ export function ExpensesView({
 
   const projectOptions = useMemo(() => {
     const seen = new Map<string, string>();
-    for (const e of items) if (!seen.has(e.projectId)) seen.set(e.projectId, e.projectName);
+    for (const e of items) {
+      if (!seen.has(e.projectId)) seen.set(e.projectId, e.projectName);
+    }
     return [...seen.entries()].map(([id, name]) => ({ id, name }));
   }, [items]);
 
-  function handleCreate(
-    input: Parameters<typeof createExpense>[0],
+  function openNew() {
+    setEditing(null);
+    setFormOpen(true);
+  }
+
+  function openEdit(expense: Expense) {
+    setEditing(expense);
+    setFormOpen(true);
+  }
+
+  function handleFormSubmit(
+    value: ExpenseFormValue,
     mode: ExpenseSubmitMode,
+    file: File | null,
   ) {
-    const project = formProjects.find((p) => p.id === input.projectId);
-    if (!project) return;
-    idCounter.current += 1;
-    const expense = createExpense(input, {
-      id: `exp-local-${idCounter.current}-${input.projectId}`,
-      projectName: project.name,
-      clientName: project.clientName,
-      consultantName,
-      status: mode,
-      submittedAt: mode === "SUBMITTED" ? `${today}T12:00:00Z` : undefined,
+    if (isDemo) {
+      handleFormSubmitDemo(value, mode, file);
+      return;
+    }
+    const editingId = editing?.id ?? null;
+    startTransition(async () => {
+      const saved = editingId
+        ? await updateExpenseAction({ id: editingId, ...value })
+        : await createExpenseAction(value);
+      if (!saved.ok) {
+        notify("warning", saved.message);
+        return;
+      }
+      const expenseId = saved.data.id;
+      const messages: string[] = [
+        editingId ? "Despesa atualizada" : "Despesa criada",
+      ];
+
+      if (file && storageAvailable) {
+        const formData = new FormData();
+        formData.set("expenseId", expenseId);
+        formData.set("file", file);
+        const hadAttachment = Boolean(editing?.attachment);
+        const attached = hadAttachment
+          ? await replaceReceipt(formData)
+          : await attachReceipt(formData);
+        if (attached.ok) {
+          messages.push("comprovante anexado");
+        } else {
+          notify(
+            "warning",
+            `Despesa salva, mas o comprovante falhou: ${attached.message}`,
+          );
+          setFormOpen(false);
+          setEditing(null);
+          return;
+        }
+      }
+
+      if (mode === "SUBMITTED") {
+        const submitted = await submitExpenseAction({ id: expenseId });
+        if (submitted.ok) {
+          messages.push("enviada para aprovação");
+        } else {
+          notify("warning", `Despesa salva, mas não enviada: ${submitted.message}`);
+          setFormOpen(false);
+          setEditing(null);
+          return;
+        }
+      }
+
+      setFormOpen(false);
+      setEditing(null);
+      notify("success", `${messages.join(", ")}.`);
     });
-    setItems((prev) => [expense, ...prev]);
+  }
+
+  function handleFormSubmitDemo(
+    value: ExpenseFormValue,
+    mode: ExpenseSubmitMode,
+    file: File | null,
+  ) {
+    const project = formProjects.find((p) => p.id === value.projectId);
+    if (!project) return;
+    const attachment = file
+      ? {
+          fileName: file.name,
+          contentType: file.type || "application/octet-stream",
+          size: file.size,
+        }
+      : (editing?.attachment ?? undefined);
+
+    if (editing) {
+      const editingId = editing.id;
+      setLocalItems((prev) =>
+        prev.map((e) =>
+          e.id === editingId
+            ? {
+                ...e,
+                ...value,
+                projectName: project.name,
+                clientName: project.clientName,
+                invoiceNumber: value.invoiceNumber,
+                attachment,
+                status: mode,
+                submittedAt:
+                  mode === "SUBMITTED" ? `${props.today}T12:00:00Z` : undefined,
+                rejectionReason: undefined,
+              }
+            : e,
+        ),
+      );
+    } else {
+      idCounter.current += 1;
+      const expense = createMockExpense(
+        { ...value, attachment },
+        {
+          id: `exp-local-${idCounter.current}-${value.projectId}`,
+          projectName: project.name,
+          clientName: project.clientName,
+          consultantName: props.consultantName,
+          status: mode,
+          submittedAt:
+            mode === "SUBMITTED" ? `${props.today}T12:00:00Z` : undefined,
+        },
+      );
+      setLocalItems((prev) => [expense, ...prev]);
+    }
     setFormOpen(false);
+    setEditing(null);
     notify(
       "success",
       mode === "SUBMITTED"
-        ? `Despesa de ${formatCurrency(expense.amount)} enviada para aprovação (rascunho local).`
-        : `Rascunho de ${formatCurrency(expense.amount)} salvo localmente.`,
+        ? `Despesa de ${formatCurrency(value.amount)} enviada para aprovação (local).`
+        : `Rascunho de ${formatCurrency(value.amount)} salvo localmente.`,
     );
   }
 
-  function handleChangePayment(id: string, paymentStatus: ExpensePaymentStatus) {
-    setItems((prev) =>
-      prev.map((e) => (e.id === id ? { ...e, paymentStatus } : e)),
-    );
-    notify("info", "Status de pagamento atualizado (local).");
+  function handleDelete(expense: Expense) {
+    if (isDemo) {
+      setLocalItems((prev) => prev.filter((e) => e.id !== expense.id));
+      notify("info", "Despesa excluída (local).");
+      return;
+    }
+    startTransition(async () => {
+      const result = await deleteExpenseAction({ id: expense.id });
+      if (result.ok) notify("success", "Despesa excluída.");
+      else notify("warning", result.message);
+    });
+  }
+
+  function handleSubmitExpense(expense: Expense) {
+    if (isDemo) {
+      setLocalItems((prev) =>
+        prev.map((e) =>
+          e.id === expense.id
+            ? {
+                ...e,
+                status: "SUBMITTED",
+                submittedAt: `${props.today}T12:00:00Z`,
+              }
+            : e,
+        ),
+      );
+      notify("success", "Despesa enviada para aprovação (local).");
+      return;
+    }
+    startTransition(async () => {
+      const result = await submitExpenseAction({ id: expense.id });
+      if (result.ok) notify("success", "Despesa enviada para aprovação.");
+      else notify("warning", result.message);
+    });
+  }
+
+  function handleViewReceipt(expense: Expense) {
+    startTransition(async () => {
+      const result = await getReceiptUrl({ expenseId: expense.id });
+      if (result.ok) {
+        window.open(result.data.url, "_blank", "noopener,noreferrer");
+      } else {
+        notify("warning", result.message);
+      }
+    });
   }
 
   return (
     <div className="space-y-6">
+      {isDemo ? (
+        <div className="flex items-center gap-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm font-medium text-warning">
+          <TriangleAlert aria-hidden="true" className="size-4 shrink-0" />
+          <span>
+            Modo demonstração: banco não configurado. Nada será persistido.
+          </span>
+        </div>
+      ) : null}
+
       <ExpenseSummaryCards totals={totals} />
 
       <FeedbackBanner message={feedback} />
@@ -136,7 +325,7 @@ export function ExpensesView({
             variant="primary"
             size="sm"
             icon={Plus}
-            onClick={() => setFormOpen(true)}
+            onClick={openNew}
           >
             Nova despesa
           </ActionButton>
@@ -221,42 +410,55 @@ export function ExpensesView({
 
       <ExpenseList
         expenses={filtered}
-        canManagePayments={canManagePayments}
         onViewAttachment={setAttachmentOf}
-        onChangePayment={handleChangePayment}
+        onEdit={openEdit}
+        onDelete={handleDelete}
+        onSubmitExpense={handleSubmitExpense}
+        busy={isPending}
       />
 
       <ExpenseForm
         open={formOpen}
-        onClose={() => setFormOpen(false)}
+        onClose={() => {
+          setFormOpen(false);
+          setEditing(null);
+        }}
         projects={formProjects}
-        consultantName={consultantName}
-        defaultDate={today}
-        onSubmit={handleCreate}
+        consultantName={props.consultantName}
+        defaultDate={props.today}
+        initial={editing}
+        attachmentUnavailable={!isDemo && !storageAvailable}
+        busy={isPending}
+        onSubmit={handleFormSubmit}
       />
 
       <Modal
         open={attachmentOf !== null}
         onClose={() => setAttachmentOf(null)}
         title="Comprovante"
-        description="Metadados do anexo (visualização mockada no MVP)."
+        description="Metadados do anexo da despesa."
       >
         {attachmentOf?.attachment ? (
           <dl className="space-y-3 text-sm">
             <div>
               <dt className="text-xs text-soft">Arquivo</dt>
               <dd className="font-medium text-strong">
-                {attachmentOf.attachment.name}
+                {attachmentOf.attachment.fileName}
               </dd>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <dt className="text-xs text-soft">Tamanho</dt>
-                <dd className="text-medium">{attachmentOf.attachment.sizeKb} KB</dd>
+                <dd className="text-medium">
+                  {Math.max(1, Math.round(attachmentOf.attachment.size / 1024))}{" "}
+                  KB
+                </dd>
               </div>
               <div>
                 <dt className="text-xs text-soft">Tipo</dt>
-                <dd className="text-medium">{attachmentOf.attachment.type}</dd>
+                <dd className="text-medium">
+                  {attachmentOf.attachment.contentType}
+                </dd>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -272,10 +474,27 @@ export function ExpensesView({
                 <dd className="text-medium">{attachmentOf.projectName}</dd>
               </div>
             </div>
-            <p className="rounded-md border border-border bg-surface-muted/50 px-3 py-2 text-xs text-soft">
-              O download real do comprovante será habilitado quando o upload for
-              integrado (Supabase Storage / Vercel Blob).
-            </p>
+            {!isDemo ? (
+              storageAvailable ? (
+                <ActionButton
+                  variant="secondary"
+                  size="sm"
+                  icon={ExternalLink}
+                  disabled={isPending}
+                  onClick={() => handleViewReceipt(attachmentOf)}
+                >
+                  Visualizar
+                </ActionButton>
+              ) : (
+                <p className="rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-xs font-medium text-warning">
+                  Anexos indisponíveis: storage não configurado.
+                </p>
+              )
+            ) : (
+              <p className="rounded-md border border-border bg-surface-muted/50 px-3 py-2 text-xs text-soft">
+                Visualização disponível apenas com banco e storage configurados.
+              </p>
+            )}
           </dl>
         ) : null}
       </Modal>

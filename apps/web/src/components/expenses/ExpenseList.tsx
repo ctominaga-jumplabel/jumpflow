@@ -1,48 +1,78 @@
 "use client";
 
-import { Paperclip, Receipt } from "lucide-react";
+import { Paperclip, Pencil, Receipt, Send, Trash2 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { SectionPanel } from "@/components/ui/SectionPanel";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { cn } from "@/lib/utils";
-import { focusRing, focusRingInput } from "@/lib/styles";
+import { focusRing } from "@/lib/styles";
 import { formatCurrency, formatDate } from "@/lib/format";
-import {
-  expensePaymentStatusLabels,
-  type Expense,
-  type ExpensePaymentStatus,
-} from "@/lib/mock-data/expenses";
+import { isExpenseEditable, type Expense } from "@/lib/expenses/types";
 import { ExpenseStatusBadge } from "./ExpenseStatusBadge";
-import { ExpensePaymentBadge } from "./ExpensePaymentBadge";
-
-const PAYMENT_OPTIONS: ExpensePaymentStatus[] = [
-  "NOT_SCHEDULED",
-  "SCHEDULED",
-  "PAID",
-  "CANCELLED",
-];
 
 const thClass =
   "px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-soft";
 
 export interface ExpenseListProps {
   expenses: Expense[];
-  /** Financial roles may change the payment status of approved expenses. */
-  canManagePayments: boolean;
   onViewAttachment: (expense: Expense) => void;
-  onChangePayment: (id: string, status: ExpensePaymentStatus) => void;
+  /** Edit an editable expense (DRAFT/rejected). Omit to hide the action. */
+  onEdit?: (expense: Expense) => void;
+  /** Delete an editable expense. Omit to hide the action. */
+  onDelete?: (expense: Expense) => void;
+  /** Submit a DRAFT for approval. Omit to hide the action. */
+  onSubmitExpense?: (expense: Expense) => void;
+  /** Disable row actions while a server action is in flight. */
+  busy?: boolean;
 }
 
-/** Tabular list of expenses with approval + payment status and comprovante access. */
+function RowAction({
+  icon: Icon,
+  label,
+  onClick,
+  disabled,
+}: {
+  icon: LucideIcon;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      title={label}
+      className={cn(
+        "inline-grid size-8 place-items-center rounded-md border border-border text-medium transition-colors hover:bg-surface-muted hover:text-strong disabled:cursor-not-allowed disabled:opacity-50",
+        focusRing,
+      )}
+    >
+      <Icon aria-hidden="true" className="size-4" />
+    </button>
+  );
+}
+
+/**
+ * Tabular list of expenses along the single status chain (approval + payment
+ * in one badge). Per-row actions (edit/delete/submit) appear only while the
+ * status allows rework and only when the caller wires them (db mode).
+ */
 export function ExpenseList({
   expenses,
-  canManagePayments,
   onViewAttachment,
-  onChangePayment,
+  onEdit,
+  onDelete,
+  onSubmitExpense,
+  busy = false,
 }: ExpenseListProps) {
+  const hasActions = Boolean(onEdit || onDelete || onSubmitExpense);
+
   return (
     <SectionPanel
       title="Despesas"
-      description="Lançamentos por projeto, com status de aprovação e pagamento."
+      description="Lançamentos por projeto, da aprovação ao pagamento."
     >
       {expenses.length === 0 ? (
         <div className="px-5 py-10">
@@ -76,18 +106,19 @@ export function ExpenseList({
                 <th scope="col" className={thClass}>
                   Status
                 </th>
-                <th scope="col" className={thClass}>
-                  Pagamento
-                </th>
                 <th scope="col" className={cn(thClass, "text-center")}>
                   Comprovante
                 </th>
+                {hasActions ? (
+                  <th scope="col" className={cn(thClass, "text-center")}>
+                    Ações
+                  </th>
+                ) : null}
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {expenses.map((expense) => {
-                const payable =
-                  expense.status === "APPROVED" || expense.status === "CLOSED";
+                const editable = isExpenseEditable(expense.status);
                 return (
                   <tr
                     key={expense.id}
@@ -114,43 +145,20 @@ export function ExpenseList({
                           {expense.invoiceNumber}
                         </p>
                       ) : null}
+                      {expense.rejectionReason ? (
+                        <p
+                          className="truncate text-xs font-medium text-danger"
+                          title={expense.rejectionReason}
+                        >
+                          {expense.rejectionReason}
+                        </p>
+                      ) : null}
                     </td>
                     <td className="px-4 py-3 text-right align-middle font-semibold tabular-nums text-strong">
                       {formatCurrency(expense.amount)}
                     </td>
                     <td className="px-4 py-3 align-middle">
                       <ExpenseStatusBadge status={expense.status} />
-                    </td>
-                    <td className="px-4 py-3 align-middle">
-                      {canManagePayments && payable ? (
-                        <label className="sr-only" htmlFor={`pay-${expense.id}`}>
-                          Status de pagamento de {expense.description}
-                        </label>
-                      ) : null}
-                      {canManagePayments && payable ? (
-                        <select
-                          id={`pay-${expense.id}`}
-                          value={expense.paymentStatus}
-                          onChange={(e) =>
-                            onChangePayment(
-                              expense.id,
-                              e.target.value as ExpensePaymentStatus,
-                            )
-                          }
-                          className={cn(
-                            "rounded-md border border-border bg-surface px-2 py-1 text-xs font-semibold text-strong",
-                            focusRingInput,
-                          )}
-                        >
-                          {PAYMENT_OPTIONS.map((status) => (
-                            <option key={status} value={status}>
-                              {expensePaymentStatusLabels[status]}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        <ExpensePaymentBadge status={expense.paymentStatus} />
-                      )}
                     </td>
                     <td className="px-4 py-3 text-center align-middle">
                       {expense.attachment ? (
@@ -169,6 +177,40 @@ export function ExpenseList({
                         <span className="text-xs text-soft">—</span>
                       )}
                     </td>
+                    {hasActions ? (
+                      <td className="px-4 py-3 text-center align-middle">
+                        {editable ? (
+                          <div className="inline-flex items-center gap-1.5">
+                            {onSubmitExpense && expense.status === "DRAFT" ? (
+                              <RowAction
+                                icon={Send}
+                                label={`Enviar despesa ${expense.description} para aprovação`}
+                                onClick={() => onSubmitExpense(expense)}
+                                disabled={busy}
+                              />
+                            ) : null}
+                            {onEdit ? (
+                              <RowAction
+                                icon={Pencil}
+                                label={`Editar despesa ${expense.description}`}
+                                onClick={() => onEdit(expense)}
+                                disabled={busy}
+                              />
+                            ) : null}
+                            {onDelete ? (
+                              <RowAction
+                                icon={Trash2}
+                                label={`Excluir despesa ${expense.description}`}
+                                onClick={() => onDelete(expense)}
+                                disabled={busy}
+                              />
+                            ) : null}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-soft">—</span>
+                        )}
+                      </td>
+                    ) : null}
                   </tr>
                 );
               })}

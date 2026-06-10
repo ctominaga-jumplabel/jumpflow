@@ -3,6 +3,7 @@ import {
   summarizeClosing,
   type MonthlyClosing,
 } from "@/lib/mock-data/financial";
+import type { Expense } from "@/lib/expenses/types";
 import { formatMonth } from "@/lib/format";
 import { RevenueSummaryCards } from "./RevenueSummaryCards";
 import { MonthlyClosingTable } from "./MonthlyClosingTable";
@@ -10,6 +11,10 @@ import { ExpensesFinancePanel } from "./ExpensesFinancePanel";
 
 export interface FinancialOverviewProps {
   closing?: MonthlyClosing;
+  /** "db": expense rows come from listFinanceExpenses; "demo": local mock. */
+  expensesMode?: "demo" | "db";
+  /** db mode: expenses that reached finance. */
+  financeExpenses?: Expense[];
 }
 
 /**
@@ -18,6 +23,8 @@ export interface FinancialOverviewProps {
  */
 export function FinancialOverview({
   closing = currentClosing,
+  expensesMode = "demo",
+  financeExpenses,
 }: FinancialOverviewProps) {
   const totals = summarizeClosing(closing);
   const monthLabel = formatMonth(closing.month, closing.year);
@@ -32,7 +39,7 @@ export function FinancialOverview({
         monthLabel={monthLabel}
       />
       <MonthlyClosingTable rows={closing.rows} monthLabel={monthLabel} />
-      <ExpensesFinancePanel />
+      <ExpensesFinancePanel mode={expensesMode} expenses={financeExpenses} />
     </div>
   );
 }

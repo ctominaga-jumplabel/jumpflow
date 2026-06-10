@@ -1,20 +1,45 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
+import type { Expense } from "@/lib/expenses/types";
 import { ExpensesView } from "./ExpensesView";
 
-function renderView(canManagePayments = false) {
+// Server actions never run in jsdom: mock the module so the db-mode wiring
+// can be asserted without Prisma/auth imports.
+vi.mock("@/app/app/despesas/actions", () => ({
+  createExpense: vi.fn(async () => ({ ok: true, data: { id: "exp-new" } })),
+  updateExpense: vi.fn(async () => ({ ok: true, data: { id: "exp-new" } })),
+  deleteExpense: vi.fn(async () => ({ ok: true, data: { id: "exp-new" } })),
+  submitExpense: vi.fn(async () => ({ ok: true, data: { id: "exp-new" } })),
+  attachReceipt: vi.fn(async () => ({ ok: false, error: "NO_STORAGE", message: "x" })),
+  replaceReceipt: vi.fn(async () => ({ ok: false, error: "NO_STORAGE", message: "x" })),
+  getReceiptUrl: vi.fn(async () => ({ ok: false, error: "NO_STORAGE", message: "x" })),
+}));
+
+import { submitExpense } from "@/app/app/despesas/actions";
+
+function renderDemo() {
   return render(
-    <ExpensesView
-      consultantName="Ana Tester"
-      canManagePayments={canManagePayments}
-      today="2026-06-10"
-    />,
+    <ExpensesView mode="demo" consultantName="Ana Tester" today="2026-06-10" />,
   );
 }
 
-describe("ExpensesView", () => {
-  it("renders the summary, filters and list", () => {
-    renderView();
+const dbExpense: Expense = {
+  id: "exp-db-1",
+  projectId: "proj-1",
+  projectName: "Portal",
+  clientName: "Cliente X",
+  consultantName: "Ana Tester",
+  date: "2026-06-08",
+  amount: 120.5,
+  description: "Despesa real de banco",
+  status: "DRAFT",
+  source: "db",
+};
+
+describe("ExpensesView (demo mode)", () => {
+  it("renders the banner, summary, filters and list", () => {
+    renderDemo();
+    expect(screen.getByText(/Modo demonstração/)).toBeInTheDocument();
     expect(screen.getByText("Total lançado")).toBeInTheDocument();
     expect(screen.getByText("Filtros")).toBeInTheDocument();
     expect(screen.getByText("Despesas")).toBeInTheDocument();
@@ -24,8 +49,8 @@ describe("ExpensesView", () => {
     ).toBeInTheDocument();
   });
 
-  it("creates a new expense and reports honest feedback", () => {
-    renderView();
+  it("creates a new expense and reports honest local feedback", () => {
+    renderDemo();
     fireEvent.click(screen.getByRole("button", { name: /Nova despesa/ }));
 
     const dialog = screen.getByRole("dialog");
@@ -47,11 +72,11 @@ describe("ExpensesView", () => {
     expect(
       within(screen.getByRole("table")).getByText("Táxi para o cliente"),
     ).toBeInTheDocument();
-    expect(screen.getByText(/enviada para aprovação/)).toBeInTheDocument();
+    expect(screen.getByText(/enviada para aprovação \(local\)/)).toBeInTheDocument();
   });
 
   it("blocks submitting an expense without required fields", () => {
-    renderView();
+    renderDemo();
     fireEvent.click(screen.getByRole("button", { name: /Nova despesa/ }));
     const dialog = screen.getByRole("dialog");
     fireEvent.click(
@@ -60,33 +85,73 @@ describe("ExpensesView", () => {
     expect(within(dialog).getByText("Selecione um projeto.")).toBeInTheDocument();
   });
 
-  it("filters the list by status", () => {
-    renderView();
+  it("filters the list by status of the new chain", () => {
+    renderDemo();
     // DRAFT seed is visible before filtering.
     expect(
       screen.getByText(/Material de apoio para oficina de discovery/),
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /^Aprovada/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Paga$/ }));
     expect(
       screen.queryByText(/Material de apoio para oficina de discovery/),
     ).not.toBeInTheDocument();
-  });
-
-  it("only lets financial roles change payment status", () => {
-    const { rerender } = renderView(false);
     expect(
-      screen.queryByLabelText(/Status de pagamento/),
-    ).not.toBeInTheDocument();
+      screen.getByText(/Estacionamento durante visita técnica/),
+    ).toBeInTheDocument();
+  });
+});
 
-    rerender(
+describe("ExpensesView (db mode)", () => {
+  it("renders server data without the demo banner", () => {
+    render(
       <ExpensesView
+        mode="db"
         consultantName="Ana Tester"
-        canManagePayments
         today="2026-06-10"
+        expenses={[dbExpense]}
+        projects={[{ id: "proj-1", name: "Portal", clientName: "Cliente X" }]}
+        storageAvailable={false}
       />,
     );
+    expect(screen.queryByText(/Modo demonstração/)).not.toBeInTheDocument();
+    expect(screen.getByText("Despesa real de banco")).toBeInTheDocument();
+  });
+
+  it("submits a DRAFT through the server action", async () => {
+    render(
+      <ExpensesView
+        mode="db"
+        consultantName="Ana Tester"
+        today="2026-06-10"
+        expenses={[dbExpense]}
+        projects={[{ id: "proj-1", name: "Portal", clientName: "Cliente X" }]}
+        storageAvailable={false}
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: /Enviar despesa Despesa real/ }),
+    );
     expect(
-      screen.getAllByLabelText(/Status de pagamento/).length,
-    ).toBeGreaterThan(0);
+      await screen.findByText("Despesa enviada para aprovação."),
+    ).toBeInTheDocument();
+    expect(vi.mocked(submitExpense)).toHaveBeenCalledWith({ id: "exp-db-1" });
+  });
+
+  it("shows the storage-unavailable warning in the form", () => {
+    render(
+      <ExpensesView
+        mode="db"
+        consultantName="Ana Tester"
+        today="2026-06-10"
+        expenses={[]}
+        projects={[{ id: "proj-1", name: "Portal", clientName: "Cliente X" }]}
+        storageAvailable={false}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Nova despesa/ }));
+    const dialog = screen.getByRole("dialog");
+    expect(
+      within(dialog).getByText(/Anexos indisponíveis: storage não configurado/),
+    ).toBeInTheDocument();
   });
 });

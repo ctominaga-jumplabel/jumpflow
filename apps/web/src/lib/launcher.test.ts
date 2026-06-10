@@ -27,6 +27,8 @@ describe("launcher shortcutsForUser", () => {
   it("shows financeiro to financial roles", () => {
     const keys = shortcutsForUser(user(["FINANCE"])).map((s) => s.key);
     expect(keys).toContain("financeiro");
+    // FINANCE also triages the finance stage of expense approvals.
+    expect(keys).toContain("aprovacoes");
   });
 
   it("shows every shortcut to admin", () => {

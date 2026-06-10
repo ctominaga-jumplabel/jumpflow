@@ -32,17 +32,30 @@ export const approvalKindLabels: Record<ApprovalKind, string> = {
 /** Where the item lives: real database rows or local demo data. */
 export type ApprovalSource = "db" | "mock";
 
+/** Which approval stage an EXPENSE item belongs to (two-stage chain). */
+export type ApprovalStage = "MANAGER" | "FINANCE";
+
+export const approvalStageLabels: Record<ApprovalStage, string> = {
+  MANAGER: "Gestor",
+  FINANCE: "Financeiro",
+};
+
 export interface ApprovalItem {
   id: string;
   /** Horas or despesas — the queue can be filtered by kind. */
   type: ApprovalKind;
   /**
-   * "db" items are decided via the decideHours server action; "mock" items
-   * remain local demo state (e.g. expenses, or hours without a database).
+   * "db" items are decided via the server actions (decideHours for HOURS,
+   * decideAsManager/decideAsFinance for EXPENSE); "mock" items remain local
+   * demo state (no database configured).
    */
   source: ApprovalSource;
   /** TimeEntry ids behind a db-backed HOURS item (decision payload). */
   entryIds?: string[];
+  /** Expense id behind a db-backed EXPENSE item (decision payload). */
+  expenseId?: string;
+  /** Approval stage of an EXPENSE item ("Gestor" or "Financeiro"). */
+  stage?: ApprovalStage;
   consultantName: string;
   projectName: string;
   clientName: string;
@@ -108,6 +121,7 @@ const mockApprovalItems: Omit<ApprovalItem, "source">[] = [
   {
     id: "ap-exp-1",
     type: "EXPENSE",
+    stage: "MANAGER",
     consultantName: "Carlos Nunes",
     projectName: "Atlas",
     clientName: "Vix Energia",
@@ -122,6 +136,7 @@ const mockApprovalItems: Omit<ApprovalItem, "source">[] = [
   {
     id: "ap-exp-2",
     type: "EXPENSE",
+    stage: "MANAGER",
     consultantName: "Rafael Moreira",
     projectName: "Órion",
     clientName: "Banco Sul",

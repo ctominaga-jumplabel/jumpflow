@@ -15,6 +15,19 @@ vi.mock("@/app/app/horas/actions", () => ({
   submitWeek: vi.fn(),
   decideHours: vi.fn(),
 }));
+// FinancialOverview renders ExpensesFinancePanel, which wires setPayment.
+vi.mock("@/app/app/despesas/actions", () => ({
+  createExpense: vi.fn(),
+  updateExpense: vi.fn(),
+  deleteExpense: vi.fn(),
+  submitExpense: vi.fn(),
+  attachReceipt: vi.fn(),
+  replaceReceipt: vi.fn(),
+  getReceiptUrl: vi.fn(),
+  setPayment: vi.fn(),
+  decideAsManager: vi.fn(),
+  decideAsFinance: vi.fn(),
+}));
 import { ConsultantDirectory } from "@/components/consultants/ConsultantDirectory";
 import { CertificateList } from "@/components/certificates/CertificateList";
 import { CertificateSummary } from "@/components/certificates/CertificateSummary";

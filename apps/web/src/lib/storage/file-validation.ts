@@ -1,0 +1,106 @@
+/**
+ * Pure receipt-file validation helpers (docs/despesas-persistencia.md
+ * section 3). No I/O, no storage imports — testable without network.
+ *
+ * The server is the validation authority; the client-side checks in
+ * `ExpenseAttachmentField` are a pre-flight convenience only.
+ */
+
+export const MAX_RECEIPT_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
+
+/** MIME whitelist and the extensions coherent with each type. */
+const MIME_EXTENSIONS: Record<string, readonly string[]> = {
+  "application/pdf": [".pdf"],
+  "image/jpeg": [".jpg", ".jpeg"],
+  "image/png": [".png"],
+  "image/webp": [".webp"],
+};
+
+export const ACCEPTED_RECEIPT_MIME_TYPES = Object.keys(MIME_EXTENSIONS);
+
+export interface ReceiptFileMeta {
+  name: string;
+  type: string;
+  size: number;
+}
+
+export interface FileValidationFailure {
+  code: "INVALID_FILE" | "FILE_TOO_LARGE";
+  message: string;
+}
+
+/** Lowercased extension of `name` including the dot, or "" when absent. */
+function extensionOf(name: string): string {
+  const index = name.lastIndexOf(".");
+  return index === -1 ? "" : name.slice(index).toLowerCase();
+}
+
+/**
+ * Validate a receipt file's metadata. Returns null when valid, or a typed
+ * failure: MIME/extension outside the whitelist (or incoherent with each
+ * other) -> INVALID_FILE; empty or > 10 MB -> FILE_TOO_LARGE.
+ */
+export function validateReceiptFile(
+  file: ReceiptFileMeta,
+): FileValidationFailure | null {
+  const allowedExtensions = MIME_EXTENSIONS[file.type];
+  if (!allowedExtensions) {
+    return {
+      code: "INVALID_FILE",
+      message: "Formato não aceito. Use PDF, JPG, PNG ou WEBP.",
+    };
+  }
+  const extension = extensionOf(file.name);
+  if (!allowedExtensions.includes(extension)) {
+    return {
+      code: "INVALID_FILE",
+      message: "Extensão do arquivo não corresponde ao tipo enviado.",
+    };
+  }
+  if (file.size <= 0) {
+    return { code: "FILE_TOO_LARGE", message: "Arquivo vazio." };
+  }
+  if (file.size > MAX_RECEIPT_SIZE_BYTES) {
+    return { code: "FILE_TOO_LARGE", message: "Arquivo acima de 10 MB." };
+  }
+  return null;
+}
+
+/**
+ * Sanitize a file name for storage keys: lowercase, pure ASCII (accents
+ * stripped), spaces -> "-", only [a-z0-9._-], no ".."/path separators
+ * (anti path traversal), max 100 chars, fallback "comprovante".
+ */
+export function safeFileName(name: string): string {
+  let safe = name
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "") // strip combining accents
+    .replace(/[^ -~]/g, "") // pure ASCII only
+    .toLowerCase()
+    .replace(/[\\/]+/g, "-") // path separators are never kept
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9._-]/g, "");
+  while (safe.includes("..")) safe = safe.replace(/\.\./g, ".");
+  safe = safe.replace(/^[.\-_]+/, "");
+  if (safe.length > 100) safe = safe.slice(0, 100);
+  return safe || "comprovante";
+}
+
+/** Compact UTC timestamp `yyyy-mm-ddThhmmssZ` (storage-key friendly). */
+function compactUtcTimestamp(date: Date): string {
+  const iso = date.toISOString(); // yyyy-mm-ddThh:mm:ss.sssZ
+  return `${iso.slice(0, 10)}T${iso.slice(11, 13)}${iso.slice(14, 16)}${iso.slice(17, 19)}Z`;
+}
+
+/**
+ * Storage key for an expense receipt: `expenses/{expenseId}/{timestamp}-{name}`.
+ * The path NEVER contains CPF, consultant, client, project or any sensitive
+ * data — only the expense cuid and the sanitized file name.
+ */
+export function buildStorageKey(
+  expenseId: string,
+  fileName: string,
+  now: Date = new Date(),
+): string {
+  return `expenses/${expenseId}/${compactUtcTimestamp(now)}-${safeFileName(fileName)}`;
+}

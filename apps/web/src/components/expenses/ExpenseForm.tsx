@@ -7,10 +7,7 @@ import { ActionButton } from "@/components/ui/ActionButton";
 import { ExpenseAttachmentField } from "./ExpenseAttachmentField";
 import { cn } from "@/lib/utils";
 import { focusRingInput } from "@/lib/styles";
-import type {
-  ExpenseAttachment,
-  NewExpenseInput,
-} from "@/lib/mock-data/expenses";
+import type { Expense, ExpenseAttachmentMeta } from "@/lib/expenses/types";
 
 export interface ExpenseFormProject {
   id: string;
@@ -20,6 +17,15 @@ export interface ExpenseFormProject {
 
 export type ExpenseSubmitMode = "DRAFT" | "SUBMITTED";
 
+/** Values the form produces (attachment travels separately as a File). */
+export interface ExpenseFormValue {
+  projectId: string;
+  date: string;
+  amount: number;
+  description: string;
+  invoiceNumber?: string;
+}
+
 export interface ExpenseFormProps {
   open: boolean;
   onClose: () => void;
@@ -27,7 +33,21 @@ export interface ExpenseFormProps {
   consultantName: string;
   /** Pre-filled date (yyyy-mm-dd) so the form is deterministic/testable. */
   defaultDate: string;
-  onSubmit: (input: NewExpenseInput, mode: ExpenseSubmitMode) => void;
+  /** When present, the form edits this expense instead of creating one. */
+  initial?: Expense | null;
+  /** Storage not configured (db mode): attachment input shows a warning. */
+  attachmentUnavailable?: boolean;
+  /** Disable buttons while a server action is in flight. */
+  busy?: boolean;
+  /**
+   * Save (DRAFT) or save+submit (SUBMITTED). `file` is a newly selected
+   * receipt to upload (db) or keep locally (demo); null = unchanged/none.
+   */
+  onSubmit: (
+    value: ExpenseFormValue,
+    mode: ExpenseSubmitMode,
+    file: File | null,
+  ) => void;
 }
 
 const inputClass = (invalid: boolean) =>
@@ -40,9 +60,9 @@ const inputClass = (invalid: boolean) =>
 const labelClass = "mb-1 block text-xs font-semibold text-medium";
 
 /**
- * New-expense form (modal). Validates the minimum fields (project, date, amount
- * > 0, description) before allowing save/submit. Save keeps a DRAFT; submit
- * sends for approval — both mutate local state in the MVP (no persistence yet).
+ * Expense form (modal) for create and edit. Validates the minimum fields
+ * (project, date, amount > 0, description) before allowing save/submit —
+ * the server re-validates everything with Zod.
  */
 export function ExpenseForm({
   open,
@@ -50,6 +70,9 @@ export function ExpenseForm({
   projects,
   consultantName,
   defaultDate,
+  initial = null,
+  attachmentUnavailable = false,
+  busy = false,
   onSubmit,
 }: ExpenseFormProps) {
   const [projectId, setProjectId] = useState("");
@@ -57,8 +80,29 @@ export function ExpenseForm({
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
   const [invoiceNumber, setInvoiceNumber] = useState("");
-  const [attachment, setAttachment] = useState<ExpenseAttachment | null>(null);
+  const [attachment, setAttachment] = useState<ExpenseAttachmentMeta | null>(
+    null,
+  );
+  const [file, setFile] = useState<File | null>(null);
   const [showErrors, setShowErrors] = useState(false);
+
+  // Re-seed the fields whenever the modal opens for a different target
+  // (render-time state adjustment — the React-recommended effect alternative).
+  const formKey = open ? (initial?.id ?? "__new__") : "__closed__";
+  const [prevKey, setPrevKey] = useState(formKey);
+  if (formKey !== prevKey) {
+    setPrevKey(formKey);
+    if (open) {
+      setProjectId(initial?.projectId ?? "");
+      setDate(initial?.date ?? defaultDate);
+      setAmount(initial ? String(initial.amount).replace(".", ",") : "");
+      setDescription(initial?.description ?? "");
+      setInvoiceNumber(initial?.invoiceNumber ?? "");
+      setAttachment(initial?.attachment ?? null);
+      setFile(null);
+      setShowErrors(false);
+    }
+  }
 
   const selectedProject = projects.find((p) => p.id === projectId);
   const amountValue = Number(amount.replace(",", "."));
@@ -74,21 +118,6 @@ export function ExpenseForm({
 
   const hasErrors = Object.values(errors).some(Boolean);
 
-  function reset() {
-    setProjectId("");
-    setDate(defaultDate);
-    setAmount("");
-    setDescription("");
-    setInvoiceNumber("");
-    setAttachment(null);
-    setShowErrors(false);
-  }
-
-  function handleClose() {
-    reset();
-    onClose();
-  }
-
   function handleSubmit(mode: ExpenseSubmitMode) {
     if (hasErrors) {
       setShowErrors(true);
@@ -101,28 +130,32 @@ export function ExpenseForm({
         amount: amountValue,
         description: description.trim(),
         invoiceNumber: invoiceNumber.trim() || undefined,
-        attachment: attachment ?? undefined,
       },
       mode,
+      file,
     );
-    reset();
   }
 
   return (
     <Modal
       open={open}
-      onClose={handleClose}
-      title="Nova despesa"
-      description="Vincule a despesa a um projeto e anexe o comprovante."
+      onClose={onClose}
+      title={initial ? "Editar despesa" : "Nova despesa"}
+      description={
+        initial
+          ? "Ajuste os dados e reenvie. Despesa reprovada volta a rascunho ao salvar."
+          : "Vincule a despesa a um projeto e anexe o comprovante."
+      }
       footer={
         <>
-          <ActionButton variant="secondary" size="sm" onClick={handleClose}>
+          <ActionButton variant="secondary" size="sm" onClick={onClose}>
             Cancelar
           </ActionButton>
           <ActionButton
             variant="secondary"
             size="sm"
             icon={Save}
+            disabled={busy}
             onClick={() => handleSubmit("DRAFT")}
           >
             Salvar rascunho
@@ -131,6 +164,7 @@ export function ExpenseForm({
             variant="primary"
             size="sm"
             icon={Send}
+            disabled={busy}
             onClick={() => handleSubmit("SUBMITTED")}
           >
             Enviar para aprovação
@@ -145,6 +179,12 @@ export function ExpenseForm({
           handleSubmit("SUBMITTED");
         }}
       >
+        {initial?.rejectionReason ? (
+          <p className="rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-xs font-medium text-danger">
+            Justificativa da reprovação: {initial.rejectionReason}
+          </p>
+        ) : null}
+
         <div>
           <label htmlFor="expense-project" className={labelClass}>
             Projeto
@@ -255,7 +295,18 @@ export function ExpenseForm({
           ) : null}
         </div>
 
-        <ExpenseAttachmentField value={attachment} onChange={setAttachment} />
+        <ExpenseAttachmentField
+          value={attachment}
+          unavailable={attachmentUnavailable}
+          // A receipt already persisted on the server cannot be "removed"
+          // locally (there is no remove action in the MVP) — only replaced.
+          // Clearing a freshly picked file restores the persisted one.
+          persisted={file === null && initial?.attachment != null}
+          onChange={(next) => {
+            setAttachment(next?.meta ?? initial?.attachment ?? null);
+            setFile(next?.file ?? null);
+          }}
+        />
       </form>
     </Modal>
   );

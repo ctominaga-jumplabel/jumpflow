@@ -1,54 +1,105 @@
 "use client";
 
 import { useId, useRef, useState } from "react";
-import { FileText, Paperclip, X } from "lucide-react";
+import { FileText, Paperclip, TriangleAlert, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { focusRing } from "@/lib/styles";
-import type { ExpenseAttachment } from "@/lib/mock-data/expenses";
+import type { ExpenseAttachmentMeta } from "@/lib/expenses/types";
 
-/** Accepted comprovante types and max size, validated client-side. */
-const ACCEPTED_TYPES = ["application/pdf", "image/jpeg", "image/png"];
-const MAX_SIZE_KB = 5 * 1024; // 5 MB
-const ACCEPT_ATTR = ".pdf,.jpg,.jpeg,.png";
+/**
+ * Client-side pre-check only — the SERVER is the validation authority
+ * (lib/storage/file-validation.ts): same whitelist + 10 MB limit.
+ */
+const ACCEPTED_TYPES = [
+  "application/pdf",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+];
+const ACCEPTED_EXTENSIONS = [".pdf", ".jpg", ".jpeg", ".png", ".webp"];
+const MAX_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
+const ACCEPT_ATTR = ".pdf,.jpg,.jpeg,.png,.webp";
+
+/** MIME when the browser reports one; extension as fallback (e.g. Windows). */
+function isAcceptedFile(file: File): boolean {
+  if (file.type) return ACCEPTED_TYPES.includes(file.type);
+  const dot = file.name.lastIndexOf(".");
+  const ext = dot >= 0 ? file.name.slice(dot).toLowerCase() : "";
+  return ACCEPTED_EXTENSIONS.includes(ext);
+}
+
+function formatMb(bytes: number): string {
+  return (bytes / (1024 * 1024)).toFixed(1).replace(".", ",");
+}
 
 export interface ExpenseAttachmentFieldProps {
-  value: ExpenseAttachment | null;
-  onChange: (value: ExpenseAttachment | null) => void;
+  value: ExpenseAttachmentMeta | null;
+  /** Metadata + the File itself (null when cleared). */
+  onChange: (value: { meta: ExpenseAttachmentMeta; file: File } | null) => void;
+  /**
+   * Storage not configured: show an honest warning instead of the file input.
+   * Attachments are never faked.
+   */
+  unavailable?: boolean;
+  /**
+   * The shown value is already persisted on the server. There is no remove
+   * action in the MVP, so offer "Substituir" instead of a remove button —
+   * pretending to remove it would be dishonest (it would reappear on reload).
+   */
+  persisted?: boolean;
 }
 
 /**
- * Comprovante (receipt) picker for the expense form. Captures file metadata
- * only — the MVP does not upload bytes anywhere. The field validates type and
- * size so the contract is ready for a real Supabase Storage / Vercel Blob
- * upload later (swap the metadata capture for the upload call).
+ * Comprovante (receipt) picker for the expense form. Validates type and size
+ * as a pre-flight; the selected File is handed to the caller, which uploads
+ * it via the attachReceipt/replaceReceipt server actions (db mode) or keeps
+ * the metadata locally (demo mode).
  */
 export function ExpenseAttachmentField({
   value,
   onChange,
+  unavailable = false,
+  persisted = false,
 }: ExpenseAttachmentFieldProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
   const inputId = useId();
 
+  if (unavailable) {
+    return (
+      <div>
+        <span className="mb-1 block text-xs font-semibold text-medium">
+          Comprovante
+        </span>
+        <p className="flex items-center gap-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-xs font-medium text-warning">
+          <TriangleAlert aria-hidden="true" className="size-4 shrink-0" />
+          Anexos indisponíveis: storage não configurado.
+        </p>
+      </div>
+    );
+  }
+
   function handleFiles(files: FileList | null) {
     const file = files?.[0];
     if (!file) return;
 
-    if (file.type && !ACCEPTED_TYPES.includes(file.type)) {
-      setError("Formato não aceito. Use PDF, JPG ou PNG.");
+    if (!isAcceptedFile(file)) {
+      setError("Formato não aceito. Use PDF, JPG, PNG ou WEBP.");
       return;
     }
-    const sizeKb = Math.max(1, Math.round(file.size / 1024));
-    if (sizeKb > MAX_SIZE_KB) {
-      setError("Arquivo acima de 5 MB.");
+    if (file.size > MAX_SIZE_BYTES) {
+      setError(`Arquivo com ${formatMb(file.size)} MB excede o limite de 10 MB.`);
       return;
     }
 
     setError(null);
     onChange({
-      name: file.name,
-      sizeKb,
-      type: file.type || "application/octet-stream",
+      meta: {
+        fileName: file.name,
+        contentType: file.type || "application/octet-stream",
+        size: file.size,
+      },
+      file,
     });
   }
 
@@ -62,7 +113,9 @@ export function ExpenseAttachmentField({
     <div>
       <span className="mb-1 block text-xs font-semibold text-medium">
         Comprovante{" "}
-        <span className="font-normal text-soft">(PDF, JPG ou PNG, até 5 MB)</span>
+        <span className="font-normal text-soft">
+          (PDF, JPG, PNG ou WEBP, até 10 MB)
+        </span>
       </span>
 
       {value ? (
@@ -70,23 +123,36 @@ export function ExpenseAttachmentField({
           <FileText aria-hidden="true" className="size-4 shrink-0 text-medium" />
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium text-strong">
-              {value.name}
+              {value.fileName}
             </p>
             <p className="text-xs text-soft">
-              {value.sizeKb} KB · {value.type}
+              {Math.max(1, Math.round(value.size / 1024))} KB ·{" "}
+              {value.contentType}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={clearAttachment}
-            aria-label="Remover comprovante"
-            className={cn(
-              "grid size-7 shrink-0 place-items-center rounded-md text-medium transition-colors hover:bg-surface hover:text-strong",
-              focusRing,
-            )}
-          >
-            <X aria-hidden="true" className="size-4" />
-          </button>
+          {persisted ? (
+            <label
+              htmlFor={inputId}
+              className={cn(
+                "shrink-0 cursor-pointer rounded-md px-2 py-1 text-xs font-semibold text-brand transition-colors hover:bg-surface",
+                focusRing,
+              )}
+            >
+              Substituir
+            </label>
+          ) : (
+            <button
+              type="button"
+              onClick={clearAttachment}
+              aria-label="Remover comprovante"
+              className={cn(
+                "grid size-7 shrink-0 place-items-center rounded-md text-medium transition-colors hover:bg-surface hover:text-strong",
+                focusRing,
+              )}
+            >
+              <X aria-hidden="true" className="size-4" />
+            </button>
+          )}
         </div>
       ) : (
         <label

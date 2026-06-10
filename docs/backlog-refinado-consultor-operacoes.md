@@ -585,15 +585,68 @@ Padroes/caminhos futuros:
 - **ERP/financeiro externo**: caminho provavelmente mais simples se a Jump ja usa um ERP que centraliza contas a pagar. JumpFlow envia ou exporta despesas aprovadas; o ERP devolve status.
 - **Open Finance / Pix**: pode ser considerado no futuro para iniciacao/consulta de pagamentos via APIs, mas exige consentimento, participante/provedor adequado e maior complexidade regulatoria/operacional.
 
-- MVP: status manual (`NOT_SCHEDULED`, `SCHEDULED`, `PAID`, `CANCELLED`).
+- MVP: pagamento manual dentro da cadeia unica de status da despesa (sem enum
+  separado de pagamento; ver "Despesas - Decisoes Confirmadas" abaixo).
 - Fase posterior: exportacao CSV/CNAB ou integracao com ERP.
 - Fase avancada: avaliar APIs bancarias/Open Finance apenas se houver caso de uso claro e governanca financeira.
 
+### Despesas - Decisoes Confirmadas (Rodada 3)
+
+Storage e arquivo:
+
+- Bucket Supabase Storage: `expense-receipts`.
+- Path: `expenses/{expenseId}/{timestamp}-{safeFileName}`; sem CPF, nome de
+  consultor, cliente, projeto ou dado sensivel no path.
+- MIME aceitos: `application/pdf`, `image/jpeg`, `image/png`, `image/webp`.
+- Tamanho maximo: 10 MB. MVP: 1 comprovante por despesa.
+- Acesso por URL assinada de curta duracao, gerada no servidor apos RBAC.
+- Visibilidade do comprovante: dono da despesa, gestor do projeto da despesa,
+  FINANCE, AREA_MANAGER e ADMIN. Mais ninguem.
+
+Status (cadeia unica `ExpenseStatus`, sem `ExpensePaymentStatus` separado):
+
+- `DRAFT -> SUBMITTED -> MANAGER_APPROVED -> FINANCE_APPROVED ->
+  PAYMENT_SCHEDULED -> PAID`, com `MANAGER_REJECTED` e `FINANCE_REJECTED`.
+- Cadeia unica evita combinacoes invalidas e da ao financeiro filtros diretos:
+  `FINANCE_APPROVED` = a pagar, `PAYMENT_SCHEDULED` = agendada, `PAID` = paga.
+- Sem status `PAYMENT_CANCELLED`: cancelar agendamento e a transicao
+  `PAYMENT_SCHEDULED -> FINANCE_APPROVED`, com AuditEvent e motivo.
+  `PAID` e o unico terminal.
+- Reenvio pos-reprovacao segue o padrao de Horas: editar despesa
+  `MANAGER_REJECTED`/`FINANCE_REJECTED` retorna a `DRAFT`; o reenvio refaz a
+  cadeia completa (gestor aprova de novo, mesmo se a reprovacao foi do
+  financeiro), preservando o historico de Approvals.
+- Comprovante pode ser anexado/substituido apenas em `DRAFT`,
+  `MANAGER_REJECTED` e `FINANCE_REJECTED`; imutavel a partir de `SUBMITTED`.
+- Reprovacao (gestor ou financeiro) exige comentario.
+
+Regras de criacao:
+
+- Criar/editar despesa exige `Allocation ACTIVE` do consultor no projeto
+  cobrindo a data da despesa (paridade com Horas); projeto `CLOSED` nao recebe
+  despesa; `allocationId` gravado na despesa.
+
+RBAC das decisoes:
+
+- `approveAsManager`: PROJECT_MANAGER somente nos projetos onde e
+  `managerUserId`; AREA_MANAGER e ADMIN em qualquer projeto. FINANCE puro nao
+  aprova como gestor.
+- `approveAsFinance` e `setPayment`: `FINANCIAL_ROLES`
+  (FINANCE, AREA_MANAGER, ADMIN).
+- Segregacao: nenhum usuario decide ou altera pagamento de despesa cujo
+  consultor e ele mesmo, em nenhuma etapa.
+
+Onde cada decisao acontece:
+
+- `/app/aprovacoes`: fila unica; `SUBMITTED` para quem aprova como gestor e
+  `MANAGER_APPROVED` para quem aprova como financeiro, com etiqueta da etapa.
+  Requer adicionar `FINANCE` ao acesso da rota no route map.
+- `/app/financeiro`: lista `FINANCE_APPROVED`/`PAYMENT_SCHEDULED`/`PAID` e
+  concentra o controle manual de pagamento (`setPayment`).
+- Integracao bancaria/ERP fora do escopo; pagamento manual no MVP.
+
 ## 11. Decisoes Ainda Pendentes
 
-- Qual bucket/naming convention usar no Supabase Storage?
-- Limites de tipo/tamanho para comprovantes.
-- Se o gestor do projeto aprova antes do financeiro ou se ambos podem aprovar em paralelo.
 - Se despesas aprovadas entram no fechamento mensal junto com horas ou em fechamento separado.
 - Quais funcionalidades de RH/documentos/equipamentos entram primeiro.
 
@@ -661,3 +714,10 @@ mecanica.
   sidebar.
 - `ModulePlaceholder` mantido (ainda util para telas futuras).
 - Status de pagamento manual no JumpFlow, restrito a papeis financeiros.
+
+## 13. Rodada 2 - Entregue (Persistencia de Horas)
+
+Entregue (`feat: persist timesheet entries`): horas persistem via Prisma com
+Server Actions, Zod, RBAC, Approval e AuditEvent; fila de aprovacoes le horas
+reais e a automacao de aprovacao opera sobre dados persistidos. Spec e
+pendencias residuais em `docs/horas-persistencia.md` (secao 8).

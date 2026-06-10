@@ -100,6 +100,22 @@ enum ApprovableEntityType {
   TIME_ENTRY
   CONSULTANT_SKILL
   CERTIFICATE
+  EXPENSE
+}
+
+/// Single status chain for expenses (no separate payment enum). Flow:
+/// DRAFT -> SUBMITTED -> MANAGER_APPROVED -> FINANCE_APPROVED ->
+/// PAYMENT_SCHEDULED -> PAID, with MANAGER_REJECTED / FINANCE_REJECTED as
+/// rejection branches. PAID is the only terminal status.
+enum ExpenseStatus {
+  DRAFT
+  SUBMITTED
+  MANAGER_APPROVED
+  MANAGER_REJECTED
+  FINANCE_APPROVED
+  FINANCE_REJECTED
+  PAYMENT_SCHEDULED
+  PAID
 }
 
 enum MonthlyClosingStatus {
@@ -131,6 +147,7 @@ model User {
   consultant  Consultant?
   auditEvents AuditEvent[] @relation("AuditActor")
   approvals   Approval[]   @relation("ApprovalApprover")
+  uploadedExpenseAttachments ExpenseAttachment[] @relation("ExpenseAttachmentUploader")
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 }
@@ -168,6 +185,7 @@ model Consultant {
   skills      ConsultantSkill[]
   certificates Certificate[]
   autoApprovalExceptions AutoApprovalException[]
+  expenses    Expense[]
   createdAt   DateTime           @default(now())
   updatedAt   DateTime           @updatedAt
 }
@@ -200,6 +218,7 @@ model Project {
   timeEntries       TimeEntry[]
   closings          MonthlyClosing[]
   autoApprovalExceptions AutoApprovalException[]
+  expenses          Expense[]
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
 
@@ -219,6 +238,7 @@ model Allocation {
   endDate           DateTime?
   status            AllocationStatus @default(PLANNED)
   timeEntries       TimeEntry[]
+  expenses          Expense[]
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
 
@@ -413,4 +433,54 @@ model AutomationEmailLog {
 
   @@unique([type, referenceKey])
   @@index([createdAt])
+}
+
+/// Consultant expense tied to a project (and the active allocation that
+/// authorized it). `date` is stored as UTC midnight (date-only semantics,
+/// same convention as TimeEntry.date). Status transitions, RBAC and the
+/// "active allocation covering the expense date" rule are enforced in
+/// Server Actions; sensitive transitions emit AuditEvent + Approval rows.
+model Expense {
+  id            String             @id @default(cuid())
+  consultantId  String
+  consultant    Consultant         @relation(fields: [consultantId], references: [id])
+  projectId     String
+  project       Project            @relation(fields: [projectId], references: [id])
+  allocationId  String?
+  allocation    Allocation?        @relation(fields: [allocationId], references: [id])
+  date          DateTime
+  amount        Decimal            @db.Decimal(12, 2)
+  description   String
+  invoiceNumber String?
+  status        ExpenseStatus      @default(DRAFT)
+  submittedAt   DateTime?
+  attachment    ExpenseAttachment?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  @@index([consultantId])
+  @@index([projectId])
+  @@index([allocationId])
+  @@index([status, submittedAt])
+  @@index([consultantId, date])
+}
+
+/// Receipt metadata for an expense (file itself lives in object storage,
+/// bucket `expense-receipts`). Separate model (1:1 today) so evolving to
+/// multiple attachments per expense is a relation change, not a rewrite.
+/// Cascade delete: removing a DRAFT expense also removes the metadata row.
+model ExpenseAttachment {
+  id               String   @id @default(cuid())
+  expenseId        String   @unique
+  expense          Expense  @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  fileName         String
+  contentType      String
+  size             Int
+  storageBucket    String
+  storageKey       String
+  uploadedByUserId String?
+  uploadedBy       User?    @relation("ExpenseAttachmentUploader", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+  createdAt        DateTime @default(now())
+
+  @@index([uploadedByUserId])
 }

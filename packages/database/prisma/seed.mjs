@@ -9,6 +9,10 @@
 //   be exercised end to end. All demo rows use deterministic `seed-` ids, so
 //   re-running never duplicates data. No TimeEntry/TimesheetPeriod is seeded:
 //   those are created through the UI / Server Actions.
+// - Upserts Round 3 demo expenses (one per ExpenseStatus) with their Approval
+//   trail, so every approval/finance screen state can be exercised. No
+//   ExpenseAttachment is seeded: storage is not configured yet and metadata
+//   without a real file would be misleading.
 //
 // Plain ESM + the generated Prisma client — no extra TS runner dependency.
 // Run with: npm run db:seed --workspace @jumpflow/database
@@ -213,10 +217,216 @@ async function seedDemoWorkspace() {
   );
 }
 
+// --- Round 3 demo expenses (fictional validation data) ---------------------
+//
+// One expense per ExpenseStatus so every queue/screen state is reachable:
+// consultant launcher (DRAFT/SUBMITTED/rejected), /app/aprovacoes (SUBMITTED,
+// MANAGER_APPROVED) and /app/financeiro (FINANCE_APPROVED, PAYMENT_SCHEDULED,
+// PAID). Deterministic ids (`seed-exp-*`, `seed-app-exp-*`) keep upserts
+// idempotent. Approvals mirror the two-stage chain: anything at
+// FINANCE_APPROVED or beyond carries both the manager and the finance
+// decision; FINANCE_REJECTED carries manager APPROVED + finance REJECTED.
+// All dates are fixed UTC midnights in June 2026, covered by the active
+// seed-alloc-* allocations.
+
+const DEMO_EXPENSES = [
+  {
+    id: "seed-exp-draft",
+    projectId: "seed-project-portal",
+    allocationId: "seed-alloc-portal",
+    date: new Date("2026-06-08T00:00:00.000Z"),
+    amount: "84.50",
+    description: "Estacionamento em visita ao cliente (Demo)",
+    invoiceNumber: null,
+    status: "DRAFT",
+    submittedAt: null,
+    approvals: [],
+  },
+  {
+    id: "seed-exp-submitted",
+    projectId: "seed-project-portal",
+    allocationId: "seed-alloc-portal",
+    date: new Date("2026-06-05T00:00:00.000Z"),
+    amount: "312.40",
+    description: "Transporte aplicativo para workshop no cliente (Demo)",
+    invoiceNumber: "NF-2026-0605",
+    status: "SUBMITTED",
+    submittedAt: new Date("2026-06-05T13:00:00.000Z"),
+    approvals: [],
+  },
+  {
+    id: "seed-exp-manager-approved",
+    projectId: "seed-project-dados",
+    allocationId: "seed-alloc-dados",
+    date: new Date("2026-06-04T00:00:00.000Z"),
+    amount: "159.90",
+    description: "Almoco com stakeholders do projeto (Demo)",
+    invoiceNumber: "NF-2026-0604",
+    status: "MANAGER_APPROVED",
+    submittedAt: new Date("2026-06-04T18:30:00.000Z"),
+    approvals: [
+      { id: "seed-app-exp-mgr-approved-1", status: "APPROVED", comment: null },
+    ],
+  },
+  {
+    id: "seed-exp-finance-approved",
+    projectId: "seed-project-dados",
+    allocationId: "seed-alloc-dados",
+    date: new Date("2026-06-03T00:00:00.000Z"),
+    amount: "1280.00",
+    description: "Passagem aerea para kickoff presencial (Demo)",
+    invoiceNumber: "NF-2026-0603",
+    status: "FINANCE_APPROVED",
+    submittedAt: new Date("2026-06-03T14:00:00.000Z"),
+    approvals: [
+      { id: "seed-app-exp-fin-approved-1", status: "APPROVED", comment: null },
+      { id: "seed-app-exp-fin-approved-2", status: "APPROVED", comment: null },
+    ],
+  },
+  {
+    id: "seed-exp-payment-scheduled",
+    projectId: "seed-project-mobile",
+    allocationId: "seed-alloc-mobile",
+    date: new Date("2026-06-02T00:00:00.000Z"),
+    amount: "640.75",
+    description: "Hospedagem para sprint review presencial (Demo)",
+    invoiceNumber: "NF-2026-0602",
+    status: "PAYMENT_SCHEDULED",
+    submittedAt: new Date("2026-06-02T11:00:00.000Z"),
+    approvals: [
+      { id: "seed-app-exp-pay-sched-1", status: "APPROVED", comment: null },
+      { id: "seed-app-exp-pay-sched-2", status: "APPROVED", comment: null },
+    ],
+  },
+  {
+    id: "seed-exp-paid",
+    projectId: "seed-project-mobile",
+    allocationId: "seed-alloc-mobile",
+    date: new Date("2026-06-01T00:00:00.000Z"),
+    amount: "97.30",
+    description: "Pedagio e combustivel em deslocamento (Demo)",
+    invoiceNumber: "NF-2026-0601",
+    status: "PAID",
+    submittedAt: new Date("2026-06-01T16:45:00.000Z"),
+    approvals: [
+      { id: "seed-app-exp-paid-1", status: "APPROVED", comment: null },
+      { id: "seed-app-exp-paid-2", status: "APPROVED", comment: null },
+    ],
+  },
+  {
+    id: "seed-exp-manager-rejected",
+    projectId: "seed-project-portal",
+    allocationId: "seed-alloc-portal",
+    date: new Date("2026-06-06T00:00:00.000Z"),
+    amount: "450.00",
+    description: "Jantar de equipe sem aprovacao previa (Demo)",
+    invoiceNumber: null,
+    status: "MANAGER_REJECTED",
+    submittedAt: new Date("2026-06-06T20:00:00.000Z"),
+    approvals: [
+      {
+        id: "seed-app-exp-mgr-rejected-1",
+        status: "REJECTED",
+        comment:
+          "Despesa sem aprovacao previa da gestao; reenviar com justificativa.",
+      },
+    ],
+  },
+  {
+    id: "seed-exp-finance-rejected",
+    projectId: "seed-project-dados",
+    allocationId: "seed-alloc-dados",
+    date: new Date("2026-06-07T00:00:00.000Z"),
+    amount: "210.00",
+    description: "Material de escritorio para o projeto (Demo)",
+    invoiceNumber: "NF-2026-0607",
+    status: "FINANCE_REJECTED",
+    submittedAt: new Date("2026-06-07T10:15:00.000Z"),
+    approvals: [
+      { id: "seed-app-exp-fin-rejected-1", status: "APPROVED", comment: null },
+      {
+        id: "seed-app-exp-fin-rejected-2",
+        status: "REJECTED",
+        comment: "Nota fiscal divergente do valor lancado; corrigir e reenviar.",
+      },
+    ],
+  },
+];
+
+async function seedDemoExpenses() {
+  const user = await prisma.user.findUnique({
+    where: { email: DEV_USER.email },
+  });
+  if (!user) {
+    console.log(
+      `Dev user ${DEV_USER.email} not found — skipping demo expenses seed.`,
+    );
+    return;
+  }
+
+  const consultant = await prisma.consultant.findUnique({
+    where: { id: "seed-consultant-dev" },
+  });
+  if (!consultant) {
+    console.log(
+      "Consultant seed-consultant-dev not found — skipping demo expenses seed.",
+    );
+    return;
+  }
+
+  let approvalCount = 0;
+  for (const demoExpense of DEMO_EXPENSES) {
+    const { approvals, ...expense } = demoExpense;
+
+    await prisma.expense.upsert({
+      where: { id: expense.id },
+      update: {
+        projectId: expense.projectId,
+        allocationId: expense.allocationId,
+        date: expense.date,
+        amount: expense.amount,
+        description: expense.description,
+        invoiceNumber: expense.invoiceNumber,
+        status: expense.status,
+        submittedAt: expense.submittedAt,
+      },
+      create: {
+        ...expense,
+        consultantId: consultant.id,
+      },
+    });
+
+    for (const approval of approvals) {
+      await prisma.approval.upsert({
+        where: { id: approval.id },
+        update: {
+          status: approval.status,
+          comment: approval.comment,
+          approverUserId: user.id,
+        },
+        create: {
+          id: approval.id,
+          entityType: "EXPENSE",
+          entityId: expense.id,
+          approverUserId: user.id,
+          status: approval.status,
+          comment: approval.comment,
+          isAutomatic: false,
+        },
+      });
+      approvalCount += 1;
+    }
+  }
+  console.log(
+    `Seeded ${DEMO_EXPENSES.length} demo expenses with ${approvalCount} approvals for consultant ${consultant.id}.`,
+  );
+}
+
 async function main() {
   await seedRoles();
   await seedDevUser();
   await seedDemoWorkspace();
+  await seedDemoExpenses();
 }
 
 main()

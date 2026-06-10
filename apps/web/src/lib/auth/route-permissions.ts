@@ -34,8 +34,10 @@ interface RouteRule {
 export const routePermissions: RouteRule[] = [
   { prefix: "/app/financeiro", access: FINANCIAL_ROLES },
   {
+    // FINANCE participates in the expense approval chain (finance stage),
+    // so it has access to the queue alongside the manager roles.
     prefix: "/app/aprovacoes",
-    access: ["ADMIN", "AREA_MANAGER", "PROJECT_MANAGER"],
+    access: ["ADMIN", "AREA_MANAGER", "PROJECT_MANAGER", "FINANCE"],
   },
   // Despesas are open to any authenticated user (consultants log their own).
   // Payment-status changes are gated in-page by FINANCIAL_ROLES, not here.

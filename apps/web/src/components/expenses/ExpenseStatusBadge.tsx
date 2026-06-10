@@ -1,16 +1,9 @@
-import { StatusBadge, type StatusTone } from "@/components/ui/StatusBadge";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 import {
   expenseStatusLabels,
+  expenseStatusTones,
   type ExpenseStatus,
-} from "@/lib/mock-data/expenses";
-
-const toneByStatus: Record<ExpenseStatus, StatusTone> = {
-  DRAFT: "neutral",
-  SUBMITTED: "info",
-  APPROVED: "success",
-  REJECTED: "danger",
-  CLOSED: "neutral",
-};
+} from "@/lib/expenses/types";
 
 export interface ExpenseStatusBadgeProps {
   status: ExpenseStatus;
@@ -18,10 +11,13 @@ export interface ExpenseStatusBadgeProps {
   strong?: boolean;
 }
 
-/** Approval-status pill for an expense. */
+/**
+ * Status pill for an expense. The single chain covers approval AND payment
+ * (DRAFT → … → PAID), so this badge replaced the old separate payment badge.
+ */
 export function ExpenseStatusBadge({ status, strong }: ExpenseStatusBadgeProps) {
   return (
-    <StatusBadge tone={toneByStatus[status]} strong={strong}>
+    <StatusBadge tone={expenseStatusTones[status]} strong={strong}>
       {expenseStatusLabels[status]}
     </StatusBadge>
   );

@@ -6,11 +6,11 @@ import {
   summarizeExpenses,
 } from "./expenses";
 
-describe("expenses mock helpers", () => {
+describe("expenses mock helpers (single status chain)", () => {
   it("filters by status", () => {
-    const approved = filterExpenses(expenses, { status: "APPROVED" });
-    expect(approved.length).toBeGreaterThan(0);
-    expect(approved.every((e) => e.status === "APPROVED")).toBe(true);
+    const submitted = filterExpenses(expenses, { status: "SUBMITTED" });
+    expect(submitted.length).toBeGreaterThan(0);
+    expect(submitted.every((e) => e.status === "SUBMITTED")).toBe(true);
   });
 
   it("filters by project and date range", () => {
@@ -20,19 +20,42 @@ describe("expenses mock helpers", () => {
       to: "2026-06-30",
     });
     expect(result.every((e) => e.projectId === "prj-atlas")).toBe(true);
-    expect(result.every((e) => e.date >= "2026-06-01" && e.date <= "2026-06-30")).toBe(
-      true,
-    );
+    expect(
+      result.every((e) => e.date >= "2026-06-01" && e.date <= "2026-06-30"),
+    ).toBe(true);
   });
 
-  it("summarizes amounts by status", () => {
+  it("summarizes amounts along the chain", () => {
     const totals = summarizeExpenses(expenses);
     expect(totals.totalAmount).toBeCloseTo(
       expenses.reduce((s, e) => s + e.amount, 0),
       2,
     );
-    expect(totals.approvedAmount).toBeGreaterThan(0);
-    expect(totals.submitted).toBeGreaterThanOrEqual(1);
+    // aPagar = FINANCE_APPROVED, agendada = PAYMENT_SCHEDULED, paga = PAID.
+    expect(totals.toPayAmount).toBeCloseTo(
+      expenses
+        .filter((e) => e.status === "FINANCE_APPROVED")
+        .reduce((s, e) => s + e.amount, 0),
+      2,
+    );
+    expect(totals.scheduledAmount).toBeCloseTo(
+      expenses
+        .filter((e) => e.status === "PAYMENT_SCHEDULED")
+        .reduce((s, e) => s + e.amount, 0),
+      2,
+    );
+    expect(totals.paidAmount).toBeCloseTo(
+      expenses
+        .filter((e) => e.status === "PAID")
+        .reduce((s, e) => s + e.amount, 0),
+      2,
+    );
+    expect(totals.awaiting).toBeGreaterThanOrEqual(1);
+    expect(totals.rejected).toBeGreaterThanOrEqual(1);
+  });
+
+  it("every demo item is flagged as mock source", () => {
+    expect(expenses.every((e) => e.source === "mock")).toBe(true);
   });
 
   it("creates a submitted expense with a submittedAt stamp", () => {
@@ -54,7 +77,7 @@ describe("expenses mock helpers", () => {
     );
     expect(expense.status).toBe("SUBMITTED");
     expect(expense.submittedAt).toBe("2026-06-10T12:00:00Z");
-    expect(expense.paymentStatus).toBe("NOT_SCHEDULED");
+    expect(expense.source).toBe("mock");
   });
 
   it("creates a draft without a submittedAt stamp", () => {

@@ -61,10 +61,12 @@ describe("accessForPath", () => {
   });
 
   it("requires approval roles for the aprovacoes module", () => {
+    // FINANCE entered in Round 3: it decides the finance stage of expenses.
     expect(accessForPath("/app/aprovacoes")).toEqual([
       "ADMIN",
       "AREA_MANAGER",
       "PROJECT_MANAGER",
+      "FINANCE",
     ]);
   });
 
@@ -102,6 +104,7 @@ describe("canAccess / canAccessPath", () => {
 
   it("enforces roles on the aprovacoes route", () => {
     expect(canAccessPath(consultant, "/app/aprovacoes")).toBe(false);
-    expect(canAccessPath(finance, "/app/aprovacoes")).toBe(false);
+    // FINANCE may access the queue (finance stage of expense approvals).
+    expect(canAccessPath(finance, "/app/aprovacoes")).toBe(true);
   });
 });
