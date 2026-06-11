@@ -2,6 +2,7 @@ import { DataTable, type DataTableColumn } from "@/components/ui/DataTable";
 import { SectionPanel } from "@/components/ui/SectionPanel";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { StatTile } from "@/components/reports/StatTile";
+import { ReportPagination } from "@/components/reports/ReportPagination";
 import { formatCurrencyPrecise, formatDate, formatHours } from "@/lib/format";
 import {
   timeEntryStatusLabels,
@@ -34,16 +35,25 @@ function fmtDateTime(iso?: string): string {
 
 export interface HoursReportTableProps {
   report: HoursReport;
+  /** Href to the previous page (preserves the query string). */
+  prevHref: string;
+  /** Href to the next page (preserves the query string). */
+  nextHref: string;
 }
 
-/** Hours report table + totals (docs section 5.1). */
-export function HoursReportTable({ report }: HoursReportTableProps) {
-  const { rows, totals, includeFinancials } = report;
+/** Hours report table + totals + pagination (docs section 5.1). */
+export function HoursReportTable({
+  report,
+  prevHref,
+  nextHref,
+}: HoursReportTableProps) {
+  const { rows, totals, includeFinancials, pagination } = report;
 
   const columns: DataTableColumn<HoursReportRow>[] = [
     {
       key: "date",
       header: "Data",
+      className: "whitespace-nowrap",
       cell: (r) => (
         <div>
           <p className="tabular-nums text-strong">{formatDate(r.date)}</p>
@@ -54,15 +64,23 @@ export function HoursReportTable({ report }: HoursReportTableProps) {
     {
       key: "consultant",
       header: "Consultor",
-      cell: (r) => <span className="text-medium">{r.consultantName}</span>,
+      cell: (r) => (
+        <span className="block max-w-[14rem] truncate text-medium" title={r.consultantName}>
+          {r.consultantName}
+        </span>
+      ),
     },
     {
       key: "project",
       header: "Cliente / Projeto",
       cell: (r) => (
-        <div>
-          <p className="font-medium text-strong">{r.projectName}</p>
-          <p className="text-xs text-soft">{r.clientName}</p>
+        <div className="max-w-[18rem]">
+          <p className="truncate font-medium text-strong" title={r.projectName}>
+            {r.projectName}
+          </p>
+          <p className="truncate text-xs text-soft" title={r.clientName}>
+            {r.clientName}
+          </p>
         </div>
       ),
     },
@@ -75,6 +93,7 @@ export function HoursReportTable({ report }: HoursReportTableProps) {
       key: "hours",
       header: "Horas",
       align: "right",
+      className: "whitespace-nowrap",
       cell: (r) => (
         <span className="tabular-nums text-strong">{formatHours(r.hours)}</span>
       ),
@@ -119,12 +138,13 @@ export function HoursReportTable({ report }: HoursReportTableProps) {
               : "—"}
           </span>
         ),
-        className: "hidden lg:table-cell",
+        className: "hidden whitespace-nowrap lg:table-cell",
       },
       {
         key: "billed",
         header: "Faturado",
         align: "right",
+        className: "whitespace-nowrap",
         cell: (r) => (
           <span className="tabular-nums font-semibold text-strong">
             {r.billedAmount != null
@@ -163,6 +183,11 @@ export function HoursReportTable({ report }: HoursReportTableProps) {
               Nenhum lançamento de horas para os filtros aplicados.
             </p>
           }
+        />
+        <ReportPagination
+          pagination={pagination}
+          prevHref={prevHref}
+          nextHref={nextHref}
         />
       </SectionPanel>
     </div>

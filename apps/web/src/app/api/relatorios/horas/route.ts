@@ -1,6 +1,9 @@
 import { requireUser } from "@/lib/auth/guards";
 import { isDatabaseConfigured } from "@/lib/db/config";
-import { hoursReportFilterSchema } from "@/lib/reports/schemas";
+import {
+  hoursReportFilterSchema,
+  resolveDetailRange,
+} from "@/lib/reports/schemas";
 import { buildHoursCsv } from "@/lib/reports/csv";
 import { timeEntryStatusLabels } from "@/lib/timesheet/types";
 import {
@@ -27,7 +30,12 @@ export async function GET(request: Request) {
   if (!parsed.success) return invalidInputResponse();
 
   const { getHoursReport } = await import("@/lib/db/reports");
-  const report = await getHoursReport(user, parsed.data);
+  // Export the WHOLE filtered set: drop pagination so the read returns every
+  // matching row (capped at a safe ceiling). All other filters + sort apply.
+  const { page: _page, pageSize: _pageSize, ...exportFilter } = parsed.data;
+  void _page;
+  void _pageSize;
+  const report = await getHoursReport(user, exportFilter);
 
   const csv = buildHoursCsv(report.rows, {
     includeFinancials: report.includeFinancials,
@@ -36,6 +44,9 @@ export async function GET(request: Request) {
       status,
   });
 
-  const slug = rangeSlug(parsed.data.from, parsed.data.to);
+  // Resolve the period preset so the filename reflects the real range
+  // exported (e.g. ?period=mes-atual), not a bare "tudo".
+  const range = resolveDetailRange(parsed.data, new Date());
+  const slug = rangeSlug(range.from, range.to);
   return csvResponse(csv, `relatorio-horas_${slug}.csv`);
 }

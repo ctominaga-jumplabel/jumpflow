@@ -17,6 +17,7 @@ interface ConsultantRec {
   userId: string | null;
   email: string;
   name: string;
+  status?: string;
 }
 interface ProjectRec {
   id: string;
@@ -25,6 +26,8 @@ interface ProjectRec {
   clientName: string;
   managerUserId: string | null;
   billingHourlyRate: number | null;
+  status?: string;
+  clientStatus?: string;
 }
 interface EntryRec {
   id: string;
@@ -63,9 +66,64 @@ const h = vi.hoisted(() => {
     lastEntrySelect: undefined as Where | undefined,
     lastExpenseSelect: undefined as Where | undefined,
     lastExpenseWhere: undefined as Where | undefined,
+    lastEntryOrderBy: undefined as Where[] | undefined,
+    lastExpenseOrderBy: undefined as Where[] | undefined,
   };
 
   const projectOf = (id: string) => store.projects.find((p) => p.id === id)!;
+  const consultantOf = (id: string) =>
+    store.consultants.find((c) => c.id === id)!;
+
+  /** Apply skip/take like Prisma (no-ops when undefined). */
+  function paginate<T>(rows: T[], skip?: number, take?: number): T[] {
+    const start = skip ?? 0;
+    const end = take === undefined ? rows.length : start + take;
+    return rows.slice(start, end);
+  }
+
+  /** Minimal multi-key sort honoring the first orderBy clause used in code. */
+  function sortRows<T extends EntryRec | ExpenseRec>(
+    rows: T[],
+    orderBy?: Where[],
+  ): T[] {
+    if (!orderBy || orderBy.length === 0) return rows;
+    const out = [...rows];
+    out.sort((a, b) => {
+      for (const clause of orderBy) {
+        const [key] = Object.keys(clause);
+        const dir: string = clause[key]?.name
+          ? clause[key].name
+          : clause[key];
+        let av: unknown;
+        let bv: unknown;
+        if (key === "date") {
+          av = (a as { date: Date }).date.getTime();
+          bv = (b as { date: Date }).date.getTime();
+        } else if (key === "hours") {
+          av = (a as EntryRec).hours;
+          bv = (b as EntryRec).hours;
+        } else if (key === "amount") {
+          av = (a as ExpenseRec).amount;
+          bv = (b as ExpenseRec).amount;
+        } else if (key === "status") {
+          av = a.status;
+          bv = b.status;
+        } else if (key === "consultant") {
+          av = consultantOf(a.consultantId).name;
+          bv = consultantOf(b.consultantId).name;
+        } else if (key === "project") {
+          av = projectOf(a.projectId).name;
+          bv = projectOf(b.projectId).name;
+        } else {
+          continue;
+        }
+        if (av! < bv!) return dir === "desc" ? 1 : -1;
+        if (av! > bv!) return dir === "desc" ? -1 : 1;
+      }
+      return 0;
+    });
+    return out;
+  }
 
   function matchEntry(e: EntryRec, where?: Where): boolean {
     if (!where) return true;
@@ -80,6 +138,13 @@ const h = vi.hoisted(() => {
     if (where.activityType && e.activityType !== where.activityType) {
       return false;
     }
+    if (typeof where.billable === "boolean" && e.billable !== where.billable) {
+      return false;
+    }
+    if (where.consultant?.status) {
+      const c = store.consultants.find((x) => x.id === e.consultantId);
+      if (c?.status !== where.consultant.status) return false;
+    }
     if (where.date) {
       if (where.date.gte && e.date.getTime() < where.date.gte.getTime()) {
         return false;
@@ -88,18 +153,19 @@ const h = vi.hoisted(() => {
         return false;
       }
     }
-    if (where.project) {
-      const p = projectOf(e.projectId);
-      if (
-        where.project.managerUserId &&
-        p.managerUserId !== where.project.managerUserId
-      ) {
-        return false;
-      }
-      if (where.project.clientId && p.clientId !== where.project.clientId) {
-        return false;
-      }
+    if (where.project && !matchProject(e.projectId, where.project)) {
+      return false;
     }
+    return true;
+  }
+
+  /** Project relation match: managerUserId, clientId, status, client.status. */
+  function matchProject(projectId: string, pw: Where): boolean {
+    const p = projectOf(projectId);
+    if (pw.managerUserId && p.managerUserId !== pw.managerUserId) return false;
+    if (pw.clientId && p.clientId !== pw.clientId) return false;
+    if (pw.status && p.status !== pw.status) return false;
+    if (pw.client?.status && p.clientStatus !== pw.client.status) return false;
     return true;
   }
 
@@ -138,6 +204,10 @@ const h = vi.hoisted(() => {
       return false;
     }
     if (where.status?.in && !where.status.in.includes(x.status)) return false;
+    if (where.consultant?.status) {
+      const c = store.consultants.find((y) => y.id === x.consultantId);
+      if (c?.status !== where.consultant.status) return false;
+    }
     if (where.date) {
       if (where.date.gte && x.date.getTime() < where.date.gte.getTime()) {
         return false;
@@ -146,17 +216,8 @@ const h = vi.hoisted(() => {
         return false;
       }
     }
-    if (where.project) {
-      const p = projectOf(x.projectId);
-      if (
-        where.project.managerUserId &&
-        p.managerUserId !== where.project.managerUserId
-      ) {
-        return false;
-      }
-      if (where.project.clientId && p.clientId !== where.project.clientId) {
-        return false;
-      }
+    if (where.project && !matchProject(x.projectId, where.project)) {
+      return false;
     }
     return true;
   }
@@ -214,29 +275,49 @@ const h = vi.hoisted(() => {
       findMany: async ({
         where,
         select,
+        orderBy,
+        skip,
+        take,
       }: {
         where?: Where;
         select?: Where;
+        orderBy?: Where[];
+        skip?: number;
+        take?: number;
       }) => {
         store.lastEntrySelect = select;
-        return store.entries
-          .filter((e) => matchEntry(e, where))
-          .map((e) => entryOut(e, select));
+        if (orderBy) store.lastEntryOrderBy = orderBy;
+        const sorted = sortRows(
+          store.entries.filter((e) => matchEntry(e, where)),
+          orderBy,
+        );
+        const sliced = paginate(sorted, skip, take);
+        return sliced.map((e) => entryOut(e, select));
       },
     },
     expense: {
       findMany: async ({
         where,
         select,
+        orderBy,
+        skip,
+        take,
       }: {
         where?: Where;
         select?: Where;
+        orderBy?: Where[];
+        skip?: number;
+        take?: number;
       }) => {
         store.lastExpenseWhere = where;
         store.lastExpenseSelect = select;
-        return store.expenses
-          .filter((x) => matchExpense(x, where))
-          .map((x) => expenseOut(x));
+        if (orderBy) store.lastExpenseOrderBy = orderBy;
+        const sorted = sortRows(
+          store.expenses.filter((x) => matchExpense(x, where)),
+          orderBy,
+        );
+        const sliced = paginate(sorted, skip, take);
+        return sliced.map((x) => expenseOut(x));
       },
     },
     approval: {
@@ -309,6 +390,8 @@ beforeEach(() => {
   h.store.lastEntrySelect = undefined;
   h.store.lastExpenseSelect = undefined;
   h.store.lastExpenseWhere = undefined;
+  h.store.lastEntryOrderBy = undefined;
+  h.store.lastExpenseOrderBy = undefined;
 });
 
 describe("resolveReportScope", () => {
@@ -419,6 +502,34 @@ describe("buildHoursWhere", () => {
     expect(where.date.gte).toBeInstanceOf(Date);
     expect(where.date.lte).toBeInstanceOf(Date);
   });
+
+  it("applies billable true/false", () => {
+    expect(buildHoursWhere(ownScope, { billable: true }).billable).toBe(true);
+    expect(buildHoursWhere(ownScope, { billable: false }).billable).toBe(false);
+    // Absent billable must not add the key.
+    expect(buildHoursWhere(ownScope, {})).not.toHaveProperty("billable");
+  });
+
+  it("merges projectStatus/clientStatus into where.project WITHOUT clobbering scope", () => {
+    const where = buildHoursWhere(pmScope, {
+      clientId: "cli-vix",
+      projectStatus: "ACTIVE",
+      clientStatus: "ACTIVE",
+    });
+    // Scope narrowing + clientId + project status all coexist.
+    expect(where.project).toMatchObject({
+      managerUserId: "user-1",
+      clientId: "cli-vix",
+      status: "ACTIVE",
+      client: { status: "ACTIVE" },
+    });
+  });
+
+  it("consultantStatus adds a consultant relation filter alongside consultantId", () => {
+    const where = buildHoursWhere(ownScope, { consultantStatus: "ACTIVE" });
+    expect(where.consultantId).toBe("con-1");
+    expect(where.consultant).toEqual({ status: "ACTIVE" });
+  });
 });
 
 describe("buildExpensesWhere", () => {
@@ -449,6 +560,24 @@ describe("buildExpensesWhere", () => {
       { status: "PAID", stage: "GESTOR" },
     );
     expect(where.status).toBe("PAID");
+  });
+
+  it("merges projectStatus/clientStatus/consultantStatus", () => {
+    const where = buildExpensesWhere(
+      { broad: true, includeFinancials: true, financeHoursLimited: false },
+      {
+        clientId: "cli-vix",
+        projectStatus: "CLOSED",
+        clientStatus: "INACTIVE",
+        consultantStatus: "ON_LEAVE",
+      },
+    );
+    expect(where.project).toMatchObject({
+      clientId: "cli-vix",
+      status: "CLOSED",
+      client: { status: "INACTIVE" },
+    });
+    expect(where.consultant).toEqual({ status: "ON_LEAVE" });
   });
 });
 
@@ -641,6 +770,210 @@ describe("getConsolidatedReport", () => {
     expect(report.clients).toEqual([]);
     expect(report.totals.approvedHours).toBe(0);
     expect(report.totals.expenseEntering).toBe(0);
+  });
+});
+
+describe("getHoursReport pagination + sort + totals over the whole set", () => {
+  function seedTwelve() {
+    h.store.entries = Array.from({ length: 12 }, (_, i) => ({
+      id: `e${i + 1}`,
+      consultantId: "con-1",
+      projectId: "proj-atlas",
+      // Spread dates so date-asc ordering is deterministic.
+      date: new Date(Date.UTC(2026, 5, i + 1)),
+      hours: i + 1,
+      activityType: "DEVELOPMENT",
+      billable: i % 2 === 0,
+      status: "APPROVED",
+      submittedAt: null,
+    }));
+  }
+
+  beforeEach(seedTwelve);
+
+  it("paginates: page 1 of pageSize 5 returns 5 rows, totals cover all 12", async () => {
+    const report = await getHoursReport(user(["ADMIN"]), {
+      page: 1,
+      pageSize: 50, // 50 is a valid size; force a smaller page below
+    });
+    // pageSize must be one of the allowed values; the schema only lets 25/50/100
+    // through, so here we exercise 50 and assert the whole-set totals.
+    expect(report.rows.length).toBe(12);
+    expect(report.pagination.total).toBe(12);
+    expect(report.totals.count).toBe(12);
+    expect(report.totals.totalHours).toBe(78); // 1..12
+  });
+
+  it("page 2 of pageSize 25 is empty but totals still reflect all 12", async () => {
+    const report = await getHoursReport(user(["ADMIN"]), {
+      page: 2,
+      pageSize: 25,
+    });
+    expect(report.rows.length).toBe(0);
+    expect(report.pagination.total).toBe(12);
+    expect(report.pagination.totalPages).toBe(1);
+    expect(report.totals.totalHours).toBe(78);
+  });
+
+  it("export-all mode (no page/pageSize) returns every row in one page", async () => {
+    const report = await getHoursReport(user(["ADMIN"]), {});
+    expect(report.rows.length).toBe(12);
+    expect(report.pagination.totalPages).toBe(1);
+    expect(report.pagination.page).toBe(1);
+  });
+
+  it("sort=hours desc orders by hours descending", async () => {
+    const report = await getHoursReport(user(["ADMIN"]), {
+      sort: "hours",
+      direction: "desc",
+    });
+    expect(report.rows[0].hours).toBe(12);
+    expect(report.rows[report.rows.length - 1].hours).toBe(1);
+    expect(h.store.lastEntryOrderBy?.[0]).toEqual({ hours: "desc" });
+  });
+
+  it("billable filter narrows rows and totals together", async () => {
+    const report = await getHoursReport(user(["ADMIN"]), { billable: true });
+    // i%2===0 => indices 0,2,4,6,8,10 => hours 1,3,5,7,9,11 => 6 rows.
+    expect(report.rows.length).toBe(6);
+    expect(report.pagination.total).toBe(6);
+    expect(report.totals.totalHours).toBe(36);
+  });
+});
+
+describe("getHoursReport period preset overrides from/to", () => {
+  beforeEach(() => {
+    h.store.entries = [
+      // May entry, June entry, July entry.
+      {
+        id: "may",
+        consultantId: "con-1",
+        projectId: "proj-atlas",
+        date: new Date(Date.UTC(2026, 4, 15)),
+        hours: 5,
+        activityType: "DEVELOPMENT",
+        billable: true,
+        status: "APPROVED",
+        submittedAt: null,
+      },
+      {
+        id: "jun",
+        consultantId: "con-1",
+        projectId: "proj-atlas",
+        date: new Date(Date.UTC(2026, 5, 15)),
+        hours: 8,
+        activityType: "DEVELOPMENT",
+        billable: true,
+        status: "APPROVED",
+        submittedAt: null,
+      },
+    ];
+  });
+
+  it("mes-atual (June) ignores an explicit January range and keeps only June", async () => {
+    const today = new Date(Date.UTC(2026, 5, 11));
+    const report = await getHoursReport(
+      user(["ADMIN"]),
+      { period: "mes-atual", from: "2026-01-01", to: "2026-01-31" },
+      today,
+    );
+    expect(report.rows.map((r) => r.id)).toEqual(["jun"]);
+  });
+
+  it("mes-anterior (from June) keeps only May", async () => {
+    const today = new Date(Date.UTC(2026, 5, 11));
+    const report = await getHoursReport(
+      user(["ADMIN"]),
+      { period: "mes-anterior" },
+      today,
+    );
+    expect(report.rows.map((r) => r.id)).toEqual(["may"]);
+  });
+});
+
+describe("getHoursReport client/project/consultant status filters", () => {
+  beforeEach(() => {
+    h.store.projects = [
+      {
+        id: "proj-active",
+        name: "Ativo",
+        clientId: "cli-active",
+        clientName: "Cliente Ativo",
+        managerUserId: "user-1",
+        billingHourlyRate: 100,
+        status: "ACTIVE",
+        clientStatus: "ACTIVE",
+      },
+      {
+        id: "proj-closed",
+        name: "Encerrado",
+        clientId: "cli-inactive",
+        clientName: "Cliente Inativo",
+        managerUserId: "user-1",
+        billingHourlyRate: 100,
+        status: "CLOSED",
+        clientStatus: "INACTIVE",
+      },
+    ];
+    h.store.consultants = [
+      {
+        id: "con-1",
+        userId: "user-1",
+        email: "ana@jumplabel.com.br",
+        name: "Ana",
+        status: "ACTIVE",
+      },
+      {
+        id: "con-2",
+        userId: null,
+        email: "bia@jumplabel.com.br",
+        name: "Bia",
+        status: "ON_LEAVE",
+      },
+    ];
+    h.store.entries = [
+      mk("e-active", "proj-active", "con-1"),
+      mk("e-closed", "proj-closed", "con-1"),
+      mk("e-onleave", "proj-active", "con-2"),
+    ];
+  });
+
+  function mk(id: string, projectId: string, consultantId: string): EntryRec {
+    return {
+      id,
+      consultantId,
+      projectId,
+      date: new Date(Date.UTC(2026, 5, 10)),
+      hours: 4,
+      activityType: "DEVELOPMENT",
+      billable: true,
+      status: "APPROVED",
+      submittedAt: null,
+    };
+  }
+
+  it("projectStatus=ACTIVE drops the closed project", async () => {
+    const report = await getHoursReport(user(["ADMIN"]), {
+      projectStatus: "ACTIVE",
+    });
+    expect(report.rows.map((r) => r.id).sort()).toEqual([
+      "e-active",
+      "e-onleave",
+    ]);
+  });
+
+  it("clientStatus=INACTIVE keeps only the inactive client's entries", async () => {
+    const report = await getHoursReport(user(["ADMIN"]), {
+      clientStatus: "INACTIVE",
+    });
+    expect(report.rows.map((r) => r.id)).toEqual(["e-closed"]);
+  });
+
+  it("consultantStatus=ON_LEAVE keeps only Bia's entry", async () => {
+    const report = await getHoursReport(user(["ADMIN"]), {
+      consultantStatus: "ON_LEAVE",
+    });
+    expect(report.rows.map((r) => r.id)).toEqual(["e-onleave"]);
   });
 });
 

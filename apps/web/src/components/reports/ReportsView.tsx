@@ -27,11 +27,61 @@ const CSV_ENDPOINT: Record<Tab, string> = {
   consolidado: "/api/relatorios/consolidado",
 };
 
-/** Filter param keys relevant to each tab (kept out of the export link otherwise). */
+/**
+ * Filter param keys relevant to each tab (kept out of the export link
+ * otherwise). `page`/`pageSize` are deliberately EXCLUDED from the CSV link —
+ * the export always covers the whole filtered set.
+ */
 const TAB_PARAMS: Record<Tab, string[]> = {
-  horas: ["from", "to", "clientId", "projectId", "consultantId", "status", "activityType"],
-  despesas: ["from", "to", "clientId", "projectId", "consultantId", "status", "stage"],
-  consolidado: ["month", "from", "to", "clientId", "projectId", "consultantId"],
+  horas: [
+    "period",
+    "from",
+    "to",
+    "clientId",
+    "projectId",
+    "consultantId",
+    "status",
+    "activityType",
+    "billable",
+    "clientStatus",
+    "projectStatus",
+    "consultantStatus",
+    "sort",
+    "direction",
+  ],
+  despesas: [
+    "period",
+    "from",
+    "to",
+    "clientId",
+    "projectId",
+    "consultantId",
+    "status",
+    "stage",
+    "clientStatus",
+    "projectStatus",
+    "consultantStatus",
+    "sort",
+    "direction",
+  ],
+  consolidado: [
+    "month",
+    "from",
+    "to",
+    "clientId",
+    "projectId",
+    "consultantId",
+    "clientStatus",
+    "projectStatus",
+    "consultantStatus",
+  ],
+};
+
+/** Params that also belong in the in-page pagination links (page included). */
+const PAGE_LINK_PARAMS: Record<Tab, string[]> = {
+  horas: [...TAB_PARAMS.horas, "pageSize"],
+  despesas: [...TAB_PARAMS.despesas, "pageSize"],
+  consolidado: TAB_PARAMS.consolidado,
 };
 
 export interface ReportsViewProps {
@@ -53,6 +103,26 @@ function buildQuery(tab: Tab, params: Record<string, string>): string {
   }
   const qs = search.toString();
   return qs ? `?${qs}` : "";
+}
+
+/**
+ * Build a `/app/relatorios` href for a given page, preserving every active
+ * filter + sort + pageSize (query string is the source of truth). The active
+ * tab stays in the URL too.
+ */
+function buildPageHref(
+  tab: Tab,
+  params: Record<string, string>,
+  page: number,
+): string {
+  const search = new URLSearchParams();
+  search.set("tab", tab);
+  for (const key of PAGE_LINK_PARAMS[tab]) {
+    const value = params[key];
+    if (value && value !== "ALL") search.set(key, value);
+  }
+  search.set("page", String(page));
+  return `/app/relatorios?${search.toString()}`;
 }
 
 /**
@@ -124,10 +194,34 @@ export function ReportsView({
       <ReportFilters tab={tab} options={filterOptions} values={rawParams} />
 
       {tab === "horas" && hoursReport ? (
-        <HoursReportTable report={hoursReport} />
+        <HoursReportTable
+          report={hoursReport}
+          prevHref={buildPageHref(
+            tab,
+            rawParams,
+            Math.max(1, hoursReport.pagination.page - 1),
+          )}
+          nextHref={buildPageHref(
+            tab,
+            rawParams,
+            hoursReport.pagination.page + 1,
+          )}
+        />
       ) : null}
       {tab === "despesas" && expensesReport ? (
-        <ExpensesReportTable report={expensesReport} />
+        <ExpensesReportTable
+          report={expensesReport}
+          prevHref={buildPageHref(
+            tab,
+            rawParams,
+            Math.max(1, expensesReport.pagination.page - 1),
+          )}
+          nextHref={buildPageHref(
+            tab,
+            rawParams,
+            expensesReport.pagination.page + 1,
+          )}
+        />
       ) : null}
       {tab === "consolidado" && consolidatedReport ? (
         <ConsolidatedReport report={consolidatedReport} />

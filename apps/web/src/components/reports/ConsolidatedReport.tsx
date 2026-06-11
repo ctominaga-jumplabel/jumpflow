@@ -100,25 +100,30 @@ export function ConsolidatedReport({ report }: ConsolidatedReportProps) {
                     className="transition-colors hover:bg-surface-muted/60"
                   >
                     <td className="px-5 py-3 font-medium text-strong">
-                      {p.projectName}
+                      <span
+                        className="block max-w-[16rem] truncate"
+                        title={p.projectName}
+                      >
+                        {p.projectName}
+                      </span>
                     </td>
-                    <td className="px-5 py-3 text-right tabular-nums text-strong">
+                    <td className="whitespace-nowrap px-5 py-3 text-right tabular-nums text-strong">
                       {formatHours(p.approvedHours)}
                     </td>
-                    <td className="px-5 py-3 text-right tabular-nums text-warning">
+                    <td className="whitespace-nowrap px-5 py-3 text-right tabular-nums text-warning">
                       {p.pendingHours > 0 ? formatHours(p.pendingHours) : "—"}
                     </td>
                     {includeFinancials ? (
-                      <td className="px-5 py-3 text-right tabular-nums text-medium">
+                      <td className="whitespace-nowrap px-5 py-3 text-right tabular-nums text-medium">
                         {p.billedAmount != null
                           ? formatCurrencyPrecise(p.billedAmount)
                           : "—"}
                       </td>
                     ) : null}
-                    <td className="px-5 py-3 text-right tabular-nums text-strong">
+                    <td className="whitespace-nowrap px-5 py-3 text-right tabular-nums text-strong">
                       {formatCurrencyPrecise(p.expenseEntering)}
                     </td>
-                    <td className="px-5 py-3 text-right tabular-nums text-warning">
+                    <td className="whitespace-nowrap px-5 py-3 text-right tabular-nums text-warning">
                       {p.expensePending > 0
                         ? formatCurrencyPrecise(p.expensePending)
                         : "—"}

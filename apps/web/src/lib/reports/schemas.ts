@@ -76,8 +76,129 @@ const hoursStatusEnum = z.enum([
 
 const activityEnum = z.enum(ACTIVITY_TYPES);
 
+/* --------------------------------------------------------------------------
+ * Rodada 4.1 — paridade de filtros do portal antigo (campos já existentes).
+ * Todos os filtros abaixo usam colunas que já existem no schema, sem migration.
+ * ------------------------------------------------------------------------ */
+
+/** `Client.status` (paridade com `statusClientes` do legado). */
+const clientStatusEnum = z.enum(["ACTIVE", "INACTIVE"]);
+/** `Project.status` (paridade com `statusProjetos`). */
+const projectStatusEnum = z.enum(["PROPOSAL", "ACTIVE", "PAUSED", "CLOSED"]);
+/** `Consultant.status` (paridade com `statusUsuarios`). */
+const consultantStatusEnum = z.enum(["ACTIVE", "INACTIVE", "ON_LEAVE"]);
+
+/**
+ * Cobrança/faturável (`TimeEntry.billable`), paridade com `cobranca` do legado.
+ * `"true"` -> true, `"false"` -> false, vazio/`ALL`/ausente -> undefined.
+ */
+const billableSchema = z.preprocess((value) => {
+  const v = blankToUndefined(value);
+  if (v === undefined) return undefined;
+  if (v === "true" || v === true) return true;
+  if (v === "false" || v === false) return false;
+  return v; // valor inesperado: deixa o enum falhar
+}, z.boolean().optional());
+
+const clientStatusSchema = z.preprocess(
+  blankToUndefined,
+  clientStatusEnum.optional(),
+);
+const projectStatusSchema = z.preprocess(
+  blankToUndefined,
+  projectStatusEnum.optional(),
+);
+const consultantStatusSchema = z.preprocess(
+  blankToUndefined,
+  consultantStatusEnum.optional(),
+);
+
+/** Period presets (resolved server-side into `from`/`to`). */
+export const PERIOD_PRESETS = [
+  "mes-atual",
+  "mes-anterior",
+  "ano-atual",
+  "custom",
+] as const;
+export type PeriodPreset = (typeof PERIOD_PRESETS)[number];
+const periodSchema = z.preprocess(
+  blankToUndefined,
+  z.enum(PERIOD_PRESETS).optional(),
+);
+
+/** Sort direction. Default depends on the report (date asc for hours). */
+const directionEnum = z.enum(["asc", "desc"]);
+const directionSchema = z.preprocess(
+  blankToUndefined,
+  directionEnum.optional(),
+);
+
+/**
+ * Allowed page sizes. Anything outside the set is rejected (the UI only offers
+ * these values), keeping the page bounded and predictable.
+ */
+export const PAGE_SIZES = [25, 50, 100] as const;
+export const DEFAULT_PAGE_SIZE = 50;
+
+const pageSchema = z.preprocess((value) => {
+  const v = blankToUndefined(value);
+  return v === undefined ? undefined : Number(v);
+}, z.number().int().min(1).optional());
+
+const pageSizeSchema = z.preprocess((value) => {
+  const v = blankToUndefined(value);
+  return v === undefined ? undefined : Number(v);
+}, z
+  .union([z.literal(25), z.literal(50), z.literal(100)])
+  .optional());
+
+/**
+ * Sort whitelist per report. Invalid values fall back to the default below —
+ * the raw value never reaches Prisma as a column name (anti-injection).
+ */
+export const HOURS_SORT_FIELDS = [
+  "date",
+  "hours",
+  "consultantName",
+  "projectName",
+  "status",
+] as const;
+export type HoursSortField = (typeof HOURS_SORT_FIELDS)[number];
+export const HOURS_DEFAULT_SORT: HoursSortField = "date";
+export const HOURS_DEFAULT_DIRECTION: "asc" | "desc" = "asc";
+
+export const EXPENSES_SORT_FIELDS = [
+  "date",
+  "amount",
+  "consultantName",
+  "projectName",
+  "status",
+] as const;
+export type ExpensesSortField = (typeof EXPENSES_SORT_FIELDS)[number];
+export const EXPENSES_DEFAULT_SORT: ExpensesSortField = "date";
+export const EXPENSES_DEFAULT_DIRECTION: "asc" | "desc" = "desc";
+
+const hoursSortSchema = z.preprocess(
+  blankToUndefined,
+  z.enum(HOURS_SORT_FIELDS).optional(),
+);
+const expensesSortSchema = z.preprocess(
+  blankToUndefined,
+  z.enum(EXPENSES_SORT_FIELDS).optional(),
+);
+
+/*
+ * NOTE on `somenteComMovimento` (legado `filtroUsuariosClientesProjetos`):
+ * intentionally NOT implemented. Every row in the detail reports already comes
+ * from a TimeEntry/Expense (movement is implicit), and the consolidated report
+ * only materializes a project when it has hours or expenses in the range —
+ * projects with zero movement never appear. The toggle would be a no-op in all
+ * three reports, so we omit it rather than add an inert control.
+ */
+
 export const hoursReportFilterSchema = z
   .object({
+    period: periodSchema,
     from: isoDateSchema,
     to: isoDateSchema,
     clientId: idFilterSchema,
@@ -85,6 +206,14 @@ export const hoursReportFilterSchema = z
     consultantId: idFilterSchema,
     status: z.preprocess(blankToUndefined, hoursStatusEnum.optional()),
     activityType: z.preprocess(blankToUndefined, activityEnum.optional()),
+    billable: billableSchema,
+    clientStatus: clientStatusSchema,
+    projectStatus: projectStatusSchema,
+    consultantStatus: consultantStatusSchema,
+    sort: hoursSortSchema,
+    direction: directionSchema,
+    page: pageSchema,
+    pageSize: pageSizeSchema,
   })
   .superRefine(refineDateRange);
 
@@ -117,6 +246,7 @@ export const EXPENSE_STAGE_STATUSES: Record<
 
 export const expensesReportFilterSchema = z
   .object({
+    period: periodSchema,
     from: isoDateSchema,
     to: isoDateSchema,
     clientId: idFilterSchema,
@@ -124,6 +254,13 @@ export const expensesReportFilterSchema = z
     consultantId: idFilterSchema,
     status: z.preprocess(blankToUndefined, expenseStatusEnum.optional()),
     stage: z.preprocess(blankToUndefined, expenseStageEnum.optional()),
+    clientStatus: clientStatusSchema,
+    projectStatus: projectStatusSchema,
+    consultantStatus: consultantStatusSchema,
+    sort: expensesSortSchema,
+    direction: directionSchema,
+    page: pageSchema,
+    pageSize: pageSizeSchema,
   })
   .superRefine(refineDateRange);
 
@@ -142,6 +279,9 @@ export const consolidatedReportFilterSchema = z
     clientId: idFilterSchema,
     projectId: idFilterSchema,
     consultantId: idFilterSchema,
+    clientStatus: clientStatusSchema,
+    projectStatus: projectStatusSchema,
+    consultantStatus: consultantStatusSchema,
   })
   .superRefine(refineDateRange);
 
@@ -171,4 +311,55 @@ function toIso(date: Date): string {
   const m = String(date.getUTCMonth() + 1).padStart(2, "0");
   const d = String(date.getUTCDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
+}
+
+/**
+ * Resolve a period preset into an inclusive UTC `from`/`to` range. Pure and
+ * testable: `today` is injected (the caller passes `new Date()`), never read
+ * from the ambient clock. A known preset OVERRIDES any explicit `from`/`to`;
+ * `custom`/`undefined` return `{}` so the caller keeps its explicit range.
+ *
+ * - `mes-atual`: first..last day of `today`'s month.
+ * - `mes-anterior`: first..last day of the previous month.
+ * - `ano-atual`: Jan 1 .. Dec 31 of `today`'s year.
+ */
+export function resolvePeriodPreset(
+  period: PeriodPreset | undefined,
+  today: Date,
+): { from?: string; to?: string } {
+  if (!period || period === "custom") return {};
+  const y = today.getUTCFullYear();
+  const m = today.getUTCMonth(); // 0-based
+
+  if (period === "mes-atual") {
+    return {
+      from: toIso(new Date(Date.UTC(y, m, 1))),
+      to: toIso(new Date(Date.UTC(y, m + 1, 0))),
+    };
+  }
+  if (period === "mes-anterior") {
+    return {
+      from: toIso(new Date(Date.UTC(y, m - 1, 1))),
+      to: toIso(new Date(Date.UTC(y, m, 0))),
+    };
+  }
+  // ano-atual
+  return {
+    from: toIso(new Date(Date.UTC(y, 0, 1))),
+    to: toIso(new Date(Date.UTC(y, 11, 31))),
+  };
+}
+
+/**
+ * Effective inclusive range for a detail report (hours/expenses): a known
+ * `period` preset overrides `from`/`to`; otherwise the explicit range is used.
+ * `today` is injected for testability.
+ */
+export function resolveDetailRange(
+  filter: { period?: PeriodPreset; from?: string; to?: string },
+  today: Date,
+): { from?: string; to?: string } {
+  const preset = resolvePeriodPreset(filter.period, today);
+  if (preset.from || preset.to) return preset;
+  return { from: filter.from, to: filter.to };
 }

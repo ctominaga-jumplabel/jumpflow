@@ -1,6 +1,9 @@
 import { requireUser } from "@/lib/auth/guards";
 import { isDatabaseConfigured } from "@/lib/db/config";
-import { expensesReportFilterSchema } from "@/lib/reports/schemas";
+import {
+  expensesReportFilterSchema,
+  resolveDetailRange,
+} from "@/lib/reports/schemas";
 import { buildExpensesCsv } from "@/lib/reports/csv";
 import { expenseStatusLabels } from "@/lib/expenses/types";
 import {
@@ -26,13 +29,21 @@ export async function GET(request: Request) {
   if (!parsed.success) return invalidInputResponse();
 
   const { getExpensesReport } = await import("@/lib/db/reports");
-  const report = await getExpensesReport(user, parsed.data);
+  // Export the WHOLE filtered set: drop pagination so the read returns every
+  // matching row (capped at a safe ceiling). All other filters + sort apply.
+  const { page: _page, pageSize: _pageSize, ...exportFilter } = parsed.data;
+  void _page;
+  void _pageSize;
+  const report = await getExpensesReport(user, exportFilter);
 
   const csv = buildExpensesCsv(report.rows, {
     statusLabel: (status) =>
       expenseStatusLabels[status as keyof typeof expenseStatusLabels] ?? status,
   });
 
-  const slug = rangeSlug(parsed.data.from, parsed.data.to);
+  // Resolve the period preset so the filename reflects the real range
+  // exported (e.g. ?period=mes-atual), not a bare "tudo".
+  const range = resolveDetailRange(parsed.data, new Date());
+  const slug = rangeSlug(range.from, range.to);
   return csvResponse(csv, `relatorio-despesas_${slug}.csv`);
 }

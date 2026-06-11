@@ -46,11 +46,30 @@ export interface HoursReportTotals {
   totalBilled?: number;
 }
 
+/**
+ * Server-side pagination meta. Totals always reflect the WHOLE filtered set
+ * (`total`), not just the page; the rows array carries only the current page.
+ * When the reader runs in "export all" mode (CSV), `page`/`pageSize` describe a
+ * single page covering everything.
+ */
+export interface PaginationMeta {
+  /** Total rows matching the filter (whole set, all pages). */
+  total: number;
+  /** Current 1-based page. */
+  page: number;
+  /** Rows per page. */
+  pageSize: number;
+  /** Total number of pages (>= 1). */
+  totalPages: number;
+}
+
 export interface HoursReport {
   rows: HoursReportRow[];
   totals: HoursReportTotals;
   /** Whether monetary hour columns are present (FINANCIAL_ROLES). */
   includeFinancials: boolean;
+  /** Pagination meta over the whole filtered set. */
+  pagination: PaginationMeta;
 }
 
 export interface ExpensesReportRow {
@@ -76,6 +95,8 @@ export interface ExpensesReportRow {
 export interface ExpensesReport {
   rows: ExpensesReportRow[];
   totals: ExpenseTotals;
+  /** Pagination meta over the whole filtered set. */
+  pagination: PaginationMeta;
 }
 
 /** A project line inside a consolidated client group. */

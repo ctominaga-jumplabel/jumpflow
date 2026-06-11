@@ -2,6 +2,7 @@ import { DataTable, type DataTableColumn } from "@/components/ui/DataTable";
 import { SectionPanel } from "@/components/ui/SectionPanel";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { StatTile } from "@/components/reports/StatTile";
+import { ReportPagination } from "@/components/reports/ReportPagination";
 import { formatCurrencyPrecise, formatDate } from "@/lib/format";
 import {
   expenseStatusLabels,
@@ -21,16 +22,25 @@ const stageTones: Record<string, "neutral" | "info" | "success" | "warning" | "d
 
 export interface ExpensesReportTableProps {
   report: ExpensesReport;
+  /** Href to the previous page (preserves the query string). */
+  prevHref: string;
+  /** Href to the next page (preserves the query string). */
+  nextHref: string;
 }
 
-/** Expenses report table + totals (docs section 5.2). */
-export function ExpensesReportTable({ report }: ExpensesReportTableProps) {
-  const { rows, totals } = report;
+/** Expenses report table + totals + pagination (docs section 5.2). */
+export function ExpensesReportTable({
+  report,
+  prevHref,
+  nextHref,
+}: ExpensesReportTableProps) {
+  const { rows, totals, pagination } = report;
 
   const columns: DataTableColumn<ExpensesReportRow>[] = [
     {
       key: "date",
       header: "Data",
+      className: "whitespace-nowrap",
       cell: (r) => (
         <span className="tabular-nums text-strong">{formatDate(r.date)}</span>
       ),
@@ -38,15 +48,23 @@ export function ExpensesReportTable({ report }: ExpensesReportTableProps) {
     {
       key: "consultant",
       header: "Consultor",
-      cell: (r) => <span className="text-medium">{r.consultantName}</span>,
+      cell: (r) => (
+        <span className="block max-w-[14rem] truncate text-medium" title={r.consultantName}>
+          {r.consultantName}
+        </span>
+      ),
     },
     {
       key: "project",
       header: "Cliente / Projeto",
       cell: (r) => (
-        <div>
-          <p className="font-medium text-strong">{r.projectName}</p>
-          <p className="text-xs text-soft">{r.clientName}</p>
+        <div className="max-w-[18rem]">
+          <p className="truncate font-medium text-strong" title={r.projectName}>
+            {r.projectName}
+          </p>
+          <p className="truncate text-xs text-soft" title={r.clientName}>
+            {r.clientName}
+          </p>
         </div>
       ),
     },
@@ -55,7 +73,9 @@ export function ExpensesReportTable({ report }: ExpensesReportTableProps) {
       header: "Descrição",
       cell: (r) => (
         <div className="max-w-xs">
-          <p className="truncate text-medium">{r.description}</p>
+          <p className="truncate text-medium" title={r.description}>
+            {r.description}
+          </p>
           {r.invoiceNumber ? (
             <p className="text-xs text-soft">NF {r.invoiceNumber}</p>
           ) : null}
@@ -66,6 +86,7 @@ export function ExpensesReportTable({ report }: ExpensesReportTableProps) {
       key: "amount",
       header: "Valor",
       align: "right",
+      className: "whitespace-nowrap",
       cell: (r) => (
         <span className="tabular-nums font-semibold text-strong">
           {formatCurrencyPrecise(r.amount)}
@@ -131,6 +152,11 @@ export function ExpensesReportTable({ report }: ExpensesReportTableProps) {
               Nenhuma despesa para os filtros aplicados.
             </p>
           }
+        />
+        <ReportPagination
+          pagination={pagination}
+          prevHref={prevHref}
+          nextHref={nextHref}
         />
       </SectionPanel>
     </div>

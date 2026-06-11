@@ -17,11 +17,19 @@ import {
 } from "@/lib/expenses/types";
 import { parseIsoDateUtc, toIsoDate, weekLabel } from "@/lib/timesheet/week";
 import {
+  DEFAULT_PAGE_SIZE,
   EXPENSE_STAGE_STATUSES,
+  EXPENSES_DEFAULT_DIRECTION,
+  EXPENSES_DEFAULT_SORT,
+  HOURS_DEFAULT_DIRECTION,
+  HOURS_DEFAULT_SORT,
   resolveConsolidatedRange,
+  resolveDetailRange,
   type ConsolidatedReportFilter,
   type ExpensesReportFilter,
+  type ExpensesSortField,
   type HoursReportFilter,
+  type HoursSortField,
 } from "@/lib/reports/schemas";
 import type {
   ConsolidatedClient,
@@ -33,7 +41,11 @@ import type {
   HoursReport,
   HoursReportRow,
   HoursReportTotals,
+  PaginationMeta,
 } from "@/lib/reports/types";
+
+/** Safe ceiling for "export all" reads (CSV) when no page is given. */
+const EXPORT_ALL_LIMIT = 50_000;
 
 /**
  * Read/query layer for the Relatorios module (docs/relatorios-fechamento.md
@@ -155,10 +167,9 @@ export function buildHoursWhere(
   // Explicit filters.
   if (filter.consultantId) where.consultantId = filter.consultantId;
   if (filter.projectId) where.projectId = filter.projectId;
-  if (filter.clientId) {
-    where.project = { ...(where.project ?? {}), clientId: filter.clientId };
-  }
+  applyRelationStatusFilters(where, filter);
   if (filter.activityType) where.activityType = filter.activityType;
+  if (filter.billable !== undefined) where.billable = filter.billable;
 
   const range = dateRangeFilter(filter.from, filter.to);
   if (range) Object.assign(where, range);
@@ -175,6 +186,42 @@ export function buildHoursWhere(
   }
 
   return where;
+}
+
+/**
+ * Shared client/project/consultant status + clientId merging for both report
+ * where builders. Carefully SPREADS `where.project` so it never clobbers an
+ * existing scope narrowing (`managerUserId`) or a `clientId` filter.
+ *
+ * - `clientId` -> `where.project.clientId`
+ * - `projectStatus` -> `where.project.status`
+ * - `clientStatus` -> `where.project.client = { status }`
+ * - `consultantStatus` -> `where.consultant = { status }` (coexists with the
+ *   scalar `where.consultantId` set by scope/explicit filter).
+ */
+function applyRelationStatusFilters(
+  where: Where,
+  filter: {
+    clientId?: string;
+    clientStatus?: string;
+    projectStatus?: string;
+    consultantStatus?: string;
+  },
+): void {
+  const project: Where = { ...(where.project ?? {}) };
+  if (filter.clientId) project.clientId = filter.clientId;
+  if (filter.projectStatus) project.status = filter.projectStatus;
+  if (filter.clientStatus) {
+    project.client = { ...(project.client ?? {}), status: filter.clientStatus };
+  }
+  if (Object.keys(project).length > 0) where.project = project;
+
+  if (filter.consultantStatus) {
+    where.consultant = {
+      ...(where.consultant ?? {}),
+      status: filter.consultantStatus,
+    };
+  }
 }
 
 /**
@@ -195,9 +242,7 @@ export function buildExpensesWhere(
 
   if (filter.consultantId) where.consultantId = filter.consultantId;
   if (filter.projectId) where.projectId = filter.projectId;
-  if (filter.clientId) {
-    where.project = { ...(where.project ?? {}), clientId: filter.clientId };
-  }
+  applyRelationStatusFilters(where, filter);
 
   const range = dateRangeFilter(filter.from, filter.to);
   if (range) Object.assign(where, range);
@@ -255,13 +300,91 @@ async function loadLatestApprovalComment(
 }
 
 /**
- * Hours report: rows + totals. The `select` only pulls `billingHourlyRate`
- * when financials are allowed (defense in depth). `decidedAt` is the latest
- * Approval of the entry.
+ * Resolve effective pagination. When `page`/`pageSize` are BOTH absent the
+ * caller wants the whole filtered set (CSV "export all"): we return `skip: 0`
+ * and `take: EXPORT_ALL_LIMIT` and flag `exportAll`. Otherwise we clamp to a
+ * valid 1-based page and a known page size and compute `skip`/`take`.
+ */
+function resolvePagination(filter: {
+  page?: number;
+  pageSize?: number;
+}): { page: number; pageSize: number; skip: number; take: number; exportAll: boolean } {
+  const exportAll = filter.page === undefined && filter.pageSize === undefined;
+  if (exportAll) {
+    return { page: 1, pageSize: EXPORT_ALL_LIMIT, skip: 0, take: EXPORT_ALL_LIMIT, exportAll: true };
+  }
+  const pageSize = filter.pageSize ?? DEFAULT_PAGE_SIZE;
+  const page = Math.max(1, filter.page ?? 1);
+  return { page, pageSize, skip: (page - 1) * pageSize, take: pageSize, exportAll: false };
+}
+
+/** Build pagination meta from a total count and the resolved page. */
+function paginationMeta(
+  total: number,
+  resolved: { page: number; pageSize: number; exportAll: boolean },
+): PaginationMeta {
+  if (resolved.exportAll) {
+    return { total, page: 1, pageSize: total, totalPages: 1 };
+  }
+  return {
+    total,
+    page: resolved.page,
+    pageSize: resolved.pageSize,
+    totalPages: Math.max(1, Math.ceil(total / resolved.pageSize)),
+  };
+}
+
+/** Map a whitelisted hours sort field + direction to a Prisma `orderBy`. */
+function hoursOrderBy(
+  sort: HoursSortField,
+  direction: "asc" | "desc",
+): Where[] {
+  switch (sort) {
+    case "hours":
+      return [{ hours: direction }, { date: "asc" }];
+    case "consultantName":
+      return [{ consultant: { name: direction } }, { date: "asc" }];
+    case "projectName":
+      return [{ project: { name: direction } }, { date: "asc" }];
+    case "status":
+      return [{ status: direction }, { date: "asc" }];
+    case "date":
+    default:
+      return [{ date: direction }, { createdAt: "asc" }];
+  }
+}
+
+/** Map a whitelisted expenses sort field + direction to a Prisma `orderBy`. */
+function expensesOrderBy(
+  sort: ExpensesSortField,
+  direction: "asc" | "desc",
+): Where[] {
+  switch (sort) {
+    case "amount":
+      return [{ amount: direction }, { date: "desc" }];
+    case "consultantName":
+      return [{ consultant: { name: direction } }, { date: "desc" }];
+    case "projectName":
+      return [{ project: { name: direction } }, { date: "desc" }];
+    case "status":
+      return [{ status: direction }, { date: "desc" }];
+    case "date":
+    default:
+      return [{ date: direction }, { createdAt: "desc" }];
+  }
+}
+
+/**
+ * Hours report: rows (current page) + totals (whole filtered set). The `select`
+ * only pulls `billingHourlyRate` when financials are allowed (defense in
+ * depth). `decidedAt` is the latest Approval of the entry. A period preset, if
+ * present, overrides `from`/`to` server-side. Totals are computed over the
+ * ENTIRE filtered set via a separate minimal query, never just the page.
  */
 export async function getHoursReport(
   user: AppUser,
   filter: HoursReportFilter,
+  now: Date = new Date(),
 ): Promise<HoursReport> {
   const scope = await resolveReportScope(user);
   const includeFinancials = scope.includeFinancials;
@@ -270,8 +393,15 @@ export async function getHoursReport(
     return emptyHoursReport(includeFinancials);
   }
 
-  const where = buildHoursWhere(scope, filter);
+  // Period preset overrides explicit from/to (server-side).
+  const range = resolveDetailRange(filter, now);
+  const where = buildHoursWhere(scope, { ...filter, ...range });
 
+  const sort = filter.sort ?? HOURS_DEFAULT_SORT;
+  const direction = filter.direction ?? HOURS_DEFAULT_DIRECTION;
+  const pg = resolvePagination(filter);
+
+  // Page of rows for display/export.
   const rowsRaw = await prisma.timeEntry.findMany({
     where,
     select: {
@@ -292,8 +422,29 @@ export async function getHoursReport(
         },
       },
     },
-    orderBy: [{ date: "asc" }],
+    orderBy: hoursOrderBy(sort, direction),
+    skip: pg.skip,
+    take: pg.take,
   });
+
+  // Totals over the WHOLE filtered set (not just the page): a separate minimal
+  // read of every matching row (hours/status/rate) keeps the stat tiles honest.
+  const totalsRaw = await prisma.timeEntry.findMany({
+    where,
+    select: {
+      hours: true,
+      status: true,
+      project: {
+        select: {
+          name: true,
+          client: { select: { name: true } },
+          ...(includeFinancials ? { billingHourlyRate: true } : {}),
+        },
+      },
+    },
+    take: EXPORT_ALL_LIMIT,
+  });
+  const total = totalsRaw.length;
 
   const decidedAt = await loadLatestApprovalAt(
     "TIME_ENTRY",
@@ -331,7 +482,13 @@ export async function getHoursReport(
     return row;
   });
 
-  return { rows, totals: summarizeHours(rows, includeFinancials), includeFinancials };
+  const totals = summarizeHours(totalsRaw, includeFinancials);
+  return {
+    rows,
+    totals,
+    includeFinancials,
+    pagination: paginationMeta(total, pg),
+  };
 }
 
 function emptyHoursReport(includeFinancials: boolean): HoursReport {
@@ -345,12 +502,27 @@ function emptyHoursReport(includeFinancials: boolean): HoursReport {
       ...(includeFinancials ? { totalBilled: 0 } : {}),
     },
     includeFinancials,
+    pagination: { total: 0, page: 1, pageSize: DEFAULT_PAGE_SIZE, totalPages: 1 },
   };
 }
 
-/** Aggregate Hours totals (pure). */
+/** Minimal raw shape `summarizeHours` needs (whole-set totals query). */
+interface HoursTotalsRow {
+  hours: unknown;
+  status: string;
+  project: {
+    name: string;
+    client: { name: string };
+    billingHourlyRate?: unknown;
+  };
+}
+
+/**
+ * Aggregate Hours totals over the WHOLE filtered set (pure). Accepts the raw
+ * minimal rows from Prisma so totals never depend on the visible page.
+ */
 export function summarizeHours(
-  rows: ReadonlyArray<HoursReportRow>,
+  rows: ReadonlyArray<HoursTotalsRow>,
   includeFinancials: boolean,
 ): HoursReportTotals {
   const hoursByStatus: Partial<Record<TimeEntryStatus, number>> = {};
@@ -360,26 +532,29 @@ export function summarizeHours(
   >();
   let totalHours = 0;
   let totalBilled = 0;
+  let count = 0;
 
-  for (const row of rows) {
-    totalHours += row.hours;
-    hoursByStatus[row.status] = (hoursByStatus[row.status] ?? 0) + row.hours;
+  for (const raw of rows) {
+    count += 1;
+    const hours = Number(raw.hours);
+    const status = raw.status as TimeEntryStatus;
+    const clientName = raw.project.client.name;
+    const projectName = raw.project.name;
+    totalHours += hours;
+    hoursByStatus[status] = (hoursByStatus[status] ?? 0) + hours;
 
-    const key = `${row.clientName}|||${row.projectName}`;
+    const key = `${clientName}|||${projectName}`;
     const group = projectMap.get(key) ?? {
-      clientName: row.clientName,
-      projectName: row.projectName,
+      clientName,
+      projectName,
       hours: 0,
     };
-    group.hours += row.hours;
+    group.hours += hours;
     projectMap.set(key, group);
 
-    if (
-      includeFinancials &&
-      row.status === "APPROVED" &&
-      row.billedAmount != null
-    ) {
-      totalBilled += row.billedAmount;
+    if (includeFinancials && status === "APPROVED") {
+      const rateRaw = raw.project.billingHourlyRate;
+      if (rateRaw != null) totalBilled += hours * Number(rateRaw);
     }
   }
 
@@ -390,7 +565,7 @@ export function summarizeHours(
   );
 
   return {
-    count: rows.length,
+    count,
     totalHours,
     hoursByStatus,
     hoursByProject,
@@ -419,17 +594,31 @@ export function expenseStageLabel(status: ExpenseStatus): string {
   }
 }
 
-/** Expenses report: rows + totals (reuses `summarizeExpenses`). */
+/**
+ * Expenses report: rows (current page) + totals (whole filtered set). A period
+ * preset overrides `from`/`to` server-side. Totals come from a separate minimal
+ * read of every matching row so they never reflect just the visible page.
+ */
 export async function getExpensesReport(
   user: AppUser,
   filter: ExpensesReportFilter,
+  now: Date = new Date(),
 ): Promise<ExpensesReport> {
   const scope = await resolveReportScope(user);
   if (!scopeHasUniverse(scope)) {
-    return { rows: [], totals: summarizeExpenses([]) };
+    return {
+      rows: [],
+      totals: summarizeExpenses([]),
+      pagination: { total: 0, page: 1, pageSize: DEFAULT_PAGE_SIZE, totalPages: 1 },
+    };
   }
 
-  const where = buildExpensesWhere(scope, filter);
+  const range = resolveDetailRange(filter, now);
+  const where = buildExpensesWhere(scope, { ...filter, ...range });
+
+  const sort = filter.sort ?? EXPENSES_DEFAULT_SORT;
+  const direction = filter.direction ?? EXPENSES_DEFAULT_DIRECTION;
+  const pg = resolvePagination(filter);
 
   const rowsRaw = await prisma.expense.findMany({
     where,
@@ -445,8 +634,18 @@ export async function getExpensesReport(
       project: { select: { name: true, client: { select: { name: true } } } },
       attachment: { select: { id: true } },
     },
-    orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+    orderBy: expensesOrderBy(sort, direction),
+    skip: pg.skip,
+    take: pg.take,
   });
+
+  // Totals over the WHOLE filtered set (amount + status only).
+  const totalsRaw = await prisma.expense.findMany({
+    where,
+    select: { amount: true, status: true },
+    take: EXPORT_ALL_LIMIT,
+  });
+  const total = totalsRaw.length;
 
   const lastComment = await loadLatestApprovalComment(
     "EXPENSE",
@@ -472,22 +671,26 @@ export async function getExpensesReport(
     };
   });
 
-  // Reuse the canonical expense aggregator over a minimal Expense shape.
-  const asExpenses: Expense[] = rows.map((r) => ({
-    id: r.id,
+  // Totals over the whole set via the canonical aggregator (minimal shape).
+  const asExpenses: Expense[] = totalsRaw.map((r, i) => ({
+    id: `t-${i}`,
     projectId: "",
-    projectName: r.projectName,
-    clientName: r.clientName,
-    consultantName: r.consultantName,
-    date: r.date,
-    amount: r.amount,
-    description: r.description,
-    invoiceNumber: r.invoiceNumber,
-    status: r.status,
+    projectName: "",
+    clientName: "",
+    consultantName: "",
+    date: "",
+    amount: Number(r.amount),
+    description: "",
+    invoiceNumber: undefined,
+    status: r.status as ExpenseStatus,
     source: "db",
   }));
 
-  return { rows, totals: summarizeExpenses(asExpenses) };
+  return {
+    rows,
+    totals: summarizeExpenses(asExpenses),
+    pagination: paginationMeta(total, pg),
+  };
 }
 
 const EXPENSE_ENTERING: ExpenseStatus[] = [
@@ -512,13 +715,17 @@ export async function getConsolidatedReport(
   }
 
   const range = resolveConsolidatedRange(filter);
-  // Reuse the pure where builders; consolidated carries no status filter.
+  // Reuse the pure where builders; consolidated carries no time-entry/expense
+  // status filter, but it DOES honor client/project/consultant status filters.
   const hoursWhere = buildHoursWhere(scope, {
     from: range.from,
     to: range.to,
     clientId: filter.clientId,
     projectId: filter.projectId,
     consultantId: filter.consultantId,
+    clientStatus: filter.clientStatus,
+    projectStatus: filter.projectStatus,
+    consultantStatus: filter.consultantStatus,
   });
   const expensesWhere = buildExpensesWhere(scope, {
     from: range.from,
@@ -526,6 +733,9 @@ export async function getConsolidatedReport(
     clientId: filter.clientId,
     projectId: filter.projectId,
     consultantId: filter.consultantId,
+    clientStatus: filter.clientStatus,
+    projectStatus: filter.projectStatus,
+    consultantStatus: filter.consultantStatus,
   });
 
   const [hoursRaw, expensesRaw] = await Promise.all([

@@ -102,10 +102,19 @@ beforeEach(() => {
   calls.expenses = undefined;
   calls.consolidated = undefined;
   // Default reports reflect a CONSULTANT scope (no financials).
-  hoursReport = { rows: [ownHoursRow], totals: emptyHoursTotals(), includeFinancials: false };
-  expensesReport = { rows: [], totals: emptyExpenseTotals() };
+  hoursReport = {
+    rows: [ownHoursRow],
+    totals: emptyHoursTotals(),
+    includeFinancials: false,
+    pagination: meta(1),
+  };
+  expensesReport = { rows: [], totals: emptyExpenseTotals(), pagination: meta(0) };
   consolidatedReport = { clients: [], totals: emptyConsolidatedTotals(), includeFinancials: false };
 });
+
+function meta(total: number): HoursReport["pagination"] {
+  return { total, page: 1, pageSize: total, totalPages: 1 };
+}
 
 function emptyHoursTotals(): HoursReport["totals"] {
   return { count: 0, totalHours: 0, hoursByStatus: {}, hoursByProject: [] };
@@ -251,6 +260,7 @@ describe("includeFinancials is recomputed from the real user", () => {
       rows: [{ ...ownHoursRow, billingRate: 320, billedAmount: 2560 }],
       totals: { ...emptyHoursTotals(), totalBilled: 2560 },
       includeFinancials: true,
+      pagination: meta(1),
     };
     const res = await hoursGet(req("/api/relatorios/horas"));
     const header = (await res.text()).split("\r\n")[0];
@@ -272,6 +282,28 @@ describe("RBAC matches the screen (same read function)", () => {
     await hoursGet(req("/api/relatorios/horas"));
     expect(calls.hours?.user.roles).toEqual(["CONSULTANT"]);
     expect(calls.hours?.user.id).toBe("user-1");
+  });
+
+  it("hours CSV ignores page/pageSize (exports the whole filtered set)", async () => {
+    await hoursGet(
+      req("/api/relatorios/horas?status=APPROVED&page=2&pageSize=25"),
+    );
+    const filter = calls.hours?.filter as Record<string, unknown>;
+    // The other filters are forwarded...
+    expect(filter.status).toBe("APPROVED");
+    // ...but pagination is stripped so the read returns everything.
+    expect(filter).not.toHaveProperty("page");
+    expect(filter).not.toHaveProperty("pageSize");
+  });
+
+  it("expenses CSV ignores page/pageSize", async () => {
+    await expensesGet(
+      req("/api/relatorios/despesas?clientStatus=ACTIVE&page=3&pageSize=100"),
+    );
+    const filter = calls.expenses?.filter as Record<string, unknown>;
+    expect(filter.clientStatus).toBe("ACTIVE");
+    expect(filter).not.toHaveProperty("page");
+    expect(filter).not.toHaveProperty("pageSize");
   });
 
   it("CONSULTANT export only contains the rows the read layer returned", async () => {
