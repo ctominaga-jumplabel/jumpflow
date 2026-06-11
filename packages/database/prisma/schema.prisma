@@ -287,6 +287,11 @@ model TimeEntry {
   @@index([allocationId])
   @@index([consultantId, date, status])
   @@index([status, submittedAt])
+  // Global admin/consolidated report: month range across all consultants and
+  // projects, without fixing consultantId/projectId. The other indexes lead
+  // with consultantId/projectId/status, so a pure date-range filter would seq
+  // scan without this single-column index.
+  @@index([date])
 }
 
 model Approval {
@@ -463,6 +468,10 @@ model Expense {
   @@index([allocationId])
   @@index([status, submittedAt])
   @@index([consultantId, date])
+  // Global finance/consolidated report: month range across all consultants and
+  // projects (mirrors TimeEntry.date). Leading columns of the other indexes are
+  // consultantId/projectId/status, so a pure date-range filter needs this.
+  @@index([date])
 }
 
 /// Receipt metadata for an expense (file itself lives in object storage,

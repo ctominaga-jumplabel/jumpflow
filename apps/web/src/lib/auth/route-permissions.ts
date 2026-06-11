@@ -42,6 +42,10 @@ export const routePermissions: RouteRule[] = [
   // Despesas are open to any authenticated user (consultants log their own).
   // Payment-status changes are gated in-page by FINANCIAL_ROLES, not here.
   { prefix: "/app/despesas", access: "ALL" },
+  // Relatorios are open to any authenticated user; the REAL scope (own data
+  // for consultants, managed projects for PMs, broad for gestao/finance) is
+  // applied by the read functions in `lib/db/reports.ts`, not by this route.
+  { prefix: "/app/relatorios", access: "ALL" },
   { prefix: "/app", access: "ALL" },
 ];
 

@@ -122,6 +122,12 @@ const h = vi.hoisted(() => {
     if (include?.period) {
       out.period = { ...store.periods.find((p) => p.id === e.periodId)! };
     }
+    if (include?.consultant) {
+      const consultant = store.consultants.find((c) => c.id === e.consultantId);
+      out.consultant = consultant
+        ? { userId: consultant.userId, email: consultant.email }
+        : { userId: null, email: "" };
+    }
     return out;
   }
 
@@ -352,6 +358,7 @@ beforeEach(() => {
   };
   h.store.users = [
     { id: "user-1", name: "Ana Martins", email: "ana@jumplabel.com.br" },
+    { id: "user-2", name: "Bruno Costa", email: "bruno@jumplabel.com.br" },
   ];
   h.store.consultants = [
     {
@@ -359,6 +366,14 @@ beforeEach(() => {
       userId: "user-1",
       email: "ana@jumplabel.com.br",
       name: "Ana Martins",
+    },
+    // A SECOND consultant whose hours the current user may decide (segregation
+    // of duties: the user can never approve con-1, their own linked consultant).
+    {
+      id: "con-2",
+      userId: "user-2",
+      email: "bruno@jumplabel.com.br",
+      name: "Bruno Costa",
     },
   ];
   h.store.projects = [
@@ -700,8 +715,11 @@ describe("copyPreviousWeek", () => {
 });
 
 describe("decideHours", () => {
+  // Decided entries belong to ANOTHER consultant (con-2): the current user is
+  // linked to con-1, and segregation of duties forbids deciding own hours.
   function seedSubmitted(over: Partial<EntryRec> = {}): EntryRec {
     return seedEntry({
+      consultantId: "con-2",
       status: "SUBMITTED",
       submittedAt: new Date("2026-06-09T10:00:00.000Z"),
       ...over,
@@ -751,7 +769,7 @@ describe("decideHours", () => {
 
   it("counts an already-decided entry without writing Approval/Audit", async () => {
     seedCurrentPeriod("APPROVED");
-    const entry = seedEntry({ status: "APPROVED" });
+    const entry = seedEntry({ consultantId: "con-2", status: "APPROVED" });
     const result = await decideHours({
       entryIds: [entry.id],
       decision: "APPROVED",
@@ -763,6 +781,38 @@ describe("decideHours", () => {
     });
     expect(h.store.approvals).toHaveLength(0);
     expect(h.store.audits).toHaveLength(0);
+  });
+
+  it("blocks deciding the user's OWN hours (SELF_APPROVAL), even as ADMIN", async () => {
+    // The current ADMIN session resolves to con-1 (same email under dev auth);
+    // approving con-1's own SUBMITTED entry must be refused.
+    seedCurrentPeriod("SUBMITTED");
+    const entry = seedSubmitted({ consultantId: "con-1" });
+    const result = await decideHours({
+      entryIds: [entry.id],
+      decision: "APPROVED",
+      comment: "",
+    });
+    expect(result).toMatchObject({ ok: false, error: "SELF_APPROVAL" });
+    // Nothing was mutated, approved or audited.
+    expect(h.store.entries[0].status).toBe("SUBMITTED");
+    expect(h.store.approvals).toHaveLength(0);
+    expect(h.store.audits).toHaveLength(0);
+  });
+
+  it("blocks a batch that MIXES own hours with others' (SELF_APPROVAL)", async () => {
+    seedCurrentPeriod("SUBMITTED");
+    const own = seedSubmitted({ consultantId: "con-1" });
+    const other = seedSubmitted({ consultantId: "con-2", activityType: "MEETING" });
+    const result = await decideHours({
+      entryIds: [own.id, other.id],
+      decision: "APPROVED",
+      comment: "",
+    });
+    expect(result).toMatchObject({ ok: false, error: "SELF_APPROVAL" });
+    // The whole batch is refused: even the other consultant's entry is untouched.
+    expect(h.store.entries.every((e) => e.status === "SUBMITTED")).toBe(true);
+    expect(h.store.approvals).toHaveLength(0);
   });
 
   it("forbids a PROJECT_MANAGER outside the project scope", async () => {

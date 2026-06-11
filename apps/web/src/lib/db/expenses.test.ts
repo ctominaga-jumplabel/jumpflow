@@ -333,12 +333,15 @@ describe("getReceiptSignedUrl — RBAC matrix", () => {
     expect(h.store.signCalls).toHaveLength(0);
   });
 
-  it("returns NOT_FOUND for an unknown expense id", async () => {
+  it("returns FORBIDDEN (not NOT_FOUND) for an unknown expense id — anti-enumeration", async () => {
+    // A missing id and an inaccessible id must look identical, so the existence
+    // of an expense never leaks. NOT_FOUND ("sem comprovante") is reserved for
+    // callers already proven to have access.
     const result = await getReceiptSignedUrl(
       "exp-missing",
       appUser("user-fin", ["FINANCE"]),
     );
-    expect(result).toMatchObject({ ok: false, error: "NOT_FOUND" });
+    expect(result).toMatchObject({ ok: false, error: "FORBIDDEN" });
   });
 
   it("degrades to NO_STORAGE when storage is not configured (authorized user)", async () => {

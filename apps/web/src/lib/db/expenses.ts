@@ -386,6 +386,16 @@ export async function getReceiptSignedUrl(
   expenseId: string,
   user: AppUser,
 ): Promise<ActionResult<{ url: string }>> {
+  // Anti-enumeration: a missing expense and an expense the caller may not see
+  // return the SAME FORBIDDEN response, so the existence of an id never leaks
+  // to someone without access. The NOT_FOUND ("sem comprovante") branch below
+  // is reachable ONLY after access is confirmed.
+  const forbidden: ActionResult<{ url: string }> = {
+    ok: false,
+    error: "FORBIDDEN",
+    message: "Você não tem acesso a este comprovante.",
+  };
+
   const expense = await prisma.expense.findUnique({
     where: { id: expenseId },
     select: {
@@ -395,9 +405,7 @@ export async function getReceiptSignedUrl(
       attachment: { select: { storageKey: true } },
     },
   });
-  if (!expense) {
-    return { ok: false, error: "NOT_FOUND", message: "Despesa não encontrada." };
-  }
+  if (!expense) return forbidden;
 
   const dbUser = await resolveDbUser(user);
   const isOwner =
@@ -410,13 +418,7 @@ export async function getReceiptSignedUrl(
   // FINANCIAL_ROLES = ADMIN, AREA_MANAGER, FINANCE — exactly the privileged
   // set allowed to open any receipt.
   const hasPrivilegedRole = hasRole(user, FINANCIAL_ROLES);
-  if (!isOwner && !isProjectManager && !hasPrivilegedRole) {
-    return {
-      ok: false,
-      error: "FORBIDDEN",
-      message: "Você não tem acesso a este comprovante.",
-    };
-  }
+  if (!isOwner && !isProjectManager && !hasPrivilegedRole) return forbidden;
 
   if (!expense.attachment) {
     return {

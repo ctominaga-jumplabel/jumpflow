@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma, Prisma } from "@jumpflow/database";
 import type { ZodType } from "zod";
+import { isDevAuthEnabled } from "@/lib/auth/dev";
 import { requireRole, requireUser } from "@/lib/auth/guards";
 import type { AppUser } from "@/lib/auth/types";
 import { buildAuditEventData } from "@/lib/db/audit";
@@ -623,7 +624,10 @@ export async function decideHours(
 
     const entries = await prisma.timeEntry.findMany({
       where: { id: { in: parsed.entryIds } },
-      include: { project: { select: { managerUserId: true } } },
+      include: {
+        project: { select: { managerUserId: true } },
+        consultant: { select: { userId: true, email: true } },
+      },
     });
     if (entries.length === 0) {
       throw new ActionError("NOT_FOUND", "Nenhum lançamento encontrado.");
@@ -640,6 +644,25 @@ export async function decideHours(
       throw new ActionError(
         "FORBIDDEN",
         "Você só pode decidir lançamentos de projetos que gerencia.",
+      );
+    }
+
+    // Segregation of duties: nobody approves or rejects their OWN hours — not
+    // even ADMIN (mirrors assertNotSelf in despesas/actions). In dev auth the
+    // session id never matches db rows, so the consultant email is also
+    // compared (same constraint as getConsultantForUser/resolveDbUser).
+    const decidesOwnHours = entries.some((entry) => {
+      const sameUser = entry.consultant.userId === dbUser.id;
+      const sameDevEmail =
+        isDevAuthEnabled() &&
+        entry.consultant.email.toLowerCase() ===
+          user.email.trim().toLowerCase();
+      return sameUser || sameDevEmail;
+    });
+    if (decidesOwnHours) {
+      throw new ActionError(
+        "SELF_APPROVAL",
+        "Você não pode decidir os próprios lançamentos de horas.",
       );
     }
 

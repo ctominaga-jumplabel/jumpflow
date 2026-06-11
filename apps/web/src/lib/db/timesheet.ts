@@ -145,7 +145,11 @@ export async function getWeekForConsultant(
     }),
     prisma.timeEntry.findMany({
       where: { consultantId, date: { gte: start, lte: end } },
-      include: { project: { include: { client: true } } },
+      // Narrow select: never pull project financial fields (billingHourlyRate,
+      // budgetHours, costCenter) into the timesheet grid.
+      include: {
+        project: { select: { name: true, client: { select: { name: true } } } },
+      },
       orderBy: { date: "asc" },
     }),
   ]);
@@ -225,7 +229,11 @@ export async function listAllowedProjects(
       OR: [{ endDate: null }, { endDate: { gte: start } }],
       project: { status: { not: "CLOSED" } },
     },
-    include: { project: { include: { client: true } } },
+    // Narrow select: only the label fields, never project financials.
+    select: {
+      projectId: true,
+      project: { select: { name: true, client: { select: { name: true } } } },
+    },
   });
 
   const byProject = new Map<string, AllowedProject>();
@@ -268,7 +276,14 @@ export async function listHoursApprovalItems(
     where: { status: "SUBMITTED", ...projectScope },
     include: {
       consultant: { select: { name: true } },
-      project: { include: { client: true } },
+      // Narrow select: label + managerUserId only, never project financials.
+      project: {
+        select: {
+          name: true,
+          managerUserId: true,
+          client: { select: { name: true } },
+        },
+      },
       period: { select: { id: true, startDate: true } },
     },
     orderBy: { submittedAt: "asc" },
@@ -354,7 +369,14 @@ export async function listHoursApprovalItems(
         where: { id: { in: decidedEntryIds } },
         include: {
           consultant: { select: { name: true } },
-          project: { include: { client: true } },
+          // Narrow select: label + managerUserId only (PM history filter).
+          project: {
+            select: {
+              name: true,
+              managerUserId: true,
+              client: { select: { name: true } },
+            },
+          },
           period: { select: { startDate: true } },
         },
       })

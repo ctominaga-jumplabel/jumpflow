@@ -1,6 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import {
   Award,
+  BarChart3,
   ClipboardCheck,
   Clock,
   FolderKanban,
@@ -88,6 +89,12 @@ export const primaryNavigation: NavItemDef[] = [
     href: "/app/aprovacoes",
     icon: ClipboardCheck,
     description: "Fluxo de aprovação e reprovação de horas.",
+  },
+  {
+    label: "Relatórios",
+    href: "/app/relatorios",
+    icon: BarChart3,
+    description: "Relatórios de horas, despesas e consolidado, com exportação.",
   },
   {
     label: "Financeiro",

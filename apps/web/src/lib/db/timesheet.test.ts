@@ -179,9 +179,11 @@ const h = vi.hoisted(() => {
       findMany: async ({
         where,
         include,
+        select,
       }: {
         where: Where;
         include?: Where;
+        select?: Where;
       }) => {
         const list = store.allocations.filter((a) => {
           if (a.consultantId !== where.consultantId) return false;
@@ -213,11 +215,12 @@ const h = vi.hoisted(() => {
           }
           return true;
         });
+        // listAllowedProjects now uses a narrow `select`; the read still only
+        // needs projectId + project label, so honor either shape.
+        const wantsProject = include?.project ?? select?.project;
         return list.map((a) => ({
           ...a,
-          ...(include?.project
-            ? { project: projectWithClient(a.projectId) }
-            : {}),
+          ...(wantsProject ? { project: projectWithClient(a.projectId) } : {}),
         }));
       },
     },
