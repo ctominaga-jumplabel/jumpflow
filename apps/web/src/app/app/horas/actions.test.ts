@@ -441,13 +441,14 @@ describe("createTimeEntry — allocation rule", () => {
 });
 
 describe("createTimeEntry — persistence", () => {
-  it("creates a DRAFT at midnight UTC and upserts the weekly period", async () => {
+  it("creates a SUBMITTED entry at midnight UTC, upserts the period and audits the save", async () => {
     const result = await createTimeEntry(baseInput);
     expect(result.ok).toBe(true);
     expect(h.store.entries).toHaveLength(1);
     const entry = h.store.entries[0];
-    expect(entry.status).toBe("DRAFT");
-    expect(entry.submittedAt).toBeNull();
+    // Rodada 4.3: a complete entry enters approval as soon as it is saved.
+    expect(entry.status).toBe("SUBMITTED");
+    expect(entry.submittedAt).toBeInstanceOf(Date);
     expect(entry.allocationId).toBe("alloc-1");
     expect(entry.date.toISOString()).toBe("2026-06-10T00:00:00.000Z");
     expect(h.store.periods).toHaveLength(1);
@@ -457,6 +458,14 @@ describe("createTimeEntry — persistence", () => {
     expect(h.store.periods[0].endDate.toISOString()).toBe(
       "2026-06-14T00:00:00.000Z",
     );
+    // The save is audited with the REAL db user id (session id is "dev-user").
+    expect(h.store.audits).toHaveLength(1);
+    expect(h.store.audits[0]).toMatchObject({
+      action: "TIME_ENTRY_SUBMITTED_ON_SAVE",
+      entityType: "TimeEntry",
+      actorUserId: "user-1",
+      after: { entryId: entry.id, hours: 8, merged: false },
+    });
   });
 
   it("blocks a duplicate over a SUBMITTED entry", async () => {
@@ -466,7 +475,7 @@ describe("createTimeEntry — persistence", () => {
     expect(result).toMatchObject({ ok: false, error: "DUPLICATE_ENTRY" });
   });
 
-  it("merges into an existing DRAFT for the same key", async () => {
+  it("merges into an existing DRAFT for the same key and resubmits it", async () => {
     seedCurrentPeriod();
     const existing = seedEntry({ hours: 4 });
     const result = await createTimeEntry({ ...baseInput, hours: 6 });
@@ -474,6 +483,13 @@ describe("createTimeEntry — persistence", () => {
     expect(h.store.entries).toHaveLength(1);
     expect(h.store.entries[0].id).toBe(existing.id);
     expect(h.store.entries[0].hours).toBe(6);
+    // Rodada 4.3: the merged entry is resubmitted for approval.
+    expect(h.store.entries[0].status).toBe("SUBMITTED");
+    expect(h.store.entries[0].submittedAt).toBeInstanceOf(Date);
+    expect(h.store.audits[0]).toMatchObject({
+      action: "TIME_ENTRY_SUBMITTED_ON_SAVE",
+      after: { entryId: existing.id, merged: true },
+    });
   });
 
   it("blocks a CLOSED period", async () => {
@@ -499,15 +515,21 @@ describe("updateTimeEntry / deleteTimeEntry — editability", () => {
     },
   );
 
-  it("returns a REJECTED entry to DRAFT on edit", async () => {
+  it("resubmits a REJECTED entry for approval on edit", async () => {
     seedCurrentPeriod("REJECTED");
     const entry = seedEntry({ status: "REJECTED", submittedAt: new Date() });
     const result = await updateTimeEntry({ id: entry.id, hours: 5, billable: true });
     expect(result.ok).toBe(true);
-    expect(h.store.entries[0].status).toBe("DRAFT");
-    expect(h.store.entries[0].submittedAt).toBeNull();
-    // Period recomputed: no REJECTED entries left.
-    expect(h.store.periods[0].status).toBe("DRAFT");
+    // Rodada 4.3: editing a REJECTED entry resubmits it (REJECTED -> SUBMITTED).
+    expect(h.store.entries[0].status).toBe("SUBMITTED");
+    expect(h.store.entries[0].submittedAt).toBeInstanceOf(Date);
+    // Period recomputed: no REJECTED/DRAFT entries left.
+    expect(h.store.periods[0].status).toBe("SUBMITTED");
+    expect(h.store.audits[0]).toMatchObject({
+      action: "TIME_ENTRY_SUBMITTED_ON_SAVE",
+      actorUserId: "user-1",
+      after: { entryId: entry.id, resubmit: true },
+    });
   });
 
   it("rejects a date change outside the period week", async () => {
@@ -641,8 +663,9 @@ describe("copyPreviousWeek", () => {
     const copied = h.store.entries.find(
       (e) => e.date.getTime() === new Date("2026-06-10T00:00:00.000Z").getTime(),
     );
-    expect(copied).toMatchObject({ status: "DRAFT", hours: 8 });
-    expect(copied?.submittedAt).toBeNull();
+    // Rodada 4.3: copied entries carry hours, so they enter approval directly.
+    expect(copied).toMatchObject({ status: "SUBMITTED", hours: 8 });
+    expect(copied?.submittedAt).toBeInstanceOf(Date);
 
     const second = await copyPreviousWeek({ weekStart: "2026-06-08" });
     expect(second).toMatchObject({

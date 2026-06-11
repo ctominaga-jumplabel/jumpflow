@@ -21,12 +21,28 @@ describe("launcher shortcutsForUser", () => {
     expect(keys).toContain("projetos");
     expect(keys).not.toContain("aprovacoes");
     expect(keys).not.toContain("financeiro");
+    expect(keys).not.toContain("aprovacao-automatica");
   });
 
   it("shows aprovacoes to managers", () => {
     const keys = shortcutsForUser(user(["PROJECT_MANAGER"])).map((s) => s.key);
     expect(keys).toContain("aprovacoes");
     expect(keys).not.toContain("financeiro");
+    // PROJECT_MANAGER read-only on automation is deferred: hidden for now.
+    expect(keys).not.toContain("aprovacao-automatica");
+  });
+
+  it("shows aprovacao-automatica only to ADMIN and AREA_MANAGER", () => {
+    expect(
+      shortcutsForUser(user(["ADMIN"])).map((s) => s.key),
+    ).toContain("aprovacao-automatica");
+    expect(
+      shortcutsForUser(user(["AREA_MANAGER"])).map((s) => s.key),
+    ).toContain("aprovacao-automatica");
+    // FINANCE manages money, not the approval engine.
+    expect(
+      shortcutsForUser(user(["FINANCE"])).map((s) => s.key),
+    ).not.toContain("aprovacao-automatica");
   });
 
   it("shows financeiro to financial roles", () => {
@@ -46,6 +62,7 @@ describe("launcher shortcutsForUser", () => {
         "projetos",
         "aprovacoes",
         "financeiro",
+        "aprovacao-automatica",
       ]),
     );
   });

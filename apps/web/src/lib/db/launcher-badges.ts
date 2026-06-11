@@ -31,10 +31,13 @@ export async function getLauncherBadges(
       }),
     ]);
     if (draftHours > 0) {
+      // Hours no longer have a "send" action (Rodada 4.3: save enters approval
+      // directly). A DRAFT here is a legacy entry the consultant reopens by
+      // editing it — label as pending, not "to send".
       badges.horas = {
         count: draftHours,
         tone: "warning",
-        label: "rascunhos a enviar",
+        label: "rascunhos pendentes",
       };
     }
     if (draftExpenses > 0) {

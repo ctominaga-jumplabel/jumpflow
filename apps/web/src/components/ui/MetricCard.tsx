@@ -17,6 +17,8 @@ export interface MetricCardProps {
   /** Stagger index for entrance animation. */
   index?: number;
   className?: string;
+  /** Override the value color (e.g. semantic on/off state). */
+  valueClassName?: string;
 }
 
 const trendIcon: Record<MetricTrend, LucideIcon> = {
@@ -41,6 +43,7 @@ export function MetricCard({
   trendLabel,
   index = 0,
   className,
+  valueClassName,
 }: MetricCardProps) {
   const TrendIcon = trend ? trendIcon[trend] : null;
   const reduce = useReducedMotion();
@@ -73,7 +76,12 @@ export function MetricCard({
         ) : null}
       </div>
       <p className="mt-4 text-sm font-medium text-medium">{label}</p>
-      <p className="mt-1 text-3xl font-semibold tracking-tight text-strong">
+      <p
+        className={cn(
+          "mt-1 text-3xl font-semibold tracking-tight text-strong",
+          valueClassName,
+        )}
+      >
         {value}
       </p>
       {hint ? <p className="mt-1 text-xs text-soft">{hint}</p> : null}

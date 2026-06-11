@@ -8,7 +8,6 @@ import {
   ChevronRight,
   CopyPlus,
   Plus,
-  Send,
   TriangleAlert,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -22,7 +21,6 @@ import {
   copyPreviousWeek as copyPreviousWeekAction,
   createTimeEntry,
   deleteTimeEntry,
-  submitWeek as submitWeekAction,
   updateTimeEntry,
 } from "@/app/app/horas/actions";
 import { projects as allProjects } from "@/lib/mock-data/projects";
@@ -36,7 +34,6 @@ import {
   deriveWeekStatus,
   isRowCopyable,
   isRowEditable,
-  rowTotal,
   statusCounts,
   timeEntryStatusLabels,
   weekTotal,
@@ -300,11 +297,13 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
           });
       if (result.ok) {
         setFormOpen(false);
+        // A complete entry enters approval as soon as it is saved (Rodada 4.3).
+        const correctedRejection = existingId && editingRow?.status === "REJECTED";
         notify(
           "success",
-          existingId
-            ? "Lançamento atualizado como rascunho."
-            : "Lançamento salvo como rascunho.",
+          correctedRejection
+            ? "Lançamento corrigido e reenviado para aprovação."
+            : "Lançamento enviado para aprovação.",
         );
       } else {
         notify("warning", result.message);
@@ -335,6 +334,9 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
     if (!project) return;
     const valueDayIndex = Math.max(0, dayIndexOf(value.date));
     const editingRowId = editingRow?.id ?? null;
+    // A complete entry enters approval as soon as it is saved (Rodada 4.3):
+    // demo rows mirror the db behavior and become SUBMITTED.
+    const correctedRejection = editingRowId && editingRow?.status === "REJECTED";
 
     updateWeek((w) => {
       let rows = w.rows;
@@ -345,7 +347,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
           r.id === editingRowId
             ? {
                 ...r,
-                status: "DRAFT" as const,
+                status: "SUBMITTED" as const,
                 description: value.description,
                 billable: value.billable,
                 hours: r.hours.map((h, i) =>
@@ -356,7 +358,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
         );
       } else {
         // New entry: merge into an existing editable row for the same
-        // project+activity, or create a fresh DRAFT row.
+        // project+activity, or create a fresh SUBMITTED row.
         const existing = rows.find(
           (r) =>
             r.projectId === value.projectId &&
@@ -368,7 +370,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
             r === existing
               ? {
                   ...r,
-                  status: "DRAFT" as const,
+                  status: "SUBMITTED" as const,
                   description: value.description || r.description,
                   billable: value.billable,
                   hours: r.hours.map((h, i) =>
@@ -391,7 +393,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
               clientName: project.clientName,
               activity: value.activity,
               billable: value.billable,
-              status: "DRAFT",
+              status: "SUBMITTED",
               description: value.description || undefined,
               hours,
             },
@@ -406,9 +408,9 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
     setFormOpen(false);
     notify(
       "success",
-      editingRowId
-        ? "Lançamento atualizado (rascunho local)."
-        : "Lançamento adicionado como rascunho (local).",
+      correctedRejection
+        ? "Lançamento corrigido e reenviado para aprovação (demo)."
+        : "Lançamento enviado para aprovação (demo).",
     );
   }
 
@@ -430,7 +432,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
           );
           return;
         }
-        const parts = [`${copied} lançamento(s) copiado(s)`];
+        const parts = [`${copied} lançamento(s) copiado(s) e enviado(s) para aprovação`];
         if (skippedExisting > 0) {
           parts.push(`${skippedExisting} já existia(m) na semana`);
         }
@@ -467,7 +469,8 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
         additions.push({
           ...row,
           id: `te-copy-${idCounter.current}`,
-          status: "DRAFT",
+          // Copied entries carry hours: like a direct save they enter approval.
+          status: "SUBMITTED",
           hours: [...row.hours],
         });
       }
@@ -475,52 +478,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
       return { ...next, status: deriveWeekStatus(next) };
     });
 
-    notify("success", "Lançamentos elegíveis copiados como rascunho.");
-  }
-
-  function submitWeek() {
-    if (!isDemo) {
-      startTransition(async () => {
-        const result = await submitWeekAction({ weekStart: week.startDate });
-        if (result.ok) {
-          notify(
-            "success",
-            `${result.data.submitted} lançamento(s) enviado(s) para aprovação.`,
-          );
-        } else {
-          notify("warning", result.message);
-        }
-      });
-      return;
-    }
-
-    // Submit acts on the whole week, not just the filtered view: a hidden
-    // draft must still be sent. Read from the unfiltered local week.
-    const submittable = rawWeek.rows.filter(
-      (r) => r.status === "DRAFT" && rowTotal(r) > 0,
-    );
-    if (submittable.length === 0) {
-      notify(
-        "warning",
-        "Nenhum lançamento válido para enviar. Adicione horas em um rascunho.",
-      );
-      return;
-    }
-
-    updateWeek((w) => {
-      const rows = w.rows.map((r) =>
-        r.status === "DRAFT" && rowTotal(r) > 0
-          ? { ...r, status: "SUBMITTED" as const }
-          : r,
-      );
-      const next = { ...w, rows };
-      return { ...next, status: deriveWeekStatus(next) };
-    });
-
-    notify(
-      "success",
-      `${submittable.length} lançamento(s) enviado(s) para aprovação.`,
-    );
+    notify("success", "Lançamentos elegíveis copiados e enviados para aprovação (demo).");
   }
 
   return (
@@ -632,18 +590,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
 
       <SectionPanel
         title="Lançamentos da semana"
-        description="Horas por projeto, atividade e dia."
-        action={
-          <ActionButton
-            variant="primary"
-            size="sm"
-            icon={Send}
-            disabled={isPending}
-            onClick={submitWeek}
-          >
-            Enviar para aprovação
-          </ActionButton>
-        }
+        description="Cada lançamento salvo entra em aprovação automaticamente."
       >
         {week.rows.length === 0 ? (
           <div className="px-5 py-10">

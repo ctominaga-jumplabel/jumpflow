@@ -23,6 +23,24 @@ export interface AutoApprovalResult {
   ruleCounts: Record<string, number>;
 }
 
+/** A single SUBMITTED entry paired with its (unapplied) rule decision. */
+export interface EvaluatedEntry {
+  id: string;
+  consultantId: string;
+  projectId: string;
+  date: Date;
+  hours: number;
+  activityType: string;
+  decision: AutoApprovalDecision;
+}
+
+/** Outcome of building context and evaluating every SUBMITTED entry. */
+export interface AutoApprovalCollection {
+  skipped: boolean;
+  reason?: "no-database" | "disabled";
+  evaluations: EvaluatedEntry[];
+}
+
 function startOfUtcDay(date: Date): Date {
   const d = new Date(date);
   d.setUTCHours(0, 0, 0, 0);
@@ -36,33 +54,28 @@ function endOfUtcDay(date: Date): Date {
 }
 
 /**
- * Process all SUBMITTED time entries against the auto-approval rules.
+ * Build the auto-approval context and evaluate every SUBMITTED time entry —
+ * WITHOUT applying anything. Returns one {@link EvaluatedEntry} per SUBMITTED
+ * entry with its decision (APPROVE/PENDING + reasons + ruleKey).
  *
- * Idempotent: only SUBMITTED entries are eligible and the approval is applied
- * via a conditional `updateMany(where status=SUBMITTED)` inside a transaction,
- * so a second run (or a concurrent cron) cannot double-approve. The AuditEvent
- * is written in the SAME transaction as the status change and the Approval, so
- * the audit trail can never silently diverge from the approval.
+ * This is the single place that loads the engine context (daily totals,
+ * duplicate groups, exception flags), so both the write path
+ * ({@link runAutoApproval}) and read-only observability (the admin screen)
+ * share identical rules and can never drift.
+ *
+ * Caller must guard with `isDatabaseConfigured()`; when no DB or the engine is
+ * disabled, returns `{ skipped: true, evaluations: [] }`.
  */
-export async function runAutoApproval(
+export async function collectAutoApprovalDecisions(
   now: Date = new Date(),
-): Promise<AutoApprovalResult> {
-  const base: AutoApprovalResult = {
-    skipped: false,
-    processed: 0,
-    approved: 0,
-    pending: 0,
-    raced: 0,
-    ruleCounts: {},
-  };
-
+): Promise<AutoApprovalCollection> {
   if (!isDatabaseConfigured()) {
-    return { ...base, skipped: true, reason: "no-database" };
+    return { skipped: true, reason: "no-database", evaluations: [] };
   }
 
   const config = await loadAutomationConfig();
   if (!config.autoApprovalEnabled) {
-    return { ...base, skipped: true, reason: "disabled" };
+    return { skipped: true, reason: "disabled", evaluations: [] };
   }
 
   const submitted = await prisma.timeEntry.findMany({
@@ -78,7 +91,7 @@ export async function runAutoApproval(
       submittedAt: true,
     },
   });
-  if (submitted.length === 0) return base;
+  if (submitted.length === 0) return { skipped: false, evaluations: [] };
 
   const consultantIds = [...new Set(submitted.map((e) => e.consultantId))];
   const projectIds = [...new Set(submitted.map((e) => e.projectId))];
@@ -133,9 +146,7 @@ export async function runAutoApproval(
     flagsByPair.set(key, current);
   }
 
-  const result = { ...base };
-  for (const entry of submitted) {
-    result.processed += 1;
+  const evaluations: EvaluatedEntry[] = submitted.map((entry) => {
     const flags =
       flagsByPair.get(`${entry.consultantId}|${entry.projectId}`) ?? {
         allowAnyHours: false,
@@ -157,16 +168,64 @@ export async function runAutoApproval(
       now,
     );
 
-    if (decision.outcome !== "APPROVE") {
+    return {
+      id: entry.id,
+      consultantId: entry.consultantId,
+      projectId: entry.projectId,
+      date: entry.date,
+      hours: Number(entry.hours),
+      activityType: entry.activityType,
+      decision,
+    };
+  });
+
+  return { skipped: false, evaluations };
+}
+
+/**
+ * Process all SUBMITTED time entries against the auto-approval rules.
+ *
+ * Idempotent: only SUBMITTED entries are eligible and the approval is applied
+ * via a conditional `updateMany(where status=SUBMITTED)` inside a transaction,
+ * so a second run (or a concurrent cron) cannot double-approve. The AuditEvent
+ * is written in the SAME transaction as the status change and the Approval, so
+ * the audit trail can never silently diverge from the approval.
+ *
+ * Context-building and rule evaluation are delegated to
+ * {@link collectAutoApprovalDecisions} (shared with the read-only admin view);
+ * this function only APPLIES the resulting APPROVE decisions.
+ */
+export async function runAutoApproval(
+  now: Date = new Date(),
+): Promise<AutoApprovalResult> {
+  const base: AutoApprovalResult = {
+    skipped: false,
+    processed: 0,
+    approved: 0,
+    pending: 0,
+    raced: 0,
+    ruleCounts: {},
+  };
+
+  const collection = await collectAutoApprovalDecisions(now);
+  if (collection.skipped) {
+    return { ...base, skipped: true, reason: collection.reason };
+  }
+
+  const result = { ...base };
+  for (const item of collection.evaluations) {
+    result.processed += 1;
+
+    if (item.decision.outcome !== "APPROVE") {
       result.pending += 1;
       continue;
     }
 
-    const applied = await approveEntry(entry.id, decision);
+    const applied = await approveEntry(item.id, item.decision);
     if (applied) {
       result.approved += 1;
-      result.ruleCounts[decision.ruleKey] =
-        (result.ruleCounts[decision.ruleKey] ?? 0) + 1;
+      result.ruleCounts[item.decision.ruleKey] =
+        (result.ruleCounts[item.decision.ruleKey] ?? 0) + 1;
     } else {
       result.raced += 1;
     }

@@ -1,5 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import {
+  BotMessageSquare,
   ClipboardCheck,
   Clock,
   FolderKanban,
@@ -104,6 +105,15 @@ export const launcherShortcuts: LauncherShortcut[] = [
     icon: Wallet,
     access: FINANCIAL_ROLES,
   },
+  {
+    key: "aprovacao-automatica",
+    label: "Aprovação automática",
+    description: "Configuração, exceções e pendências da automação.",
+    href: "/app/automacoes/aprovacao-automatica",
+    icon: BotMessageSquare,
+    // Management only; PROJECT_MANAGER read-only deferred to a later round.
+    access: ["ADMIN", "AREA_MANAGER"],
+  },
 ];
 
 /** Shortcuts the given user is allowed to see, in launcher order. */
@@ -138,7 +148,7 @@ export function mockLauncherBadges(): Record<string, LauncherBadge> {
     badges.horas = {
       count: draftHours,
       tone: "warning",
-      label: "rascunhos a enviar",
+      label: "rascunhos pendentes",
     };
   }
 

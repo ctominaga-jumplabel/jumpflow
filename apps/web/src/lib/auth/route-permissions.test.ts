@@ -25,6 +25,24 @@ const noRoles: AppUser = {
   email: "no@x.com",
   roles: [],
 };
+const admin: AppUser = {
+  id: "a",
+  name: "Adm",
+  email: "adm@x.com",
+  roles: ["ADMIN"],
+};
+const areaManager: AppUser = {
+  id: "am",
+  name: "AM",
+  email: "am@x.com",
+  roles: ["AREA_MANAGER"],
+};
+const projectManager: AppUser = {
+  id: "pm",
+  name: "PM",
+  email: "pm@x.com",
+  roles: ["PROJECT_MANAGER"],
+};
 
 describe("hasRole", () => {
   it("returns false for an anonymous user", () => {
@@ -70,6 +88,14 @@ describe("accessForPath", () => {
     ]);
   });
 
+  it("restricts the automacoes module to ADMIN and AREA_MANAGER", () => {
+    expect(accessForPath("/app/automacoes")).toEqual(["ADMIN", "AREA_MANAGER"]);
+    expect(accessForPath("/app/automacoes/aprovacao-automatica")).toEqual([
+      "ADMIN",
+      "AREA_MANAGER",
+    ]);
+  });
+
   it("allows any authenticated user for general app routes", () => {
     expect(accessForPath("/app/dashboard")).toBe("ALL");
     expect(accessForPath("/app/horas")).toBe("ALL");
@@ -79,6 +105,7 @@ describe("accessForPath", () => {
     // Precedence matters: /app/financeiro must not resolve to the /app "ALL".
     expect(accessForPath("/app/financeiro")).not.toBe("ALL");
     expect(accessForPath("/app/aprovacoes")).not.toBe("ALL");
+    expect(accessForPath("/app/automacoes")).not.toBe("ALL");
   });
 
   it("defaults unknown paths to ALL", () => {
@@ -106,5 +133,20 @@ describe("canAccess / canAccessPath", () => {
     expect(canAccessPath(consultant, "/app/aprovacoes")).toBe(false);
     // FINANCE may access the queue (finance stage of expense approvals).
     expect(canAccessPath(finance, "/app/aprovacoes")).toBe(true);
+  });
+
+  it("enforces management roles on the automacoes route", () => {
+    expect(canAccessPath(admin, "/app/automacoes/aprovacao-automatica")).toBe(
+      true,
+    );
+    expect(
+      canAccessPath(areaManager, "/app/automacoes/aprovacao-automatica"),
+    ).toBe(true);
+    // PROJECT_MANAGER read-only is deferred: no access this round.
+    expect(
+      canAccessPath(projectManager, "/app/automacoes/aprovacao-automatica"),
+    ).toBe(false);
+    expect(canAccessPath(finance, "/app/automacoes")).toBe(false);
+    expect(canAccessPath(consultant, "/app/automacoes")).toBe(false);
   });
 });

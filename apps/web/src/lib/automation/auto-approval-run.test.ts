@@ -85,7 +85,10 @@ vi.mock("@jumpflow/database", () => ({
   Prisma: { JsonNull: "__JsonNull__" },
 }));
 
-import { runAutoApproval } from "@/lib/automation/auto-approval";
+import {
+  collectAutoApprovalDecisions,
+  runAutoApproval,
+} from "@/lib/automation/auto-approval";
 
 function entry(over: Partial<Entry> = {}): Entry {
   return {
@@ -165,6 +168,79 @@ describe("runAutoApproval — daily total across statuses", () => {
     expect(result.approved).toBe(0);
     expect(result.pending).toBe(1);
     expect(h.store.entries.find((e) => e.id === "dup")?.status).toBe("SUBMITTED");
+  });
+});
+
+describe("collectAutoApprovalDecisions — read-only contract", () => {
+  // "ok" (8h, delay elapsed) on its own day APPROVEs; "early" (delay not yet
+  // elapsed) stays PENDING. They sit on DIFFERENT days so their hours never sum
+  // into the same daily total.
+  const OTHER_DAY = new Date("2026-06-11T00:00:00Z"); // Thursday
+
+  it("evaluates every SUBMITTED entry WITHOUT writing anything", async () => {
+    h.store.entries = [
+      entry({ id: "ok", hours: 8, submittedAt: TEN_MIN_AGO }), // would APPROVE
+      entry({
+        id: "early",
+        hours: 8,
+        submittedAt: TWO_MIN_AGO,
+        projectId: "pB",
+        date: OTHER_DAY,
+      }), // PENDING (delay)
+    ];
+
+    const collection = await collectAutoApprovalDecisions(NOW);
+    expect(collection.skipped).toBe(false);
+    expect(collection.evaluations).toHaveLength(2);
+
+    // The read-only observability path NEVER mutates: no status change, no
+    // Approval and no AuditEvent are written.
+    expect(h.store.entries.every((e) => e.status === "SUBMITTED")).toBe(true);
+    expect(h.store.approvals).toHaveLength(0);
+    expect(h.store.audits).toHaveLength(0);
+  });
+
+  it("produces the SAME decisions that runAutoApproval then applies", async () => {
+    h.store.entries = [
+      entry({ id: "ok", hours: 8, submittedAt: TEN_MIN_AGO }),
+      entry({
+        id: "early",
+        hours: 8,
+        submittedAt: TWO_MIN_AGO,
+        projectId: "pB",
+        date: OTHER_DAY,
+      }),
+    ];
+
+    // Snapshot the decisions BEFORE any write happens.
+    const before = await collectAutoApprovalDecisions(NOW);
+    const outcomeById = new Map(
+      before.evaluations.map((e) => [e.id, e.decision.outcome]),
+    );
+    expect(outcomeById.get("ok")).toBe("APPROVE");
+    expect(outcomeById.get("early")).toBe("PENDING");
+
+    // The write path applies exactly the APPROVE decisions and leaves the rest.
+    const result = await runAutoApproval(NOW);
+    expect(result.processed).toBe(2);
+    expect(result.approved).toBe(1);
+    expect(result.pending).toBe(1);
+    expect(h.store.entries.find((e) => e.id === "ok")?.status).toBe("APPROVED");
+    expect(h.store.entries.find((e) => e.id === "early")?.status).toBe(
+      "SUBMITTED",
+    );
+  });
+
+  it("short-circuits as skipped when no database is configured (no read, no write)", async () => {
+    vi.stubEnv("DATABASE_URL", "");
+    const collection = await collectAutoApprovalDecisions(NOW);
+    expect(collection).toEqual({
+      skipped: true,
+      reason: "no-database",
+      evaluations: [],
+    });
+    expect(h.store.approvals).toHaveLength(0);
+    expect(h.store.audits).toHaveLength(0);
   });
 });
 

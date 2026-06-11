@@ -42,9 +42,13 @@ describe("Horas — TimesheetWeekView", () => {
     render(<TimesheetWeekView mode="demo" />);
     expect(screen.getByText(/Semana 24/)).toBeInTheDocument();
     expect(screen.getByText("Lançamentos da semana")).toBeInTheDocument();
+    // Rodada 4.3: no separate submit button; entries enter approval on save.
     expect(
-      screen.getByRole("button", { name: /Enviar para aprovação/ }),
+      screen.getByRole("button", { name: /Novo lançamento/ }),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Enviar para aprovação/ }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText("Em breve")).not.toBeInTheDocument();
   });
 });

@@ -1,5 +1,26 @@
 # Horas - Persistencia Real (Rodada 2)
 
+> **Atualizacao Rodada 4.3 - Fluxo direto de aprovacao.** Decisao de produto:
+> um lancamento de horas completo entra em aprovacao assim que e salvo. Logo:
+> - `createTimeEntry` (e o merge em entrada editavel) grava `status =
+>   SUBMITTED` + `submittedAt = now` (antes: `DRAFT`). A validacao de horas > 0
+>   ja garante que o lancamento e "completo".
+> - `updateTimeEntry` em entrada `DRAFT`/`REJECTED` reenvia: pos-edicao vira
+>   `SUBMITTED` + novo `submittedAt` (antes: voltava a `DRAFT`).
+> - `SUBMITTED`/`APPROVED`/`CLOSED` continuam bloqueados para edicao pelo
+>   consultor; a janela editavel segue `DRAFT`/`REJECTED`.
+> - AuditEvent `TIME_ENTRY_SUBMITTED_ON_SAVE` (actor = usuario real via
+>   `resolveDbUser`) nas tres acoes acima.
+> - O botao "Enviar para aprovacao" sai do fluxo padrao da UI. `submitWeek`
+>   permanece apenas para compatibilidade (entries `DRAFT` legadas), testes e
+>   modo demo; nao e exposto como acao primaria.
+> - NAO se chama `runAutoApproval` inline no save: o cron/`/api/jobs/auto-approval`
+>   continua o orquestrador; a tela administrativa
+>   (`/app/automacoes/aprovacao-automatica`, acesso ADMIN/AREA_MANAGER) oferece
+>   "Executar agora". Detalhes em `docs/aprovacao-automatica.md`.
+> As secoes abaixo descrevem o contrato da Rodada 2; onde dizem `DRAFT` no save,
+> leia `SUBMITTED` conforme esta atualizacao.
+
 Spec tecnica para US-COR-01 a 04 (`docs/backlog-refinado-consultor-operacoes.md`).
 Substitui o estado local/mock do modulo Horas por Prisma + Server Actions.
 

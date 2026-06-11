@@ -21,9 +21,18 @@ describe("TimesheetWeekView actions (demo mode)", () => {
     render(<TimesheetWeekView mode="demo" />);
     expect(screen.getByText(/Semana 24/)).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /Enviar para aprovação/ }),
+      screen.getByRole("button", { name: /Novo lançamento/ }),
     ).toBeInTheDocument();
     expect(screen.getByText(/Modo demonstração/)).toBeInTheDocument();
+  });
+
+  it("no longer exposes a 'Enviar para aprovação' button (Rodada 4.3)", () => {
+    // The direct-approval flow removes the separate submit button: a saved
+    // entry enters approval on its own.
+    render(<TimesheetWeekView mode="demo" />);
+    expect(
+      screen.queryByRole("button", { name: /Enviar para aprovação/ }),
+    ).not.toBeInTheDocument();
   });
 
   it("navigates to the next week", () => {
@@ -56,7 +65,10 @@ describe("TimesheetWeekView actions (demo mode)", () => {
     });
     fireEvent.click(within(dialog).getByRole("button", { name: /Salvar/ }));
 
-    expect(screen.getByText(/adicionado como rascunho/)).toBeInTheDocument();
+    // Rodada 4.3: a saved entry enters approval directly (no "rascunho").
+    expect(
+      screen.getByText(/enviado para aprovação \(demo\)/),
+    ).toBeInTheDocument();
     expect(
       within(screen.getByRole("table")).getByText("Nimbus"),
     ).toBeInTheDocument();
@@ -75,7 +87,10 @@ describe("TimesheetWeekView actions (demo mode)", () => {
       target: { value: "5" },
     });
     fireEvent.click(within(dialog).getByRole("button", { name: /Salvar/ }));
-    expect(screen.getByText(/atualizado \(rascunho local\)/)).toBeInTheDocument();
+    // Editing a DRAFT row resubmits it for approval (Rodada 4.3).
+    expect(
+      screen.getByText(/enviado para aprovação \(demo\)/),
+    ).toBeInTheDocument();
   });
 
   it("rejects hours outside the 0–24 range", () => {
@@ -94,20 +109,15 @@ describe("TimesheetWeekView actions (demo mode)", () => {
     ).toBeInTheDocument();
   });
 
-  it("submits draft entries for approval", () => {
-    render(<TimesheetWeekView mode="demo" />);
-    fireEvent.click(
-      screen.getByRole("button", { name: /Enviar para aprovação/ }),
-    );
-    expect(screen.getByText(/enviado\(s\) para aprovação/)).toBeInTheDocument();
-  });
-
   it("copies eligible entries from the previous week", () => {
     render(<TimesheetWeekView mode="demo" />);
     fireEvent.click(
       screen.getByRole("button", { name: /Copiar semana anterior/ }),
     );
-    expect(screen.getByText(/copiados como rascunho/)).toBeInTheDocument();
+    // Rodada 4.3: copied entries enter approval directly (no "rascunho").
+    expect(
+      screen.getByText(/copiados e enviados para aprovação/),
+    ).toBeInTheDocument();
   });
 
   it("defaults the new-entry activity to Dia Útil (WORKDAY)", () => {

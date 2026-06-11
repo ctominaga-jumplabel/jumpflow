@@ -33,6 +33,9 @@ interface RouteRule {
  */
 export const routePermissions: RouteRule[] = [
   { prefix: "/app/financeiro", access: FINANCIAL_ROLES },
+  // Operational automation (auto-approval admin/observability). Management
+  // only — PROJECT_MANAGER read-only access is deferred to a later round.
+  { prefix: "/app/automacoes", access: ["ADMIN", "AREA_MANAGER"] },
   {
     // FINANCE participates in the expense approval chain (finance stage),
     // so it has access to the queue alongside the manager roles.

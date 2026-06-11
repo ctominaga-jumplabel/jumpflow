@@ -73,6 +73,19 @@ async function requireConsultant(user: AppUser) {
   return consultant;
 }
 
+async function requireDbUser(user: AppUser) {
+  // FK columns (actorUserId) need the REAL db user id — the dev session id
+  // ("dev-user") does not exist in the database.
+  const dbUser = await resolveDbUser(user);
+  if (!dbUser) {
+    throw new ActionError(
+      "FORBIDDEN",
+      "Usuário não encontrado no banco de dados.",
+    );
+  }
+  return dbUser;
+}
+
 function parseInput<T>(schema: ZodType<T>, input: unknown): T {
   const result = schema.safeParse(input);
   if (!result.success) {
@@ -183,9 +196,17 @@ export async function createTimeEntry(
       date,
     );
 
+    // Resolve the REAL db user BEFORE the transaction (the audit FK cannot use
+    // the synthetic dev session id).
+    const dbUser = await requireDbUser(user);
+
     const description = parsed.description?.trim() || null;
     const entry = await prisma.$transaction(async (tx) => {
       const period = await upsertOpenPeriod(tx, consultant.id, date);
+      // A complete entry enters approval as soon as it is saved (Rodada 4.3):
+      // status = SUBMITTED + submittedAt = now (the auto-approval engine acts
+      // on SUBMITTED entries with submittedAt set).
+      const now = new Date();
       const existing = await tx.timeEntry.findFirst({
         where: {
           consultantId: consultant.id,
@@ -194,6 +215,8 @@ export async function createTimeEntry(
           date,
         },
       });
+      let merged = false;
+      let saved;
       if (existing) {
         if (existing.status !== "DRAFT" && existing.status !== "REJECTED") {
           // SUBMITTED/APPROVED/CLOSED: a second entry with the same key would
@@ -204,43 +227,53 @@ export async function createTimeEntry(
           );
         }
         // Merge semantics (same as the demo grid): editing the cell replaces
-        // hours and returns the entry to DRAFT.
-        const updated = await tx.timeEntry.update({
+        // hours and resubmits the entry for approval.
+        merged = true;
+        saved = await tx.timeEntry.update({
           where: { id: existing.id },
           data: {
             hours: parsed.hours,
             description,
             billable: parsed.billable,
-            status: "DRAFT",
-            submittedAt: null,
+            status: "SUBMITTED",
+            submittedAt: now,
             allocationId: allocation.id,
             periodId: period.id,
           },
         });
-        await recomputePeriodStatus(tx, period.id);
-        return updated;
+      } else {
+        saved = await tx.timeEntry.create({
+          data: {
+            periodId: period.id,
+            consultantId: consultant.id,
+            projectId: project.id,
+            allocationId: allocation.id,
+            date,
+            hours: parsed.hours,
+            activityType: parsed.activityType,
+            description,
+            billable: parsed.billable,
+            status: "SUBMITTED",
+            submittedAt: now,
+          },
+        });
       }
-
-      const created = await tx.timeEntry.create({
-        data: {
-          periodId: period.id,
-          consultantId: consultant.id,
-          projectId: project.id,
-          allocationId: allocation.id,
-          date,
-          hours: parsed.hours,
-          activityType: parsed.activityType,
-          description,
-          billable: parsed.billable,
-          status: "DRAFT",
-          submittedAt: null,
-        },
-      });
       await recomputePeriodStatus(tx, period.id);
-      return created;
+      await tx.auditEvent.create({
+        data: buildAuditEventData({
+          actorUserId: dbUser.id,
+          entityType: "TimeEntry",
+          entityId: saved.id,
+          action: "TIME_ENTRY_SUBMITTED_ON_SAVE",
+          after: { entryId: saved.id, hours: Number(saved.hours), merged },
+        }),
+      });
+      return saved;
     });
 
+    // The entry now sits in the approval queue, so refresh both routes.
     revalidatePath(HORAS_PATH);
+    revalidatePath(APROVACOES_PATH);
     return { ok: true, data: { id: entry.id } };
   } catch (error) {
     return toFailure(error);
@@ -318,7 +351,13 @@ export async function updateTimeEntry(
       allocationId = allocation.id;
     }
 
+    // Resolve the REAL db user BEFORE the transaction (audit FK).
+    const dbUser = await requireDbUser(user);
+
     await prisma.$transaction(async (tx) => {
+      // Editing a DRAFT/REJECTED entry resubmits it for approval (Rodada 4.3):
+      // status = SUBMITTED + new submittedAt.
+      const now = new Date();
       await tx.timeEntry.update({
         where: { id: entry.id },
         data: {
@@ -327,15 +366,25 @@ export async function updateTimeEntry(
           billable: parsed.billable,
           date,
           allocationId,
-          // Editing a REJECTED entry returns it to DRAFT for resubmission.
-          status: "DRAFT",
-          submittedAt: null,
+          status: "SUBMITTED",
+          submittedAt: now,
         },
       });
       await recomputePeriodStatus(tx, entry.periodId);
+      await tx.auditEvent.create({
+        data: buildAuditEventData({
+          actorUserId: dbUser.id,
+          entityType: "TimeEntry",
+          entityId: entry.id,
+          action: "TIME_ENTRY_SUBMITTED_ON_SAVE",
+          after: { entryId: entry.id, resubmit: true },
+        }),
+      });
     });
 
+    // The entry now sits in the approval queue, so refresh both routes.
     revalidatePath(HORAS_PATH);
+    revalidatePath(APROVACOES_PATH);
     return { ok: true, data: { id: entry.id } };
   } catch (error) {
     return toFailure(error);
@@ -416,7 +465,8 @@ export async function copyPreviousWeek(
       include: { project: { select: { status: true } } },
     });
     // Eligible at the source: not REJECTED and with hours (isRowCopyable).
-    // APPROVED entries copy as fresh editable DRAFTs.
+    // Copied entries carry hours, so they are complete launches and — like a
+    // direct save (Rodada 4.3) — enter approval immediately as SUBMITTED.
     const eligible = sourceEntries.filter(
       (entry) => entry.status !== "REJECTED" && Number(entry.hours) > 0,
     );
@@ -444,6 +494,8 @@ export async function copyPreviousWeek(
       };
     }
 
+    const dbUser = await requireDbUser(user);
+    const submittedAt = new Date();
     const result = await prisma.$transaction(async (tx) => {
       const period = await upsertOpenPeriod(tx, consultant.id, destStart);
       const destEntries = await tx.timeEntry.findMany({
@@ -486,7 +538,7 @@ export async function copyPreviousWeek(
           counts.skippedIneligible += 1;
           continue;
         }
-        await tx.timeEntry.create({
+        const created = await tx.timeEntry.create({
           data: {
             periodId: period.id,
             consultantId: consultant.id,
@@ -497,9 +549,18 @@ export async function copyPreviousWeek(
             activityType: entry.activityType,
             description: entry.description,
             billable: entry.billable,
-            status: "DRAFT",
-            submittedAt: null,
+            status: "SUBMITTED",
+            submittedAt,
           },
+        });
+        await tx.auditEvent.create({
+          data: buildAuditEventData({
+            actorUserId: dbUser.id,
+            entityType: "TimeEntry",
+            entityId: created.id,
+            action: "TIME_ENTRY_SUBMITTED_ON_SAVE",
+            after: { entryId: created.id, hours: Number(entry.hours), copied: true },
+          }),
         });
         taken.add(key);
         counts.copied += 1;
