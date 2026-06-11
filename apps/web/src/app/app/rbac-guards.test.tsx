@@ -30,6 +30,7 @@ vi.mock("@/lib/auth/guards", () => ({
 
 import FinanceiroPage from "./financeiro/page";
 import AprovacoesPage from "./aprovacoes/page";
+import AcessosPage from "./admin/acessos/page";
 import { FINANCIAL_ROLES } from "@/lib/auth/route-permissions";
 
 afterEach(() => vi.clearAllMocks());
@@ -51,5 +52,13 @@ describe("module RBAC guards", () => {
       "PROJECT_MANAGER",
       "FINANCE",
     ]);
+  });
+
+  it("Acessos requires ADMIN", async () => {
+    // No DATABASE_URL in the test env: the page short-circuits to the empty
+    // state before importing Prisma, so the guard is what we assert here.
+    await AcessosPage();
+    expect(requireRoleMock).toHaveBeenCalledTimes(1);
+    expect(requireRoleMock).toHaveBeenCalledWith(["ADMIN"]);
   });
 });

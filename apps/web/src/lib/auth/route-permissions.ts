@@ -49,6 +49,10 @@ export const routePermissions: RouteRule[] = [
   // for consultants, managed projects for PMs, broad for gestao/finance) is
   // applied by the read functions in `lib/db/reports.ts`, not by this route.
   { prefix: "/app/relatorios", access: "ALL" },
+  // Access administration (invitations, roles, status). ADMIN only — must come
+  // before the broad `/app` rule. The public invite-accept route lives at
+  // `/convite/*`, outside `/app`, so the proxy matcher never gates it.
+  { prefix: "/app/admin", access: ["ADMIN"] },
   { prefix: "/app", access: "ALL" },
 ];
 

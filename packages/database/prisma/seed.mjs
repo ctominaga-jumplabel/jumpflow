@@ -17,6 +17,8 @@
 // Plain ESM + the generated Prisma client — no extra TS runner dependency.
 // Run with: npm run db:seed --workspace @jumpflow/database
 
+import { randomBytes, scryptSync, createHash } from "node:crypto";
+
 import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
@@ -70,6 +72,135 @@ async function seedDevUser() {
   }
   console.log(
     `Seeded dev user ${DEV_USER.email} with ${roles.length} roles.`,
+  );
+}
+
+// --- Round 5: first ADMIN bootstrap (env-driven, idempotent) ---------------
+//
+// Provisions the first ADMIN so the platform is usable before any UI exists.
+// Reads BOOTSTRAP_ADMIN_EMAIL (required for the bootstrap to run),
+// BOOTSTRAP_ADMIN_NAME (optional, defaults from the email local-part) and the
+// OPTIONAL BOOTSTRAP_ADMIN_PASSWORD. No real value is committed: everything
+// comes from the environment.
+//
+//   - With BOOTSTRAP_ADMIN_PASSWORD: hashes it with node:crypto scrypt in the
+//     self-describing `scrypt$N$r$p$<saltB64url>$<hashB64url>` format
+//     (auth-foundation 11.3) and sets passwordHash + emailVerifiedAt +
+//     mustChangePassword=true. The plaintext password is NEVER logged.
+//   - Without a password: creates a PENDING UserInvitation (ADMIN role) and
+//     prints only a safe message — never the token. The plaintext token is
+//     generated, only its sha256 digest is stored.
+//
+// Idempotent: upsert by (lowercased) email, ADMIN UserRole upserted, and a
+// PENDING invitation is not duplicated if one already exists for the email.
+
+// scrypt parameters — must mirror lib/auth/password.ts (auth-foundation 11.3).
+const SCRYPT_N = 16384; // 2^14
+const SCRYPT_R = 8;
+const SCRYPT_P = 1;
+const SCRYPT_KEYLEN = 64;
+
+function hashPassword(password) {
+  const salt = randomBytes(16);
+  const derived = scryptSync(password, salt, SCRYPT_KEYLEN, {
+    N: SCRYPT_N,
+    r: SCRYPT_R,
+    p: SCRYPT_P,
+    // scrypt needs maxmem raised above the default for N=16384.
+    maxmem: 64 * 1024 * 1024,
+  });
+  const saltB64 = salt.toString("base64url");
+  const hashB64 = derived.toString("base64url");
+  return `scrypt$${SCRYPT_N}$${SCRYPT_R}$${SCRYPT_P}$${saltB64}$${hashB64}`;
+}
+
+function sha256Hex(value) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+async function seedBootstrapAdmin() {
+  const rawEmail = process.env.BOOTSTRAP_ADMIN_EMAIL;
+  if (!rawEmail || !rawEmail.trim()) {
+    console.log(
+      "BOOTSTRAP_ADMIN_EMAIL not set — skipping first-admin bootstrap.",
+    );
+    return;
+  }
+
+  const email = rawEmail.trim().toLowerCase();
+  const name =
+    (process.env.BOOTSTRAP_ADMIN_NAME && process.env.BOOTSTRAP_ADMIN_NAME.trim()) ||
+    email.split("@")[0];
+  const password = process.env.BOOTSTRAP_ADMIN_PASSWORD;
+
+  const adminRole = await prisma.role.findUnique({ where: { name: "ADMIN" } });
+  if (!adminRole) {
+    console.log("ADMIN role not found — run seedRoles first; skipping bootstrap.");
+    return;
+  }
+
+  // Build the create/update payload. Never overwrite an existing passwordHash
+  // when no password is provided; only set it when a password is supplied.
+  const userData = {};
+  if (password) {
+    userData.passwordHash = hashPassword(password);
+    userData.emailVerifiedAt = new Date();
+    userData.mustChangePassword = true;
+  }
+
+  const adminUser = await prisma.user.upsert({
+    where: { email },
+    update: { name, status: "ACTIVE", ...userData },
+    create: { name, email, status: "ACTIVE", ...userData },
+  });
+
+  // Guarantee the ADMIN role link (no duplicate thanks to the composite key).
+  await prisma.userRole.upsert({
+    where: { userId_roleId: { userId: adminUser.id, roleId: adminRole.id } },
+    update: {},
+    create: { userId: adminUser.id, roleId: adminRole.id },
+  });
+
+  if (password) {
+    console.log(
+      `Bootstrap admin ${email} provisioned with a password (must change on first login).`,
+    );
+    return;
+  }
+
+  // No password: ensure a PENDING invitation exists (do not duplicate).
+  const existingPending = await prisma.userInvitation.findFirst({
+    where: { email, status: "PENDING" },
+  });
+  if (existingPending) {
+    console.log(
+      `Bootstrap admin ${email} already has a pending invitation — not duplicating.`,
+    );
+    return;
+  }
+
+  const ttlHours = Number(process.env.INVITE_TOKEN_TTL_HOURS) || 72;
+  const token = randomBytes(32).toString("base64url");
+  const tokenHash = sha256Hex(token);
+  const expiresAt = new Date(Date.now() + ttlHours * 60 * 60 * 1000);
+
+  await prisma.userInvitation.create({
+    data: {
+      email,
+      name,
+      tokenHash,
+      status: "PENDING",
+      roles: ["ADMIN"],
+      expiresAt,
+      // Self-invited bootstrap: the admin user we just upserted is the actor.
+      invitedByUserId: adminUser.id,
+    },
+  });
+
+  // SECURITY: never print the plaintext token. The admin retrieves/regenerates
+  // the acceptance link through the admin UI (invitations flow).
+  console.log(
+    `Bootstrap invitation created for ${email}. Generate/reset the access link from the admin screen.`,
   );
 }
 
@@ -746,6 +877,7 @@ async function seedSecondConsultant() {
 
 async function main() {
   await seedRoles();
+  await seedBootstrapAdmin();
   await seedDevUser();
   await seedDemoWorkspace();
   await seedDemoExpenses();

@@ -96,6 +96,11 @@ describe("accessForPath", () => {
     ]);
   });
 
+  it("restricts the admin module to ADMIN only", () => {
+    expect(accessForPath("/app/admin")).toEqual(["ADMIN"]);
+    expect(accessForPath("/app/admin/acessos")).toEqual(["ADMIN"]);
+  });
+
   it("allows any authenticated user for general app routes", () => {
     expect(accessForPath("/app/dashboard")).toBe("ALL");
     expect(accessForPath("/app/horas")).toBe("ALL");
@@ -106,6 +111,7 @@ describe("accessForPath", () => {
     expect(accessForPath("/app/financeiro")).not.toBe("ALL");
     expect(accessForPath("/app/aprovacoes")).not.toBe("ALL");
     expect(accessForPath("/app/automacoes")).not.toBe("ALL");
+    expect(accessForPath("/app/admin")).not.toBe("ALL");
   });
 
   it("defaults unknown paths to ALL", () => {
@@ -148,5 +154,12 @@ describe("canAccess / canAccessPath", () => {
     ).toBe(false);
     expect(canAccessPath(finance, "/app/automacoes")).toBe(false);
     expect(canAccessPath(consultant, "/app/automacoes")).toBe(false);
+  });
+
+  it("restricts the admin access module to ADMIN", () => {
+    expect(canAccessPath(admin, "/app/admin/acessos")).toBe(true);
+    expect(canAccessPath(areaManager, "/app/admin/acessos")).toBe(false);
+    expect(canAccessPath(finance, "/app/admin/acessos")).toBe(false);
+    expect(canAccessPath(consultant, "/app/admin/acessos")).toBe(false);
   });
 });

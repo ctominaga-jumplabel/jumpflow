@@ -1,24 +1,35 @@
 "use client";
 
+import { useActionState } from "react";
+import { useFormStatus } from "react-dom";
 import { motion, useReducedMotion } from "motion/react";
-import { LogIn, ShieldCheck, TriangleAlert } from "lucide-react";
+import { CheckCircle2, LogIn, ShieldCheck, TriangleAlert } from "lucide-react";
 import { appConfig } from "@/config/app";
 import { cn } from "@/lib/utils";
-import { focusRing, tactileButton } from "@/lib/styles";
+import { focusRing, focusRingInput, tactileButton } from "@/lib/styles";
+import type { LoginCredentialsState } from "@/lib/auth/messages";
 
-export type LoginVariant = "dev" | "entra" | "unconfigured";
+export type LoginVariant = "dev" | "credentials" | "entra" | "unconfigured";
+
+type CredentialsAction = (
+  prevState: LoginCredentialsState,
+  formData: FormData,
+) => Promise<LoginCredentialsState>;
 
 export interface LoginViewProps {
   appName: string;
   variant: LoginVariant;
-  /** Bound server action that performs the sign-in (absent when unconfigured). */
-  action?: () => void | Promise<void>;
+  /** Show the Entra button alongside the primary variant (coexists with credentials). */
+  showEntra?: boolean;
+  /** Show a "account activated, please sign in" notice (post-invite acceptance). */
+  activated?: boolean;
+  /** Bound dev-login action (present only for the `dev` variant). */
+  devAction?: () => void | Promise<void>;
+  /** Bound Entra OAuth action (present when Entra is configured). */
+  entraAction?: () => void | Promise<void>;
+  /** Bound email/password action (present only for the `credentials` variant). */
+  credentialsAction?: CredentialsAction;
 }
-
-const ctaLabel: Record<Exclude<LoginVariant, "unconfigured">, string> = {
-  dev: "Entrar (ambiente de desenvolvimento)",
-  entra: "Entrar com Microsoft",
-};
 
 /** Steps of the operational flow, used as the decorative "pipeline" on the brand pane. */
 const flowSteps = [
@@ -32,7 +43,15 @@ const flowSteps = [
  * card: an ink brand panel with a CSS "flow" composition (no 3D) and a clean
  * form panel with a tactile CTA. Motion is restrained and reduced-motion aware.
  */
-export function LoginView({ appName, variant, action }: LoginViewProps) {
+export function LoginView({
+  appName,
+  variant,
+  showEntra = false,
+  activated = false,
+  devAction,
+  entraAction,
+  credentialsAction,
+}: LoginViewProps) {
   const reduce = useReducedMotion();
 
   return (
@@ -137,6 +156,19 @@ export function LoginView({ appName, variant, action }: LoginViewProps) {
               corporativa para continuar.
             </p>
 
+            {activated ? (
+              <div className="mt-7 flex items-start gap-3 rounded-md border-2 border-ink bg-success-soft px-4 py-3">
+                <CheckCircle2
+                  aria-hidden="true"
+                  className="mt-0.5 size-5 shrink-0 text-success"
+                />
+                <p className="text-sm leading-6 text-strong">
+                  Conta ativada com sucesso. Faça login com seu e-mail e a senha
+                  que você acabou de definir.
+                </p>
+              </div>
+            ) : null}
+
             {variant === "unconfigured" ? (
               <div className="mt-7 flex items-start gap-3 rounded-md border-2 border-ink bg-warning-soft px-4 py-3">
                 <TriangleAlert
@@ -145,28 +177,54 @@ export function LoginView({ appName, variant, action }: LoginViewProps) {
                 />
                 <p className="text-sm leading-6 text-strong">
                   Autenticação não configurada neste ambiente. Defina as
-                  variáveis do provedor (Microsoft Entra ID) ou habilite{" "}
+                  variáveis do provedor (Microsoft Entra ID), habilite o login
+                  por e-mail e senha (
+                  <code className="rounded bg-surface px-1 py-0.5 text-xs">
+                    AUTH_CREDENTIALS_ENABLED
+                  </code>
+                  ) ou ative{" "}
                   <code className="rounded bg-surface px-1 py-0.5 text-xs">
                     AUTH_DEV_MODE
                   </code>{" "}
                   em desenvolvimento.
                 </p>
               </div>
-            ) : (
-              <form action={action} className="mt-7">
-                <button
-                  type="submit"
-                  className={cn(
-                    "inline-flex w-full items-center justify-center gap-2 rounded-md bg-brand px-5 py-3 text-sm font-semibold text-white hover:bg-brand-dark",
-                    tactileButton,
-                    focusRing,
-                  )}
-                >
-                  <LogIn aria-hidden="true" className="size-4" />
-                  {ctaLabel[variant]}
-                </button>
+            ) : null}
+
+            {variant === "credentials" && credentialsAction ? (
+              <CredentialsForm action={credentialsAction} />
+            ) : null}
+
+            {variant === "dev" && devAction ? (
+              <form action={devAction} className="mt-7">
+                <SubmitButton label="Entrar (ambiente de desenvolvimento)" />
               </form>
-            )}
+            ) : null}
+
+            {/* Entra: primary when it is the variant, or secondary alongside credentials. */}
+            {(variant === "entra" || (variant === "credentials" && showEntra)) &&
+            entraAction ? (
+              <>
+                {variant === "credentials" ? (
+                  <div className="mt-6 flex items-center gap-3">
+                    <span className="h-px flex-1 bg-ink/15" />
+                    <span className="text-xs font-medium uppercase tracking-wide text-soft">
+                      ou
+                    </span>
+                    <span className="h-px flex-1 bg-ink/15" />
+                  </div>
+                ) : null}
+                <form
+                  action={entraAction}
+                  className={variant === "credentials" ? "mt-6" : "mt-7"}
+                >
+                  <SubmitButton
+                    label="Entrar com Microsoft"
+                    variant={variant === "credentials" ? "secondary" : "primary"}
+                  />
+                </form>
+              </>
+            ) : null}
 
             {variant === "dev" ? (
               <p className="mt-4 inline-flex items-center gap-1.5 text-xs text-soft">
@@ -182,5 +240,107 @@ export function LoginView({ appName, variant, action }: LoginViewProps) {
         </div>
       </motion.div>
     </main>
+  );
+}
+
+/** Submit button shared by every login variant. Disabled while pending. */
+function SubmitButton({
+  label,
+  variant = "primary",
+}: {
+  label: string;
+  variant?: "primary" | "secondary";
+}) {
+  const { pending } = useFormStatus();
+  return (
+    <button
+      type="submit"
+      disabled={pending}
+      aria-busy={pending}
+      className={cn(
+        "inline-flex w-full items-center justify-center gap-2 rounded-md px-5 py-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-70",
+        variant === "primary"
+          ? "bg-brand text-white hover:bg-brand-dark"
+          : "border-2 border-ink bg-surface text-strong hover:bg-canvas",
+        tactileButton,
+        focusRing,
+      )}
+    >
+      <LogIn aria-hidden="true" className="size-4" />
+      {pending ? "Entrando…" : label}
+    </button>
+  );
+}
+
+/** Email/password form. Errors are generic — never leak account existence. */
+function CredentialsForm({ action }: { action: CredentialsAction }) {
+  const [state, formAction] = useActionState<LoginCredentialsState, FormData>(
+    action,
+    {},
+  );
+
+  return (
+    <form action={formAction} className="mt-7 space-y-4" noValidate>
+      <div className="space-y-1.5">
+        <label
+          htmlFor="login-email"
+          className="block text-sm font-medium text-strong"
+        >
+          E-mail
+        </label>
+        <input
+          id="login-email"
+          name="email"
+          type="email"
+          autoComplete="username"
+          required
+          placeholder="voce@jumplabel.com.br"
+          aria-invalid={state.error ? true : undefined}
+          aria-describedby={state.error ? "login-error" : undefined}
+          className={cn(
+            "w-full rounded-md border-2 border-ink bg-surface px-3.5 py-2.5 text-sm text-strong placeholder:text-soft",
+            focusRingInput,
+          )}
+        />
+      </div>
+
+      <div className="space-y-1.5">
+        <label
+          htmlFor="login-password"
+          className="block text-sm font-medium text-strong"
+        >
+          Senha
+        </label>
+        <input
+          id="login-password"
+          name="password"
+          type="password"
+          autoComplete="current-password"
+          required
+          aria-invalid={state.error ? true : undefined}
+          aria-describedby={state.error ? "login-error" : undefined}
+          className={cn(
+            "w-full rounded-md border-2 border-ink bg-surface px-3.5 py-2.5 text-sm text-strong placeholder:text-soft",
+            focusRingInput,
+          )}
+        />
+      </div>
+
+      {state.error ? (
+        <div
+          id="login-error"
+          role="alert"
+          className="flex items-start gap-2 rounded-md border-2 border-ink bg-warning-soft px-3.5 py-2.5"
+        >
+          <TriangleAlert
+            aria-hidden="true"
+            className="mt-0.5 size-4 shrink-0 text-warning"
+          />
+          <p className="text-sm leading-5 text-strong">{state.error}</p>
+        </div>
+      ) : null}
+
+      <SubmitButton label="Entrar" />
+    </form>
   );
 }

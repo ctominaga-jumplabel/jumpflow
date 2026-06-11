@@ -25,6 +25,11 @@ export type ErrorCode =
   | "FILE_TOO_LARGE"
   | "ATTACHMENT_LOCKED"
   | "SELF_APPROVAL"
+  // Access management (Round 5): invitations + roles/status.
+  | "LAST_ADMIN"
+  | "ALREADY_HAS_ACCESS"
+  | "INVITE_INVALID"
+  | "WEAK_PASSWORD"
   | "UNEXPECTED";
 
 /** Uniform result of every server action (actions never throw to the client). */

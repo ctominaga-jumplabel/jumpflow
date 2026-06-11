@@ -18,7 +18,27 @@ vi.mock("@/auth", () => ({
   signOut: vi.fn(),
 }));
 
-import { devLogin, loginWithEntra } from "./actions";
+// Real-ish AuthError so `instanceof` works in loginWithCredentials. Defined
+// inside the factory because vi.mock is hoisted above module-level consts.
+vi.mock("next-auth", () => {
+  class FakeAuthError extends Error {
+    type = "CredentialsSignin";
+  }
+  return { AuthError: FakeAuthError };
+});
+
+import { AuthError } from "next-auth";
+import { CREDENTIALS_ERROR_MESSAGE } from "./messages";
+import { devLogin, loginWithCredentials, loginWithEntra } from "./actions";
+const FakeAuthError = AuthError as unknown as new (msg?: string) => Error;
+
+/** Build a FormData with email/password for the credentials action. */
+function form(email: string, password: string): FormData {
+  const fd = new FormData();
+  fd.set("email", email);
+  fd.set("password", password);
+  return fd;
+}
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -62,5 +82,65 @@ describe("login actions — callbackUrl revalidation on the server", () => {
     expect(signInMock).toHaveBeenLastCalledWith("microsoft-entra-id", {
       redirectTo: "/app",
     });
+  });
+});
+
+describe("loginWithCredentials — generic errors and safe redirect", () => {
+  it("calls signIn('credentials') with a revalidated redirectTo", async () => {
+    // On success signIn throws NEXT_REDIRECT; simulate that and ensure it
+    // propagates (the navigation must happen, not be swallowed).
+    signInMock.mockImplementationOnce(() => {
+      const err = new Error("redirect") as Error & { digest: string };
+      err.digest = "NEXT_REDIRECT;replace;/app/horas;307;";
+      throw err;
+    });
+
+    await expect(
+      loginWithCredentials("/app/horas", {}, form("a@b.com", "secret")),
+    ).rejects.toMatchObject({ digest: expect.stringContaining("NEXT_REDIRECT") });
+
+    expect(signInMock).toHaveBeenCalledWith("credentials", {
+      email: "a@b.com",
+      password: "secret",
+      redirectTo: "/app/horas",
+    });
+  });
+
+  it("blocks an unsafe bound callbackUrl", async () => {
+    signInMock.mockImplementationOnce(() => {
+      const err = new Error("redirect") as Error & { digest: string };
+      err.digest = "NEXT_REDIRECT;replace;/app;307;";
+      throw err;
+    });
+
+    await expect(
+      loginWithCredentials("https://evil.com", {}, form("a@b.com", "secret")),
+    ).rejects.toBeTruthy();
+
+    expect(signInMock).toHaveBeenCalledWith("credentials", {
+      email: "a@b.com",
+      password: "secret",
+      redirectTo: "/app",
+    });
+  });
+
+  it("maps any AuthError to ONE generic message (no existence/state leak)", async () => {
+    signInMock.mockImplementationOnce(() => {
+      throw new FakeAuthError("CredentialsSignin");
+    });
+
+    await expect(
+      loginWithCredentials("/app", {}, form("a@b.com", "wrong")),
+    ).resolves.toEqual({ error: CREDENTIALS_ERROR_MESSAGE });
+  });
+
+  it("rethrows non-auth, non-redirect errors", async () => {
+    signInMock.mockImplementationOnce(() => {
+      throw new Error("database down");
+    });
+
+    await expect(
+      loginWithCredentials("/app", {}, form("a@b.com", "x")),
+    ).rejects.toThrow("database down");
   });
 });

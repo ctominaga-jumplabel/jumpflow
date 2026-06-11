@@ -6,6 +6,7 @@ import {
   FolderKanban,
   GraduationCap,
   Receipt,
+  ShieldCheck,
   Wallet,
 } from "lucide-react";
 import type { AppUser } from "./auth/types";
@@ -113,6 +114,15 @@ export const launcherShortcuts: LauncherShortcut[] = [
     icon: BotMessageSquare,
     // Management only; PROJECT_MANAGER read-only deferred to a later round.
     access: ["ADMIN", "AREA_MANAGER"],
+  },
+  {
+    key: "acessos",
+    label: "Acessos",
+    description: "Convites, grupos de acesso e bloqueio de usuários.",
+    href: "/app/admin/acessos",
+    icon: ShieldCheck,
+    // Access administration is ADMIN only (auth-foundation §11).
+    access: ["ADMIN"],
   },
 ];
 

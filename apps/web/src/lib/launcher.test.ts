@@ -22,6 +22,7 @@ describe("launcher shortcutsForUser", () => {
     expect(keys).not.toContain("aprovacoes");
     expect(keys).not.toContain("financeiro");
     expect(keys).not.toContain("aprovacao-automatica");
+    expect(keys).not.toContain("acessos");
   });
 
   it("shows aprovacoes to managers", () => {
@@ -45,6 +46,21 @@ describe("launcher shortcutsForUser", () => {
     ).not.toContain("aprovacao-automatica");
   });
 
+  it("shows acessos only to ADMIN", () => {
+    expect(shortcutsForUser(user(["ADMIN"])).map((s) => s.key)).toContain(
+      "acessos",
+    );
+    expect(
+      shortcutsForUser(user(["AREA_MANAGER"])).map((s) => s.key),
+    ).not.toContain("acessos");
+    expect(
+      shortcutsForUser(user(["FINANCE"])).map((s) => s.key),
+    ).not.toContain("acessos");
+    expect(
+      shortcutsForUser(user(["CONSULTANT"])).map((s) => s.key),
+    ).not.toContain("acessos");
+  });
+
   it("shows financeiro to financial roles", () => {
     const keys = shortcutsForUser(user(["FINANCE"])).map((s) => s.key);
     expect(keys).toContain("financeiro");
@@ -63,6 +79,7 @@ describe("launcher shortcutsForUser", () => {
         "aprovacoes",
         "financeiro",
         "aprovacao-automatica",
+        "acessos",
       ]),
     );
   });

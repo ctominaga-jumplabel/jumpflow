@@ -2,10 +2,13 @@ import type { NextAuthConfig } from "next-auth";
 import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id";
 import { DEV_LOGOUT_COOKIE, isDevAuthEnabled } from "@/lib/auth/dev";
 import { isRoleName } from "@/lib/auth/roles";
+import { isDatabaseConfigured } from "@/lib/db/config";
 
 /**
  * Edge-safe Auth.js configuration shared by the server runtime (`auth.ts`) and
- * the middleware. No database adapter and no Node-only imports here.
+ * the middleware. No database adapter and no Node-only imports here — only
+ * `process.env` reads. The Credentials provider (Prisma + node:crypto) lives
+ * EXCLUSIVELY in `auth.ts`; this file must stay importable from the edge proxy.
  */
 
 /** Whether the Microsoft Entra ID provider has all required env vars. */
@@ -14,6 +17,19 @@ export function isEntraConfigured(): boolean {
     process.env.AUTH_MICROSOFT_ENTRA_ID_ID &&
       process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET &&
       process.env.AUTH_MICROSOFT_ENTRA_ID_TENANT_ID,
+  );
+}
+
+/**
+ * Whether email/password (local Credentials provider) is available. Requires
+ * the explicit `AUTH_CREDENTIALS_ENABLED` flag AND a configured database (the
+ * provider reads `User`/`passwordHash`). Edge-safe: only reads env. Keeping
+ * this here (not in `auth.ts`) lets the edge proxy and the login page share the
+ * exact same gate without importing Node-only credentials code.
+ */
+export function isCredentialsEnabled(): boolean {
+  return (
+    process.env.AUTH_CREDENTIALS_ENABLED === "true" && isDatabaseConfigured()
   );
 }
 

@@ -23,6 +23,13 @@ enum RoleName {
   SALES
 }
 
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+  REVOKED
+}
+
 enum ConsultantStatus {
   ACTIVE
   INACTIVE
@@ -143,11 +150,23 @@ model User {
   name        String
   email       String       @unique
   status      UserStatus   @default(ACTIVE)
+  // Local credentials provider (Round 5). Nullable: Entra users and not-yet
+  // accepted invitations have no password. Format is the self-describing
+  // scrypt string `scrypt$N$r$p$<saltB64url>$<hashB64url>` (see auth-foundation
+  // 11.3). Never store or log the plaintext password.
+  passwordHash       String?
+  emailVerifiedAt    DateTime?
+  lastLoginAt        DateTime?
+  mustChangePassword Boolean   @default(false)
   roles       UserRole[]
   consultant  Consultant?
   auditEvents AuditEvent[] @relation("AuditActor")
   approvals   Approval[]   @relation("ApprovalApprover")
   uploadedExpenseAttachments ExpenseAttachment[] @relation("ExpenseAttachmentUploader")
+  // Invitations this user created (actor side) and the invitation that created
+  // this user on acceptance (at most one).
+  invitationsSent    UserInvitation[] @relation("InvitedBy")
+  invitationCreated  UserInvitation?  @relation("CreatedUser")
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 }
@@ -166,6 +185,43 @@ model UserRole {
   role   Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
 
   @@id([userId, roleId])
+}
+
+/// Invitation-only onboarding (Round 5). There is no public sign-up: a user
+/// enters the platform solely by accepting an invitation created by an ADMIN.
+/// The invite token is a high-entropy secret delivered once; only its sha256
+/// digest is stored in `tokenHash` (@unique), never the plaintext token.
+/// `roles` carries the RoleName enum array to grant on acceptance, kept in the
+/// row (no join table) since the role set is small and static for the MVP and
+/// is written/read atomically with the invitation. Acceptance is single-use
+/// + TTL-bound (`expiresAt`); status transitions and the
+/// re-hash/lookup/validate flow are enforced in Server Actions.
+model UserInvitation {
+  id              String           @id @default(cuid())
+  // Normalized to lowercase in the application layer before persisting.
+  email           String
+  name            String
+  // sha256 digest of the plaintext token (hex/base64url). Plaintext is never
+  // stored. @unique enforces single active digest per token.
+  tokenHash       String           @unique
+  status          InvitationStatus @default(PENDING)
+  // Roles to grant when the invitation is accepted. Native Postgres enum array.
+  roles           RoleName[]
+  expiresAt       DateTime
+  acceptedAt      DateTime?
+  // Actor who created the invitation. Restrict so an admin with open invites
+  // cannot be hard-deleted without first resolving them (audit integrity).
+  invitedByUserId String
+  invitedBy       User             @relation("InvitedBy", fields: [invitedByUserId], references: [id], onDelete: Restrict)
+  // Populated on acceptance with the created/activated user. SetNull keeps the
+  // invitation history if that user is later removed.
+  createdUserId   String?          @unique
+  createdUser     User?            @relation("CreatedUser", fields: [createdUserId], references: [id], onDelete: SetNull)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@index([email])
+  @@index([status])
 }
 
 model Consultant {
