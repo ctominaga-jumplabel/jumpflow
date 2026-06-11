@@ -22,7 +22,7 @@ const FULL_PARAMS: Record<string, string> = {
   projectId: "proj-a",
   consultantId: "cons-b",
   status: "APPROVED",
-  activityType: "MEETING",
+  activityType: "ON_CALL",
   billable: "true",
   clientStatus: "ACTIVE",
   projectStatus: "ACTIVE",

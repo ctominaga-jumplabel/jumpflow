@@ -318,7 +318,7 @@ function seedEntry(over: Partial<EntryRec> = {}): EntryRec {
     allocationId: "alloc-1",
     date: new Date("2026-06-10T00:00:00.000Z"),
     hours: 8,
-    activityType: "DEVELOPMENT",
+    activityType: "WORKDAY",
     description: null,
     billable: true,
     status: "DRAFT",
@@ -409,7 +409,7 @@ afterEach(() => vi.unstubAllEnvs());
 
 const baseInput = {
   projectId: "proj-1",
-  activityType: "DEVELOPMENT" as const,
+  activityType: "WORKDAY" as const,
   date: "2026-06-10",
   hours: 8,
   description: "",

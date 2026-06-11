@@ -3,11 +3,7 @@ import { FINANCIAL_ROLES, hasRole } from "@/lib/auth/route-permissions";
 import type { AppUser } from "@/lib/auth/types";
 import { getConsultantForUser } from "@/lib/db/timesheet";
 import { resolveDbUser } from "@/lib/db/users";
-import {
-  activityLabels,
-  isActivityType,
-  type TimeEntryStatus,
-} from "@/lib/timesheet/types";
+import { activityLabelOf, type TimeEntryStatus } from "@/lib/timesheet/types";
 import {
   expenseStatusLabels,
   isExpenseRejected,
@@ -61,9 +57,9 @@ const EXPORT_ALL_LIMIT = 50_000;
 /** Hours statuses FINANCE may see (closing-only). */
 const FINANCE_HOURS_STATUSES: TimeEntryStatus[] = ["APPROVED", "CLOSED"];
 
-/** Activity label, raw passthrough for legacy free-form values. */
+/** Activity label (canonical -> legacy -> raw). Single source in types.ts. */
 function activityLabelFor(value: string): string {
-  return isActivityType(value) ? activityLabels[value] : value;
+  return activityLabelOf(value);
 }
 
 export interface ReportScope {

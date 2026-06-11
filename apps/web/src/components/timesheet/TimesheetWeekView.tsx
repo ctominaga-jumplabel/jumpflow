@@ -43,9 +43,20 @@ import {
   type TimeEntryRow as TimeEntryRowData,
   type TimesheetWeek,
 } from "@/lib/timesheet/types";
-import { addDays, parseIsoDateUtc, toIsoDate } from "@/lib/timesheet/week";
+import {
+  addDays,
+  parseIsoDateUtc,
+  toIsoDate,
+  weekStartOf,
+} from "@/lib/timesheet/week";
+import {
+  hasActiveTimesheetFilter,
+  type TimesheetFilter,
+} from "@/lib/timesheet/filters";
+import { activityLabelOf, type ActivityType } from "@/lib/timesheet/types";
 import { TimeEntryRow } from "./TimeEntryRow";
 import { TimeEntryStatusBadge } from "./TimeEntryStatusBadge";
+import { TimesheetFilters } from "./TimesheetFilters";
 import {
   TimeEntryForm,
   type TimeEntryFormProject,
@@ -59,6 +70,68 @@ const demoProjects: TimeEntryFormProject[] = allProjects
   .filter((p) => p.status !== "CLOSED")
   .map((p) => ({ id: p.id, name: p.name, clientName: p.client.name }));
 
+/** Project id -> status, for the demo project-status filter. */
+const demoProjectStatus = new Map(allProjects.map((p) => [p.id, p.status]));
+
+/**
+ * Apply the operational filters to a week's rows in DEMO mode, mirroring the
+ * server-side reduction + ordering of `getWeekForConsultant`. Pure: returns a
+ * new week object so the original mock is never mutated.
+ */
+function applyDemoFilter(
+  week: TimesheetWeek,
+  filter: TimesheetFilter,
+): TimesheetWeek {
+  const rows = week.rows.filter((row) => {
+    if (filter.status && row.status !== filter.status) return false;
+    if (filter.activity && row.activity !== filter.activity) return false;
+    if (filter.billable !== undefined && row.billable !== filter.billable) {
+      return false;
+    }
+    if (filter.projectId && row.projectId !== filter.projectId) return false;
+    if (
+      filter.projectStatus &&
+      demoProjectStatus.get(row.projectId) !== filter.projectStatus
+    ) {
+      return false;
+    }
+    return true;
+  });
+
+  const sort = filter.sort ?? "project";
+  const direction = filter.direction ?? "asc";
+  const factor = direction === "desc" ? -1 : 1;
+  const keyOf = (row: TimesheetWeek["rows"][number]): string => {
+    switch (sort) {
+      case "activity":
+        return activityLabelOf(row.activity);
+      case "status":
+        return row.status;
+      case "date": {
+        const idx = row.hours.findIndex((h) => h > 0);
+        return String(idx < 0 ? 99 : idx).padStart(2, "0");
+      }
+      case "project":
+      default:
+        return row.projectName;
+    }
+  };
+  const sorted = [...rows].sort((a, b) => {
+    const primary = keyOf(a).localeCompare(keyOf(b), "pt-BR") * factor;
+    if (primary !== 0) return primary;
+    return (
+      a.projectName.localeCompare(b.projectName, "pt-BR") ||
+      activityLabelOf(a.activity).localeCompare(
+        activityLabelOf(b.activity),
+        "pt-BR",
+      ) ||
+      a.status.localeCompare(b.status)
+    );
+  });
+
+  return { ...week, rows: sorted };
+}
+
 export interface TimesheetWeekViewProps {
   /**
    * "demo": no database configured — all mutations stay in local state.
@@ -69,6 +142,12 @@ export interface TimesheetWeekViewProps {
   week?: TimesheetWeek;
   /** db mode: projects with an active allocation in the week. */
   projects?: TimeEntryFormProject[];
+  /**
+   * Current filter values (Rodada 4.2). In db mode these are applied on the
+   * server and reflected back in the filter form; in demo mode they seed the
+   * client-side local filter state.
+   */
+  filter?: TimesheetFilter;
   /** demo mode: override the navigable weeks (mainly for tests). */
   weeks?: TimesheetWeek[];
   /** demo mode: index of the week shown first. */
@@ -98,8 +177,32 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
   const { feedback, notify } = useFeedback();
   const idCounter = useRef(0);
 
-  const week = isDemo ? localWeeks[index] : (props.week as TimesheetWeek);
-  const formProjects = isDemo ? demoProjects : (props.projects ?? []);
+  // Demo mode applies the SAME filters client-side; db mode receives an
+  // already-filtered week from the server (query string is the source of truth).
+  const [demoFilter, setDemoFilter] = useState<TimesheetFilter>(
+    props.filter ?? {},
+  );
+  const activeFilter = isDemo ? demoFilter : (props.filter ?? {});
+
+  const rawWeek = isDemo ? localWeeks[index] : (props.week as TimesheetWeek);
+  const week = useMemo(
+    () => (isDemo ? applyDemoFilter(rawWeek, demoFilter) : rawWeek),
+    [isDemo, rawWeek, demoFilter],
+  );
+  const dbProjects = props.projects ?? [];
+  const formProjects = isDemo ? demoProjects : dbProjects;
+  // Demo project dropdown: narrow by the chosen project status (db mode gets the
+  // already-narrowed list from the server via listAllowedProjects).
+  const demoFilterProjects = useMemo(() => {
+    if (!demoFilter.projectStatus) return demoProjects;
+    const allowed = new Set(
+      allProjects
+        .filter((p) => p.status === demoFilter.projectStatus)
+        .map((p) => p.id),
+    );
+    return demoProjects.filter((p) => allowed.has(p.id));
+  }, [demoFilter.projectStatus]);
+  const filterProjects = isDemo ? demoFilterProjects : dbProjects;
   const counts = useMemo(() => statusCounts(week), [week]);
   const total = useMemo(() => weekTotal(week), [week]);
 
@@ -121,6 +224,23 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
     const start = parseIsoDateUtc(week.startDate);
     if (!start) return;
     const target = toIsoDate(addDays(start, delta * 7));
+    router.push(`/app/horas?semana=${target}`);
+  }
+
+  /** "Ir para data": jump to the week containing the chosen date. */
+  function goToDate(isoDate: string) {
+    const parsed = parseIsoDateUtc(isoDate);
+    if (!parsed) return;
+    const target = toIsoDate(weekStartOf(parsed));
+    if (isDemo) {
+      const found = localWeeks.findIndex((w) => w.startDate === target);
+      if (found === -1) {
+        notify("info", "Esta semana não está disponível na demonstração.");
+        return;
+      }
+      setIndex(found);
+      return;
+    }
     router.push(`/app/horas?semana=${target}`);
   }
 
@@ -169,7 +289,10 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
           })
         : await createTimeEntry({
             projectId: editingRow?.projectId ?? value.projectId,
-            activityType: editingRow?.activity ?? value.activity,
+            // New entries only: the activity comes from the canonical-only
+            // select. The server re-validates the catalog on write.
+            activityType: (editingRow?.activity ??
+              value.activity) as ActivityType,
             date: value.date,
             hours: value.hours,
             description: value.description,
@@ -371,7 +494,9 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
       return;
     }
 
-    const submittable = week.rows.filter(
+    // Submit acts on the whole week, not just the filtered view: a hidden
+    // draft must still be sent. Read from the unfiltered local week.
+    const submittable = rawWeek.rows.filter(
       (r) => r.status === "DRAFT" && rowTotal(r) > 0,
     );
     if (submittable.length === 0) {
@@ -488,6 +613,22 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
             ) : null,
         )}
       </div>
+
+      <TimesheetFilters
+        mode={props.mode}
+        weekStart={week.startDate}
+        filter={activeFilter}
+        projects={filterProjects}
+        onChange={isDemo ? setDemoFilter : undefined}
+        onClear={isDemo ? () => setDemoFilter({}) : undefined}
+        onPickDate={goToDate}
+      />
+
+      {hasActiveTimesheetFilter(activeFilter) ? (
+        <p className="text-xs font-medium text-soft">
+          Filtros ativos: a grade mostra apenas os lançamentos correspondentes.
+        </p>
+      ) : null}
 
       <SectionPanel
         title="Lançamentos da semana"

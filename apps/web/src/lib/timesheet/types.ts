@@ -6,17 +6,42 @@
  * keeping existing imports working for the demo mode.
  */
 
+/**
+ * Canonical activity catalog (Rodada 4.2, docs/horas-operacional-filtros.md
+ * section 2), in the order shown in the entry form, default `WORKDAY`.
+ * `TimeEntry.activityType` is a `String` column, so this catalog can evolve
+ * without a migration; legacy values keep rendering via `DEPRECATED_ACTIVITY_LABELS`.
+ */
 export const ACTIVITY_TYPES = [
-  "DEVELOPMENT",
-  "MEETING",
-  "DISCOVERY",
-  "SUPPORT",
-  "DOCS",
+  "WORKDAY",
+  "WAITING_PROJECT_START",
+  "VACATION",
+  "LEAVE",
+  "ABSENCE",
+  "DAY_OFF",
+  "PAID_ABSENCE",
+  "ON_CALL",
 ] as const;
 
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];
 
 export const activityLabels: Record<ActivityType, string> = {
+  WORKDAY: "Dia Útil",
+  WAITING_PROJECT_START: "Aguardando início no projeto",
+  VACATION: "Férias",
+  LEAVE: "Licença",
+  ABSENCE: "Ausência / Falta",
+  DAY_OFF: "Folga",
+  PAID_ABSENCE: "Ausência Remunerada",
+  ON_CALL: "Sobreaviso",
+};
+
+/**
+ * Labels for legacy activity values that predate the 4.2 catalog. They are NOT
+ * in `ACTIVITY_TYPES` (so the form/filters never offer them), but existing
+ * entries keep rendering a readable label instead of a raw code.
+ */
+export const DEPRECATED_ACTIVITY_LABELS: Record<string, string> = {
   DEVELOPMENT: "Desenvolvimento",
   MEETING: "Reunião",
   DISCOVERY: "Discovery",
@@ -29,6 +54,20 @@ export const activityOrder: ActivityType[] = [...ACTIVITY_TYPES];
 
 export function isActivityType(value: string): value is ActivityType {
   return (ACTIVITY_TYPES as readonly string[]).includes(value);
+}
+
+/**
+ * Single source of truth for activity display labels. Resolves the canonical
+ * catalog first, then legacy values, and finally falls back to the raw value so
+ * an unknown code is shown as-is (never coerced to a wrong label). Used by the
+ * Horas grid, the reports layer and the approval queue.
+ */
+export function activityLabelOf(value: string): string {
+  return (
+    (activityLabels as Record<string, string>)[value] ??
+    DEPRECATED_ACTIVITY_LABELS[value] ??
+    value
+  );
 }
 
 /** Mirrors `TimeEntryStatus` in the Prisma schema (CLOSED is terminal). */
@@ -60,7 +99,12 @@ export interface TimeEntryRow {
   projectId: string;
   projectName: string;
   clientName: string;
-  activity: ActivityType;
+  /**
+   * Activity code. Typed as `string` (not `ActivityType`) so legacy/unknown
+   * values read from the database flow through without coercion; the UI renders
+   * them via `activityLabelOf`. The entry form only produces canonical values.
+   */
+  activity: string;
   billable: boolean;
   status: TimeEntryStatus;
   /** Optional note about the work logged on this row. */

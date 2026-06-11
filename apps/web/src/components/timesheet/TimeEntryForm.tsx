@@ -15,7 +15,12 @@ import {
 
 export interface TimeEntryFormValue {
   projectId: string;
-  activity: ActivityType;
+  /**
+   * Activity code. Typed as `string` so it can carry a legacy value when
+   * pre-filling the edit form from an existing row; the new-entry select only
+   * offers canonical `ActivityType` options, and the server validates on write.
+   */
+  activity: string;
   /** ISO date (yyyy-mm-dd) of the day being logged. */
   date: string;
   hours: number;
@@ -57,7 +62,7 @@ const labelClass = "mb-1 block text-xs font-semibold text-medium";
 
 const emptyValue = (days: WeekDay[]): TimeEntryFormValue => ({
   projectId: "",
-  activity: "DEVELOPMENT",
+  activity: "WORKDAY",
   date: days[0]?.date ?? "",
   hours: 0,
   description: "",

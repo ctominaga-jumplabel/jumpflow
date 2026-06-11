@@ -3,14 +3,18 @@ import { isDevAuthEnabled } from "@/lib/auth/dev";
 import type { AppUser } from "@/lib/auth/types";
 import type { ApprovalItem } from "@/lib/mock-data/approvals";
 import {
-  activityLabels,
+  activityLabelOf,
   deriveWeekStatus,
-  isActivityType,
-  type ActivityType,
   type TimeEntryRow,
   type TimeEntryStatus,
   type TimesheetWeek,
 } from "@/lib/timesheet/types";
+import {
+  TIMESHEET_DEFAULT_DIRECTION,
+  TIMESHEET_DEFAULT_SORT,
+  type ProjectStatusFilter,
+  type TimesheetFilter,
+} from "@/lib/timesheet/filters";
 import {
   addDays,
   buildWeekDays,
@@ -106,18 +110,58 @@ export async function recomputePeriodStatus(
   }
 }
 
-function toActivity(value: string): ActivityType {
-  // Entries are validated on write; tolerate legacy values on read.
-  return isActivityType(value) ? value : "DEVELOPMENT";
+/**
+ * Activity code as stored, preserved verbatim on read. Entries are validated on
+ * write (canonical catalog), but legacy/unknown values must NOT be coerced — the
+ * UI renders them via `activityLabelOf`, and the approver must see what was
+ * actually logged.
+ */
+function toActivity(value: string): string {
+  return value;
 }
 
 /**
- * Display label for an activity. Unknown/legacy values (e.g. seed data with
- * free-form strings) are shown raw instead of being coerced to a wrong label —
- * the approver must decide on accurate information.
+ * Display label for an activity (canonical -> legacy -> raw). Delegates to the
+ * single source of truth in `lib/timesheet/types`.
  */
 function activityLabelFor(value: string): string {
-  return isActivityType(value) ? activityLabels[value] : value;
+  return activityLabelOf(value);
+}
+
+/**
+ * Build the extra `where` fragment from the operational filters (Rodada 4.2).
+ * The filters only REDUCE the rows shown; they never touch the allocation rule.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function entryFilterWhere(filter: TimesheetFilter): Record<string, any> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const where: Record<string, any> = {};
+  if (filter.status) where.status = filter.status;
+  if (filter.activity) where.activityType = filter.activity;
+  if (filter.billable !== undefined) where.billable = filter.billable;
+  if (filter.projectId) where.projectId = filter.projectId;
+  if (filter.projectStatus) {
+    where.project = { ...(where.project ?? {}), status: filter.projectStatus };
+  }
+  return where;
+}
+
+/** Sort key extractor for an aggregated row, by whitelisted sort field. */
+function rowSortKey(row: TimeEntryRow, sort: string): string {
+  switch (sort) {
+    case "activity":
+      return activityLabelOf(row.activity);
+    case "status":
+      return row.status;
+    case "date": {
+      // First weekday index with logged hours; rows with no hours sort last.
+      const idx = row.hours.findIndex((h) => h > 0);
+      return String(idx < 0 ? 99 : idx).padStart(2, "0");
+    }
+    case "project":
+    default:
+      return row.projectName;
+  }
 }
 
 /**
@@ -125,10 +169,16 @@ function activityLabelFor(value: string): string {
  * (project, activity, status) with hours[7] Mon→Sun. Entries of the same
  * project+activity but different statuses become separate rows so a row's
  * status is always exact.
+ *
+ * The optional `filter` (Rodada 4.2) reduces the entries server-side
+ * (status/activity/billable/project + project status) and orders the aggregated
+ * rows by the whitelisted `sort`/`direction`. With no filter the behavior is
+ * identical to before.
  */
 export async function getWeekForConsultant(
   consultantId: string,
   weekStart: Date,
+  filter: TimesheetFilter = {},
 ): Promise<TimesheetWeek> {
   const start = weekStartOf(weekStart);
   const end = addDays(start, 6);
@@ -144,7 +194,11 @@ export async function getWeekForConsultant(
       },
     }),
     prisma.timeEntry.findMany({
-      where: { consultantId, date: { gte: start, lte: end } },
+      where: {
+        consultantId,
+        date: { gte: start, lte: end },
+        ...entryFilterWhere(filter),
+      },
       // Narrow select: never pull project financial fields (billingHourlyRate,
       // budgetHours, costCenter) into the timesheet grid.
       include: {
@@ -183,12 +237,23 @@ export async function getWeekForConsultant(
     }
   }
 
-  const rows = [...rowsByKey.values()].sort(
-    (a, b) =>
+  const sort = filter.sort ?? TIMESHEET_DEFAULT_SORT;
+  const direction = filter.direction ?? TIMESHEET_DEFAULT_DIRECTION;
+  const factor = direction === "desc" ? -1 : 1;
+  const rows = [...rowsByKey.values()].sort((a, b) => {
+    const primary =
+      rowSortKey(a, sort).localeCompare(rowSortKey(b, sort), "pt-BR") * factor;
+    if (primary !== 0) return primary;
+    // Stable secondary order keeps split rows deterministic regardless of sort.
+    return (
       a.projectName.localeCompare(b.projectName, "pt-BR") ||
-      a.activity.localeCompare(b.activity) ||
-      a.status.localeCompare(b.status),
-  );
+      activityLabelOf(a.activity).localeCompare(
+        activityLabelOf(b.activity),
+        "pt-BR",
+      ) ||
+      a.status.localeCompare(b.status)
+    );
+  });
 
   const week: TimesheetWeek = {
     label: weekLabel(start),
@@ -213,10 +278,14 @@ export interface AllowedProject {
 /**
  * Projects the consultant may log hours to in the given week: ACTIVE
  * allocations whose period intersects the week, on projects not CLOSED.
+ *
+ * When `projectStatus` is given (filter dropdown), the list is further narrowed
+ * to that exact status; otherwise the default (any non-CLOSED) applies.
  */
 export async function listAllowedProjects(
   consultantId: string,
   weekStart: Date,
+  projectStatus?: ProjectStatusFilter,
 ): Promise<AllowedProject[]> {
   const start = weekStartOf(weekStart);
   const end = addDays(start, 6);
@@ -227,7 +296,9 @@ export async function listAllowedProjects(
       status: "ACTIVE",
       startDate: { lte: end },
       OR: [{ endDate: null }, { endDate: { gte: start } }],
-      project: { status: { not: "CLOSED" } },
+      project: projectStatus
+        ? { status: projectStatus }
+        : { status: { not: "CLOSED" } },
     },
     // Narrow select: only the label fields, never project financials.
     select: {

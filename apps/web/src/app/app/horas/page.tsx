@@ -6,11 +6,12 @@ import { TimesheetWeekView } from "@/components/timesheet/TimesheetWeekView";
 import { requireUser } from "@/lib/auth/guards";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { parseWeekParam } from "@/lib/timesheet/week";
+import { parseTimesheetFilter } from "@/lib/timesheet/filters";
 
 export const metadata: Metadata = { title: "Horas" };
 
 interface HorasPageProps {
-  searchParams: Promise<{ semana?: string | string[] }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }
 
 /**
@@ -56,17 +57,26 @@ export default async function HorasPage({ searchParams }: HorasPageProps) {
     );
   }
 
-  const { semana } = await searchParams;
-  const weekStart = parseWeekParam(semana);
+  const params = await searchParams;
+  const weekStart = parseWeekParam(params.semana);
+  // Safe fallback: an invalid filter value is dropped, defaults take over.
+  const filter = parseTimesheetFilter(params);
   const [week, projects] = await Promise.all([
-    getWeekForConsultant(consultant.id, weekStart),
-    listAllowedProjects(consultant.id, weekStart),
+    getWeekForConsultant(consultant.id, weekStart, filter),
+    // The project dropdown lists the consultant's scope, narrowed by the
+    // chosen project status so the options match the active filter.
+    listAllowedProjects(consultant.id, weekStart, filter.projectStatus),
   ]);
 
   return (
     <div className="space-y-6">
       {header}
-      <TimesheetWeekView mode="db" week={week} projects={projects} />
+      <TimesheetWeekView
+        mode="db"
+        week={week}
+        projects={projects}
+        filter={filter}
+      />
     </div>
   );
 }

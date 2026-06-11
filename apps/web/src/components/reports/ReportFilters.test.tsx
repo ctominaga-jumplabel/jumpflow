@@ -41,7 +41,7 @@ describe("ReportFilters — reflects the query string (hours tab)", () => {
           projectId: "proj-b",
           consultantId: "cons-b",
           status: "APPROVED",
-          activityType: "MEETING",
+          activityType: "ON_CALL",
           // advanced:
           clientStatus: "INACTIVE",
           projectStatus: "PAUSED",
@@ -77,7 +77,7 @@ describe("ReportFilters — reflects the query string (hours tab)", () => {
     );
     expect(
       (screen.getByLabelText("Atividade") as HTMLSelectElement).value,
-    ).toBe("MEETING");
+    ).toBe("ON_CALL");
 
     // Advanced fields.
     expect(
@@ -140,7 +140,7 @@ describe("ReportFilters — reflects the query string (hours tab)", () => {
           period: "mes-atual",
           clientId: "client-a",
           status: "APPROVED",
-          activityType: "MEETING",
+          activityType: "ON_CALL",
         }}
       />,
     );

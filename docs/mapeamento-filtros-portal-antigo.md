@@ -91,6 +91,23 @@ Status de horas inferidos por uso visual:
 | `3` | reprovado | `REJECTED` |
 | `4` | aprovado | `APPROVED` |
 
+Atividades visiveis no print do portal antigo:
+
+| Label legado | Observacao | Sugestao de chave JumpFlow |
+| --- | --- | --- |
+| Dia Util | trabalho normal | `WORKDAY` |
+| Aguardando inicio no projeto | periodo alocado sem inicio efetivo | `WAITING_PROJECT_START` |
+| Ferias | ausencia programada | `VACATION` |
+| Licenca | licenca/afastamento | `LEAVE` |
+| Ausencia / Falta | ausencia nao remunerada/falta | `ABSENCE` |
+| Folga | folga/compensacao | `DAY_OFF` |
+| Ausencia Remunerada | ausencia remunerada | `PAID_ABSENCE` |
+| Sobreaviso | disponibilidade/sobreaviso | `ON_CALL` |
+
+O bundle tambem referencia slugs como `ferias`, `ausencia`, `folga`,
+`compensacao-horas` e `sobreaviso`. A API autenticada deve ser usada para
+confirmar se ha outras atividades ativas alem das visiveis no print.
+
 Totais exibidos no legado:
 
 - Horas apontadas.
@@ -195,6 +212,29 @@ Campos de despesa no formulario legado:
 - Hora possui `billable`, equivalente moderno de cobranca/faturavel.
 - Despesa possui status suficiente para aprovacao, pagamento agendado e paga.
 
+### Lacuna descoberta apos Rodada 4.1
+
+A Rodada 4.1 alinhou filtros de **relatorios**, mas nao alinhou a tela
+operacional de **lancamento de horas** (`/app/horas`). No legado, a tela de
+apontamento mostra filtros visiveis diretamente no modulo de horas:
+
+- tipo de periodo/data;
+- dia;
+- mes;
+- ano;
+- status do projeto;
+- projeto;
+- atividade;
+- status;
+- ordenar por;
+- itens por pagina.
+
+No JumpFlow, `/app/horas` ainda mostra a grade semanal com acoes principais,
+mas nao expoe esses filtros operacionais. Alem disso, o catalogo de atividades
+do formulario de novo lancamento usa atividades de entrega/consultoria
+(`Desenvolvimento`, `Reuniao`, `Discovery`, `Suporte`, `Documentacao`), que
+nao correspondem ao catalogo operacional do portal antigo.
+
 ### Gaps de paridade com o legado
 
 | Gap | Prioridade | Como tratar no JumpFlow |
@@ -279,6 +319,13 @@ Implementar agora:
 - `somenteComMovimento` se a leitura atual permitir sem custo alto.
 - Presets de periodo: mes atual, mes anterior, ano atual e range customizado,
   mantendo `from`/`to` como contrato final.
+
+Implementar em rodada complementar de `/app/horas`:
+
+- Catalogo legado de atividades no lancamento de horas.
+- Filtros operacionais na tela `/app/horas`: status, projeto, status do
+  projeto, atividade, cobranca/faturavel e ordenacao.
+- Modo de periodo/data adaptado ao design semanal do JumpFlow.
 
 Decidir antes de migrar:
 

@@ -109,6 +109,131 @@ describe("TimesheetWeekView actions (demo mode)", () => {
     );
     expect(screen.getByText(/copiados como rascunho/)).toBeInTheDocument();
   });
+
+  it("defaults the new-entry activity to Dia Útil (WORKDAY)", () => {
+    render(<TimesheetWeekView mode="demo" />);
+    fireEvent.click(screen.getByRole("button", { name: /Novo lançamento/ }));
+    const dialog = screen.getByRole("dialog");
+    expect(
+      (within(dialog).getByLabelText("Atividade") as HTMLSelectElement).value,
+    ).toBe("WORKDAY");
+  });
+
+  it("renders the operational filters block with the catalog options", () => {
+    render(<TimesheetWeekView mode="demo" />);
+    const activity = screen.getByLabelText("Atividade") as HTMLSelectElement;
+    const values = Array.from(activity.options).map((o) => o.value);
+    expect(values).toContain("WORKDAY");
+    expect(values).toContain("ON_CALL");
+    // Legacy values are never offered as a filter option.
+    expect(values).not.toContain("DEVELOPMENT");
+  });
+
+  it("applies the activity filter client-side in demo mode", () => {
+    render(<TimesheetWeekView mode="demo" />);
+    const table = screen.getByRole("table");
+    // The current demo week has a WORKDAY (te-1) and an ON_CALL (te-2) row.
+    expect(within(table).getAllByText("Atlas").length).toBeGreaterThan(0);
+    fireEvent.change(screen.getByLabelText("Atividade"), {
+      target: { value: "ON_CALL" },
+    });
+    // Only the ON_CALL (Sobreaviso) Atlas row remains.
+    expect(within(screen.getByRole("table")).getByText("Sobreaviso")).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("table")).queryByText("Dia Útil"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/Filtros ativos/),
+    ).toBeInTheDocument();
+  });
+
+  it("renders a legacy activity label (compat) and clears filters", () => {
+    render(<TimesheetWeekView mode="demo" />);
+    // te-4 (Vega) carries the legacy DOCS code -> "Documentação".
+    expect(
+      within(screen.getByRole("table")).getByText("Documentação"),
+    ).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Status"), {
+      target: { value: "REJECTED" },
+    });
+    expect(screen.getByText(/Filtros ativos/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Limpar$/ }));
+    expect(screen.queryByText(/Filtros ativos/)).not.toBeInTheDocument();
+  });
+
+  it("combines status + billable filters client-side (AND semantics)", () => {
+    render(<TimesheetWeekView mode="demo" />);
+    // Current demo week: te-2 (Atlas/ON_CALL, DRAFT, billable),
+    // te-3 (Órion/WORKDAY, DRAFT, billable), te-4 (Vega/DOCS, REJECTED, NOT
+    // billable). Status=DRAFT + Cobrança=Não faturável => zero rows, because no
+    // row is both DRAFT and non-billable.
+    fireEvent.change(screen.getByLabelText("Status"), {
+      target: { value: "DRAFT" },
+    });
+    fireEvent.change(screen.getByLabelText("Cobrança"), {
+      target: { value: "false" },
+    });
+    expect(
+      screen.getByText(/Nenhum lançamento nesta semana/),
+    ).toBeInTheDocument();
+
+    // Relax to billable=true: the two DRAFT billable rows (Atlas/Órion) remain.
+    fireEvent.change(screen.getByLabelText("Cobrança"), {
+      target: { value: "true" },
+    });
+    const table = screen.getByRole("table");
+    expect(within(table).getByText("Sobreaviso")).toBeInTheDocument();
+    expect(within(table).getByText("Órion")).toBeInTheDocument();
+    // The REJECTED Vega row is filtered out by status=DRAFT.
+    expect(within(table).queryByText("Documentação")).not.toBeInTheDocument();
+  });
+
+  it("orders the demo grid by date when sort=date is chosen", () => {
+    render(<TimesheetWeekView mode="demo" />);
+    // te-1/te-2 log hours on Mon (index 0); te-3 first logs on Tue (index 1).
+    // With sort=date asc the Monday rows must come before the Tuesday one.
+    fireEvent.change(screen.getByLabelText("Ordenar por"), {
+      target: { value: "date" },
+    });
+    fireEvent.change(screen.getByLabelText("Direção"), {
+      target: { value: "asc" },
+    });
+    const activityCells = within(screen.getByRole("table"))
+      .getAllByRole("row")
+      // Skip the header row; activity is the 2nd cell of each body row.
+      .slice(1)
+      .map((r) => r.querySelectorAll("td")[1]?.textContent ?? "");
+    // te-3 (Órion/Dia Útil, first hours on Tue) must not be first.
+    const orionIndex = activityCells.findIndex((c) => c.includes("Dia Útil"));
+    // The Monday-first rows (Dia Útil te-1 SUBMITTED, Sobreaviso te-2) precede
+    // the Tuesday-first Órion row; te-1 (Atlas/Dia Útil) is index 0.
+    expect(activityCells[0]).toContain("Dia Útil");
+    expect(orionIndex).toBeGreaterThanOrEqual(0);
+  });
+
+  it('"Ir para data" navigates to an available demo week', () => {
+    render(<TimesheetWeekView mode="demo" />);
+    expect(screen.getByText(/Semana 24/)).toBeInTheDocument();
+    // Pick any day inside the previous demo week (Mon 2026-06-01 .. Sun 06-07).
+    fireEvent.change(screen.getByLabelText("Ir para data"), {
+      target: { value: "2026-06-03" },
+    });
+    expect(screen.getByText(/Semana 23/)).toBeInTheDocument();
+  });
+
+  it('"Ir para data" reports when the demo week is not available', () => {
+    render(<TimesheetWeekView mode="demo" />);
+    // A date far outside the three seeded demo weeks.
+    fireEvent.change(screen.getByLabelText("Ir para data"), {
+      target: { value: "2026-08-10" },
+    });
+    expect(
+      screen.getByText(/Esta semana não está disponível na demonstração/),
+    ).toBeInTheDocument();
+    // The current week stays put.
+    expect(screen.getByText(/Semana 24/)).toBeInTheDocument();
+  });
 });
 
 describe("TimesheetWeekView (db mode)", () => {
@@ -154,5 +279,39 @@ describe("TimesheetWeekView (db mode)", () => {
       within(screen.getByRole("table")).getByText("Portal do Cliente"),
     ).toBeInTheDocument();
     expect(screen.queryByText(/Modo demonstração/)).not.toBeInTheDocument();
+  });
+
+  it("renders a legacy activity code as a readable label in the grid (compat)", () => {
+    // dbWeek's only row carries the legacy DEVELOPMENT code; the grid must show
+    // the human label via activityLabelOf, not the raw code.
+    render(
+      <TimesheetWeekView
+        mode="db"
+        week={dbWeek}
+        projects={[{ id: "proj-1", name: "Portal do Cliente", clientName: "Acme Corp" }]}
+      />,
+    );
+    const table = within(screen.getByRole("table"));
+    expect(table.getByText("Desenvolvimento")).toBeInTheDocument();
+    expect(table.queryByText("DEVELOPMENT")).not.toBeInTheDocument();
+  });
+
+  it("reflects the server filter values in the filter form (db mode)", () => {
+    render(
+      <TimesheetWeekView
+        mode="db"
+        week={dbWeek}
+        projects={[{ id: "proj-1", name: "Portal do Cliente", clientName: "Acme Corp" }]}
+        filter={{ status: "DRAFT", sort: "date", direction: "desc" }}
+      />,
+    );
+    expect((screen.getByLabelText("Status") as HTMLSelectElement).value).toBe(
+      "DRAFT",
+    );
+    expect(
+      (screen.getByLabelText("Ordenar por") as HTMLSelectElement).value,
+    ).toBe("date");
+    // A secondary filter (sort/direction) is active, so the disclosure opens.
+    expect(screen.getByText(/Filtros ativos/)).toBeInTheDocument();
   });
 });

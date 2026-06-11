@@ -9,7 +9,7 @@ import {
 
 const validEntry = {
   projectId: "seed-project-portal",
-  activityType: "DEVELOPMENT" as const,
+  activityType: "WORKDAY" as const,
   date: "2026-06-10",
   hours: 8,
   description: "Trabalho no portal",

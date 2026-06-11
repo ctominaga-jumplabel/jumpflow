@@ -60,12 +60,16 @@ describe("hoursReportFilterSchema", () => {
     ).toBe(true);
   });
 
-  it("rejects an unknown activity type", () => {
+  it("rejects an unknown activity type, accepts a canonical one", () => {
     expect(
       hoursReportFilterSchema.safeParse({ activityType: "NAP" }).success,
     ).toBe(false);
+    // Legacy values are no longer in the canonical catalog (4.2).
     expect(
       hoursReportFilterSchema.safeParse({ activityType: "MEETING" }).success,
+    ).toBe(false);
+    expect(
+      hoursReportFilterSchema.safeParse({ activityType: "WORKDAY" }).success,
     ).toBe(true);
   });
 

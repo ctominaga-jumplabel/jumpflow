@@ -4,7 +4,7 @@ import { Pencil } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { focusRing } from "@/lib/styles";
 import {
-  activityLabels,
+  activityLabelOf,
   isRowEditable,
   rowTotal,
   type TimeEntryRow as TimeEntryRowData,
@@ -39,7 +39,7 @@ export function TimeEntryRow({ row, days, onEdit }: TimeEntryRowProps) {
               "group flex items-center gap-1.5 rounded-md text-left",
               focusRing,
             )}
-            aria-label={`Editar lançamento de ${row.projectName} · ${activityLabels[row.activity]}`}
+            aria-label={`Editar lançamento de ${row.projectName} · ${activityLabelOf(row.activity)}`}
           >
             <span className="text-sm font-medium text-strong group-hover:text-brand">
               {row.projectName}
@@ -56,7 +56,7 @@ export function TimeEntryRow({ row, days, onEdit }: TimeEntryRowProps) {
       </td>
       <td className="px-4 py-3 align-middle">
         <span className="text-sm text-medium">
-          {activityLabels[row.activity]}
+          {activityLabelOf(row.activity)}
         </span>
         {!row.billable ? (
           <span className="ml-2 text-xs text-soft">(não faturável)</span>

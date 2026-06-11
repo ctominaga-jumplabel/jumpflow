@@ -98,6 +98,14 @@ const h = vi.hoisted(() => {
     if (typeof where.status === "string" && e.status !== where.status) {
       return false;
     }
+    // Rodada 4.2 operational filters.
+    if (where.activityType && e.activityType !== where.activityType) {
+      return false;
+    }
+    if (typeof where.billable === "boolean" && e.billable !== where.billable) {
+      return false;
+    }
+    if (where.projectId && e.projectId !== where.projectId) return false;
     if (where.date) {
       if (where.date.gte && e.date.getTime() < where.date.gte.getTime()) {
         return false;
@@ -111,6 +119,10 @@ const h = vi.hoisted(() => {
       if (!project || project.managerUserId !== where.project.managerUserId) {
         return false;
       }
+    }
+    if (where.project?.status) {
+      const project = projectOf(e.projectId);
+      if (!project || project.status !== where.project.status) return false;
     }
     return true;
   }
@@ -210,6 +222,13 @@ const h = vi.hoisted(() => {
           if (where.project?.status?.not) {
             const project = projectOf(a.projectId);
             if (!project || project.status === where.project.status.not) {
+              return false;
+            }
+          }
+          // Exact project-status match (listAllowedProjects with a filter).
+          if (typeof where.project?.status === "string") {
+            const project = projectOf(a.projectId);
+            if (!project || project.status !== where.project.status) {
               return false;
             }
           }
@@ -447,6 +466,267 @@ describe("getWeekForConsultant", () => {
     expect(week.rows).toHaveLength(1);
     expect(week.status).toBe("DRAFT");
   });
+
+  it("renders legacy activity codes with a readable label (compat)", async () => {
+    seedEntry({ activityType: "DEVELOPMENT", status: "DRAFT" });
+    const week = await getWeekForConsultant("con-1", MONDAY);
+    // The row keeps the raw code; the UI maps it via activityLabelOf.
+    expect(week.rows[0].activity).toBe("DEVELOPMENT");
+  });
+});
+
+describe("getWeekForConsultant — operational filters (Rodada 4.2)", () => {
+  function seedMixedWeek() {
+    seedEntry({
+      projectId: "proj-atlas",
+      activityType: "WORKDAY",
+      status: "DRAFT",
+      billable: true,
+      date: new Date("2026-06-08T00:00:00.000Z"),
+    });
+    seedEntry({
+      projectId: "proj-atlas",
+      activityType: "ON_CALL",
+      status: "SUBMITTED",
+      billable: false,
+      date: new Date("2026-06-09T00:00:00.000Z"),
+    });
+    seedEntry({
+      projectId: "proj-orion",
+      activityType: "WORKDAY",
+      status: "APPROVED",
+      billable: true,
+      date: new Date("2026-06-10T00:00:00.000Z"),
+    });
+  }
+
+  it("with no filter behaves like the current week (all rows)", async () => {
+    seedMixedWeek();
+    const week = await getWeekForConsultant("con-1", MONDAY);
+    expect(week.rows).toHaveLength(3);
+  });
+
+  it("reduces by status", async () => {
+    seedMixedWeek();
+    const week = await getWeekForConsultant("con-1", MONDAY, {
+      status: "DRAFT",
+    });
+    expect(week.rows.map((r) => r.status)).toEqual(["DRAFT"]);
+  });
+
+  it("reduces by activity", async () => {
+    seedMixedWeek();
+    const week = await getWeekForConsultant("con-1", MONDAY, {
+      activity: "ON_CALL",
+    });
+    expect(week.rows).toHaveLength(1);
+    expect(week.rows[0].activity).toBe("ON_CALL");
+  });
+
+  it("reduces by billable", async () => {
+    seedMixedWeek();
+    const week = await getWeekForConsultant("con-1", MONDAY, {
+      billable: false,
+    });
+    expect(week.rows).toHaveLength(1);
+    expect(week.rows[0].billable).toBe(false);
+  });
+
+  it("reduces by projectId", async () => {
+    seedMixedWeek();
+    const week = await getWeekForConsultant("con-1", MONDAY, {
+      projectId: "proj-orion",
+    });
+    expect(week.rows.map((r) => r.projectId)).toEqual(["proj-orion"]);
+  });
+
+  it("reduces by project status", async () => {
+    // proj-atlas + proj-orion are ACTIVE; proj-closed is CLOSED.
+    seedMixedWeek();
+    seedEntry({
+      projectId: "proj-closed",
+      activityType: "WORKDAY",
+      status: "DRAFT",
+      date: new Date("2026-06-11T00:00:00.000Z"),
+    });
+    const week = await getWeekForConsultant("con-1", MONDAY, {
+      projectStatus: "CLOSED",
+    });
+    expect(week.rows.map((r) => r.projectId)).toEqual(["proj-closed"]);
+  });
+
+  it("orders rows by status asc/desc", async () => {
+    seedMixedWeek();
+    const asc = await getWeekForConsultant("con-1", MONDAY, {
+      sort: "status",
+      direction: "asc",
+    });
+    expect(asc.rows.map((r) => r.status)).toEqual([
+      "APPROVED",
+      "DRAFT",
+      "SUBMITTED",
+    ]);
+    const desc = await getWeekForConsultant("con-1", MONDAY, {
+      sort: "status",
+      direction: "desc",
+    });
+    expect(desc.rows.map((r) => r.status)).toEqual([
+      "SUBMITTED",
+      "DRAFT",
+      "APPROVED",
+    ]);
+  });
+
+  it("orders rows by project name (default)", async () => {
+    seedMixedWeek();
+    const week = await getWeekForConsultant("con-1", MONDAY);
+    // Atlas before Órion (pt-BR collation), default sort=project asc.
+    expect(week.rows.map((r) => r.projectName)).toEqual([
+      "Atlas",
+      "Atlas",
+      "Órion",
+    ]);
+  });
+
+  it("orders rows by project name desc", async () => {
+    seedMixedWeek();
+    const week = await getWeekForConsultant("con-1", MONDAY, {
+      sort: "project",
+      direction: "desc",
+    });
+    expect(week.rows.map((r) => r.projectName)).toEqual([
+      "Órion",
+      "Atlas",
+      "Atlas",
+    ]);
+  });
+
+  it("orders rows by activity label asc/desc", async () => {
+    seedMixedWeek();
+    // Labels: WORKDAY="Dia Útil", ON_CALL="Sobreaviso". Two WORKDAY + one
+    // ON_CALL: asc => Dia Útil (x2) before Sobreaviso.
+    const asc = await getWeekForConsultant("con-1", MONDAY, {
+      sort: "activity",
+      direction: "asc",
+    });
+    expect(asc.rows.map((r) => r.activity)).toEqual([
+      "WORKDAY",
+      "WORKDAY",
+      "ON_CALL",
+    ]);
+    const desc = await getWeekForConsultant("con-1", MONDAY, {
+      sort: "activity",
+      direction: "desc",
+    });
+    expect(desc.rows.map((r) => r.activity)).toEqual([
+      "ON_CALL",
+      "WORKDAY",
+      "WORKDAY",
+    ]);
+  });
+
+  it("orders rows by date (first weekday with hours) asc/desc", async () => {
+    // seedMixedWeek logs Mon (WORKDAY/Atlas), Tue (ON_CALL/Atlas),
+    // Wed (WORKDAY/Órion) — first-hour indices 0, 1, 2.
+    seedMixedWeek();
+    const asc = await getWeekForConsultant("con-1", MONDAY, {
+      sort: "date",
+      direction: "asc",
+    });
+    expect(asc.rows.map((r) => r.activity)).toEqual([
+      "WORKDAY", // Mon (Atlas)
+      "ON_CALL", // Tue
+      "WORKDAY", // Wed (Órion)
+    ]);
+    expect(asc.rows.map((r) => r.projectName)).toEqual([
+      "Atlas",
+      "Atlas",
+      "Órion",
+    ]);
+    const desc = await getWeekForConsultant("con-1", MONDAY, {
+      sort: "date",
+      direction: "desc",
+    });
+    expect(desc.rows.map((r) => r.projectName)).toEqual([
+      "Órion", // Wed
+      "Atlas", // Tue
+      "Atlas", // Mon
+    ]);
+  });
+
+  it("combines status + activity + billable to reduce to a single row", async () => {
+    // Add a decoy that matches only some of the three predicates so the AND
+    // semantics are actually exercised (not just one filter doing the work).
+    seedMixedWeek();
+    seedEntry({
+      projectId: "proj-atlas",
+      activityType: "WORKDAY",
+      status: "SUBMITTED", // same activity as a target but wrong status
+      billable: true,
+      date: new Date("2026-06-11T00:00:00.000Z"),
+    });
+
+    const week = await getWeekForConsultant("con-1", MONDAY, {
+      status: "DRAFT",
+      activity: "WORKDAY",
+      billable: true,
+    });
+
+    // Only the DRAFT + WORKDAY + billable Atlas row (Monday) survives.
+    expect(week.rows).toHaveLength(1);
+    expect(week.rows[0]).toMatchObject({
+      status: "DRAFT",
+      activity: "WORKDAY",
+      billable: true,
+      projectName: "Atlas",
+    });
+  });
+
+  it("combines projectId + status (AND, not OR)", async () => {
+    seedMixedWeek();
+    // proj-orion has only an APPROVED row; asking for proj-orion + DRAFT must
+    // yield nothing (the DRAFT rows are all on proj-atlas).
+    const empty = await getWeekForConsultant("con-1", MONDAY, {
+      projectId: "proj-orion",
+      status: "DRAFT",
+    });
+    expect(empty.rows).toEqual([]);
+
+    const orion = await getWeekForConsultant("con-1", MONDAY, {
+      projectId: "proj-orion",
+      status: "APPROVED",
+    });
+    expect(orion.rows.map((r) => r.projectId)).toEqual(["proj-orion"]);
+  });
+
+  it("includes a legacy-coded row by default but excludes it when filtering by a canonical activity (compat)", async () => {
+    // A pre-4.2 entry stored as DEVELOPMENT alongside a canonical WORKDAY one.
+    seedEntry({
+      projectId: "proj-atlas",
+      activityType: "DEVELOPMENT",
+      status: "DRAFT",
+      date: new Date("2026-06-08T00:00:00.000Z"),
+    });
+    seedEntry({
+      projectId: "proj-atlas",
+      activityType: "WORKDAY",
+      status: "DRAFT",
+      date: new Date("2026-06-09T00:00:00.000Z"),
+    });
+
+    // No activity filter: both rows show; the legacy code is preserved verbatim.
+    const all = await getWeekForConsultant("con-1", MONDAY);
+    expect(all.rows.map((r) => r.activity).sort()).toEqual([
+      "DEVELOPMENT",
+      "WORKDAY",
+    ]);
+
+    // Filtering by WORKDAY must NOT bring the DEVELOPMENT row.
+    const workday = await getWeekForConsultant("con-1", MONDAY, {
+      activity: "WORKDAY",
+    });
+    expect(workday.rows.map((r) => r.activity)).toEqual(["WORKDAY"]);
+  });
 });
 
 describe("listAllowedProjects", () => {
@@ -495,6 +775,34 @@ describe("listAllowedProjects", () => {
 
   it("returns an empty list when the consultant has no allocations", async () => {
     expect(await listAllowedProjects("con-1", MONDAY)).toEqual([]);
+  });
+
+  it("narrows to a given project status when provided (Rodada 4.2)", async () => {
+    const alloc = (over: Partial<AllocationRec>): AllocationRec => ({
+      id: `alloc-${h.store.allocations.length + 1}`,
+      consultantId: "con-1",
+      projectId: "proj-atlas",
+      status: "ACTIVE",
+      startDate: new Date("2026-01-05T00:00:00.000Z"),
+      endDate: null,
+      ...over,
+    });
+    // Give proj-orion a non-ACTIVE status so the filter excludes it.
+    h.store.projects.find((p) => p.id === "proj-orion")!.status = "PAUSED";
+    h.store.allocations = [
+      alloc({ projectId: "proj-atlas" }), // ACTIVE
+      alloc({ projectId: "proj-orion", id: "alloc-orion" }), // PAUSED
+    ];
+
+    const active = await listAllowedProjects("con-1", MONDAY, "ACTIVE");
+    expect(active.map((p) => p.id)).toEqual(["proj-atlas"]);
+
+    const paused = await listAllowedProjects("con-1", MONDAY, "PAUSED");
+    expect(paused.map((p) => p.id)).toEqual(["proj-orion"]);
+
+    // No filter keeps the default (any non-CLOSED): both show up.
+    const all = await listAllowedProjects("con-1", MONDAY);
+    expect(all.map((p) => p.id).sort()).toEqual(["proj-atlas", "proj-orion"]);
   });
 });
 
