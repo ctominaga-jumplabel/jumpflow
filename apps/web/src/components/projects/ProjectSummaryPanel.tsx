@@ -1,6 +1,6 @@
 import { FolderKanban, PlayCircle, Clock4, CheckCircle2 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { summarizeProjects, type Project } from "@/lib/mock-data/projects";
+import type { ProjectItem } from "@/lib/projects/types";
 
 interface SummaryStat {
   label: string;
@@ -10,7 +10,7 @@ interface SummaryStat {
 }
 
 export interface ProjectSummaryPanelProps {
-  projects: Project[];
+  projects: ProjectItem[];
 }
 
 /**
@@ -18,29 +18,28 @@ export interface ProjectSummaryPanelProps {
  * (rate/budget) are shown per-row in the list and masked by role — never here.
  */
 export function ProjectSummaryPanel({ projects }: ProjectSummaryPanelProps) {
-  const summary = summarizeProjects(projects);
   const stats: SummaryStat[] = [
     {
       label: "Projetos",
-      value: summary.total,
+      value: projects.length,
       icon: FolderKanban,
       className: "bg-brand-soft text-brand-dark",
     },
     {
       label: "Ativos",
-      value: summary.active,
+      value: projects.filter((project) => project.status === "ACTIVE").length,
       icon: PlayCircle,
       className: "bg-success-soft text-success",
     },
     {
-      label: "Planejados",
-      value: summary.planned,
+      label: "Propostas",
+      value: projects.filter((project) => project.status === "PROPOSAL").length,
       icon: Clock4,
       className: "bg-warning-soft text-warning",
     },
     {
       label: "Encerrados",
-      value: summary.closed,
+      value: projects.filter((project) => project.status === "CLOSED").length,
       icon: CheckCircle2,
       className: "bg-surface-muted text-medium",
     },

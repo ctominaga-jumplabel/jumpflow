@@ -1,18 +1,28 @@
 import { StatusBadge, type StatusTone } from "@/components/ui/StatusBadge";
-import {
-  projectStatusLabels,
-  type ProjectStatus,
-} from "@/lib/mock-data/projects";
+import type { ProjectStatus } from "@/lib/projects/types";
 
-const toneByStatus: Record<ProjectStatus, StatusTone> = {
+type SupportedProjectStatus = ProjectStatus | "PLANNED" | "ON_HOLD";
+
+export const projectStatusLabels: Record<SupportedProjectStatus, string> = {
+  PROPOSAL: "Proposta",
+  ACTIVE: "Ativo",
+  PLANNED: "Planejado",
+  ON_HOLD: "Em espera",
+  PAUSED: "Pausado",
+  CLOSED: "Encerrado",
+};
+
+const toneByStatus: Record<SupportedProjectStatus, StatusTone> = {
+  PROPOSAL: "info",
   ACTIVE: "success",
   PLANNED: "info",
   ON_HOLD: "warning",
+  PAUSED: "warning",
   CLOSED: "neutral",
 };
 
 export interface ProjectStatusBadgeProps {
-  status: ProjectStatus;
+  status: SupportedProjectStatus;
 }
 
 /** Status pill for a project. */

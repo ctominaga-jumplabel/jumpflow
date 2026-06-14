@@ -298,6 +298,7 @@ vi.mock("@/lib/auth/guards", () => ({
 import {
   copyPreviousWeek,
   createTimeEntry,
+  createWeeklyTimeEntries,
   decideHours,
   deleteTimeEntry,
   submitWeek,
@@ -496,6 +497,71 @@ describe("createTimeEntry — persistence", () => {
     seedCurrentPeriod("CLOSED");
     const result = await createTimeEntry(baseInput);
     expect(result).toMatchObject({ ok: false, error: "PERIOD_CLOSED" });
+  });
+});
+
+describe("createWeeklyTimeEntries", () => {
+  it("creates selected weekdays, skips duplicates and dates outside allocation", async () => {
+    seedCurrentPeriod();
+    seedEntry({
+      date: new Date("2026-06-09T00:00:00.000Z"),
+      status: "SUBMITTED",
+      submittedAt: new Date(),
+    });
+    h.store.allocations[0].endDate = new Date("2026-06-10T00:00:00.000Z");
+
+    const result = await createWeeklyTimeEntries({
+      projectId: "proj-1",
+      activityType: "WORKDAY",
+      weekStart: "2026-06-08",
+      hoursPerDay: 6,
+      weekdays: [1, 2, 3, 4, 5],
+      description: "Rotina semanal",
+      billable: true,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        created: 2,
+        skippedExisting: 1,
+        skippedOutOfAllocation: 2,
+      },
+    });
+    const created = h.store.entries.filter((entry) => entry.hours === 6);
+    expect(created.map((entry) => entry.date.toISOString().slice(0, 10))).toEqual([
+      "2026-06-08",
+      "2026-06-10",
+    ]);
+    expect(created.every((entry) => entry.status === "SUBMITTED")).toBe(true);
+    expect(
+      h.store.audits.filter((audit) => audit.action === "TIME_ENTRY_WEEKLY_CREATED"),
+    ).toHaveLength(2);
+  });
+
+  it("does not create an empty period when every selected day is outside allocation", async () => {
+    h.store.allocations[0].endDate = new Date("2026-06-07T00:00:00.000Z");
+
+    const result = await createWeeklyTimeEntries({
+      projectId: "proj-1",
+      activityType: "WORKDAY",
+      weekStart: "2026-06-08",
+      hoursPerDay: 6,
+      weekdays: [1],
+      description: "",
+      billable: true,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        created: 0,
+        skippedExisting: 0,
+        skippedOutOfAllocation: 1,
+      },
+    });
+    expect(h.store.periods).toHaveLength(0);
+    expect(h.store.entries).toHaveLength(0);
   });
 });
 
@@ -911,6 +977,19 @@ describe("guards", () => {
     [string, () => Promise<{ ok: boolean }>]
   > = [
     ["createTimeEntry", () => createTimeEntry(baseInput)],
+    [
+      "createWeeklyTimeEntries",
+      () =>
+        createWeeklyTimeEntries({
+          projectId: "proj-1",
+          activityType: "WORKDAY",
+          weekStart: "2026-06-08",
+          hoursPerDay: 8,
+          weekdays: [1, 2, 3, 4, 5],
+          description: "",
+          billable: true,
+        }),
+    ],
     [
       "updateTimeEntry",
       () => updateTimeEntry({ id: "entry-x", hours: 5, billable: true }),

@@ -36,6 +36,8 @@ describe("TimesheetFilters (db mode) — query string reflection", () => {
       projectStatus: "PAUSED",
       activity: "ON_CALL",
       billable: false,
+      startDate: "2026-06-01",
+      endDate: "2026-06-30",
       sort: "status",
       direction: "desc",
     });
@@ -55,6 +57,12 @@ describe("TimesheetFilters (db mode) — query string reflection", () => {
     expect(
       (screen.getByLabelText("Cobrança") as HTMLSelectElement).value,
     ).toBe("false");
+    expect(
+      (screen.getByLabelText("Inicio do periodo") as HTMLInputElement).value,
+    ).toBe("2026-06-01");
+    expect(
+      (screen.getByLabelText("Fim do periodo") as HTMLInputElement).value,
+    ).toBe("2026-06-30");
     expect(
       (screen.getByLabelText("Ordenar por") as HTMLSelectElement).value,
     ).toBe("status");
@@ -114,6 +122,11 @@ describe("TimesheetFilters — secondary disclosure", () => {
 
   it("opens when direction is active", () => {
     const { container } = renderDb({ direction: "desc" });
+    expect(details(container).open).toBe(true);
+  });
+
+  it("opens when the period range is active", () => {
+    const { container } = renderDb({ startDate: "2026-06-01" });
     expect(details(container).open).toBe(true);
   });
 });

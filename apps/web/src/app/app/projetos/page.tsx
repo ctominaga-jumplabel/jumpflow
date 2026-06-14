@@ -1,29 +1,77 @@
 import type { Metadata } from "next";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ProjectSummaryPanel } from "@/components/projects/ProjectSummaryPanel";
-import { ProjectList } from "@/components/projects/ProjectList";
+import { ProjectsView } from "@/components/projects/ProjectsView";
 import { getCurrentUser } from "@/lib/auth/current-user";
-import { FINANCIAL_ROLES, hasRole } from "@/lib/auth/route-permissions";
-import { projects } from "@/lib/mock-data/projects";
+import { hasRole } from "@/lib/auth/route-permissions";
+import type { RoleName } from "@/lib/auth/types";
+import { isDatabaseConfigured } from "@/lib/db/config";
+import {
+  listProjectClients,
+  listProjectConsultants,
+  listProjectManagers,
+  listProjects,
+} from "@/lib/db/projects";
+import {
+  demoProjectClients,
+  demoProjectConsultants,
+  demoProjectManagers,
+  demoProjects,
+} from "@/lib/projects/mock-data";
 
 export const metadata: Metadata = { title: "Projetos" };
 
+const PROJECT_WRITE_ROLES: RoleName[] = [
+  "ADMIN",
+  "AREA_MANAGER",
+  "PROJECT_MANAGER",
+  "SALES",
+];
+const SALE_RATE_ROLES: RoleName[] = [
+  "ADMIN",
+  "AREA_MANAGER",
+  "FINANCE",
+  "SALES",
+];
+
 export default async function ProjetosPage() {
-  // Financial fields (valor hora, budget) are role-protected even though the
-  // module itself is readable by all authenticated users. We resolve the
-  // capability on the server and pass it down; the UI only masks the display.
   const user = await getCurrentUser();
-  const canViewFinancials = hasRole(user, FINANCIAL_ROLES);
+  const databaseReady = isDatabaseConfigured();
+  const canManageProjects = hasRole(user, PROJECT_WRITE_ROLES);
+  const canViewCommercials = hasRole(user, SALE_RATE_ROLES);
+  const canManageSaleRates = hasRole(user, SALE_RATE_ROLES);
+  const [projects, clients, consultants, managers] = databaseReady
+    ? await Promise.all([
+        listProjects({ includeFinancials: canViewCommercials }),
+        listProjectClients(),
+        listProjectConsultants(),
+        listProjectManagers(),
+      ])
+    : [
+        demoProjects,
+        demoProjectClients,
+        demoProjectConsultants,
+        demoProjectManagers,
+      ];
 
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Operação"
+        eyebrow="Operacao"
         title="Projetos"
-        description="Carteira de projetos com cliente, status, gestor, período, budget e alocação."
+        description="Carteira de projetos com cliente, status, gestor, periodo, budget, vinculos e valores de venda."
       />
       <ProjectSummaryPanel projects={projects} />
-      <ProjectList canViewFinancials={canViewFinancials} projects={projects} />
+      <ProjectsView
+        mode={databaseReady ? "db" : "demo"}
+        projects={projects}
+        clients={clients}
+        consultants={consultants}
+        managers={managers}
+        canManageProjects={canManageProjects}
+        canViewCommercials={canViewCommercials}
+        canManageSaleRates={canManageSaleRates}
+      />
     </div>
   );
 }

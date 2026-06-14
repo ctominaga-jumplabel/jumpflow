@@ -104,6 +104,35 @@ export function ApprovalDecisionPanel({
             </dt>
             <dd className="text-medium">{item.activitySummary}</dd>
           </div>
+          <div>
+            <dt className="text-xs text-soft">Enviado em</dt>
+            <dd className="font-medium text-strong">
+              {new Date(item.submittedAt).toLocaleString("pt-BR", {
+                dateStyle: "short",
+                timeStyle: "short",
+              })}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs text-soft">Origem</dt>
+            <dd className="font-medium text-strong">
+              {item.source === "db" ? "Banco" : "Demo"}
+            </dd>
+          </div>
+          {item.entryIds?.length ? (
+            <div className="col-span-2">
+              <dt className="text-xs text-soft">Lancamentos</dt>
+              <dd className="break-all text-medium">
+                {item.entryIds.length} item(ns) - {item.entryIds.join(", ")}
+              </dd>
+            </div>
+          ) : null}
+          {item.expenseId ? (
+            <div className="col-span-2">
+              <dt className="text-xs text-soft">Despesa</dt>
+              <dd className="break-all text-medium">{item.expenseId}</dd>
+            </div>
+          ) : null}
           {item.comment ? (
             <div className="col-span-2">
               <dt className="text-xs text-soft">Justificativa anterior</dt>

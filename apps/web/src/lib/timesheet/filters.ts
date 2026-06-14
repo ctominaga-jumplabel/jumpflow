@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ACTIVITY_TYPES } from "./types";
+import { parseIsoDateUtc } from "./week";
 
 /**
  * Filters for the `/app/horas` weekly grid (Rodada 4.2,
@@ -53,6 +54,10 @@ export const TIMESHEET_DEFAULT_SORT: TimesheetSortField = "project";
 export const TIMESHEET_DEFAULT_DIRECTION: "asc" | "desc" = "asc";
 
 const directionEnum = z.enum(["asc", "desc"]);
+const isoDateFilterSchema = z.preprocess(
+  blankToUndefined,
+  z.string().refine((value) => parseIsoDateUtc(value) !== null).optional(),
+);
 
 /**
  * Cobrança/faturável (`TimeEntry.billable`). `"true"` -> true, `"false"` ->
@@ -72,6 +77,8 @@ export const timesheetFilterSchema = z.object({
   projectId: z.preprocess(blankToUndefined, z.string().min(1).optional()),
   activity: z.preprocess(blankToUndefined, activityEnum.optional()),
   status: z.preprocess(blankToUndefined, statusEnum.optional()),
+  startDate: isoDateFilterSchema,
+  endDate: isoDateFilterSchema,
   billable: billableSchema,
   sort: z.preprocess(blankToUndefined, z.enum(TIMESHEET_SORT_FIELDS).optional()),
   direction: z.preprocess(blankToUndefined, directionEnum.optional()),
@@ -97,6 +104,8 @@ export function parseTimesheetFilter(
     projectId: pick("projectId"),
     activity: pick("activity"),
     status: pick("status"),
+    startDate: pick("inicio"),
+    endDate: pick("fim"),
     billable: pick("billable"),
     sort: pick("sort"),
     direction: pick("direction"),
@@ -111,6 +120,8 @@ export function hasActiveTimesheetFilter(filter: TimesheetFilter): boolean {
       filter.projectId ||
       filter.activity ||
       filter.status ||
+      filter.startDate ||
+      filter.endDate ||
       filter.billable !== undefined,
   );
 }

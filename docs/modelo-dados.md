@@ -430,3 +430,91 @@ User 1:N AuditEvent
 - Valor hora e custo hora devem ser protegidos por perfil.
 - A soma de alocacoes deve gerar alerta acima de 100%.
 
+## 6. Expansao Fase 2 - Dominios Financeiros, Fiscal, Consultores e Integracoes
+
+Esta expansao prepara os fluxos solicitados no roadmap longo sem implementar
+telas ou providers externos. A decisao de modelagem e aditiva: entidades novas
+convivem com o modelo MVP existente para permitir migracao gradual.
+
+### Billing e Clientes
+
+- **BillingType**: catalogo de tipos de cobranca (`HOURLY`, `MONTHLY`,
+  `CONSULTANT_HOURLY`, `FIXED`) com regra de arredondamento padrao.
+- **Client** passa a aceitar logo, tipo de cobranca, valor hora padrao,
+  valor mensal, limite de horas, regra de arredondamento, dia de faturamento,
+  dia de vencimento, tipo de NF, municipio, aliquota ISS e regras tributarias.
+- Campos financeiros/fiscais de cliente devem ser restritos a FINANCE,
+  AREA_MANAGER, ADMIN e perfis explicitamente autorizados.
+
+### Projetos e Valores de Venda
+
+- **ProjectSaleRate** registra valor de venda por projeto, opcionalmente por
+  consultor/alocacao, com vigencia (`startsAt`/`endsAt`) e moeda.
+- **ConsultantAllocationCostRate** registra custo hora por alocacao e vigencia,
+  separado do valor de venda, para calculo futuro de margem.
+- A regra de sobreposicao de vigencias deve ser validada no servidor antes de
+  gravar, porque pode variar entre valor por projeto e valor por consultor.
+- Alteracoes de valor de venda devem gerar `AuditEvent`.
+
+### Consultores, Contratacao e Beneficios
+
+- **ConsultantPersonalInfo** separa CPF e dados pessoais.
+- **ConsultantCompanyInfo** separa CNPJ, razao social, nome fantasia, inscricao
+  municipal, regime tributario e snapshot do provider CNPJ.
+- **ConsultantAddress** separa CEP/endereco e snapshot do provider CEP.
+- **ConsultantBankAccount** permite contas CLT, PJ ou primaria; CLT FLEX deve
+  usar contas separadas quando aplicavel.
+- **ConsultantCompensation** versiona tipo de contratacao (`CLT`, `PJ`,
+  `CLT_FLEX`), valores acordados e regras de desconto por vigencia.
+- **ConsultantBenefit** versiona beneficios como VA, VR, VT, cartao beneficio
+  e outros.
+- Dados pessoais, bancarios e remuneracao exigem RBAC estrito, testes
+  negativos e auditoria em alteracoes.
+- Entidades sensiveis de consultor usam `onDelete: Restrict`; consultores devem
+  ser inativados por status, nao removidos fisicamente quando houver historico.
+
+### Receita, Pre-fatura e NFS-e
+
+- **RevenueClosing** representa o fechamento de receita por cliente/projeto,
+  mes/ano e status (`OPEN`, `IN_REVIEW`, `READY_TO_CLOSE`, `CLOSED`,
+  `INVOICED`, `CANCELLED`).
+- **RevenueClosingLine** detalha itens do fechamento, incluindo horas,
+  valor unitario, valor total e vinculo opcional com `TimeEntry`.
+- Fechamentos por projeto usam unicidade `clientId + projectId + month + year`.
+  Fechamentos client-level (`projectId` nulo) exigem indice parcial SQL
+  `clientId + month + year WHERE projectId IS NULL`, mantido na migration.
+- **FiscalDocument** guarda status fiscal, tipo de documento, provider,
+  numero da NF, protocolo, storage keys de XML/PDF, erro e validador.
+- Numero fiscal e unico por provider quando informado.
+- O provider padrao previsto e `SAO_PAULO_NFSE`, mas regras de negocio devem
+  chamar uma interface interna, nao o Web Service diretamente.
+- XML/PDF devem ser privados e servidos por URLs assinadas ou equivalente.
+
+### Pagamento de Consultores
+
+- **ConsultantPaymentForecast** cadastra previsao por competencia, prazo limite
+  de retorno e data prevista de pagamento.
+- **ConsultantPayment** controla status de pagamento por consultor/mes/ano,
+  tipo de contratacao, valores CLT/PJ/beneficios, previsao e confirmacao.
+- **ConsultantPaymentLine** detalha abertura por projeto/alocacao/time entry,
+  horas, valor unitario e valor total.
+- Mudancas de status, valores, NF recebida/validada e pagamento confirmado
+  devem gerar auditoria.
+
+### Integracoes Externas
+
+- **IntegrationEvent** registra provider, operacao, status, entidade relacionada,
+  chave de idempotencia, metadados de request/response, erro e timestamps.
+- Providers previstos: CNPJ, CEP, Entra ID, Sao Paulo NFS-e, email, storage,
+  banco e ERP.
+- Secrets nunca devem ser persistidos em `IntegrationEvent`; apenas metadados
+  operacionais seguros.
+
+### Regras Transversais
+
+- Prisma e o banco guardam estrutura e historico; regras de permissao, calculo,
+  provider e transicao de status ficam na aplicacao.
+- Toda alteracao financeira, fiscal, bancaria, remuneratoria ou de permissao
+  deve gerar `AuditEvent`.
+- Integracoes devem ser idempotentes e rastreaveis, sem acoplar dominio a SDKs
+  ou providers especificos.

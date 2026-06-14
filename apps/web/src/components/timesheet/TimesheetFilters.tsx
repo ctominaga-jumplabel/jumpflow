@@ -119,6 +119,8 @@ export function TimesheetFilters({
   // filter is never hidden from view.
   const advancedActive =
     filter.billable !== undefined ||
+    Boolean(filter.startDate) ||
+    Boolean(filter.endDate) ||
     Boolean(filter.sort) ||
     Boolean(filter.direction);
   const anyActive = hasActiveTimesheetFilter(filter);
@@ -218,6 +220,32 @@ export function TimesheetFilters({
           <p id="hf-date-hint" className="mt-1 text-xs text-soft">
             Abre a semana que contém a data.
           </p>
+        </div>
+
+        <div>
+          <label className={labelClass} htmlFor="hf-start">
+            Inicio do periodo
+          </label>
+          <input
+            id="hf-start"
+            type="date"
+            name="inicio"
+            className={fieldClass}
+            {...bind("startDate", filter.startDate)}
+          />
+        </div>
+
+        <div>
+          <label className={labelClass} htmlFor="hf-end">
+            Fim do periodo
+          </label>
+          <input
+            id="hf-end"
+            type="date"
+            name="fim"
+            className={fieldClass}
+            {...bind("endDate", filter.endDate)}
+          />
         </div>
       </div>
 

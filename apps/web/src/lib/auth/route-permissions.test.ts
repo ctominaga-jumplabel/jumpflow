@@ -66,6 +66,11 @@ describe("hasRole", () => {
 
 describe("accessForPath", () => {
   it("requires finance roles for the financeiro module", () => {
+    expect(accessForPath("/app/pagamentos")).toEqual([
+      "ADMIN",
+      "AREA_MANAGER",
+      "FINANCE",
+    ]);
     expect(accessForPath("/app/financeiro")).toEqual([
       "ADMIN",
       "AREA_MANAGER",
@@ -109,6 +114,7 @@ describe("accessForPath", () => {
   it("matches the most specific rule before the broad /app rule", () => {
     // Precedence matters: /app/financeiro must not resolve to the /app "ALL".
     expect(accessForPath("/app/financeiro")).not.toBe("ALL");
+    expect(accessForPath("/app/pagamentos")).not.toBe("ALL");
     expect(accessForPath("/app/aprovacoes")).not.toBe("ALL");
     expect(accessForPath("/app/automacoes")).not.toBe("ALL");
     expect(accessForPath("/app/admin")).not.toBe("ALL");
@@ -131,7 +137,9 @@ describe("canAccess / canAccessPath", () => {
 
   it("enforces roles on the financeiro route", () => {
     expect(canAccessPath(finance, "/app/financeiro")).toBe(true);
+    expect(canAccessPath(finance, "/app/pagamentos")).toBe(true);
     expect(canAccessPath(consultant, "/app/financeiro")).toBe(false);
+    expect(canAccessPath(consultant, "/app/pagamentos")).toBe(false);
     expect(canAccessPath(noRoles, "/app/financeiro")).toBe(false);
   });
 

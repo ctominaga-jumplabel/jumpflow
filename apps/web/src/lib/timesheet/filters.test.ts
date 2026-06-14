@@ -109,6 +109,8 @@ describe("parseTimesheetFilter (safe fallback)", () => {
   it("keeps valid values and ignores unrelated params", () => {
     const filter = parseTimesheetFilter({
       semana: "2026-06-08",
+      inicio: "2026-06-01",
+      fim: "2026-06-30",
       status: "DRAFT",
       activity: "WORKDAY",
       billable: "true",
@@ -117,6 +119,8 @@ describe("parseTimesheetFilter (safe fallback)", () => {
     });
     expect(filter).toEqual({
       status: "DRAFT",
+      startDate: "2026-06-01",
+      endDate: "2026-06-30",
       activity: "WORKDAY",
       billable: true,
       sort: "status",
@@ -140,6 +144,7 @@ describe("hasActiveTimesheetFilter", () => {
 
   it("is true when a reducing filter is set", () => {
     expect(hasActiveTimesheetFilter({ status: "DRAFT" })).toBe(true);
+    expect(hasActiveTimesheetFilter({ startDate: "2026-06-01" })).toBe(true);
     expect(hasActiveTimesheetFilter({ billable: false })).toBe(true);
     expect(hasActiveTimesheetFilter({ projectStatus: "ACTIVE" })).toBe(true);
   });

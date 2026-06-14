@@ -2,6 +2,8 @@ import type { LucideIcon } from "lucide-react";
 import {
   Award,
   BarChart3,
+  Banknote,
+  Building2,
   ClipboardCheck,
   Clock,
   FolderKanban,
@@ -67,6 +69,12 @@ export const primaryNavigation: NavItemDef[] = [
     description: "Projetos, clientes, budget e responsáveis.",
   },
   {
+    label: "Clientes",
+    href: "/app/clientes",
+    icon: Building2,
+    description: "Clientes, CNPJ, regras fiscais e tipos de cobranca.",
+  },
+  {
     label: "Consultores",
     href: "/app/consultores",
     icon: Users,
@@ -101,6 +109,12 @@ export const primaryNavigation: NavItemDef[] = [
     href: "/app/financeiro",
     icon: Wallet,
     description: "Horas aprovadas, valor hora e fechamento mensal.",
+  },
+  {
+    label: "Pagamentos",
+    href: "/app/pagamentos",
+    icon: Banknote,
+    description: "Pagamentos de consultores, NF e envio ao banco.",
   },
 ];
 

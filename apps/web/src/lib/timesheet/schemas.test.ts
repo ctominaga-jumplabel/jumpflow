@@ -5,6 +5,7 @@ import {
   timeEntryInputSchema,
   updateTimeEntryInputSchema,
   weekActionInputSchema,
+  weeklyTimeEntryInputSchema,
 } from "./schemas";
 
 const validEntry = {
@@ -85,6 +86,36 @@ describe("weekActionInputSchema", () => {
   it("requires a valid ISO date", () => {
     expect(weekActionInputSchema.safeParse({ weekStart: "2026-06-08" }).success).toBe(true);
     expect(weekActionInputSchema.safeParse({ weekStart: "semana-24" }).success).toBe(false);
+  });
+});
+
+describe("weeklyTimeEntryInputSchema", () => {
+  it("accepts a valid weekly entry", () => {
+    expect(
+      weeklyTimeEntryInputSchema.safeParse({
+        projectId: "seed-project-portal",
+        activityType: "WORKDAY",
+        weekStart: "2026-06-08",
+        hoursPerDay: 8,
+        weekdays: [1, 2, 3, 4, 5],
+        description: "",
+        billable: true,
+      }).success,
+    ).toBe(true);
+  });
+
+  it("requires at least one weekday and valid daily hours", () => {
+    expect(
+      weeklyTimeEntryInputSchema.safeParse({
+        projectId: "seed-project-portal",
+        activityType: "WORKDAY",
+        weekStart: "2026-06-08",
+        hoursPerDay: 25,
+        weekdays: [],
+        description: "",
+        billable: true,
+      }).success,
+    ).toBe(false);
   });
 });
 

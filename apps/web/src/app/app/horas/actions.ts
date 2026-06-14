@@ -16,16 +16,22 @@ import {
 import { resolveDbUser } from "@/lib/db/users";
 import {
   COMMENT_REQUIRED_MESSAGE,
+  applyTimesheetDefaultInputSchema,
   decideHoursSchema,
   deleteTimeEntryInputSchema,
+  saveTimesheetDefaultInputSchema,
   timeEntryInputSchema,
   updateTimeEntryInputSchema,
   weekActionInputSchema,
+  weeklyTimeEntryInputSchema,
+  type ApplyTimesheetDefaultInput,
   type DecideHoursInput,
   type DeleteTimeEntryInput,
+  type SaveTimesheetDefaultInput,
   type TimeEntryInput,
   type UpdateTimeEntryInput,
   type WeekActionInput,
+  type WeeklyTimeEntryInput,
 } from "@/lib/timesheet/schemas";
 import type { ActionResult, ErrorCode } from "@/lib/timesheet/types";
 import {
@@ -280,6 +286,135 @@ export async function createTimeEntry(
   }
 }
 
+export interface CreateWeeklyTimeEntriesResult {
+  created: number;
+  skippedExisting: number;
+  skippedOutOfAllocation: number;
+}
+
+export async function createWeeklyTimeEntries(
+  input: WeeklyTimeEntryInput,
+): Promise<ActionResult<CreateWeeklyTimeEntriesResult>> {
+  try {
+    ensureDatabase();
+    const user = await requireUser();
+    const consultant = await requireConsultant(user);
+    const parsed = parseInput(weeklyTimeEntryInputSchema, input);
+    const weekStart = weekStartOf(parseIsoDateUtc(parsed.weekStart)!);
+    const weekEnd = addDays(weekStart, 6);
+
+    const project = await prisma.project.findUnique({
+      where: { id: parsed.projectId },
+    });
+    if (!project) {
+      throw new ActionError("NOT_FOUND", "Projeto nÃ£o encontrado.");
+    }
+    if (project.status === "CLOSED") {
+      throw new ActionError(
+        "PROJECT_CLOSED",
+        "Projeto encerrado nÃ£o recebe lanÃ§amentos.",
+      );
+    }
+
+    const dbUser = await requireDbUser(user);
+    const weekdays = [...new Set(parsed.weekdays)].sort((a, b) => a - b);
+    const description = parsed.description?.trim() || null;
+
+    const result = await prisma.$transaction(async (tx) => {
+      let period = await tx.timesheetPeriod.findUnique({
+        where: {
+          consultantId_startDate_endDate: {
+            consultantId: consultant.id,
+            startDate: weekStart,
+            endDate: weekEnd,
+          },
+        },
+      });
+      if (period?.status === "CLOSED") {
+        throw new ActionError(
+          "PERIOD_CLOSED",
+          "Esta semana jÃ¡ foi fechada e nÃ£o aceita alteraÃ§Ãµes.",
+        );
+      }
+      const existing = await tx.timeEntry.findMany({
+        where: {
+          consultantId: consultant.id,
+          projectId: project.id,
+          activityType: parsed.activityType,
+          date: { gte: weekStart, lte: weekEnd },
+        },
+        select: { date: true },
+      });
+      const existingDays = new Set(existing.map((entry) => entry.date.getTime()));
+      const counts: CreateWeeklyTimeEntriesResult = {
+        created: 0,
+        skippedExisting: 0,
+        skippedOutOfAllocation: 0,
+      };
+      const submittedAt = new Date();
+
+      for (let index = 0; index < 7; index += 1) {
+        const date = addDays(weekStart, index);
+        if (!weekdays.includes(utcIsoWeekday(date))) continue;
+        if (existingDays.has(date.getTime())) {
+          counts.skippedExisting += 1;
+          continue;
+        }
+        const allocation = await findActiveAllocation(
+          tx,
+          consultant.id,
+          project.id,
+          date,
+        );
+        if (!allocation) {
+          counts.skippedOutOfAllocation += 1;
+          continue;
+        }
+        period ??= await upsertOpenPeriod(tx, consultant.id, weekStart);
+        const created = await tx.timeEntry.create({
+          data: {
+            periodId: period.id,
+            consultantId: consultant.id,
+            projectId: project.id,
+            allocationId: allocation.id,
+            date,
+            hours: parsed.hoursPerDay,
+            activityType: parsed.activityType,
+            description,
+            billable: parsed.billable,
+            status: "SUBMITTED",
+            submittedAt,
+          },
+        });
+        existingDays.add(date.getTime());
+        counts.created += 1;
+        await tx.auditEvent.create({
+          data: buildAuditEventData({
+            actorUserId: dbUser.id,
+            entityType: "TimeEntry",
+            entityId: created.id,
+            action: "TIME_ENTRY_WEEKLY_CREATED",
+            after: {
+              entryId: created.id,
+              hours: Number(created.hours),
+              date: created.date.toISOString().slice(0, 10),
+            },
+          }),
+        });
+      }
+
+      if (counts.created > 0 && period) await recomputePeriodStatus(tx, period.id);
+      return counts;
+    });
+
+    revalidatePath(HORAS_PATH);
+    revalidatePath(APROVACOES_PATH);
+    return { ok: true, data: result };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
 export async function updateTimeEntry(
   input: UpdateTimeEntryInput,
 ): Promise<ActionResult<{ id: string }>> {
@@ -442,6 +577,240 @@ export interface CopyWeekResult {
   copied: number;
   skippedExisting: number;
   skippedIneligible: number;
+}
+
+async function requireOwnedActiveAllocation(
+  db: Db,
+  consultantId: string,
+  allocationId: string,
+) {
+  const allocation = await db.allocation.findFirst({
+    where: { id: allocationId, consultantId, status: "ACTIVE" },
+    include: { project: { select: { id: true, status: true } } },
+  });
+  if (!allocation) {
+    throw new ActionError(
+      "NO_ACTIVE_ALLOCATION",
+      "Alocacao ativa nao encontrada para este consultor.",
+    );
+  }
+  if (allocation.project.status === "CLOSED") {
+    throw new ActionError(
+      "PROJECT_CLOSED",
+      "Projeto encerrado nao recebe lancamentos.",
+    );
+  }
+  return allocation;
+}
+
+function utcIsoWeekday(date: Date): number {
+  const day = date.getUTCDay();
+  return day === 0 ? 7 : day;
+}
+
+function allocationCoversDate(
+  allocation: { startDate: Date; endDate: Date | null },
+  date: Date,
+): boolean {
+  return (
+    allocation.startDate.getTime() <= date.getTime() &&
+    (!allocation.endDate || allocation.endDate.getTime() >= date.getTime())
+  );
+}
+
+export async function saveTimesheetDefault(
+  input: SaveTimesheetDefaultInput,
+): Promise<ActionResult<{ allocationId: string }>> {
+  try {
+    ensureDatabase();
+    const user = await requireUser();
+    const consultant = await requireConsultant(user);
+    const parsed = parseInput(saveTimesheetDefaultInputSchema, input);
+    const dbUser = await requireDbUser(user);
+
+    const allocation = await requireOwnedActiveAllocation(
+      prisma,
+      consultant.id,
+      parsed.allocationId,
+    );
+    const weekdays = [...new Set(parsed.weekdays)].sort((a, b) => a - b);
+
+    await prisma.$transaction(async (tx) => {
+      const saved = await tx.timesheetDefault.upsert({
+        where: { allocationId: allocation.id },
+        update: {
+          activityType: parsed.activityType,
+          hoursPerDay: parsed.hoursPerDay,
+          weekdays,
+          billable: parsed.billable,
+          description: parsed.description?.trim() || null,
+        },
+        create: {
+          allocationId: allocation.id,
+          activityType: parsed.activityType,
+          hoursPerDay: parsed.hoursPerDay,
+          weekdays,
+          billable: parsed.billable,
+          description: parsed.description?.trim() || null,
+        },
+      });
+      await tx.auditEvent.create({
+        data: buildAuditEventData({
+          actorUserId: dbUser.id,
+          entityType: "TimesheetDefault",
+          entityId: saved.id,
+          action: "TIMESHEET_DEFAULT_SAVED",
+          after: {
+            allocationId: allocation.id,
+            activityType: saved.activityType,
+            hoursPerDay: Number(saved.hoursPerDay),
+            weekdays: saved.weekdays,
+            billable: saved.billable,
+          },
+        }),
+      });
+    });
+
+    revalidatePath(HORAS_PATH);
+    return { ok: true, data: { allocationId: allocation.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+export interface ApplyTimesheetDefaultResult {
+  created: number;
+  skippedExisting: number;
+  skippedOutOfAllocation: number;
+  skippedNoDefault: number;
+}
+
+export async function applyTimesheetDefault(
+  input: ApplyTimesheetDefaultInput,
+): Promise<ActionResult<ApplyTimesheetDefaultResult>> {
+  try {
+    ensureDatabase();
+    const user = await requireUser();
+    const consultant = await requireConsultant(user);
+    const parsed = parseInput(applyTimesheetDefaultInputSchema, input);
+    const weekStart = weekStartOf(parseIsoDateUtc(parsed.weekStart)!);
+    const weekEnd = addDays(weekStart, 6);
+    const dbUser = await requireDbUser(user);
+
+    const allocation = await prisma.allocation.findFirst({
+      where: { id: parsed.allocationId, consultantId: consultant.id, status: "ACTIVE" },
+      include: {
+        project: { select: { id: true, status: true } },
+        timesheetDefault: true,
+      },
+    });
+    if (!allocation) {
+      throw new ActionError(
+        "NO_ACTIVE_ALLOCATION",
+        "Alocacao ativa nao encontrada para este consultor.",
+      );
+    }
+    if (allocation.project.status === "CLOSED") {
+      throw new ActionError(
+        "PROJECT_CLOSED",
+        "Projeto encerrado nao recebe lancamentos.",
+      );
+    }
+    if (!allocation.timesheetDefault) {
+      return {
+        ok: true,
+        data: {
+          created: 0,
+          skippedExisting: 0,
+          skippedOutOfAllocation: 0,
+          skippedNoDefault: 1,
+        },
+      };
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      const period = await upsertOpenPeriod(tx, consultant.id, weekStart);
+      const existing = await tx.timeEntry.findMany({
+        where: {
+          consultantId: consultant.id,
+          projectId: allocation.projectId,
+          activityType: allocation.timesheetDefault!.activityType,
+          date: { gte: weekStart, lte: weekEnd },
+        },
+        select: { date: true },
+      });
+      const existingDays = new Set(existing.map((entry) => entry.date.getTime()));
+      const counts: ApplyTimesheetDefaultResult = {
+        created: 0,
+        skippedExisting: 0,
+        skippedOutOfAllocation: 0,
+        skippedNoDefault: 0,
+      };
+      const submittedAt = new Date();
+      for (let index = 0; index < 7; index += 1) {
+        const date = addDays(weekStart, index);
+        if (!allocation.timesheetDefault!.weekdays.includes(utcIsoWeekday(date))) {
+          continue;
+        }
+        if (!allocationCoversDate(allocation, date)) {
+          counts.skippedOutOfAllocation += 1;
+          continue;
+        }
+        if (existingDays.has(date.getTime())) {
+          counts.skippedExisting += 1;
+          continue;
+        }
+        const created = await tx.timeEntry.create({
+          data: {
+            periodId: period.id,
+            consultantId: consultant.id,
+            projectId: allocation.projectId,
+            allocationId: allocation.id,
+            date,
+            hours: allocation.timesheetDefault!.hoursPerDay,
+            activityType: allocation.timesheetDefault!.activityType,
+            description: allocation.timesheetDefault!.description,
+            billable: allocation.timesheetDefault!.billable,
+            status: "SUBMITTED",
+            submittedAt,
+          },
+        });
+        existingDays.add(date.getTime());
+        counts.created += 1;
+        await tx.auditEvent.create({
+          data: buildAuditEventData({
+            actorUserId: dbUser.id,
+            entityType: "TimeEntry",
+            entityId: created.id,
+            action: "TIME_ENTRY_CREATED_FROM_DEFAULT",
+            after: {
+              allocationId: allocation.id,
+              timesheetDefaultId: allocation.timesheetDefault!.id,
+              hours: Number(created.hours),
+              date: created.date.toISOString().slice(0, 10),
+            },
+          }),
+        });
+      }
+      if (counts.created > 0) await recomputePeriodStatus(tx, period.id);
+      await tx.auditEvent.create({
+        data: buildAuditEventData({
+          actorUserId: dbUser.id,
+          entityType: "TimesheetDefault",
+          entityId: allocation.timesheetDefault!.id,
+          action: "TIMESHEET_DEFAULT_APPLIED",
+          after: { allocationId: allocation.id, weekStart: parsed.weekStart, ...counts },
+        }),
+      });
+      return counts;
+    });
+
+    revalidatePath(HORAS_PATH);
+    revalidatePath(APROVACOES_PATH);
+    return { ok: true, data: result };
+  } catch (error) {
+    return toFailure(error);
+  }
 }
 
 export async function copyPreviousWeek(

@@ -286,6 +286,7 @@ vi.mock("@jumpflow/database", () => ({
 import type { AppUser } from "@/lib/auth/types";
 import {
   getConsultantForUser,
+  getPeriodForConsultant,
   getWeekForConsultant,
   listAllowedProjects,
   listHoursApprovalItems,
@@ -472,6 +473,20 @@ describe("getWeekForConsultant", () => {
     const week = await getWeekForConsultant("con-1", MONDAY);
     // The row keeps the raw code; the UI maps it via activityLabelOf.
     expect(week.rows[0].activity).toBe("DEVELOPMENT");
+  });
+});
+
+describe("getPeriodForConsultant", () => {
+  it("clamps very long ranges to the operational overview limit", async () => {
+    const period = await getPeriodForConsultant(
+      "con-1",
+      "2026-01-01",
+      "2026-12-31",
+    );
+
+    expect(period.startDate).toBe("2026-01-01");
+    expect(period.endDate).toBe("2026-04-03");
+    expect(period.days).toHaveLength(93);
   });
 });
 

@@ -28,12 +28,32 @@ vi.mock("@/app/app/despesas/actions", () => ({
   decideAsManager: vi.fn(),
   decideAsFinance: vi.fn(),
 }));
+// FinancialOverview renders MonthlyClosingTable, which wires revenue actions.
+vi.mock("@/app/app/financeiro/actions", () => ({
+  generateMonthlyRevenueClosings: vi.fn(),
+  advanceRevenueClosing: vi.fn(),
+  createFiscalDocumentDraft: vi.fn(),
+  requestFiscalDocumentIssue: vi.fn(),
+}));
+vi.mock("@/app/app/pagamentos/actions", () => ({
+  generateMonthlyConsultantPayments: vi.fn(),
+  advanceConsultantPayment: vi.fn(),
+  sendPaymentForecast: vi.fn(),
+  createMonthlyPaymentForecast: vi.fn(),
+}));
+vi.mock("@/app/app/consultores/actions", () => ({
+  saveBankAccount: vi.fn(),
+  saveCompensation: vi.fn(),
+  saveConsultantIdentity: vi.fn(),
+}));
 import { ConsultantDirectory } from "@/components/consultants/ConsultantDirectory";
 import { CertificateList } from "@/components/certificates/CertificateList";
 import { CertificateSummary } from "@/components/certificates/CertificateSummary";
 import { SkillMatrix } from "@/components/skills/SkillMatrix";
 import { SkillCoveragePanel } from "@/components/skills/SkillCoveragePanel";
 import { FinancialOverview } from "@/components/financial/FinancialOverview";
+import { ConsultantPaymentsPanel } from "@/components/payments/ConsultantPaymentsPanel";
+import { PaymentForecastPanel } from "@/components/payments/PaymentForecastPanel";
 import { certificates } from "@/lib/mock-data/certificates";
 import { skills } from "@/lib/mock-data/skills";
 
@@ -50,6 +70,26 @@ describe("Horas — TimesheetWeekView", () => {
       screen.queryByRole("button", { name: /Enviar para aprovação/ }),
     ).not.toBeInTheDocument();
     expect(screen.queryByText("Em breve")).not.toBeInTheDocument();
+  });
+});
+
+describe("Pagamentos - ConsultantPaymentsPanel", () => {
+  it("renders the payment table shell", () => {
+    render(
+      <ConsultantPaymentsPanel mode="demo" month={6} year={2026} payments={[]} />,
+    );
+    expect(screen.getByText("Pagamentos de consultores")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Gerar/ })).toBeInTheDocument();
+  });
+});
+
+describe("Pagamentos - PaymentForecastPanel", () => {
+  it("renders the forecast table shell", () => {
+    render(
+      <PaymentForecastPanel mode="demo" month={6} year={2026} forecasts={[]} />,
+    );
+    expect(screen.getByText("Previsoes de pagamento")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Adicionar/ })).toBeInTheDocument();
   });
 });
 

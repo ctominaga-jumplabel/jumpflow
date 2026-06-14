@@ -700,8 +700,30 @@ describe("replaceReceipt", () => {
 });
 
 describe("submitExpense", () => {
+  function seedReceipt(expenseId: string) {
+    h.store.attachments.push({
+      id: `att-${expenseId}`,
+      expenseId,
+      fileName: "nota.pdf",
+      contentType: "application/pdf",
+      size: 100,
+      storageBucket: "expense-receipts",
+      storageKey: `expenses/${expenseId}/nota.pdf`,
+      uploadedByUserId: "user-1",
+    });
+  }
+
+  it("requires a receipt before submitting", async () => {
+    const expense = seedOwnExpense();
+    const result = await submitExpense({ id: expense.id });
+    expect(result).toMatchObject({ ok: false, error: "INVALID_INPUT" });
+    expect(h.store.expenses[0].status).toBe("DRAFT");
+    expect(h.store.audits).toHaveLength(0);
+  });
+
   it("submits a DRAFT, stamps submittedAt and audits with the real user id", async () => {
     const expense = seedOwnExpense();
+    seedReceipt(expense.id);
     const result = await submitExpense({ id: expense.id });
     expect(result.ok).toBe(true);
     expect(h.store.expenses[0].status).toBe("SUBMITTED");
@@ -716,6 +738,7 @@ describe("submitExpense", () => {
 
   it("does not resubmit (status guard, idempotent)", async () => {
     const expense = seedOwnExpense();
+    seedReceipt(expense.id);
     await submitExpense({ id: expense.id });
     const firstSubmittedAt = h.store.expenses[0].submittedAt;
     const second = await submitExpense({ id: expense.id });
@@ -726,6 +749,7 @@ describe("submitExpense", () => {
 
   it("does not submit a rejected expense directly (must edit first)", async () => {
     const expense = seedOwnExpense({ status: "MANAGER_REJECTED" });
+    seedReceipt(expense.id);
     const result = await submitExpense({ id: expense.id });
     expect(result).toMatchObject({ ok: false, error: "NOT_EDITABLE" });
   });
