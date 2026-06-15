@@ -37,3 +37,8 @@ Revisar hardening final das Fases 10 a 12, validar qualidade e documentar penden
 - O worktree ja continha alteracoes pre-existentes antes das Fases 1 a 13.
 - Nada foi revertido.
 - Antes de commit, revisar o diff por arquivo para separar trabalho anterior das fases executadas.
+
+## Publicacao
+
+- 2026-06-15: MVP (Fases 1-13) publicado em producao na Vercel (https://jumpflow-sepia.vercel.app), migration phase2 aplicada no Supabase e dev-auth removido de producao.
+- Auto-deploy via integracao Git habilitado (repo ctominaga-jumplabel/jumpflow, branch de producao main).
