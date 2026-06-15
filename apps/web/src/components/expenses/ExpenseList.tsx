@@ -186,7 +186,7 @@ export function ExpenseList({
                                 icon={Send}
                                 label={`Enviar despesa ${expense.description} para aprovação`}
                                 onClick={() => onSubmitExpense(expense)}
-                                disabled={busy}
+                                disabled={busy || !expense.attachment}
                               />
                             ) : null}
                             {onEdit ? (

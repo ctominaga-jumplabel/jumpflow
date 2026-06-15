@@ -8,7 +8,7 @@ import { isDevAuthEnabled } from "@/lib/auth/dev";
 import { requireRole, requireUser } from "@/lib/auth/guards";
 import { FINANCIAL_ROLES } from "@/lib/auth/route-permissions";
 import type { AppUser } from "@/lib/auth/types";
-import { buildAuditEventData } from "@/lib/db/audit";
+import { buildAuditEventData, recordAuditEvent } from "@/lib/db/audit";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { getReceiptSignedUrl } from "@/lib/db/expenses";
 import {
@@ -547,6 +547,7 @@ export async function submitExpense(
 
     const expense = await prisma.expense.findUnique({
       where: { id: parsed.id },
+      include: { attachment: { select: { id: true } } },
     });
     if (!expense) {
       throw new ActionError("NOT_FOUND", "Despesa não encontrada.");
@@ -555,6 +556,12 @@ export async function submitExpense(
       throw new ActionError(
         "FORBIDDEN",
         "Você só pode enviar as suas próprias despesas.",
+      );
+    }
+    if (!expense.attachment) {
+      throw new ActionError(
+        "INVALID_INPUT",
+        "Anexe o comprovante antes de enviar a despesa para aprovação.",
       );
     }
 
@@ -817,7 +824,18 @@ export async function getReceiptUrl(input: {
     ensureDatabase();
     const user = await requireUser();
     const parsed = parseInput(receiptInputSchema, input);
-    return await getReceiptSignedUrl(parsed.expenseId, user);
+    const result = await getReceiptSignedUrl(parsed.expenseId, user);
+    if (result.ok) {
+      const dbUser = await resolveDbUser(user);
+      await recordAuditEvent({
+        actorUserId: dbUser?.id ?? null,
+        entityType: "Expense",
+        entityId: parsed.expenseId,
+        action: "EXPENSE_ATTACHMENT_SIGNED_URL_CREATED",
+        after: { expiresInSeconds: 300 },
+      });
+    }
+    return result;
   } catch (error) {
     return toFailure(error);
   }

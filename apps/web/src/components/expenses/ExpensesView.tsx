@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState, useTransition } from "react";
-import { ExternalLink, Plus, TriangleAlert } from "lucide-react";
+import { Download, ExternalLink, Plus, TriangleAlert } from "lucide-react";
 import { ActionButton } from "@/components/ui/ActionButton";
 import { FilterChip } from "@/components/ui/FilterChip";
 import { SectionPanel } from "@/components/ui/SectionPanel";
@@ -95,6 +95,7 @@ export function ExpensesView(props: ExpensesViewProps) {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Expense | null>(null);
   const [attachmentOf, setAttachmentOf] = useState<Expense | null>(null);
+  const [receiptPreviewUrl, setReceiptPreviewUrl] = useState<string | null>(null);
   const { feedback, notify } = useFeedback();
   const [isPending, startTransition] = useTransition();
   const idCounter = useRef(0);
@@ -295,7 +296,24 @@ export function ExpensesView(props: ExpensesViewProps) {
     startTransition(async () => {
       const result = await getReceiptUrl({ expenseId: expense.id });
       if (result.ok) {
-        window.open(result.data.url, "_blank", "noopener,noreferrer");
+        setReceiptPreviewUrl(result.data.url);
+      } else {
+        notify("warning", result.message);
+      }
+    });
+  }
+
+  function handleDownloadReceipt(expense: Expense) {
+    startTransition(async () => {
+      const result = await getReceiptUrl({ expenseId: expense.id });
+      if (result.ok) {
+        const anchor = document.createElement("a");
+        anchor.href = result.data.url;
+        anchor.download = expense.attachment?.fileName ?? "comprovante";
+        anchor.rel = "noopener noreferrer";
+        document.body.append(anchor);
+        anchor.click();
+        anchor.remove();
       } else {
         notify("warning", result.message);
       }
@@ -434,9 +452,12 @@ export function ExpensesView(props: ExpensesViewProps) {
 
       <Modal
         open={attachmentOf !== null}
-        onClose={() => setAttachmentOf(null)}
+        onClose={() => {
+          setAttachmentOf(null);
+          setReceiptPreviewUrl(null);
+        }}
         title="Comprovante"
-        description="Metadados do anexo da despesa."
+        description="Preview e download do anexo da despesa."
       >
         {attachmentOf?.attachment ? (
           <dl className="space-y-3 text-sm">
@@ -476,15 +497,35 @@ export function ExpensesView(props: ExpensesViewProps) {
             </div>
             {!isDemo ? (
               storageAvailable ? (
-                <ActionButton
-                  variant="secondary"
-                  size="sm"
-                  icon={ExternalLink}
-                  disabled={isPending}
-                  onClick={() => handleViewReceipt(attachmentOf)}
-                >
-                  Visualizar
-                </ActionButton>
+                <div className="space-y-3">
+                  <div className="flex flex-wrap gap-2">
+                    <ActionButton
+                      variant="secondary"
+                      size="sm"
+                      icon={ExternalLink}
+                      disabled={isPending}
+                      onClick={() => handleViewReceipt(attachmentOf)}
+                    >
+                      Visualizar
+                    </ActionButton>
+                    <ActionButton
+                      variant="secondary"
+                      size="sm"
+                      icon={Download}
+                      disabled={isPending}
+                      onClick={() => handleDownloadReceipt(attachmentOf)}
+                    >
+                      Baixar
+                    </ActionButton>
+                  </div>
+                  {receiptPreviewUrl ? (
+                    <iframe
+                      title={`Preview de ${attachmentOf.attachment.fileName}`}
+                      src={receiptPreviewUrl}
+                      className="h-96 w-full rounded-md border border-border bg-surface"
+                    />
+                  ) : null}
+                </div>
               ) : (
                 <p className="rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-xs font-medium text-warning">
                   Anexos indisponíveis: storage não configurado.

@@ -85,6 +85,8 @@ export function ExpenseForm({
   );
   const [file, setFile] = useState<File | null>(null);
   const [showErrors, setShowErrors] = useState(false);
+  const [lastSubmitMode, setLastSubmitMode] =
+    useState<ExpenseSubmitMode>("DRAFT");
 
   // Re-seed the fields whenever the modal opens for a different target
   // (render-time state adjustment — the React-recommended effect alternative).
@@ -101,6 +103,7 @@ export function ExpenseForm({
       setAttachment(initial?.attachment ?? null);
       setFile(null);
       setShowErrors(false);
+      setLastSubmitMode("DRAFT");
     }
   }
 
@@ -119,7 +122,9 @@ export function ExpenseForm({
   const hasErrors = Object.values(errors).some(Boolean);
 
   function handleSubmit(mode: ExpenseSubmitMode) {
-    if (hasErrors) {
+    setLastSubmitMode(mode);
+    const missingReceipt = mode === "SUBMITTED" && attachment === null;
+    if (hasErrors || missingReceipt) {
       setShowErrors(true);
       return;
     }
@@ -307,6 +312,11 @@ export function ExpenseForm({
             setFile(next?.file ?? null);
           }}
         />
+        {showErrors && lastSubmitMode === "SUBMITTED" && attachment === null ? (
+          <p className="text-xs font-medium text-danger">
+            Anexe o comprovante para enviar a despesa para aprovação.
+          </p>
+        ) : null}
       </form>
     </Modal>
   );

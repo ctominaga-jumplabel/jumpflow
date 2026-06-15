@@ -1,5 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import {
+  Banknote,
   BotMessageSquare,
   ClipboardCheck,
   Clock,
@@ -104,6 +105,14 @@ export const launcherShortcuts: LauncherShortcut[] = [
     description: "Fechamento mensal e despesas aprovadas.",
     href: "/app/financeiro",
     icon: Wallet,
+    access: FINANCIAL_ROLES,
+  },
+  {
+    key: "pagamentos",
+    label: "Pagamentos",
+    description: "Consultores, NFs e envio ao banco.",
+    href: "/app/pagamentos",
+    icon: Banknote,
     access: FINANCIAL_ROLES,
   },
   {

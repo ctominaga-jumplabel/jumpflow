@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * Proves the role-protected module pages actually enforce RBAC on the server.
@@ -29,15 +29,29 @@ vi.mock("@/lib/auth/guards", () => ({
 }));
 
 import FinanceiroPage from "./financeiro/page";
+import PagamentosPage from "./pagamentos/page";
 import AprovacoesPage from "./aprovacoes/page";
 import AcessosPage from "./admin/acessos/page";
 import { FINANCIAL_ROLES } from "@/lib/auth/route-permissions";
 
-afterEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.stubEnv("DATABASE_URL", "");
+});
+
+afterEach(() => {
+  vi.clearAllMocks();
+  vi.unstubAllEnvs();
+});
 
 describe("module RBAC guards", () => {
   it("Financeiro requires the financial roles", async () => {
     await FinanceiroPage();
+    expect(requireRoleMock).toHaveBeenCalledTimes(1);
+    expect(requireRoleMock).toHaveBeenCalledWith(FINANCIAL_ROLES);
+  });
+
+  it("Pagamentos requires the financial roles", async () => {
+    await PagamentosPage();
     expect(requireRoleMock).toHaveBeenCalledTimes(1);
     expect(requireRoleMock).toHaveBeenCalledWith(FINANCIAL_ROLES);
   });

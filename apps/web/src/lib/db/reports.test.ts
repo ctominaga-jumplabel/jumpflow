@@ -268,7 +268,13 @@ const h = vi.hoisted(() => {
           id: p.id,
           name: p.name,
           clientId: p.clientId,
-          client: { id: p.clientId, name: p.clientName },
+          billingHourlyRate: p.billingHourlyRate,
+          client: {
+            id: p.clientId,
+            name: p.clientName,
+            defaultHourlyRate: null,
+          },
+          saleRates: [],
         })),
     },
     timeEntry: {
@@ -609,12 +615,12 @@ describe("getHoursReport financial gating", () => {
     expect(report.rows[0].billedAmount).toBeUndefined();
   });
 
-  it("ADMIN: select includes billingHourlyRate and computes billed amounts", async () => {
+  it("ADMIN: loads rate context and computes billed amounts", async () => {
     const report = await getHoursReport(user(["ADMIN"]), {});
     expect(report.includeFinancials).toBe(true);
     expect(
       h.store.lastEntrySelect?.project?.select?.billingHourlyRate,
-    ).toBe(true);
+    ).toBeUndefined();
     expect(report.rows[0].billingRate).toBe(320);
     expect(report.rows[0].billedAmount).toBe(2560);
     expect(report.totals.totalBilled).toBe(2560);

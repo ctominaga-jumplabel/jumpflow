@@ -32,6 +32,7 @@ interface RouteRule {
  * expands.
  */
 export const routePermissions: RouteRule[] = [
+  { prefix: "/app/pagamentos", access: FINANCIAL_ROLES },
   { prefix: "/app/financeiro", access: FINANCIAL_ROLES },
   // Operational automation (auto-approval admin/observability). Management
   // only — PROJECT_MANAGER read-only access is deferred to a later round.
@@ -52,6 +53,14 @@ export const routePermissions: RouteRule[] = [
   // Access administration (invitations, roles, status). ADMIN only — must come
   // before the broad `/app` rule. The public invite-accept route lives at
   // `/convite/*`, outside `/app`, so the proxy matcher never gates it.
+  {
+    // Client registration includes fiscal and financial fields. The page also
+    // masks financial values, but route access stays restricted to business roles.
+    prefix: "/app/clientes",
+    access: ["ADMIN", "AREA_MANAGER", "FINANCE", "SALES"],
+  },
+  // Directory is visible to authenticated users; sensitive writes are action-gated.
+  { prefix: "/app/consultores", access: "ALL" },
   { prefix: "/app/admin", access: ["ADMIN"] },
   { prefix: "/app", access: "ALL" },
 ];

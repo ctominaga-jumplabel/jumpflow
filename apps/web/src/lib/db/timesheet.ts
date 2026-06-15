@@ -18,6 +18,7 @@ import {
 import {
   addDays,
   buildWeekDays,
+  parseIsoDateUtc,
   toIsoDate,
   weekLabel,
   weekStartOf,
@@ -29,6 +30,7 @@ import {
  */
 
 type Db = Prisma.TransactionClient | typeof prisma;
+const MAX_PERIOD_OVERVIEW_DAYS = 93;
 
 /**
  * Resolve the `Consultant` linked to the current user.
@@ -269,10 +271,134 @@ export async function getWeekForConsultant(
   return week;
 }
 
+export interface PeriodProjectTotal {
+  projectId: string;
+  projectName: string;
+  clientName: string;
+  totalHours: number;
+}
+
+export interface PeriodCalendarEntry {
+  id: string;
+  date: string;
+  projectName: string;
+  activityLabel: string;
+  status: TimeEntryStatus;
+  hours: number;
+}
+
+export interface PeriodCalendarDay {
+  date: string;
+  totalHours: number;
+  statuses: TimeEntryStatus[];
+  entries: PeriodCalendarEntry[];
+}
+
+export interface TimesheetPeriodOverview {
+  startDate: string;
+  endDate: string;
+  totalHours: number;
+  projectTotals: PeriodProjectTotal[];
+  days: PeriodCalendarDay[];
+}
+
+export async function getPeriodForConsultant(
+  consultantId: string,
+  startDateIso: string,
+  endDateIso: string,
+  filter: TimesheetFilter = {},
+): Promise<TimesheetPeriodOverview> {
+  const parsedStart = parseIsoDateUtc(startDateIso);
+  const parsedEnd = parseIsoDateUtc(endDateIso);
+  const start = parsedStart ?? weekStartOf(new Date());
+  const requestedEnd = parsedEnd && parsedEnd >= start ? parsedEnd : addDays(start, 6);
+  const maxEnd = addDays(start, MAX_PERIOD_OVERVIEW_DAYS - 1);
+  const end = requestedEnd > maxEnd ? maxEnd : requestedEnd;
+
+  const entries = await prisma.timeEntry.findMany({
+    where: {
+      consultantId,
+      date: { gte: start, lte: end },
+      ...entryFilterWhere(filter),
+    },
+    include: {
+      project: { select: { name: true, client: { select: { name: true } } } },
+    },
+    orderBy: { date: "asc" },
+  });
+
+  const daysByDate = new Map<string, PeriodCalendarDay>();
+  for (
+    let cursor = start;
+    cursor.getTime() <= end.getTime();
+    cursor = addDays(cursor, 1)
+  ) {
+    const iso = toIsoDate(cursor);
+    daysByDate.set(iso, {
+      date: iso,
+      totalHours: 0,
+      statuses: [],
+      entries: [],
+    });
+  }
+
+  const projectTotals = new Map<string, PeriodProjectTotal>();
+  for (const entry of entries) {
+    const hours = Number(entry.hours);
+    const date = toIsoDate(entry.date);
+    const day = daysByDate.get(date);
+    const status = entry.status as TimeEntryStatus;
+    if (day) {
+      day.totalHours += hours;
+      if (!day.statuses.includes(status)) day.statuses.push(status);
+      day.entries.push({
+        id: entry.id,
+        date,
+        projectName: entry.project.name,
+        activityLabel: activityLabelFor(entry.activityType),
+        status,
+        hours,
+      });
+    }
+    const existing = projectTotals.get(entry.projectId);
+    if (existing) {
+      existing.totalHours += hours;
+    } else if (hours > 0) {
+      projectTotals.set(entry.projectId, {
+        projectId: entry.projectId,
+        projectName: entry.project.name,
+        clientName: entry.project.client.name,
+        totalHours: hours,
+      });
+    }
+  }
+
+  return {
+    startDate: toIsoDate(start),
+    endDate: toIsoDate(end),
+    totalHours: entries.reduce((sum, entry) => sum + Number(entry.hours), 0),
+    projectTotals: [...projectTotals.values()]
+      .filter((item) => item.totalHours > 0)
+      .sort((a, b) => a.projectName.localeCompare(b.projectName, "pt-BR")),
+    days: [...daysByDate.values()],
+  };
+}
+
 export interface AllowedProject {
   id: string;
   name: string;
   clientName: string;
+}
+
+export interface TimesheetDefaultOption extends AllowedProject {
+  allocationId: string;
+  defaultConfig: {
+    activityType: string;
+    hoursPerDay: number;
+    weekdays: number[];
+    billable: boolean;
+    description: string;
+  } | null;
 }
 
 /**
@@ -318,6 +444,60 @@ export async function listAllowedProjects(
   return [...byProject.values()].sort((a, b) =>
     a.name.localeCompare(b.name, "pt-BR"),
   );
+}
+
+/**
+ * Active allocations eligible for a weekly default in the selected week.
+ * Unlike listAllowedProjects, this intentionally keeps one row per allocation:
+ * the default belongs to the allocation, not the project globally.
+ */
+export async function listTimesheetDefaultOptions(
+  consultantId: string,
+  weekStart: Date,
+): Promise<TimesheetDefaultOption[]> {
+  const start = weekStartOf(weekStart);
+  const end = addDays(start, 6);
+
+  const allocations = await prisma.allocation.findMany({
+    where: {
+      consultantId,
+      status: "ACTIVE",
+      startDate: { lte: end },
+      OR: [{ endDate: null }, { endDate: { gte: start } }],
+      project: { status: { not: "CLOSED" } },
+    },
+    select: {
+      id: true,
+      projectId: true,
+      project: { select: { name: true, client: { select: { name: true } } } },
+      timesheetDefault: {
+        select: {
+          activityType: true,
+          hoursPerDay: true,
+          weekdays: true,
+          billable: true,
+          description: true,
+        },
+      },
+    },
+    orderBy: { project: { name: "asc" } },
+  });
+
+  return allocations.map((allocation) => ({
+    id: allocation.projectId,
+    allocationId: allocation.id,
+    name: allocation.project.name,
+    clientName: allocation.project.client.name,
+    defaultConfig: allocation.timesheetDefault
+      ? {
+          activityType: allocation.timesheetDefault.activityType,
+          hoursPerDay: Number(allocation.timesheetDefault.hoursPerDay),
+          weekdays: allocation.timesheetDefault.weekdays,
+          billable: allocation.timesheetDefault.billable,
+          description: allocation.timesheetDefault.description ?? "",
+        }
+      : null,
+  }));
 }
 
 export interface HoursApprovalScope {

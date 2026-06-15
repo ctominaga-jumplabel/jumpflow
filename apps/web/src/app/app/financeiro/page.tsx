@@ -13,10 +13,17 @@ export default async function FinanceiroPage() {
 
   const databaseConfigured = isDatabaseConfigured();
   let financeExpenses;
+  let revenueClosing;
   if (databaseConfigured) {
     // Lazy import so Prisma is never loaded on code paths without a database.
     const { listFinanceExpenses } = await import("@/lib/db/expenses");
+    const { listRevenueClosings } = await import("@/lib/db/revenue");
     financeExpenses = (await listFinanceExpenses()).expenses;
+    const now = new Date();
+    revenueClosing = await listRevenueClosings({
+      month: now.getMonth() + 1,
+      year: now.getFullYear(),
+    });
   }
 
   return (
@@ -27,6 +34,8 @@ export default async function FinanceiroPage() {
         description="Fechamento mensal de horas aprovadas, valor hora, receita estimada e pagamento de despesas."
       />
       <FinancialOverview
+        revenueMode={databaseConfigured ? "db" : "demo"}
+        revenueClosing={revenueClosing}
         expensesMode={databaseConfigured ? "db" : "demo"}
         financeExpenses={financeExpenses}
       />

@@ -14,6 +14,7 @@ import {
 } from "@/lib/timesheet/types";
 
 export interface TimeEntryFormValue {
+  mode: "daily" | "weekly";
   projectId: string;
   /**
    * Activity code. Typed as `string` so it can carry a legacy value when
@@ -24,6 +25,7 @@ export interface TimeEntryFormValue {
   /** ISO date (yyyy-mm-dd) of the day being logged. */
   date: string;
   hours: number;
+  weekdays: number[];
   description: string;
   billable: boolean;
 }
@@ -61,13 +63,25 @@ const inputClass = (invalid: boolean) =>
 const labelClass = "mb-1 block text-xs font-semibold text-medium";
 
 const emptyValue = (days: WeekDay[]): TimeEntryFormValue => ({
+  mode: "daily",
   projectId: "",
   activity: "WORKDAY",
   date: days[0]?.date ?? "",
   hours: 0,
+  weekdays: [1, 2, 3, 4, 5],
   description: "",
   billable: true,
 });
+
+const weekdayOptions = [
+  { value: 1, label: "Seg" },
+  { value: 2, label: "Ter" },
+  { value: 3, label: "Qua" },
+  { value: 4, label: "Qui" },
+  { value: 5, label: "Sex" },
+  { value: 6, label: "Sab" },
+  { value: 7, label: "Dom" },
+];
 
 /**
  * New/edit time-entry form (modal). One entry = a project+activity for a given
@@ -113,15 +127,16 @@ export function TimeEntryForm({
   const errors = useMemo(
     () => ({
       projectId: !value.projectId,
+      weekdays: value.mode === "weekly" && value.weekdays.length === 0,
       hours:
         !hoursText ||
         Number.isNaN(hoursValue) ||
         hoursValue <= 0 ||
         hoursValue > 24,
     }),
-    [value.projectId, hoursText, hoursValue],
+    [value.mode, value.projectId, value.weekdays.length, hoursText, hoursValue],
   );
-  const hasErrors = errors.projectId || errors.hours;
+  const hasErrors = errors.projectId || errors.hours || errors.weekdays;
 
   const isEditing = Boolean(initial);
 
@@ -133,12 +148,26 @@ export function TimeEntryForm({
     onSubmit({ ...value, hours: hoursValue });
   }
 
+  function toggleWeekday(day: number) {
+    setValue((current) => {
+      const hasDay = current.weekdays.includes(day);
+      const weekdays = hasDay
+        ? current.weekdays.filter((item) => item !== day)
+        : [...current.weekdays, day].sort((a, b) => a - b);
+      return { ...current, weekdays };
+    });
+  }
+
   return (
     <Modal
       open={open}
       onClose={onClose}
       title={isEditing ? "Editar lançamento" : "Novo lançamento"}
-      description="Informe projeto, atividade, dia e horas."
+      description={
+        isEditing
+          ? "Informe projeto, atividade, dia e horas."
+          : "Informe projeto, atividade, modo e horas."
+      }
       footer={
         <>
           {isEditing && onDelete ? (
@@ -207,6 +236,35 @@ export function TimeEntryForm({
           ) : null}
         </div>
 
+        {!isEditing ? (
+          <fieldset>
+            <legend className={labelClass}>Modo</legend>
+            <div className="grid grid-cols-2 gap-2">
+              {(["daily", "weekly"] as const).map((mode) => (
+                <label
+                  key={mode}
+                  className={cn(
+                    "flex h-9 cursor-pointer items-center justify-center rounded-md border text-xs font-semibold",
+                    value.mode === mode
+                      ? "border-ink bg-marker text-ink"
+                      : "border-border bg-surface text-medium",
+                  )}
+                >
+                  <input
+                    type="radio"
+                    name="entry-mode"
+                    value={mode}
+                    checked={value.mode === mode}
+                    onChange={() => setValue((v) => ({ ...v, mode }))}
+                    className="sr-only"
+                  />
+                  {mode === "daily" ? "Diario" : "Semanal"}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        ) : null}
+
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <label htmlFor="entry-activity" className={labelClass}>
@@ -254,6 +312,38 @@ export function TimeEntryForm({
             </select>
           </div>
         </div>
+
+        {value.mode === "weekly" && !isEditing ? (
+          <fieldset>
+            <legend className={labelClass}>Dias da semana</legend>
+            <div className="grid grid-cols-4 gap-2 sm:grid-cols-7">
+              {weekdayOptions.map((day) => (
+                <label
+                  key={day.value}
+                  className={cn(
+                    "flex h-9 cursor-pointer items-center justify-center rounded-md border text-xs font-semibold",
+                    value.weekdays.includes(day.value)
+                      ? "border-ink bg-marker text-ink"
+                      : "border-border bg-surface text-medium",
+                  )}
+                >
+                  <input
+                    type="checkbox"
+                    checked={value.weekdays.includes(day.value)}
+                    onChange={() => toggleWeekday(day.value)}
+                    className="sr-only"
+                  />
+                  {day.label}
+                </label>
+              ))}
+            </div>
+            {showErrors && errors.weekdays ? (
+              <p className="mt-1 text-xs text-danger">
+                Selecione ao menos um dia.
+              </p>
+            ) : null}
+          </fieldset>
+        ) : null}
 
         <div>
           <label htmlFor="entry-hours" className={labelClass}>

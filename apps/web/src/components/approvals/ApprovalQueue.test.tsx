@@ -22,7 +22,7 @@ describe("ApprovalQueue", () => {
 
   it("requires a comment before rejection is allowed", () => {
     render(<ApprovalQueue />);
-    const reject = screen.getByRole("button", { name: /Reprovar/ });
+    const reject = screen.getByRole("button", { name: /^Reprovar$/ });
     expect(reject).toBeDisabled();
 
     fireEvent.change(screen.getByLabelText(/Comentário/), {
@@ -48,7 +48,7 @@ describe("ApprovalQueue", () => {
   it("approves the selected item with local feedback", () => {
     render(<ApprovalQueue />);
     expect(screen.getByText("5 pendentes")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Aprovar/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Aprovar$/ }));
     expect(screen.getByText(/aprovado \(local\)/)).toBeInTheDocument();
     expect(screen.getByText("4 pendentes")).toBeInTheDocument();
   });
@@ -58,7 +58,29 @@ describe("ApprovalQueue", () => {
     fireEvent.change(screen.getByLabelText(/Comentário/), {
       target: { value: "Reenviar com a nota fiscal." },
     });
-    fireEvent.click(screen.getByRole("button", { name: /Reprovar/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Reprovar$/ }));
     expect(screen.getByText(/reprovado com justificativa/)).toBeInTheDocument();
+  });
+
+  it("filters approvals by project", () => {
+    render(<ApprovalQueue />);
+    fireEvent.change(screen.getByLabelText("Projeto"), {
+      target: { value: "Atlas" },
+    });
+    expect(screen.getByText("3 pendentes")).toBeInTheDocument();
+  });
+
+  it("decides visible pending items in bulk with a justification", async () => {
+    render(<ApprovalQueue />);
+    fireEvent.click(screen.getByRole("button", { name: /Selecionar visiveis/ }));
+    expect(await screen.findByText(/5 selecionado/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Justificativa de massa"), {
+      target: { value: "Revisao em lote." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Reprovar selecao/ }));
+    expect(
+      await screen.findByText(/5 item\(ns\) reprovado\(s\)/),
+    ).toBeInTheDocument();
+    expect(await screen.findByText("0 pendentes")).toBeInTheDocument();
   });
 });

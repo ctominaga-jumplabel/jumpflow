@@ -78,6 +78,14 @@ docs/
 - Use `jump-frontend-ux` for screens, flows and usability.
 - Use `jump-design-system` for visual identity, Motion, premium polish and component consistency.
 - Use `jump-visual-identity` for Playful Ops direction, controlled Neo Brutalism, 3D/assets decisions and creative exploration.
+- Use `jump-finance-ops-agent` for Cobrança, Remuneração, hourly values by allocation, financial reports, closing, margin, exports and financial RBAC.
+- Use `jump-billing-agent` for billing types, revenue closing, pre-invoices, customer billing rules and sale values.
+- Use `jump-payments-agent` for consultant payment flow, payment forecasts, NF received/validated, bank/ERP handoff and payment status.
+- Use `jump-fiscal-nfse-agent` for NFS-e Sao Paulo, fiscal documents, XML/PDF, invoice number, protocol, ISS, municipality and tax rules.
+- Use `jump-hr-compensation-agent` for CLT/PJ/CLT FLEX compensation, benefits, bank data, agreed values and payroll-like deductions.
+- Use `jump-integrations-agent` for CNPJ, CEP, Entra ID, Prefeitura SP, email, storage, bank/ERP and provider abstractions.
+- Use `jump-people-ops-agent` for weekly review by project, occurrences, holidays/calendar, async feedback, offboarding and consultant lifecycle workflows.
+- Use `jump-skills-intelligence-agent` for real skills, self-service, catalog curation, AI-assisted suggestions, evidence and human validation.
 - Use `.claude/skills/ui-ux-pro-max/` as supporting design intelligence when useful, while keeping `docs/design-system.md` as the project source of truth.
 - Use `jump-qa-engineer` for test strategy and critical scenarios.
 - Use `jump-devops` for Vercel, Supabase, Render and environments.

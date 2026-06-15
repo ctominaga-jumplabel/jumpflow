@@ -46,6 +46,27 @@ export const timeEntryInputSchema = z.object({
 
 export type TimeEntryInput = z.infer<typeof timeEntryInputSchema>;
 
+const weekdaySchema = z
+  .number()
+  .int("Dia da semana invalido.")
+  .min(1, "Dia da semana invalido.")
+  .max(7, "Dia da semana invalido.");
+
+export const weeklyTimeEntryInputSchema = z.object({
+  projectId: idSchema,
+  activityType: z.enum(ACTIVITY_TYPES),
+  weekStart: isoDateSchema,
+  hoursPerDay: hoursSchema,
+  weekdays: z
+    .array(weekdaySchema)
+    .min(1, "Selecione ao menos um dia.")
+    .max(7, "Selecione no maximo sete dias."),
+  description: descriptionSchema,
+  billable: z.boolean(),
+});
+
+export type WeeklyTimeEntryInput = z.infer<typeof weeklyTimeEntryInputSchema>;
+
 export const updateTimeEntryInputSchema = z.object({
   id: idSchema,
   hours: hoursSchema,
@@ -67,6 +88,31 @@ export const weekActionInputSchema = z.object({
 });
 
 export type WeekActionInput = z.infer<typeof weekActionInputSchema>;
+
+export const saveTimesheetDefaultInputSchema = z.object({
+  allocationId: idSchema,
+  activityType: z.enum(ACTIVITY_TYPES),
+  hoursPerDay: hoursSchema,
+  weekdays: z
+    .array(weekdaySchema)
+    .min(1, "Selecione ao menos um dia.")
+    .max(7, "Selecione no maximo sete dias."),
+  description: descriptionSchema,
+  billable: z.boolean(),
+});
+
+export type SaveTimesheetDefaultInput = z.infer<
+  typeof saveTimesheetDefaultInputSchema
+>;
+
+export const applyTimesheetDefaultInputSchema = z.object({
+  allocationId: idSchema,
+  weekStart: isoDateSchema,
+});
+
+export type ApplyTimesheetDefaultInput = z.infer<
+  typeof applyTimesheetDefaultInputSchema
+>;
 
 /** Marker used by actions to map the comment issue to COMMENT_REQUIRED. */
 export const COMMENT_REQUIRED_MESSAGE =

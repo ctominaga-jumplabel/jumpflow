@@ -9,9 +9,12 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("@/app/app/horas/actions", () => ({
   createTimeEntry: vi.fn(),
+  createWeeklyTimeEntries: vi.fn(),
   updateTimeEntry: vi.fn(),
   deleteTimeEntry: vi.fn(),
   copyPreviousWeek: vi.fn(),
+  applyTimesheetDefault: vi.fn(),
+  saveTimesheetDefault: vi.fn(),
   submitWeek: vi.fn(),
   decideHours: vi.fn(),
 }));
@@ -72,6 +75,24 @@ describe("TimesheetWeekView actions (demo mode)", () => {
     expect(
       within(screen.getByRole("table")).getByText("Nimbus"),
     ).toBeInTheDocument();
+  });
+
+  it("adds a weekly entry through the modal", () => {
+    render(<TimesheetWeekView mode="demo" />);
+    fireEvent.click(screen.getByRole("button", { name: /Novo lan/ }));
+
+    const dialog = screen.getByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText("Projeto"), {
+      target: { value: "prj-nimbus" },
+    });
+    fireEvent.click(within(dialog).getByText("Semanal"));
+    fireEvent.change(within(dialog).getByLabelText("Horas"), {
+      target: { value: "2" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: /Salvar/ }));
+
+    expect(screen.getAllByText(/enviado/).length).toBeGreaterThan(0);
+    expect(within(screen.getByRole("table")).getAllByText("10").length).toBe(2);
   });
 
   it("edits an existing draft entry", () => {

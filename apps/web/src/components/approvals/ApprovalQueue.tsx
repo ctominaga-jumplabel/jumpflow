@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { ClipboardCheck, TriangleAlert } from "lucide-react";
+import { Check, ClipboardCheck, ListChecks, TriangleAlert, X } from "lucide-react";
+import { ActionButton } from "@/components/ui/ActionButton";
 import { SectionPanel } from "@/components/ui/SectionPanel";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -21,18 +22,56 @@ import {
   summarizeApprovals,
   type ApprovalItem,
   type ApprovalKind,
+  type ApprovalStatus,
 } from "@/lib/mock-data/approvals";
 import { ApprovalStatusBadge } from "./ApprovalStatusBadge";
 import { ApprovalDecisionPanel } from "./ApprovalDecisionPanel";
 
 type Tab = "PENDING" | "HISTORY";
 type KindFilter = ApprovalKind | "ALL";
+type StatusFilter = ApprovalStatus | "ALL";
 
 const KIND_FILTERS: { value: KindFilter; label: string }[] = [
   { value: "ALL", label: "Todos" },
   { value: "HOURS", label: "Horas" },
   { value: "EXPENSE", label: "Despesas" },
 ];
+
+const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
+  { value: "ALL", label: "Todos" },
+  { value: "PENDING", label: "Pendente" },
+  { value: "APPROVED", label: "Aprovado" },
+  { value: "REJECTED", label: "Reprovado" },
+  { value: "AUTO_APPROVED", label: "Auto-aprovado" },
+];
+
+interface ApprovalFilters {
+  status: StatusFilter;
+  project: string;
+  consultant: string;
+  activity: string;
+  startDate: string;
+  endDate: string;
+}
+
+const emptyFilters: ApprovalFilters = {
+  status: "ALL",
+  project: "",
+  consultant: "",
+  activity: "",
+  startDate: "",
+  endDate: "",
+};
+
+function optionValues(items: ApprovalItem[], key: keyof ApprovalItem): string[] {
+  return [
+    ...new Set(
+      items
+        .map((item) => item[key])
+        .filter((value): value is string => typeof value === "string" && value.length > 0),
+    ),
+  ].sort((a, b) => a.localeCompare(b, "pt-BR"));
+}
 
 export interface ApprovalQueueProps {
   items?: ApprovalItem[];
@@ -58,6 +97,9 @@ export function ApprovalQueue({
   >({});
   const [tab, setTab] = useState<Tab>("PENDING");
   const [kind, setKind] = useState<KindFilter>("ALL");
+  const [filters, setFilters] = useState<ApprovalFilters>(emptyFilters);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkComment, setBulkComment] = useState("");
   const { feedback, notify } = useFeedback();
   const [isPending, startTransition] = useTransition();
 
@@ -80,20 +122,164 @@ export function ApprovalQueue({
     () => filterApprovalsByKind(items, kind),
     [items, kind],
   );
-  const counts = useMemo(() => summarizeApprovals(byKind), [byKind]);
-  const pending = useMemo(() => pendingApprovals(byKind), [byKind]);
-  const history = useMemo(() => decidedApprovals(byKind), [byKind]);
+  const filterOptions = useMemo(
+    () => ({
+      projects: optionValues(byKind, "projectName"),
+      consultants: optionValues(byKind, "consultantName"),
+      activities: optionValues(byKind, "activitySummary"),
+    }),
+    [byKind],
+  );
+  const filtered = useMemo(
+    () =>
+      byKind.filter((item) => {
+        if (filters.status !== "ALL" && item.status !== filters.status) {
+          return false;
+        }
+        if (filters.project && item.projectName !== filters.project) return false;
+        if (filters.consultant && item.consultantName !== filters.consultant) {
+          return false;
+        }
+        if (filters.activity && item.activitySummary !== filters.activity) {
+          return false;
+        }
+        const submittedDate = item.submittedAt.slice(0, 10);
+        if (filters.startDate && submittedDate < filters.startDate) return false;
+        if (filters.endDate && submittedDate > filters.endDate) return false;
+        return true;
+      }),
+    [byKind, filters],
+  );
+  const counts = useMemo(() => summarizeApprovals(filtered), [filtered]);
+  const pending = useMemo(() => pendingApprovals(filtered), [filtered]);
+  const history = useMemo(() => decidedApprovals(filtered), [filtered]);
 
   const [selectedId, setSelectedId] = useState<string | null>(
     pendingApprovals(seed)[0]?.id ?? null,
   );
 
   const list = tab === "PENDING" ? pending : history;
-  const selected = items.find((i) => i.id === selectedId) ?? null;
+  const selected = list.find((i) => i.id === selectedId) ?? list[0] ?? null;
+  const activeId = selected?.id ?? null;
+  const selectedPending = selectedIds
+    .map((id) => pending.find((item) => item.id === id))
+    .filter((item): item is ApprovalItem => Boolean(item));
 
   function selectNextPending(decidedId: string) {
     const remaining = pending.filter((i) => i.id !== decidedId);
     setSelectedId(remaining[0]?.id ?? null);
+  }
+
+  function toggleSelected(id: string) {
+    setSelectedIds((current) =>
+      current.includes(id)
+        ? current.filter((item) => item !== id)
+        : [...current, id],
+    );
+  }
+
+  function toggleAllVisiblePending() {
+    const ids = pending.map((item) => item.id);
+    setSelectedIds((current) =>
+      ids.every((id) => current.includes(id))
+        ? current.filter((id) => !ids.includes(id))
+        : [...new Set([...current, ...ids])],
+    );
+  }
+
+  function decideMany(status: "APPROVED" | "REJECTED") {
+    const comment = bulkComment.trim();
+    if (status === "REJECTED" && comment.length === 0) {
+      notify("warning", "Informe uma justificativa para reprovar em massa.");
+      return;
+    }
+    if (selectedPending.length === 0) {
+      notify("info", "Selecione ao menos uma pendencia.");
+      return;
+    }
+
+    startTransition(async () => {
+      const successfulIds = new Set<string>();
+      const errors: string[] = [];
+      const hourEntryIds = selectedPending
+        .filter((item) => item.source === "db" && item.type === "HOURS")
+        .flatMap((item) => item.entryIds ?? []);
+      let decided = 0;
+      let alreadyDecided = 0;
+
+      if (hourEntryIds.length > 0) {
+        const result = await decideHours({
+          entryIds: hourEntryIds,
+          decision: status,
+          comment,
+        });
+        if (!result.ok) {
+          errors.push(result.message);
+        } else {
+          decided += result.data.decided;
+          alreadyDecided += result.data.alreadyDecided;
+          for (const item of selectedPending) {
+            if (item.source === "db" && item.type === "HOURS") {
+              successfulIds.add(item.id);
+            }
+          }
+        }
+      }
+
+      for (const item of selectedPending) {
+        if (item.source !== "db" || item.type !== "EXPENSE" || !item.expenseId) {
+          continue;
+        }
+        const decideExpense =
+          item.stage === "FINANCE" ? decideAsFinance : decideAsManager;
+        const result = await decideExpense({
+          expenseId: item.expenseId,
+          decision: status,
+          comment,
+        });
+        if (!result.ok) {
+          errors.push(result.message);
+          continue;
+        }
+        decided += 1;
+        successfulIds.add(item.id);
+      }
+
+      const mockIds = selectedPending
+        .filter((item) => item.source === "mock")
+        .map((item) => item.id);
+      if (mockIds.length > 0) {
+        setMockDecisions((current) => {
+          const next = { ...current };
+          for (const id of mockIds) {
+            next[id] = { status, comment: comment || undefined };
+          }
+          return next;
+        });
+        decided += mockIds.length;
+        for (const id of mockIds) successfulIds.add(id);
+      }
+
+      const remaining = pending.filter((item) => !successfulIds.has(item.id));
+      setSelectedIds((current) => current.filter((id) => !successfulIds.has(id)));
+      setBulkComment("");
+      setSelectedId(remaining[0]?.id ?? null);
+      const suffix =
+        alreadyDecided > 0 ? ` ${alreadyDecided} ja decidido(s).` : "";
+      if (errors.length > 0) {
+        notify(
+          "warning",
+          `${decided} item(ns) aplicado(s). ${errors.length} falha(s): ${errors[0]}`,
+        );
+        return;
+      }
+      notify(
+        status === "APPROVED" ? "success" : "info",
+        status === "APPROVED"
+          ? `${decided} item(ns) aprovado(s).${suffix}`
+          : `${decided} item(ns) reprovado(s) com justificativa.${suffix}`,
+      );
+    });
   }
 
   function decide(id: string, status: "APPROVED" | "REJECTED", comment: string) {
@@ -202,6 +388,159 @@ export function ApprovalQueue({
         ))}
       </div>
 
+      <SectionPanel
+        title="Filtros"
+        description="Combine periodo, status, projeto, consultor e atividade."
+      >
+        <div className="grid gap-4 px-5 py-4 sm:grid-cols-2 lg:grid-cols-5">
+          <div>
+            <label htmlFor="approval-start" className="mb-1 block text-xs font-semibold text-medium">
+              Inicio
+            </label>
+            <input
+              id="approval-start"
+              type="date"
+              value={filters.startDate}
+              onChange={(event) =>
+                setFilters((current) => ({ ...current, startDate: event.target.value }))
+              }
+              className={cn(
+                "h-9 w-full rounded-md border border-border bg-surface px-3 text-sm text-strong",
+                focusRing,
+              )}
+            />
+          </div>
+          <div>
+            <label htmlFor="approval-end" className="mb-1 block text-xs font-semibold text-medium">
+              Fim
+            </label>
+            <input
+              id="approval-end"
+              type="date"
+              value={filters.endDate}
+              onChange={(event) =>
+                setFilters((current) => ({ ...current, endDate: event.target.value }))
+              }
+              className={cn(
+                "h-9 w-full rounded-md border border-border bg-surface px-3 text-sm text-strong",
+                focusRing,
+              )}
+            />
+          </div>
+          <div>
+            <label htmlFor="approval-status" className="mb-1 block text-xs font-semibold text-medium">
+              Status
+            </label>
+            <select
+              id="approval-status"
+              value={filters.status}
+              onChange={(event) =>
+                setFilters((current) => ({
+                  ...current,
+                  status: event.target.value as StatusFilter,
+                }))
+              }
+              className={cn(
+                "h-9 w-full rounded-md border border-border bg-surface px-3 text-sm text-strong",
+                focusRing,
+              )}
+            >
+              {STATUS_FILTERS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label htmlFor="approval-project" className="mb-1 block text-xs font-semibold text-medium">
+              Projeto
+            </label>
+            <select
+              id="approval-project"
+              value={filters.project}
+              onChange={(event) =>
+                setFilters((current) => ({ ...current, project: event.target.value }))
+              }
+              className={cn(
+                "h-9 w-full rounded-md border border-border bg-surface px-3 text-sm text-strong",
+                focusRing,
+              )}
+            >
+              <option value="">Todos</option>
+              {filterOptions.projects.map((project) => (
+                <option key={project} value={project}>
+                  {project}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label htmlFor="approval-consultant" className="mb-1 block text-xs font-semibold text-medium">
+              Consultor
+            </label>
+            <select
+              id="approval-consultant"
+              value={filters.consultant}
+              onChange={(event) =>
+                setFilters((current) => ({ ...current, consultant: event.target.value }))
+              }
+              className={cn(
+                "h-9 w-full rounded-md border border-border bg-surface px-3 text-sm text-strong",
+                focusRing,
+              )}
+            >
+              <option value="">Todos</option>
+              {filterOptions.consultants.map((consultant) => (
+                <option key={consultant} value={consultant}>
+                  {consultant}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="sm:col-span-2 lg:col-span-4">
+            <label htmlFor="approval-activity" className="mb-1 block text-xs font-semibold text-medium">
+              Atividade
+            </label>
+            <select
+              id="approval-activity"
+              value={filters.activity}
+              onChange={(event) =>
+                setFilters((current) => ({ ...current, activity: event.target.value }))
+              }
+              className={cn(
+                "h-9 w-full rounded-md border border-border bg-surface px-3 text-sm text-strong",
+                focusRing,
+              )}
+            >
+              <option value="">Todas</option>
+              {filterOptions.activities.map((activity) => (
+                <option key={activity} value={activity}>
+                  {activity}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-end">
+            <ActionButton
+              variant="secondary"
+              size="sm"
+              disabled={
+                filters.status === "ALL" &&
+                !filters.project &&
+                !filters.consultant &&
+                !filters.activity &&
+                !filters.startDate &&
+                !filters.endDate
+              }
+              onClick={() => setFilters(emptyFilters)}
+            >
+              Limpar
+            </ActionButton>
+          </div>
+        </div>
+      </SectionPanel>
+
       <div className="grid gap-6 lg:grid-cols-[1fr_360px] lg:items-start">
         <div className="space-y-4">
           <div className="flex items-center gap-2">
@@ -218,6 +557,73 @@ export function ApprovalQueue({
               onClick={() => setTab("HISTORY")}
             />
           </div>
+
+          {tab === "PENDING" && pending.length > 0 ? (
+            <SectionPanel
+              title="Decisao em massa"
+              description="A decisao usa as mesmas regras e auditoria do fluxo individual."
+              action={
+                <StatusBadge tone="info">
+                  {selectedPending.length} selecionado(s)
+                </StatusBadge>
+              }
+            >
+              <div className="grid gap-3 px-5 py-4 lg:grid-cols-[1fr_auto] lg:items-end">
+                <div>
+                  <label
+                    htmlFor="approval-bulk-comment"
+                    className="mb-1 block text-xs font-semibold text-medium"
+                  >
+                    Justificativa de massa
+                  </label>
+                  <textarea
+                    id="approval-bulk-comment"
+                    value={bulkComment}
+                    onChange={(event) => setBulkComment(event.target.value)}
+                    rows={2}
+                    placeholder="Obrigatoria para reprovar; opcional para aprovar."
+                    className={cn(
+                      "w-full resize-y rounded-md border border-border bg-surface px-3 py-2 text-sm text-strong placeholder:text-soft",
+                      focusRing,
+                    )}
+                  />
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <ActionButton
+                    variant="secondary"
+                    size="sm"
+                    icon={ListChecks}
+                    disabled={isPending}
+                    onClick={toggleAllVisiblePending}
+                  >
+                    Selecionar visiveis
+                  </ActionButton>
+                  <ActionButton
+                    variant="success"
+                    size="sm"
+                    icon={Check}
+                    disabled={isPending || selectedPending.length === 0}
+                    onClick={() => decideMany("APPROVED")}
+                  >
+                    Aprovar selecao
+                  </ActionButton>
+                  <ActionButton
+                    variant="danger"
+                    size="sm"
+                    icon={X}
+                    disabled={
+                      isPending ||
+                      selectedPending.length === 0 ||
+                      bulkComment.trim().length === 0
+                    }
+                    onClick={() => decideMany("REJECTED")}
+                  >
+                    Reprovar selecao
+                  </ActionButton>
+                </div>
+              </div>
+            </SectionPanel>
+          ) : null}
 
           <SectionPanel
             title={tab === "PENDING" ? "Fila de aprovação" : "Decisões recentes"}
@@ -246,22 +652,36 @@ export function ApprovalQueue({
             ) : (
               <ul className="divide-y divide-border">
                 {list.map((item) => {
-                  const isActive = item.id === selectedId;
+                  const isActive = item.id === activeId;
                   const isExpense = item.type === "EXPENSE";
+                  const isSelected = selectedIds.includes(item.id);
                   return (
                     <li key={item.id}>
-                      <button
-                        type="button"
-                        onClick={() => setSelectedId(item.id)}
-                        aria-pressed={isActive}
-                        className={cn(
-                          "flex w-full items-start gap-3 px-5 py-3.5 text-left transition-colors",
-                          focusRing,
-                          isActive
-                            ? "bg-brand-soft/50"
-                            : "hover:bg-surface-muted/60",
-                        )}
-                      >
+                      <div className="flex items-start">
+                        {tab === "PENDING" ? (
+                          <label className="flex h-full px-5 py-4">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => toggleSelected(item.id)}
+                              aria-label={`Selecionar ${item.consultantName}`}
+                              className="size-4 rounded border-border text-brand focus:ring-brand"
+                            />
+                          </label>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={() => setSelectedId(item.id)}
+                          aria-pressed={isActive}
+                          className={cn(
+                            "flex min-w-0 flex-1 items-start gap-3 py-3.5 pr-5 text-left transition-colors",
+                            tab !== "PENDING" && "pl-5",
+                            focusRing,
+                            isActive
+                              ? "bg-brand-soft/50"
+                              : "hover:bg-surface-muted/60",
+                          )}
+                        >
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
                             <p className="text-sm font-medium text-strong">
@@ -294,7 +714,8 @@ export function ApprovalQueue({
                           </span>
                           <ApprovalStatusBadge status={item.status} />
                         </div>
-                      </button>
+                        </button>
+                      </div>
                     </li>
                   );
                 })}

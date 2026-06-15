@@ -39,9 +39,91 @@ import type {
   HoursReportTotals,
   PaginationMeta,
 } from "@/lib/reports/types";
+import {
+  resolveSaleRate,
+  type SaleRateRange,
+} from "@/lib/projects/rates";
 
 /** Safe ceiling for "export all" reads (CSV) when no page is given. */
 const EXPORT_ALL_LIMIT = 50_000;
+
+interface ProjectRateContext {
+  projectFallbackRate?: number | null;
+  clientFallbackRate?: number | null;
+  rates: SaleRateRange[];
+}
+
+async function loadProjectRateContexts(
+  projectIds: string[],
+): Promise<Map<string, ProjectRateContext>> {
+  const uniqueIds = [...new Set(projectIds)].filter(Boolean);
+  if (uniqueIds.length === 0) return new Map();
+  const projects = await prisma.project.findMany({
+    where: { id: { in: uniqueIds } },
+    select: {
+      id: true,
+      billingHourlyRate: true,
+      client: { select: { defaultHourlyRate: true } },
+      saleRates: {
+        select: {
+          id: true,
+          projectId: true,
+          consultantId: true,
+          allocationId: true,
+          startsAt: true,
+          endsAt: true,
+          hourlyRate: true,
+        },
+      },
+    },
+  });
+  return new Map(
+    projects.map((project) => [
+      project.id,
+      {
+        projectFallbackRate:
+          project.billingHourlyRate == null
+            ? null
+            : Number(project.billingHourlyRate),
+        clientFallbackRate:
+          project.client.defaultHourlyRate == null
+            ? null
+            : Number(project.client.defaultHourlyRate),
+        rates: (project.saleRates ?? []).map((rate) => ({
+          id: rate.id,
+          projectId: rate.projectId,
+          consultantId: rate.consultantId,
+          allocationId: rate.allocationId,
+          startsAt: toIsoDate(rate.startsAt),
+          endsAt: rate.endsAt ? toIsoDate(rate.endsAt) : null,
+          hourlyRate: Number(rate.hourlyRate),
+        })),
+      },
+    ]),
+  );
+}
+
+function resolveBillingRate(
+  contexts: Map<string, ProjectRateContext>,
+  entry: {
+    projectId: string;
+    consultantId?: string | null;
+    allocationId?: string | null;
+    date: Date;
+  },
+): number | null {
+  const context = contexts.get(entry.projectId);
+  if (!context) return null;
+  return (
+    resolveSaleRate(context.rates, {
+      date: toIsoDate(entry.date),
+      consultantId: entry.consultantId,
+      allocationId: entry.allocationId,
+      projectFallbackRate: context.projectFallbackRate,
+      clientFallbackRate: context.clientFallbackRate,
+    })?.hourlyRate ?? null
+  );
+}
 
 /**
  * Read/query layer for the Relatorios module (docs/relatorios-fechamento.md
@@ -402,6 +484,9 @@ export async function getHoursReport(
     where,
     select: {
       id: true,
+      projectId: true,
+      consultantId: true,
+      allocationId: true,
       date: true,
       hours: true,
       activityType: true,
@@ -413,8 +498,6 @@ export async function getHoursReport(
         select: {
           name: true,
           client: { select: { name: true } },
-          // Financial field only when allowed.
-          ...(includeFinancials ? { billingHourlyRate: true } : {}),
         },
       },
     },
@@ -430,11 +513,14 @@ export async function getHoursReport(
     select: {
       hours: true,
       status: true,
+      projectId: true,
+      consultantId: true,
+      allocationId: true,
+      date: true,
       project: {
         select: {
           name: true,
           client: { select: { name: true } },
-          ...(includeFinancials ? { billingHourlyRate: true } : {}),
         },
       },
     },
@@ -446,6 +532,12 @@ export async function getHoursReport(
     "TIME_ENTRY",
     rowsRaw.map((r) => r.id),
   );
+  const rateContexts = includeFinancials
+    ? await loadProjectRateContexts([
+        ...rowsRaw.map((r) => r.projectId),
+        ...totalsRaw.map((r) => r.projectId),
+      ])
+    : new Map<string, ProjectRateContext>();
 
   const rows: HoursReportRow[] = rowsRaw.map((r) => {
     const hours = Number(r.hours);
@@ -465,20 +557,25 @@ export async function getHoursReport(
       decidedAt: decidedAt.get(r.id),
     };
     if (includeFinancials) {
-      // billingHourlyRate is present in the select only here.
-      const rate =
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (r.project as any).billingHourlyRate != null
-          ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            Number((r.project as any).billingHourlyRate)
-          : null;
+      const rate = resolveBillingRate(rateContexts, r);
       row.billingRate = rate;
       row.billedAmount = rate != null ? hours * rate : null;
     }
     return row;
   });
 
-  const totals = summarizeHours(totalsRaw, includeFinancials);
+  const totals = summarizeHours(
+    totalsRaw.map((r) => ({
+      ...r,
+      project: {
+        ...r.project,
+        billingHourlyRate: includeFinancials
+          ? resolveBillingRate(rateContexts, r)
+          : undefined,
+      },
+    })),
+    includeFinancials,
+  );
   return {
     rows,
     totals,
@@ -741,11 +838,13 @@ export async function getConsolidatedReport(
         hours: true,
         status: true,
         projectId: true,
+        consultantId: true,
+        allocationId: true,
+        date: true,
         project: {
           select: {
             name: true,
             client: { select: { name: true } },
-            ...(includeFinancials ? { billingHourlyRate: true } : {}),
           },
         },
       },
@@ -796,6 +895,9 @@ export async function getConsolidatedReport(
   let totalBilled = 0;
   let totalExpenseEntering = 0;
   let totalExpensePending = 0;
+  const consolidatedRateContexts = includeFinancials
+    ? await loadProjectRateContexts(hoursRaw.map((entry) => entry.projectId))
+    : new Map<string, ProjectRateContext>();
 
   for (const e of hoursRaw) {
     const acc = ensure(e.projectId, e.project.name, e.project.client.name);
@@ -804,10 +906,9 @@ export async function getConsolidatedReport(
       acc.approvedHours += h;
       totalApproved += h;
       if (includeFinancials) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const rateRaw = (e.project as any).billingHourlyRate;
-        if (rateRaw != null) {
-          const amount = h * Number(rateRaw);
+        const rate = resolveBillingRate(consolidatedRateContexts, e);
+        if (rate != null) {
+          const amount = h * rate;
           acc.billedAmount = (acc.billedAmount ?? 0) + amount;
           totalBilled += amount;
         }

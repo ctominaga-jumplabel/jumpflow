@@ -5,7 +5,12 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { TimesheetWeekView } from "@/components/timesheet/TimesheetWeekView";
 import { requireUser } from "@/lib/auth/guards";
 import { isDatabaseConfigured } from "@/lib/db/config";
-import { parseWeekParam } from "@/lib/timesheet/week";
+import {
+  addDays,
+  parseIsoDateUtc,
+  parseWeekParam,
+  toIsoDate,
+} from "@/lib/timesheet/week";
 import { parseTimesheetFilter } from "@/lib/timesheet/filters";
 
 export const metadata: Metadata = { title: "Horas" };
@@ -40,8 +45,13 @@ export default async function HorasPage({ searchParams }: HorasPageProps) {
   }
 
   // Lazy import so Prisma is never loaded on code paths without a database.
-  const { getConsultantForUser, getWeekForConsultant, listAllowedProjects } =
-    await import("@/lib/db/timesheet");
+  const {
+    getConsultantForUser,
+    getPeriodForConsultant,
+    getWeekForConsultant,
+    listAllowedProjects,
+    listTimesheetDefaultOptions,
+  } = await import("@/lib/db/timesheet");
 
   const consultant = await getConsultantForUser(user);
   if (!consultant) {
@@ -61,11 +71,16 @@ export default async function HorasPage({ searchParams }: HorasPageProps) {
   const weekStart = parseWeekParam(params.semana);
   // Safe fallback: an invalid filter value is dropped, defaults take over.
   const filter = parseTimesheetFilter(params);
-  const [week, projects] = await Promise.all([
+  const periodStart = filter.startDate ?? toIsoDate(weekStart);
+  const parsedPeriodStart = parseIsoDateUtc(periodStart) ?? weekStart;
+  const periodEnd = filter.endDate ?? toIsoDate(addDays(parsedPeriodStart, 6));
+  const [week, period, projects, defaultOptions] = await Promise.all([
     getWeekForConsultant(consultant.id, weekStart, filter),
+    getPeriodForConsultant(consultant.id, periodStart, periodEnd, filter),
     // The project dropdown lists the consultant's scope, narrowed by the
     // chosen project status so the options match the active filter.
     listAllowedProjects(consultant.id, weekStart, filter.projectStatus),
+    listTimesheetDefaultOptions(consultant.id, weekStart),
   ]);
 
   return (
@@ -74,7 +89,9 @@ export default async function HorasPage({ searchParams }: HorasPageProps) {
       <TimesheetWeekView
         mode="db"
         week={week}
+        period={period}
         projects={projects}
+        defaultOptions={defaultOptions}
         filter={filter}
       />
     </div>

@@ -33,6 +33,11 @@ const dbExpense: Expense = {
   amount: 120.5,
   description: "Despesa real de banco",
   status: "DRAFT",
+  attachment: {
+    fileName: "nota.pdf",
+    contentType: "application/pdf",
+    size: 1200,
+  },
   source: "db",
 };
 
@@ -49,7 +54,7 @@ describe("ExpensesView (demo mode)", () => {
     ).toBeInTheDocument();
   });
 
-  it("creates a new expense and reports honest local feedback", () => {
+  it("creates a new draft expense and reports honest local feedback", () => {
     renderDemo();
     fireEvent.click(screen.getByRole("button", { name: /Nova despesa/ }));
 
@@ -64,7 +69,7 @@ describe("ExpensesView (demo mode)", () => {
       target: { value: "Táxi para o cliente" },
     });
     fireEvent.click(
-      within(dialog).getByRole("button", { name: /Enviar para aprovação/ }),
+      within(dialog).getByRole("button", { name: /Salvar rascunho/ }),
     );
 
     // Scope to the list table: the modal lingers briefly during its exit
@@ -72,7 +77,7 @@ describe("ExpensesView (demo mode)", () => {
     expect(
       within(screen.getByRole("table")).getByText("Táxi para o cliente"),
     ).toBeInTheDocument();
-    expect(screen.getByText(/enviada para aprovação \(local\)/)).toBeInTheDocument();
+    expect(screen.getByText(/salvo localmente/)).toBeInTheDocument();
   });
 
   it("blocks submitting an expense without required fields", () => {
@@ -83,6 +88,27 @@ describe("ExpensesView (demo mode)", () => {
       within(dialog).getByRole("button", { name: /Enviar para aprovação/ }),
     );
     expect(within(dialog).getByText("Selecione um projeto.")).toBeInTheDocument();
+  });
+
+  it("requires a receipt before submitting from the form", () => {
+    renderDemo();
+    fireEvent.click(screen.getByRole("button", { name: /Nova despesa/ }));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText("Projeto"), {
+      target: { value: "prj-atlas" },
+    });
+    fireEvent.change(within(dialog).getByLabelText(/Valor/), {
+      target: { value: "150" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Descrição"), {
+      target: { value: "Taxi para o cliente" },
+    });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: /Enviar para aprovação/ }),
+    );
+    expect(
+      within(dialog).getByText(/Anexe o comprovante para enviar/),
+    ).toBeInTheDocument();
   });
 
   it("filters the list by status of the new chain", () => {

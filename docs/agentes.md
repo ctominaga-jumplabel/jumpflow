@@ -129,6 +129,158 @@ Arquivos principais:
 - `apps/web/src/components/expenses/`, quando existir.
 - `packages/database/prisma/schema.prisma`, quando houver persistencia.
 
+### `jump-finance-ops-agent`
+
+Use para:
+
+- cobranca e remuneracao;
+- valor hora por alocacao com vigencia;
+- relatorios financeiros;
+- faturamento, contas a receber/pagar e fechamento;
+- margem, exportacoes e RBAC financeiro.
+
+Arquivos principais:
+
+- `docs/plano-implementacao-proximas-funcionalidades.md`
+- `docs/relatorios-fechamento.md`
+- `docs/modelo-dados.md`
+- `packages/database/prisma/schema.prisma`
+- `apps/web/src/app/app/financeiro/`
+- `apps/web/src/lib/reports/`, quando existir.
+
+### `jump-billing-agent`
+
+Use para:
+
+- tipos de cobranca;
+- regras de faturamento de cliente;
+- valores de venda e vigencia;
+- fechamento de receita;
+- pre-fatura e status de receita;
+- base de dados para emissao fiscal.
+
+Arquivos principais:
+
+- `docs/orchestration/jumpflow-master-plan.md`
+- `docs/modelo-dados.md`
+- `docs/relatorios-fechamento.md`
+- `packages/database/prisma/schema.prisma`
+- `apps/web/src/app/app/financeiro/`, quando houver receita/pre-fatura.
+
+### `jump-payments-agent`
+
+Use para:
+
+- pagamento de consultores;
+- previsao de pagamento;
+- confirmacao de valores;
+- NF recebida e validada;
+- envio ao banco/ERP;
+- abertura por projeto, horas, valores e beneficios.
+
+Arquivos principais:
+
+- `docs/orchestration/jumpflow-master-plan.md`
+- `docs/modelo-dados.md`
+- `packages/database/prisma/schema.prisma`
+- futuros modulos de pagamento de consultores.
+
+### `jump-fiscal-nfse-agent`
+
+Use para:
+
+- NFS-e Sao Paulo;
+- Web Service oficial da Prefeitura de Sao Paulo;
+- XML, PDF, numero de NF e protocolo;
+- ISS, municipio, tipo de NF e regras tributarias;
+- documentos fiscais e reprocessamento de emissao.
+
+Arquivos principais:
+
+- `docs/orchestration/jumpflow-master-plan.md`
+- `docs/modelo-dados.md`
+- `docs/arquitetura.md`
+- `packages/database/prisma/schema.prisma`
+- futuros providers fiscais.
+
+### `jump-hr-compensation-agent`
+
+Use para:
+
+- tipos de contratacao CLT, PJ e CLT FLEX;
+- valores acordados;
+- beneficios;
+- dados bancarios;
+- descontos CLT, FGTS, INSS e parametros de calculo;
+- dados sensiveis de remuneracao do consultor.
+
+Arquivos principais:
+
+- `docs/orchestration/jumpflow-master-plan.md`
+- `docs/modelo-dados.md`
+- `packages/database/prisma/schema.prisma`
+- futuros modulos de consultores/remuneracao.
+
+### `jump-integrations-agent`
+
+Use para:
+
+- provider abstraction;
+- CNPJ;
+- CEP;
+- Entra ID;
+- Prefeitura SP/NFS-e;
+- email;
+- storage;
+- banco/ERP;
+- secrets, retries, timeouts e portabilidade.
+
+Arquivos principais:
+
+- `docs/arquitetura.md`
+- `docs/orchestration/jumpflow-master-plan.md`
+- arquivos de config/env;
+- modulos de providers em `apps/web/src/lib/`, quando existirem.
+
+### `jump-people-ops-agent`
+
+Use para:
+
+- revisao semanal por projeto;
+- ocorrencias operacionais;
+- calendario de feriados/emendas;
+- feedback assincrono;
+- offboarding e redistribuicao de assets;
+- lifecycle operacional do consultor.
+
+Arquivos principais:
+
+- `docs/plano-implementacao-proximas-funcionalidades.md`
+- `docs/ideacao-melhorias-horas-skills.md`
+- `docs/backlog-refinado-consultor-operacoes.md`
+- `apps/web/src/components/timesheet/`
+- futuros modulos `/trocas` e `/admin/desligamentos`.
+
+### `jump-skills-intelligence-agent`
+
+Use para:
+
+- skills reais;
+- autosservico do consultor;
+- matriz de skills;
+- sugestoes assistidas por IA/heuristica;
+- curadoria de catalogo;
+- validacao por gestor/People.
+
+Arquivos principais:
+
+- `docs/plano-implementacao-proximas-funcionalidades.md`
+- `docs/ideacao-melhorias-horas-skills.md`
+- `apps/web/src/app/app/skills/`
+- `apps/web/src/components/skills/`
+- `apps/web/src/lib/skills/`
+- `packages/database/prisma/schema.prisma`.
+
 ### `jump-legacy-portal-analyst`
 
 Use para:
@@ -288,6 +440,34 @@ Arquivos principais:
 10. `jump-qa-engineer` cobre testes.
 11. `jump-code-reviewer` revisa.
 
+### Roadmap Pos-MVP / Proximas Funcionalidades
+
+1. `jump-product-owner` confirma fase, valor e fora de escopo.
+2. Escolha o agente de dominio:
+   - Horas/revisao semanal/ocorrencias/calendario/offboarding/feedback:
+     `jump-people-ops-agent` + `jump-timesheet-agent`.
+   - Financeiro amplo/governanca/margem/exportacoes:
+     `jump-finance-ops-agent`.
+   - Receita, tipos de cobranca, pre-fatura e fechamento de cliente:
+     `jump-billing-agent`.
+   - Pagamento de consultores, previsoes, NF recebida e envio ao banco:
+     `jump-payments-agent`.
+   - NFS-e, documentos fiscais, ISS e Prefeitura SP:
+     `jump-fiscal-nfse-agent`.
+   - Contratacao, beneficios, dados bancarios e descontos CLT:
+     `jump-hr-compensation-agent`.
+   - CNPJ, CEP, Entra ID, email, storage, banco/ERP e providers:
+     `jump-integrations-agent`.
+   - Skills reais/curadoria/sugestoes:
+     `jump-skills-intelligence-agent`.
+3. `jump-data-modeler` valida schema e migracoes.
+4. `jump-architect` valida fronteiras de dominio se a mudanca for estrutural.
+5. `jump-workflow-automation` entra quando houver jobs, SLA, notificacoes,
+   calendario ou idempotencia.
+6. `jump-fullstack-engineer` e `jump-frontend-ux` implementam.
+7. `jump-qa-engineer` cobre testes.
+8. `jump-code-reviewer` revisa riscos antes do fechamento.
+
 ### Nova Tela
 
 1. `jump-product-owner` confirma objetivo e persona.
@@ -353,6 +533,22 @@ Arquivos principais:
 - O `jump-workflow-automation` deve ser chamado antes de criar aprovacoes automaticas, jobs, notificacoes ou emails.
 - O `jump-timesheet-agent` deve ser chamado antes de mudancas no modulo Horas.
 - O `jump-expenses-agent` deve ser chamado antes de criar ou alterar despesas.
+- O `jump-finance-ops-agent` deve ser chamado antes de alteracoes em cobranca,
+  remuneracao, valor hora, fechamento, margem ou relatorios financeiros.
+- O `jump-billing-agent` deve ser chamado antes de tipos de cobranca,
+  pre-fatura, fechamento de receita, valores de venda e regras de faturamento.
+- O `jump-payments-agent` deve ser chamado antes de pagamentos de consultores,
+  previsoes de pagamento, NF recebida/validada e status de pagamento.
+- O `jump-fiscal-nfse-agent` deve ser chamado antes de NFS-e, documentos
+  fiscais, XML/PDF, numero de NF, protocolo, ISS ou Prefeitura SP.
+- O `jump-hr-compensation-agent` deve ser chamado antes de contratacao,
+  beneficios, dados bancarios, valores acordados ou descontos CLT.
+- O `jump-integrations-agent` deve ser chamado antes de CNPJ, CEP, Entra ID,
+  Prefeitura SP, email, storage, banco/ERP ou qualquer provider externo.
+- O `jump-people-ops-agent` deve ser chamado antes de revisao semanal,
+  ocorrencias, calendario, feedback assincrono ou offboarding.
+- O `jump-skills-intelligence-agent` deve ser chamado antes de mudancas em
+  skills reais, sugestoes, catalogo ou validacao de competencias.
 - O `jump-legacy-portal-analyst` deve ser chamado quando a tarefa envolver comparacao com o portal antigo.
 - O `jump-operational-launcher-agent` deve ser chamado antes de alterar `/app` como tela inicial ou atalhos por perfil.
 - O `jump-product-owner` deve ser chamado quando houver duvida de escopo.
