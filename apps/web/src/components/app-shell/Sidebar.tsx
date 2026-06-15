@@ -3,7 +3,13 @@
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { appConfig } from "@/config/app";
-import { findActiveNav, primaryNavigation } from "@/lib/navigation";
+import {
+  adminNavigation,
+  canSeeNavItem,
+  findActiveNav,
+  primaryNavigation,
+} from "@/lib/navigation";
+import type { RoleName } from "@/lib/auth/roles";
 import { cn } from "@/lib/utils";
 import { focusRing } from "@/lib/styles";
 import { NavItem } from "./NavItem";
@@ -13,6 +19,8 @@ export interface SidebarProps {
   onNavigate?: () => void;
   /** Whether a real database connection is configured. */
   databaseConfigured?: boolean;
+  /** Current user's roles, used to gate role-restricted items. */
+  roles?: RoleName[];
   className?: string;
 }
 
@@ -20,10 +28,14 @@ export interface SidebarProps {
 export function Sidebar({
   onNavigate,
   databaseConfigured = false,
+  roles = [],
   className,
 }: SidebarProps) {
   const pathname = usePathname();
   const activeHref = findActiveNav(pathname)?.href;
+  const adminItems = adminNavigation.filter((item) =>
+    canSeeNavItem(item, roles),
+  );
 
   return (
     <div className={cn("flex h-full flex-col bg-surface", className)}>
@@ -60,6 +72,22 @@ export function Sidebar({
             onNavigate={onNavigate}
           />
         ))}
+
+        {adminItems.length > 0 ? (
+          <div className="pt-4">
+            <p className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-soft">
+              Administração
+            </p>
+            {adminItems.map((item) => (
+              <NavItem
+                key={item.href}
+                item={item}
+                active={item.href === activeHref}
+                onNavigate={onNavigate}
+              />
+            ))}
+          </div>
+        ) : null}
       </nav>
 
       <div className="border-t border-border px-5 py-4">

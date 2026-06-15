@@ -63,7 +63,7 @@ export function AppShell({
     <div className="min-h-screen bg-canvas">
       {/* Desktop sidebar */}
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 border-r-2 border-ink lg:block">
-        <Sidebar databaseConfigured={databaseConfigured} />
+        <Sidebar databaseConfigured={databaseConfigured} roles={user.roles} />
       </aside>
 
       {/* Mobile drawer */}
@@ -104,6 +104,7 @@ export function AppShell({
               <Sidebar
                 onNavigate={() => setMobileOpen(false)}
                 databaseConfigured={databaseConfigured}
+                roles={user.roles}
               />
             </motion.aside>
           </div>

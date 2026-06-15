@@ -11,9 +11,11 @@ import {
   Home,
   LayoutDashboard,
   Receipt,
+  ShieldCheck,
   Users,
   Wallet,
 } from "lucide-react";
+import type { RoleName } from "@/lib/auth/roles";
 
 export interface NavItemDef {
   /** Visible label in the sidebar. */
@@ -30,6 +32,12 @@ export interface NavItemDef {
    * on every nested page.
    */
   exact?: boolean;
+  /**
+   * Roles allowed to see this item. Undefined means visible to everyone. The
+   * sidebar hides items the current user cannot use; the route still enforces
+   * access on the server (this is discoverability, not the security boundary).
+   */
+  requiredRoles?: RoleName[];
 }
 
 /**
@@ -118,9 +126,36 @@ export const primaryNavigation: NavItemDef[] = [
   },
 ];
 
+/**
+ * Administration navigation, shown below the primary rail and gated by role.
+ * Visible only to users who hold one of `requiredRoles`; the page itself also
+ * enforces the same role on the server.
+ */
+export const adminNavigation: NavItemDef[] = [
+  {
+    label: "Acessos",
+    href: "/app/admin/acessos",
+    icon: ShieldCheck,
+    description:
+      "Convites, grupos de acesso (perfis) e bloqueio de usuários.",
+    requiredRoles: ["ADMIN"],
+  },
+];
+
+/** Whether the current user's roles allow seeing a navigation item. */
+export function canSeeNavItem(
+  item: NavItemDef,
+  roles: readonly RoleName[],
+): boolean {
+  return (
+    !item.requiredRoles ||
+    item.requiredRoles.some((role) => roles.includes(role))
+  );
+}
+
 /** Find the active navigation entry for a given pathname. */
 export function findActiveNav(pathname: string): NavItemDef | undefined {
-  return primaryNavigation.find((item) =>
+  return [...primaryNavigation, ...adminNavigation].find((item) =>
     item.exact
       ? pathname === item.href
       : pathname === item.href || pathname.startsWith(`${item.href}/`),

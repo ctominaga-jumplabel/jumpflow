@@ -34,6 +34,26 @@ describe("AppShell", () => {
     }
   });
 
+  it("hides the admin Acessos link from non-admin users", () => {
+    renderShell();
+    expect(screen.queryByRole("link", { name: /acessos/i })).toBeNull();
+  });
+
+  it("shows the admin Acessos link to ADMIN users", () => {
+    const admin: AppUser = { ...testUser, roles: ["ADMIN"] };
+    render(
+      <AppShell user={admin} logoutAction={noopLogout}>
+        conteudo
+      </AppShell>,
+    );
+    const acessosLinks = screen.getAllByRole("link", { name: /acessos/i });
+    expect(
+      acessosLinks.some(
+        (link) => link.getAttribute("href") === "/app/admin/acessos",
+      ),
+    ).toBe(true);
+  });
+
   it("renders the current user and role label in the topbar", () => {
     renderShell();
     expect(screen.getByText(testUser.name)).toBeInTheDocument();

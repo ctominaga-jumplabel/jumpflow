@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { findActiveNav, primaryNavigation } from "@/lib/navigation";
+import {
+  adminNavigation,
+  canSeeNavItem,
+  findActiveNav,
+  primaryNavigation,
+} from "@/lib/navigation";
 
 describe("findActiveNav", () => {
   it("matches an exact route", () => {
@@ -32,5 +37,32 @@ describe("findActiveNav", () => {
       // Every item lives under /app (the launcher is exactly "/app").
       expect(item.href === "/app" || item.href.startsWith("/app/")).toBe(true);
     }
+  });
+
+  it("resolves the admin access route as active", () => {
+    expect(findActiveNav("/app/admin/acessos")?.href).toBe(
+      "/app/admin/acessos",
+    );
+  });
+});
+
+describe("admin navigation gating", () => {
+  it("includes the access management entry, restricted to ADMIN", () => {
+    const acessos = adminNavigation.find(
+      (item) => item.href === "/app/admin/acessos",
+    );
+    expect(acessos).toBeDefined();
+    expect(acessos?.requiredRoles).toEqual(["ADMIN"]);
+  });
+
+  it("canSeeNavItem hides admin items from non-admins and shows them to admins", () => {
+    const acessos = adminNavigation[0];
+    expect(canSeeNavItem(acessos, ["ADMIN"])).toBe(true);
+    expect(canSeeNavItem(acessos, ["AREA_MANAGER", "FINANCE"])).toBe(false);
+    expect(canSeeNavItem(acessos, [])).toBe(false);
+  });
+
+  it("treats items without requiredRoles as visible to everyone", () => {
+    expect(canSeeNavItem(primaryNavigation[0], [])).toBe(true);
   });
 });
