@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { Building2, Edit, Plus, Search, Settings2 } from "lucide-react";
 import { ActionButton } from "@/components/ui/ActionButton";
 import { DataTable, type DataTableColumn } from "@/components/ui/DataTable";
@@ -127,17 +127,13 @@ export function ClientsView({
   canManageBillingTypes,
   cnpjLookupAvailable,
 }: ClientsViewProps) {
-  const [items, setItems] = useState(clients);
-  const [types, setTypes] = useState(billingTypes);
-  // After a server action calls revalidatePath, the page re-renders with fresh
-  // props. Sync local state so DB-mode writes show up without a full reload.
-  // Demo mode passes stable arrays, so this is a no-op there.
-  useEffect(() => {
-    setItems(clients);
-  }, [clients]);
-  useEffect(() => {
-    setTypes(billingTypes);
-  }, [billingTypes]);
+  // In db mode `items`/`types` derive straight from props, so data revalidated
+  // by a server action shows up immediately without a reload. Demo mode keeps
+  // local optimistic state since there is no server to refetch.
+  const [localItems, setLocalItems] = useState(clients);
+  const [localTypes, setLocalTypes] = useState(billingTypes);
+  const items = mode === "db" ? clients : localItems;
+  const types = mode === "db" ? billingTypes : localTypes;
   const [tab, setTab] = useState<Tab>("CLIENTS");
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<"ALL" | "ACTIVE" | "INACTIVE">("ALL");
@@ -322,7 +318,7 @@ export function ClientsView({
         billingTypeName: billingType?.name,
         projectCount: editingClient?.projectCount ?? 0,
       };
-      setItems((current) =>
+      setLocalItems((current) =>
         editingClient
           ? current.map((item) => (item.id === editingClient.id ? next : item))
           : [next, ...current],
@@ -354,7 +350,7 @@ export function ClientsView({
         ...typeForm,
         id: editingType?.id ?? `bt-local-${Date.now()}`,
       };
-      setTypes((current) =>
+      setLocalTypes((current) =>
         editingType
           ? current.map((item) => (item.id === editingType.id ? next : item))
           : [next, ...current],

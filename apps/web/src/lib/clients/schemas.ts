@@ -1,5 +1,16 @@
 import { z } from "zod";
 
+// Entity ids are opaque strings. Prisma generates cuids for new rows, but
+// seeded/imported data may use readable ids. Referential integrity is enforced
+// by the database, so we only sanity-check shape instead of forcing the cuid
+// format (which silently rejected updates against seeded rows).
+const entityId = z
+  .string()
+  .trim()
+  .min(1)
+  .max(64)
+  .regex(/^[A-Za-z0-9_-]+$/, "Identificador invalido.");
+
 const optionalText = (max: number) =>
   z
     .string()
@@ -48,7 +59,7 @@ export const clientInputSchema = z.object({
 });
 
 export const clientUpdateSchema = clientInputSchema.extend({
-  id: z.string().cuid(),
+  id: entityId,
 });
 
 export const billingTypeInputSchema = z.object({
@@ -68,7 +79,7 @@ export const billingTypeInputSchema = z.object({
 });
 
 export const billingTypeUpdateSchema = billingTypeInputSchema.extend({
-  id: z.string().cuid(),
+  id: entityId,
 });
 
 export const cnpjLookupSchema = z.object({

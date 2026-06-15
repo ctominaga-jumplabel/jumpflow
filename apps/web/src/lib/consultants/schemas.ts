@@ -1,5 +1,16 @@
 import { z } from "zod";
 
+// Entity ids are opaque strings. Prisma generates cuids for new rows, but
+// seeded/imported data may use readable ids. Referential integrity is enforced
+// by the database, so we only sanity-check shape instead of forcing the cuid
+// format (which silently rejected updates against seeded rows).
+const entityId = z
+  .string()
+  .trim()
+  .min(1)
+  .max(64)
+  .regex(/^[A-Za-z0-9_-]+$/, "Identificador invalido.");
+
 const optionalText = (max: number) =>
   z
     .string()
@@ -30,14 +41,14 @@ export const consultantIdentitySchema = z.object({
 });
 
 export const personalInfoSchema = z.object({
-  consultantId: z.string().cuid(),
+  consultantId: entityId,
   cpf: optionalText(20),
   birthDate: optionalDate,
   phone: optionalText(30),
 });
 
 export const companyInfoSchema = z.object({
-  consultantId: z.string().cuid(),
+  consultantId: entityId,
   cnpj: optionalText(20),
   legalName: optionalText(160),
   tradeName: optionalText(160),
@@ -46,7 +57,7 @@ export const companyInfoSchema = z.object({
 });
 
 export const addressSchema = z.object({
-  consultantId: z.string().cuid(),
+  consultantId: entityId,
   postalCode: optionalText(12),
   street: optionalText(160),
   district: optionalText(120),
@@ -58,7 +69,7 @@ export const addressSchema = z.object({
 
 export const bankAccountSchema = z.object({
   id: optionalText(80),
-  consultantId: z.string().cuid(),
+  consultantId: entityId,
   kind: z.enum(["CLT", "PJ", "PRIMARY"]),
   bankCode: optionalText(20),
   bankName: optionalText(120),
@@ -73,7 +84,7 @@ export const bankAccountSchema = z.object({
 export const compensationSchema = z
   .object({
     id: optionalText(80),
-    consultantId: z.string().cuid(),
+    consultantId: entityId,
     contractType: z.enum(["CLT", "PJ", "CLT_FLEX"]),
     startsAt: z.string().trim().min(10).max(10),
     endsAt: optionalDate,
@@ -101,7 +112,7 @@ export const compensationSchema = z
 export const benefitSchema = z
   .object({
     id: optionalText(80),
-    consultantId: z.string().cuid(),
+    consultantId: entityId,
     type: z.enum([
       "MEAL_VOUCHER",
       "FOOD_VOUCHER",
@@ -120,7 +131,7 @@ export const benefitSchema = z
   });
 
 export const lookupInputSchema = z.object({
-  consultantId: z.string().cuid(),
+  consultantId: entityId,
   value: z.string().trim().min(8).max(20),
 });
 

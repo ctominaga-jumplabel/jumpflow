@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { Edit, FolderKanban, Link2, Plus, ReceiptText } from "lucide-react";
 import { ActionButton } from "@/components/ui/ActionButton";
 import { DataTable, type DataTableColumn } from "@/components/ui/DataTable";
@@ -112,13 +112,11 @@ export function ProjectsView({
   canViewCommercials,
   canManageSaleRates,
 }: ProjectsViewProps) {
-  const [items, setItems] = useState(projects);
-  // After a server action calls revalidatePath, the page re-renders with fresh
-  // `projects`. Sync local state so DB-mode writes (e.g. trocar gestor) show up
-  // without a full reload. Demo mode passes a stable array, so this is a no-op there.
-  useEffect(() => {
-    setItems(projects);
-  }, [projects]);
+  // In db mode `items` derives straight from props, so data revalidated by a
+  // server action (e.g. trocar o gestor) shows up immediately without a reload.
+  // Demo mode keeps local optimistic state since there is no server to refetch.
+  const [localItems, setLocalItems] = useState(projects);
+  const items = mode === "db" ? projects : localItems;
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<ProjectStatus | "ALL">("ALL");
   const [clientId, setClientId] = useState("ALL");
@@ -286,7 +284,7 @@ export function ProjectsView({
         managerName: manager?.name,
         endDate: projectForm.endDate,
       };
-      setItems((current) =>
+      setLocalItems((current) =>
         editing
           ? current.map((item) => (item.id === editing.id ? next : item))
           : [next, ...current],
@@ -316,7 +314,7 @@ export function ProjectsView({
         id: `alloc-local-${Date.now()}`,
         consultantName: consultant?.name ?? "Consultor",
       };
-      setItems((current) =>
+      setLocalItems((current) =>
         current.map((project) =>
           project.id === value.projectId
             ? {
@@ -359,7 +357,7 @@ export function ProjectsView({
           ? `${allocation.consultantName} - ${allocation.role}`
           : undefined,
       };
-      setItems((current) =>
+      setLocalItems((current) =>
         current.map((project) =>
           project.id === value.projectId
             ? {

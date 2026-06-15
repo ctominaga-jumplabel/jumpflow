@@ -1,5 +1,17 @@
 import { z } from "zod";
 
+// Entity ids are opaque strings. Prisma generates cuids for new rows, but
+// seeded/imported data may use readable ids (e.g. "seed-project-portal").
+// Referential integrity is enforced by the database FK and the `where: { id }`
+// lookup, so we only sanity-check shape here instead of forcing the cuid format
+// (which silently rejected every update against seeded rows).
+const entityId = z
+  .string()
+  .trim()
+  .min(1)
+  .max(64)
+  .regex(/^[A-Za-z0-9_-]+$/, "Identificador invalido.");
+
 const optionalText = (max: number) =>
   z
     .string()
@@ -13,7 +25,7 @@ const optionalCuid = z
   .trim()
   .optional()
   .transform((value) => (value ? value : undefined))
-  .pipe(z.string().cuid().optional());
+  .pipe(entityId.optional());
 
 const optionalDate = z
   .string()
@@ -28,7 +40,7 @@ const optionalNumber = z.preprocess(
 
 export const projectInputSchema = z
   .object({
-    clientId: z.string().cuid(),
+    clientId: entityId,
     name: z.string().trim().min(2).max(120),
     description: optionalText(500),
     status: z.enum(["PROPOSAL", "ACTIVE", "PAUSED", "CLOSED"]),
@@ -45,13 +57,13 @@ export const projectInputSchema = z
   });
 
 export const projectUpdateSchema = projectInputSchema.extend({
-  id: z.string().cuid(),
+  id: entityId,
 });
 
 export const allocationInputSchema = z
   .object({
-    projectId: z.string().cuid(),
-    consultantId: z.string().cuid(),
+    projectId: entityId,
+    consultantId: entityId,
     role: z.string().trim().min(2).max(80),
     allocationPercent: z.coerce.number().int().min(1).max(100),
     startDate: z.string().trim().min(10).max(10),
@@ -64,12 +76,12 @@ export const allocationInputSchema = z
   });
 
 export const allocationUpdateSchema = allocationInputSchema.extend({
-  id: z.string().cuid(),
+  id: entityId,
 });
 
 export const saleRateInputSchema = z
   .object({
-    projectId: z.string().cuid(),
+    projectId: entityId,
     consultantId: optionalCuid,
     allocationId: optionalCuid,
     startsAt: z.string().trim().min(10).max(10),
@@ -88,7 +100,7 @@ export const saleRateInputSchema = z
   });
 
 export const saleRateUpdateSchema = saleRateInputSchema.extend({
-  id: z.string().cuid(),
+  id: entityId,
 });
 
 export type ProjectInput = z.infer<typeof projectInputSchema>;
