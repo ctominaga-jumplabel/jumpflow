@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { Building2, Edit, Plus, Search, Settings2 } from "lucide-react";
 import { ActionButton } from "@/components/ui/ActionButton";
 import { DataTable, type DataTableColumn } from "@/components/ui/DataTable";
@@ -129,6 +129,15 @@ export function ClientsView({
 }: ClientsViewProps) {
   const [items, setItems] = useState(clients);
   const [types, setTypes] = useState(billingTypes);
+  // After a server action calls revalidatePath, the page re-renders with fresh
+  // props. Sync local state so DB-mode writes show up without a full reload.
+  // Demo mode passes stable arrays, so this is a no-op there.
+  useEffect(() => {
+    setItems(clients);
+  }, [clients]);
+  useEffect(() => {
+    setTypes(billingTypes);
+  }, [billingTypes]);
   const [tab, setTab] = useState<Tab>("CLIENTS");
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<"ALL" | "ACTIVE" | "INACTIVE">("ALL");

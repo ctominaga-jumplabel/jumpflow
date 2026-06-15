@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { Edit, FolderKanban, Link2, Plus, ReceiptText } from "lucide-react";
 import { ActionButton } from "@/components/ui/ActionButton";
 import { DataTable, type DataTableColumn } from "@/components/ui/DataTable";
@@ -113,6 +113,12 @@ export function ProjectsView({
   canManageSaleRates,
 }: ProjectsViewProps) {
   const [items, setItems] = useState(projects);
+  // After a server action calls revalidatePath, the page re-renders with fresh
+  // `projects`. Sync local state so DB-mode writes (e.g. trocar gestor) show up
+  // without a full reload. Demo mode passes a stable array, so this is a no-op there.
+  useEffect(() => {
+    setItems(projects);
+  }, [projects]);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<ProjectStatus | "ALL">("ALL");
   const [clientId, setClientId] = useState("ALL");

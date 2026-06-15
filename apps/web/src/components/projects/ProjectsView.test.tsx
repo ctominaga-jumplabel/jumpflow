@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import type { ProjectItem } from "@/lib/projects/types";
 import { ProjectsView } from "./ProjectsView";
 
 vi.mock("@/app/app/projetos/actions", () => ({
@@ -10,6 +11,23 @@ vi.mock("@/app/app/projetos/actions", () => ({
   createSaleRate: vi.fn(),
   updateSaleRate: vi.fn(),
 }));
+
+function dbProject(managerName: string): ProjectItem {
+  return {
+    id: "prj-1",
+    clientId: "cli-1",
+    clientName: "Cliente Um",
+    name: "Atlas",
+    status: "ACTIVE",
+    managerUserId: "usr-1",
+    managerName,
+    startDate: "2026-01-01",
+    consumedHours: 0,
+    allocatedConsultants: 0,
+    allocations: [],
+    saleRates: [],
+  };
+}
 
 function renderDemo(canViewCommercials = true) {
   return render(
@@ -65,5 +83,31 @@ describe("ProjectsView", () => {
     detail = screen.getByRole("dialog");
     expect(within(detail).getByText(/410,00/)).toBeInTheDocument();
     expect(screen.getByText("Valor de venda salvo localmente.")).toBeInTheDocument();
+  });
+
+  it("re-syncs the table when revalidated props change in db mode", () => {
+    const { rerender } = render(
+      <ProjectsView
+        mode="db"
+        projects={[dbProject("Ana Martins")]}
+        canManageProjects
+        canViewCommercials
+        canManageSaleRates
+      />,
+    );
+    expect(screen.getByText("Ana Martins")).toBeInTheDocument();
+
+    // Simulate revalidatePath: the page re-renders with fresh server data.
+    rerender(
+      <ProjectsView
+        mode="db"
+        projects={[dbProject("Christopher Tominaga")]}
+        canManageProjects
+        canViewCommercials
+        canManageSaleRates
+      />,
+    );
+    expect(screen.getByText("Christopher Tominaga")).toBeInTheDocument();
+    expect(screen.queryByText("Ana Martins")).not.toBeInTheDocument();
   });
 });

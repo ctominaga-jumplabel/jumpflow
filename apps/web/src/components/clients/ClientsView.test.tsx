@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import type { ClientItem } from "@/lib/clients/types";
 import { ClientsView } from "./ClientsView";
 
 vi.mock("@/app/app/clientes/actions", () => ({
@@ -9,6 +10,17 @@ vi.mock("@/app/app/clientes/actions", () => ({
   updateBillingType: vi.fn(),
   lookupCnpj: vi.fn(),
 }));
+
+function dbClient(name: string): ClientItem {
+  return {
+    id: "cli-1",
+    name,
+    roundingRule: "NONE",
+    invoiceKind: "SERVICE",
+    status: "ACTIVE",
+    projectCount: 0,
+  };
+}
 
 function renderDemo(canViewFinancials = true) {
   return render(
@@ -58,5 +70,35 @@ describe("ClientsView", () => {
     expect(
       screen.getByText("Tipo de cobranca salvo localmente."),
     ).toBeInTheDocument();
+  });
+
+  it("re-syncs the table when revalidated props change in db mode", () => {
+    const { rerender } = render(
+      <ClientsView
+        mode="db"
+        clients={[dbClient("Atlas Energia")]}
+        billingTypes={[]}
+        canManageClients
+        canViewFinancials
+        canManageBillingTypes
+        cnpjLookupAvailable={false}
+      />,
+    );
+    expect(screen.getByText("Atlas Energia")).toBeInTheDocument();
+
+    // Simulate revalidatePath: the page re-renders with fresh server data.
+    rerender(
+      <ClientsView
+        mode="db"
+        clients={[dbClient("Atlas Energia Renovavel")]}
+        billingTypes={[]}
+        canManageClients
+        canViewFinancials
+        canManageBillingTypes
+        cnpjLookupAvailable={false}
+      />,
+    );
+    expect(screen.getByText("Atlas Energia Renovavel")).toBeInTheDocument();
+    expect(screen.queryByText("Atlas Energia")).not.toBeInTheDocument();
   });
 });
