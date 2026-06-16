@@ -408,12 +408,22 @@ beforeEach(() => {
 
 afterEach(() => vi.unstubAllEnvs());
 
+/** Clock times for exactly N worked hours (09:00 + N, no break; N <= 14). */
+function clockFor(hours: number) {
+  return {
+    startTime: "09:00",
+    endTime: `${String(9 + hours).padStart(2, "0")}:00`,
+    breakStart: null,
+    breakEnd: null,
+  };
+}
+
 const baseInput = {
   projectId: "proj-1",
   activityType: "WORKDAY" as const,
   date: "2026-06-10",
-  hours: 8,
-  description: "",
+  ...clockFor(8),
+  description: "Trabalho do dia",
   billable: true,
 };
 
@@ -479,7 +489,7 @@ describe("createTimeEntry — persistence", () => {
   it("merges into an existing DRAFT for the same key and resubmits it", async () => {
     seedCurrentPeriod();
     const existing = seedEntry({ hours: 4 });
-    const result = await createTimeEntry({ ...baseInput, hours: 6 });
+    const result = await createTimeEntry({ ...baseInput, ...clockFor(6) });
     expect(result.ok).toBe(true);
     expect(h.store.entries).toHaveLength(1);
     expect(h.store.entries[0].id).toBe(existing.id);
@@ -514,7 +524,7 @@ describe("createWeeklyTimeEntries", () => {
       projectId: "proj-1",
       activityType: "WORKDAY",
       weekStart: "2026-06-08",
-      hoursPerDay: 6,
+      ...clockFor(6),
       weekdays: [1, 2, 3, 4, 5],
       description: "Rotina semanal",
       billable: true,
@@ -546,9 +556,9 @@ describe("createWeeklyTimeEntries", () => {
       projectId: "proj-1",
       activityType: "WORKDAY",
       weekStart: "2026-06-08",
-      hoursPerDay: 6,
+      ...clockFor(6),
       weekdays: [1],
-      description: "",
+      description: "Fora da vigência",
       billable: true,
     });
 
@@ -574,7 +584,8 @@ describe("updateTimeEntry / deleteTimeEntry — editability", () => {
       const entry = seedEntry({ status });
       const result = await updateTimeEntry({
         id: entry.id,
-        hours: 5,
+        ...clockFor(5),
+        description: "Ajuste",
         billable: true,
       });
       expect(result).toMatchObject({ ok: false, error: "NOT_EDITABLE" });
@@ -587,7 +598,12 @@ describe("updateTimeEntry / deleteTimeEntry — editability", () => {
     seedCurrentPeriod("SUBMITTED");
     const submittedAt = new Date("2026-06-08T10:00:00Z");
     const entry = seedEntry({ status: "SUBMITTED", submittedAt });
-    const result = await updateTimeEntry({ id: entry.id, hours: 6, billable: true });
+    const result = await updateTimeEntry({
+      id: entry.id,
+      ...clockFor(6),
+      description: "Ajuste",
+      billable: true,
+    });
     expect(result.ok).toBe(true);
     expect(h.store.entries[0].status).toBe("SUBMITTED");
     expect(h.store.entries[0].hours).toBe(6);
@@ -607,7 +623,12 @@ describe("updateTimeEntry / deleteTimeEntry — editability", () => {
   it("resubmits a REJECTED entry for approval on edit", async () => {
     seedCurrentPeriod("REJECTED");
     const entry = seedEntry({ status: "REJECTED", submittedAt: new Date() });
-    const result = await updateTimeEntry({ id: entry.id, hours: 5, billable: true });
+    const result = await updateTimeEntry({
+      id: entry.id,
+      ...clockFor(5),
+      description: "Ajuste",
+      billable: true,
+    });
     expect(result.ok).toBe(true);
     // Rodada 4.3: editing a REJECTED entry resubmits it (REJECTED -> SUBMITTED).
     expect(h.store.entries[0].status).toBe("SUBMITTED");
@@ -627,7 +648,8 @@ describe("updateTimeEntry / deleteTimeEntry — editability", () => {
     const entry = seedEntry();
     const result = await updateTimeEntry({
       id: entry.id,
-      hours: 5,
+      ...clockFor(5),
+      description: "Ajuste",
       billable: true,
       date: "2026-06-15",
     });
@@ -637,7 +659,12 @@ describe("updateTimeEntry / deleteTimeEntry — editability", () => {
   it("blocks edits from another consultant (ownership)", async () => {
     seedCurrentPeriod();
     const entry = seedEntry({ consultantId: "con-2" });
-    const result = await updateTimeEntry({ id: entry.id, hours: 5, billable: true });
+    const result = await updateTimeEntry({
+      id: entry.id,
+      ...clockFor(5),
+      description: "Ajuste",
+      billable: true,
+    });
     expect(result).toMatchObject({ ok: false, error: "FORBIDDEN" });
   });
 
@@ -1151,15 +1178,21 @@ describe("guards", () => {
           projectId: "proj-1",
           activityType: "WORKDAY",
           weekStart: "2026-06-08",
-          hoursPerDay: 8,
+          ...clockFor(8),
           weekdays: [1, 2, 3, 4, 5],
-          description: "",
+          description: "Semana",
           billable: true,
         }),
     ],
     [
       "updateTimeEntry",
-      () => updateTimeEntry({ id: "entry-x", hours: 5, billable: true }),
+      () =>
+        updateTimeEntry({
+          id: "entry-x",
+          ...clockFor(5),
+          description: "Ajuste",
+          billable: true,
+        }),
     ],
     ["deleteTimeEntry", () => deleteTimeEntry({ id: "entry-x" })],
     ["copyPreviousWeek", () => copyPreviousWeek({ weekStart: "2026-06-08" })],

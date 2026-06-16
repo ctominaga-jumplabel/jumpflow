@@ -6,10 +6,8 @@ import { TimesheetWeekView } from "@/components/timesheet/TimesheetWeekView";
 import { requireUser } from "@/lib/auth/guards";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import {
-  addDays,
-  parseIsoDateUtc,
+  monthRangeOf,
   parseWeekParam,
-  toIsoDate,
 } from "@/lib/timesheet/week";
 import { parseTimesheetFilter } from "@/lib/timesheet/filters";
 
@@ -71,9 +69,14 @@ export default async function HorasPage({ searchParams }: HorasPageProps) {
   const weekStart = parseWeekParam(params.semana);
   // Safe fallback: an invalid filter value is dropped, defaults take over.
   const filter = parseTimesheetFilter(params);
-  const periodStart = filter.startDate ?? toIsoDate(weekStart);
-  const parsedPeriodStart = parseIsoDateUtc(periodStart) ?? weekStart;
-  const periodEnd = filter.endDate ?? toIsoDate(addDays(parsedPeriodStart, 6));
+  // Default period filter is the current calendar month (1st → last day).
+  // Both bounds are mandatory in the UI, so fill them when absent and reflect
+  // them back into `filter` so the date inputs render the month.
+  const defaultMonth = monthRangeOf();
+  filter.startDate ??= defaultMonth.start;
+  filter.endDate ??= defaultMonth.end;
+  const periodStart = filter.startDate;
+  const periodEnd = filter.endDate;
   const [week, period, projects, defaultOptions] = await Promise.all([
     getWeekForConsultant(consultant.id, weekStart, filter),
     getPeriodForConsultant(consultant.id, periodStart, periodEnd, filter),

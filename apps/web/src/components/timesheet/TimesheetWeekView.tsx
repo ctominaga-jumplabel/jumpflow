@@ -42,13 +42,16 @@ import {
   statusCounts,
   timeEntryStatusLabels,
   weekTotal,
+  type DayClock,
   type TimeEntryRow as TimeEntryRowData,
+  type TimeEntryStatus,
   type TimesheetWeek,
 } from "@/lib/timesheet/types";
 import {
   addDays,
   parseIsoDateUtc,
   toIsoDate,
+  weekLabel,
   weekStartOf,
 } from "@/lib/timesheet/week";
 import {
@@ -71,6 +74,13 @@ import {
   type TimeEntryFormProject,
   type TimeEntryFormValue,
 } from "./TimeEntryForm";
+import {
+  ClockFields,
+  clockFromStored,
+  clockHours,
+  emptyClock,
+  type ClockFieldsValue,
+} from "./ClockFields";
 
 const WEEKLY_TARGET = 40;
 const WEEKDAY_OPTIONS = [
@@ -184,16 +194,30 @@ export interface TimesheetDefaultOption extends TimeEntryFormProject {
     weekdays: number[];
     billable: boolean;
     description: string;
+    startTime: string | null;
+    breakStart: string | null;
+    breakEnd: string | null;
+    endTime: string | null;
   } | null;
 }
 
 interface TimesheetDefaultFormValue {
   allocationId: string;
   activityType: ActivityType;
-  hoursPerDay: string;
+  clock: ClockFieldsValue;
   weekdays: number[];
   billable: boolean;
   description: string;
+}
+
+/** Build the clock value used by the weekly-default form from a stored config. */
+function defaultClock(
+  config: TimesheetDefaultOption["defaultConfig"],
+): ClockFieldsValue {
+  if (!config || !config.startTime || !config.endTime) {
+    return { ...emptyClock };
+  }
+  return clockFromStored(config);
 }
 
 const inputClass =
@@ -252,74 +276,174 @@ function deriveDemoPeriod(week: TimesheetWeek): TimesheetPeriodOverview {
   };
 }
 
-function PeriodOverview({ period }: { period: TimesheetPeriodOverview }) {
+interface PeriodWeekRow {
+  /** Monday (ISO) — the navigation target. */
+  start: string;
+  label: string;
+  totalHours: number;
+  statuses: TimeEntryStatus[];
+  /** Whether this is the week currently open in the grid. */
+  current: boolean;
+}
+
+/** Group the period's days into Monday→Sunday weeks for the clickable list. */
+function groupPeriodWeeks(
+  period: TimesheetPeriodOverview,
+  currentWeekStart: string,
+): PeriodWeekRow[] {
+  const byWeek = new Map<
+    string,
+    { start: string; totalHours: number; statuses: Set<TimeEntryStatus> }
+  >();
+  for (const day of period.days) {
+    const parsed = parseIsoDateUtc(day.date);
+    if (!parsed) continue;
+    const monday = toIsoDate(weekStartOf(parsed));
+    let week = byWeek.get(monday);
+    if (!week) {
+      week = { start: monday, totalHours: 0, statuses: new Set() };
+      byWeek.set(monday, week);
+    }
+    week.totalHours += day.totalHours;
+    for (const status of day.statuses) week.statuses.add(status);
+  }
+  return [...byWeek.values()]
+    .sort((a, b) => a.start.localeCompare(b.start))
+    .map((week) => {
+      const start = parseIsoDateUtc(week.start)!;
+      return {
+        start: week.start,
+        label: weekLabel(start),
+        totalHours: week.totalHours,
+        statuses: [...week.statuses],
+        current: week.start === currentWeekStart,
+      };
+    });
+}
+
+const STATUS_LEGEND = (
+  <div className="flex flex-wrap gap-2 pt-1">
+    {(["SUBMITTED", "APPROVED", "REJECTED", "DRAFT", "CLOSED"] as const).map(
+      (status) => (
+        <span key={status} className="flex items-center gap-1 text-xs text-soft">
+          <span
+            className={cn("size-2 rounded-full border", statusToneClass[status])}
+          />
+          {timeEntryStatusLabels[status]}
+        </span>
+      ),
+    )}
+  </div>
+);
+
+function PeriodSummaryColumn({ period }: { period: TimesheetPeriodOverview }) {
+  return (
+    <div className="space-y-3">
+      <div>
+        <p className="text-xs font-semibold uppercase text-soft">Total</p>
+        <p className="text-2xl font-semibold text-strong">
+          {formatHours(period.totalHours)}
+        </p>
+      </div>
+      <div className="space-y-2">
+        {period.projectTotals.length > 0 ? (
+          period.projectTotals.map((project, index) => (
+            <div
+              key={`${project.projectId}-${index}`}
+              className="flex items-center justify-between gap-3 text-sm"
+              title={`${project.projectName} · ${project.clientName}`}
+            >
+              <span className="min-w-0 truncate text-medium">
+                {project.projectName}
+              </span>
+              <span className="shrink-0 font-semibold tabular-nums text-strong">
+                {formatHours(project.totalHours)}
+              </span>
+            </div>
+          ))
+        ) : (
+          <p className="text-sm text-soft">Sem horas no período.</p>
+        )}
+      </div>
+      {STATUS_LEGEND}
+    </div>
+  );
+}
+
+function PeriodOverview({
+  period,
+  currentWeekStart,
+  onSelectWeek,
+}: {
+  period: TimesheetPeriodOverview;
+  currentWeekStart: string;
+  /** Navigate to (and open) the week starting on the given Monday. */
+  onSelectWeek: (mondayIso: string) => void;
+}) {
   const kind = periodKind(period.days.length);
-  const columns =
-    kind === "week"
-      ? "grid-cols-7"
-      : kind === "month-weeks"
-        ? "grid-cols-7"
-        : "grid-cols-7 md:grid-cols-10";
-  const groupedLabel =
-    kind === "months"
-      ? "Calendario mensal"
-      : kind === "month-weeks"
-        ? "Semanas do periodo"
-        : "Semana";
+
+  // Multi-week period (the monthly default): show the weeks of the period as
+  // clickable rows — clicking opens that week in the grid for logging.
+  if (kind !== "week") {
+    const weeks = groupPeriodWeeks(period, currentWeekStart);
+    return (
+      <SectionPanel
+        title="Resumo do período"
+        description={`${period.startDate} a ${period.endDate} · Semanas do período`}
+      >
+        <div className="grid gap-4 px-5 py-4 lg:grid-cols-[220px_minmax(0,1fr)]">
+          <PeriodSummaryColumn period={period} />
+          <ul className="space-y-2">
+            {weeks.map((week) => {
+              const dominant = week.statuses[0] ?? "DRAFT";
+              return (
+                <li key={week.start}>
+                  <button
+                    type="button"
+                    onClick={() => onSelectWeek(week.start)}
+                    aria-current={week.current ? "true" : undefined}
+                    className={cn(
+                      "flex w-full items-center justify-between gap-3 rounded-md border px-3 py-2 text-left text-sm transition hover:border-ink",
+                      week.current
+                        ? "border-ink bg-marker/40 text-strong"
+                        : "border-border bg-surface text-medium",
+                    )}
+                  >
+                    <span className="flex items-center gap-2">
+                      <span
+                        className={cn(
+                          "size-2 shrink-0 rounded-full border",
+                          week.totalHours > 0
+                            ? statusToneClass[dominant]
+                            : "border-border bg-surface",
+                        )}
+                      />
+                      <span className="font-medium">{week.label}</span>
+                      {week.current ? (
+                        <span className="text-xs text-soft">(semana atual)</span>
+                      ) : null}
+                    </span>
+                    <span className="shrink-0 font-semibold tabular-nums text-strong">
+                      {week.totalHours > 0 ? formatHours(week.totalHours) : "–"}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      </SectionPanel>
+    );
+  }
 
   return (
     <SectionPanel
-      title="Resumo do periodo"
-      description={`${period.startDate} a ${period.endDate} · ${groupedLabel}`}
+      title="Resumo do período"
+      description={`${period.startDate} a ${period.endDate} · Semana`}
     >
       <div className="grid gap-4 px-5 py-4 lg:grid-cols-[220px_minmax(0,1fr)]">
-        <div className="space-y-3">
-          <div>
-            <p className="text-xs font-semibold uppercase text-soft">
-              Total
-            </p>
-            <p className="text-2xl font-semibold text-strong">
-              {formatHours(period.totalHours)}
-            </p>
-          </div>
-          <div className="space-y-2">
-            {period.projectTotals.length > 0 ? (
-              period.projectTotals.map((project, index) => (
-                <div
-                  key={`${project.projectId}-${index}`}
-                  className="flex items-center justify-between gap-3 text-sm"
-                  title={`${project.projectName} · ${project.clientName}`}
-                >
-                  <span className="min-w-0 truncate text-medium">
-                    {project.projectName}
-                  </span>
-                  <span className="shrink-0 font-semibold tabular-nums text-strong">
-                    {formatHours(project.totalHours)}
-                  </span>
-                </div>
-              ))
-            ) : (
-              <p className="text-sm text-soft">Sem horas no periodo.</p>
-            )}
-          </div>
-          <div className="flex flex-wrap gap-2 pt-1">
-            {(["SUBMITTED", "APPROVED", "REJECTED", "DRAFT", "CLOSED"] as const).map(
-              (status) => (
-                <span key={status} className="flex items-center gap-1 text-xs text-soft">
-                  <span
-                    className={cn(
-                      "size-2 rounded-full border",
-                      statusToneClass[status],
-                    )}
-                  />
-                  {timeEntryStatusLabels[status]}
-                </span>
-              ),
-            )}
-          </div>
-        </div>
-
-        <div className={cn("grid gap-1", columns)}>
+        <PeriodSummaryColumn period={period} />
+        <div className="grid grid-cols-7 gap-1">
           {period.days.map((day) => {
             const dominant = day.entries[0]?.status ?? "DRAFT";
             const title =
@@ -330,7 +454,7 @@ function PeriodOverview({ period }: { period: TimesheetPeriodOverview }) {
                         `${entry.projectName}: ${formatHours(entry.hours)} · ${entry.activityLabel} · ${entry.status}`,
                     )
                     .join("\n")
-                : "Sem lancamentos";
+                : "Sem lançamentos";
             return (
               <div
                 key={day.date}
@@ -370,9 +494,7 @@ function defaultFormValue(
   return {
     allocationId: option?.allocationId ?? "",
     activityType: (option?.defaultConfig?.activityType ?? "WORKDAY") as ActivityType,
-    hoursPerDay: option?.defaultConfig?.hoursPerDay
-      ? String(option.defaultConfig.hoursPerDay)
-      : "8",
+    clock: defaultClock(option?.defaultConfig ?? null),
     weekdays: option?.defaultConfig?.weekdays?.length
       ? option.defaultConfig.weekdays
       : [1, 2, 3, 4, 5],
@@ -400,6 +522,8 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
   const [index, setIndex] = useState(props.initialIndex ?? DEFAULT_WEEK_INDEX);
   const [formOpen, setFormOpen] = useState(false);
   const [defaultOpen, setDefaultOpen] = useState(false);
+  const [copyOpen, setCopyOpen] = useState(false);
+  const [copyDescription, setCopyDescription] = useState("");
   const [editingRow, setEditingRow] = useState<TimeEntryRowData | null>(null);
   const [editInitial, setEditInitial] = useState<TimeEntryFormValue | null>(null);
   const [defaultValue, setDefaultValue] = useState<TimesheetDefaultFormValue>(() =>
@@ -464,9 +588,9 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
     router.push(`/app/horas?semana=${target}`);
   }
 
-  /** "Ir para data": jump to the week containing the chosen date. */
-  function goToDate(isoDate: string) {
-    const parsed = parseIsoDateUtc(isoDate);
+  /** Open the week starting on the given Monday (from the period week list). */
+  function goToWeek(mondayIso: string) {
+    const parsed = parseIsoDateUtc(mondayIso);
     if (!parsed) return;
     const target = toIsoDate(weekStartOf(parsed));
     if (isDemo) {
@@ -506,9 +630,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
     setDefaultValue({
       allocationId,
       activityType: (option?.defaultConfig?.activityType ?? "WORKDAY") as ActivityType,
-      hoursPerDay: option?.defaultConfig?.hoursPerDay
-        ? String(option.defaultConfig.hoursPerDay)
-        : "8",
+      clock: defaultClock(option?.defaultConfig ?? null),
       weekdays: option?.defaultConfig?.weekdays?.length
         ? option.defaultConfig.weekdays
         : [1, 2, 3, 4, 5],
@@ -528,18 +650,26 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
     });
   }
 
-  function parsedDefaultHours(): number {
-    return Number(defaultValue.hoursPerDay.replace(",", "."));
+  function defaultClockPayload() {
+    const { clock } = defaultValue;
+    return {
+      startTime: clock.startTime,
+      endTime: clock.endTime,
+      breakStart: clock.hasBreak ? clock.breakStart : null,
+      breakEnd: clock.hasBreak ? clock.breakEnd : null,
+    };
   }
 
   function validateDefaultForm(): string | null {
-    const hours = parsedDefaultHours();
-    if (!defaultValue.allocationId) return "Selecione uma alocacao.";
-    if (!Number.isFinite(hours) || hours <= 0 || hours > 24) {
-      return "Informe horas entre 0 e 24.";
+    if (!defaultValue.allocationId) return "Selecione uma alocação.";
+    if (clockHours(defaultValue.clock) === null) {
+      return "Informe horários válidos (Início, Saída e pausa).";
     }
     if (defaultValue.weekdays.length === 0) {
       return "Selecione ao menos um dia.";
+    }
+    if (defaultValue.description.trim().length === 0) {
+      return "Descrição é obrigatória.";
     }
     return null;
   }
@@ -554,14 +684,14 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
       const result = await saveTimesheetDefaultAction({
         allocationId: defaultValue.allocationId,
         activityType: defaultValue.activityType,
-        hoursPerDay: parsedDefaultHours(),
+        ...defaultClockPayload(),
         weekdays: defaultValue.weekdays,
         billable: defaultValue.billable,
         description: defaultValue.description,
       });
       if (result.ok) {
         router.refresh();
-        notify("success", "Padrao semanal salvo.");
+        notify("success", "Padrão semanal salvo.");
       } else {
         setDefaultError(result.message);
       }
@@ -578,7 +708,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
       const saved = await saveTimesheetDefaultAction({
         allocationId: defaultValue.allocationId,
         activityType: defaultValue.activityType,
-        hoursPerDay: parsedDefaultHours(),
+        ...defaultClockPayload(),
         weekdays: defaultValue.weekdays,
         billable: defaultValue.billable,
         description: defaultValue.description,
@@ -614,13 +744,17 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
       0,
       row.hours.findIndex((h) => h > 0),
     );
+    const storedClock = row.clock?.[dayIndex] ?? null;
     setEditingRow(row);
     setEditInitial({
       mode: "daily",
       projectId: row.projectId,
       activity: row.activity,
       date: week.days[dayIndex]?.date ?? week.startDate,
-      hours: row.hours[dayIndex] ?? 0,
+      clock:
+        storedClock && storedClock.startTime && storedClock.endTime
+          ? clockFromStored(storedClock)
+          : { ...emptyClock },
       weekdays: [1, 2, 3, 4, 5],
       description: row.description ?? "",
       billable: row.billable,
@@ -633,6 +767,12 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
       handleSubmitEntryDemo(value);
       return;
     }
+    const clockPayload = {
+      startTime: value.clock.startTime,
+      endTime: value.clock.endTime,
+      breakStart: value.clock.hasBreak ? value.clock.breakStart : null,
+      breakEnd: value.clock.hasBreak ? value.clock.breakEnd : null,
+    };
     startTransition(async () => {
       const dayIndex = dayIndexOf(value.date);
       const existingId = editingRow?.entryIds?.[dayIndex] ?? null;
@@ -641,7 +781,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
           projectId: value.projectId,
           activityType: value.activity as ActivityType,
           weekStart: week.startDate,
-          hoursPerDay: value.hours,
+          ...clockPayload,
           weekdays: value.weekdays,
           description: value.description,
           billable: value.billable,
@@ -667,7 +807,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
       const result = existingId
         ? await updateTimeEntry({
             id: existingId,
-            hours: value.hours,
+            ...clockPayload,
             description: value.description,
             billable: value.billable,
             date: value.date,
@@ -679,7 +819,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
             activityType: (editingRow?.activity ??
               value.activity) as ActivityType,
             date: value.date,
-            hours: value.hours,
+            ...clockPayload,
             description: value.description,
             billable: value.billable,
           });
@@ -728,6 +868,22 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
             .filter((index) => value.weekdays.includes(index + 1))
         : [valueDayIndex];
     const editingRowId = editingRow?.id ?? null;
+    // Demo mirrors the server: hours are derived from the clock.
+    const hoursValue = clockHours(value.clock) ?? 0;
+    const cell: DayClock = {
+      startTime: value.clock.startTime,
+      endTime: value.clock.endTime,
+      breakStart: value.clock.hasBreak ? value.clock.breakStart : null,
+      breakEnd: value.clock.hasBreak ? value.clock.breakEnd : null,
+    };
+    const dayCount = week.days.length;
+    const emptyClockArr = (): (DayClock | null)[] =>
+      Array.from({ length: dayCount }, () => null);
+    const applyClock = (existing: (DayClock | null)[] | undefined) => {
+      const next = existing ? [...existing] : emptyClockArr();
+      for (const i of targetIndexes) next[i] = cell;
+      return next;
+    };
     // A complete entry enters approval as soon as it is saved (Rodada 4.3):
     // demo rows mirror the db behavior and become SUBMITTED.
     const correctedRejection = editingRowId && editingRow?.status === "REJECTED";
@@ -746,8 +902,9 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
                 description: value.description,
                 billable: value.billable,
                 hours: r.hours.map((h, i) =>
-                  targetIndexes.includes(i) ? value.hours : h,
+                  targetIndexes.includes(i) ? hoursValue : h,
                 ),
+                clock: applyClock(r.clock),
               }
             : r,
         );
@@ -769,15 +926,16 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
                   description: value.description || r.description,
                   billable: value.billable,
                   hours: r.hours.map((h, i) =>
-                    targetIndexes.includes(i) ? value.hours : h,
+                    targetIndexes.includes(i) ? hoursValue : h,
                   ),
+                  clock: applyClock(r.clock),
                 }
               : r,
           );
         } else {
           idCounter.current += 1;
-          const hours = Array.from({ length: w.days.length }, (_, i) =>
-            targetIndexes.includes(i) ? value.hours : 0,
+          const hours = Array.from({ length: dayCount }, (_, i) =>
+            targetIndexes.includes(i) ? hoursValue : 0,
           );
           rows = [
             ...rows,
@@ -791,6 +949,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
               status: "SUBMITTED",
               description: value.description || undefined,
               hours,
+              clock: applyClock(undefined),
             },
           ];
         }
@@ -809,17 +968,25 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
     );
   }
 
-  function copyPreviousWeek() {
+  function openCopyModal() {
+    setCopyDescription("");
+    setCopyOpen(true);
+  }
+
+  function confirmCopyPreviousWeek() {
+    const description = copyDescription.trim();
     if (!isDemo) {
       startTransition(async () => {
         const result = await copyPreviousWeekAction({
           weekStart: week.startDate,
+          description: description || undefined,
         });
         if (!result.ok) {
           notify("warning", result.message);
           return;
         }
         const { copied, skippedExisting, skippedIneligible } = result.data;
+        setCopyOpen(false);
         if (copied === 0 && skippedExisting === 0 && skippedIneligible === 0) {
           notify(
             "info",
@@ -866,13 +1033,20 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
           id: `te-copy-${idCounter.current}`,
           // Copied entries carry hours: like a direct save they enter approval.
           status: "SUBMITTED",
+          // Single week-level description applied to every copied entry; blank
+          // keeps the source description (mirrors the server action).
+          description: description || row.description,
           hours: [...row.hours],
+          clock: row.clock
+            ? row.clock.map((cell) => (cell ? { ...cell } : null))
+            : undefined,
         });
       }
       const next = { ...w, rows: [...w.rows, ...additions] };
       return { ...next, status: deriveWeekStatus(next) };
     });
 
+    setCopyOpen(false);
     notify("success", "Lançamentos elegíveis copiados e enviados para aprovação (demo).");
   }
 
@@ -927,7 +1101,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
             size="sm"
             icon={CopyPlus}
             disabled={isPending}
-            onClick={copyPreviousWeek}
+            onClick={openCopyModal}
           >
             Copiar semana anterior
           </ActionButton>
@@ -985,7 +1159,6 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
         projects={filterProjects}
         onChange={isDemo ? setDemoFilter : undefined}
         onClear={isDemo ? () => setDemoFilter({}) : undefined}
-        onPickDate={goToDate}
       />
 
       {hasActiveTimesheetFilter(activeFilter) ? (
@@ -994,7 +1167,11 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
         </p>
       ) : null}
 
-      <PeriodOverview period={periodOverview} />
+      <PeriodOverview
+        period={periodOverview}
+        currentWeekStart={week.startDate}
+        onSelectWeek={goToWeek}
+      />
 
       <SectionPanel
         title="Lançamentos da semana"
@@ -1159,47 +1336,41 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
             </select>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label htmlFor="default-activity" className="mb-1 block text-xs font-semibold text-medium">
-                Atividade
-              </label>
-              <select
-                id="default-activity"
-                value={defaultValue.activityType}
-                onChange={(event) =>
-                  setDefaultValue((value) => ({
-                    ...value,
-                    activityType: event.target.value as ActivityType,
-                  }))
-                }
-                className={inputClass}
-              >
-                {activityOrder.map((activity) => (
-                  <option key={activity} value={activity}>
-                    {activityLabels[activity]}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label htmlFor="default-hours" className="mb-1 block text-xs font-semibold text-medium">
-                Horas por dia
-              </label>
-              <input
-                id="default-hours"
-                value={defaultValue.hoursPerDay}
-                onChange={(event) =>
-                  setDefaultValue((value) => ({
-                    ...value,
-                    hoursPerDay: event.target.value,
-                  }))
-                }
-                inputMode="decimal"
-                className={inputClass}
-              />
-            </div>
+          <div>
+            <label htmlFor="default-activity" className="mb-1 block text-xs font-semibold text-medium">
+              Atividade
+            </label>
+            <select
+              id="default-activity"
+              value={defaultValue.activityType}
+              onChange={(event) =>
+                setDefaultValue((value) => ({
+                  ...value,
+                  activityType: event.target.value as ActivityType,
+                }))
+              }
+              className={inputClass}
+            >
+              {activityOrder.map((activity) => (
+                <option key={activity} value={activity}>
+                  {activityLabels[activity]}
+                </option>
+              ))}
+            </select>
           </div>
+
+          <fieldset>
+            <legend className="mb-1 block text-xs font-semibold text-medium">
+              Horários
+            </legend>
+            <ClockFields
+              value={defaultValue.clock}
+              onChange={(clock) =>
+                setDefaultValue((value) => ({ ...value, clock }))
+              }
+              idPrefix="default"
+            />
+          </fieldset>
 
           <fieldset>
             <legend className="mb-2 text-xs font-semibold text-medium">
@@ -1230,7 +1401,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
 
           <div>
             <label htmlFor="default-description" className="mb-1 block text-xs font-semibold text-medium">
-              Descricao padrao <span className="font-normal text-soft">(opcional)</span>
+              Descrição padrão
             </label>
             <textarea
               id="default-description"
@@ -1258,13 +1429,63 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
               }
               className="size-4 rounded border-border text-brand focus:ring-brand"
             />
-            Faturavel
+            Faturável
           </label>
 
           <p className="text-xs text-soft">
-            Preview: {selectedDefaultOption()?.name ?? "alocacao"} ·{" "}
-            {activityLabels[defaultValue.activityType]} · {defaultValue.hoursPerDay || "0"}h
-            nos dias selecionados. Lancamentos existentes serao pulados.
+            Prévia: {selectedDefaultOption()?.name ?? "alocação"} ·{" "}
+            {activityLabels[defaultValue.activityType]} ·{" "}
+            {formatHours(clockHours(defaultValue.clock) ?? 0)} nos dias
+            selecionados. Lançamentos existentes serão pulados.
+          </p>
+        </div>
+      </Modal>
+
+      <Modal
+        open={copyOpen}
+        onClose={() => setCopyOpen(false)}
+        title="Copiar semana anterior"
+        description="Os lançamentos elegíveis da semana anterior entram em aprovação automaticamente. Edite a descrição de atividades da semana, se desejar."
+        footer={
+          <>
+            <ActionButton
+              variant="secondary"
+              size="sm"
+              disabled={isPending}
+              onClick={() => setCopyOpen(false)}
+            >
+              Cancelar
+            </ActionButton>
+            <ActionButton
+              variant="primary"
+              size="sm"
+              icon={CopyPlus}
+              disabled={isPending}
+              onClick={confirmCopyPreviousWeek}
+            >
+              Copiar e salvar
+            </ActionButton>
+          </>
+        }
+      >
+        <div className="space-y-2">
+          <label
+            htmlFor="copy-description"
+            className="mb-1 block text-xs font-semibold text-medium"
+          >
+            Descrição de atividades da semana
+          </label>
+          <textarea
+            id="copy-description"
+            value={copyDescription}
+            onChange={(event) => setCopyDescription(event.target.value)}
+            rows={3}
+            placeholder="Deixe em branco para manter a descrição de cada lançamento copiado."
+            className={cn(inputClass, "resize-y")}
+          />
+          <p className="text-xs text-soft">
+            Quando preenchida, esta descrição é aplicada a todos os lançamentos
+            copiados.
           </p>
         </div>
       </Modal>

@@ -109,6 +109,22 @@ export function weekLabel(weekStart: Date): string {
   return `Semana ${week} · ${range} ${end.getUTCFullYear()}`;
 }
 
+/**
+ * First and last day (ISO, UTC) of the calendar month containing `date`.
+ * Used as the default period filter on the Horas screen (current month).
+ */
+export function monthRangeOf(date: Date = new Date()): {
+  start: string;
+  end: string;
+} {
+  const year = date.getUTCFullYear();
+  const month = date.getUTCMonth();
+  const start = new Date(Date.UTC(year, month, 1));
+  // Day 0 of the next month = last day of this month.
+  const end = new Date(Date.UTC(year, month + 1, 0));
+  return { start: toIsoDate(start), end: toIsoDate(end) };
+}
+
 /** The 7 `WeekDay` cells (Mon→Sun) for the week starting at `weekStart`. */
 export function buildWeekDays(weekStart: Date): WeekDay[] {
   const start = weekStartOf(weekStart);

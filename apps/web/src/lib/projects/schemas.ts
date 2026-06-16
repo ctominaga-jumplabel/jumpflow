@@ -47,6 +47,7 @@ export const projectInputSchema = z
     startDate: z.string().trim().min(10).max(10),
     endDate: optionalDate,
     managerUserId: optionalText(80),
+    billingTypeId: optionalCuid,
     billingHourlyRate: optionalNumber,
     budgetHours: optionalNumber,
     costCenter: optionalText(80),
@@ -68,7 +69,7 @@ export const allocationInputSchema = z
     allocationPercent: z.coerce.number().int().min(1).max(100),
     startDate: z.string().trim().min(10).max(10),
     endDate: optionalDate,
-    status: z.enum(["ACTIVE", "PLANNED", "ENDED", "CANCELLED"]),
+    status: z.enum(["ACTIVE", "PLANNED", "ENDED", "CANCELLED", "INACTIVE"]),
   })
   .refine((value) => !value.endDate || value.endDate >= value.startDate, {
     message: "Data final deve ser maior ou igual ao inicio.",
@@ -78,6 +79,8 @@ export const allocationInputSchema = z
 export const allocationUpdateSchema = allocationInputSchema.extend({
   id: entityId,
 });
+
+export const allocationRemoveSchema = z.object({ id: entityId });
 
 export const saleRateInputSchema = z
   .object({
@@ -136,6 +139,7 @@ export type ProjectInput = z.infer<typeof projectInputSchema>;
 export type ProjectUpdateInput = z.infer<typeof projectUpdateSchema>;
 export type AllocationInput = z.infer<typeof allocationInputSchema>;
 export type AllocationUpdateInput = z.infer<typeof allocationUpdateSchema>;
+export type AllocationRemoveInput = z.infer<typeof allocationRemoveSchema>;
 export type SaleRateInput = z.infer<typeof saleRateInputSchema>;
 export type SaleRateUpdateInput = z.infer<typeof saleRateUpdateSchema>;
 export type AllocationSkillInput = z.infer<typeof allocationSkillInputSchema>;

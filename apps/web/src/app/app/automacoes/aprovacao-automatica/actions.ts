@@ -79,6 +79,65 @@ const toggleExceptionSchema = z.object({
 
 export type ToggleExceptionInput = z.infer<typeof toggleExceptionSchema>;
 
+const createExceptionSchema = z.object({
+  consultantId: z.string().min(1, "Selecione um consultor."),
+  projectId: z.string().min(1, "Selecione um projeto."),
+  type: z.enum(["ANY_HOURS", "WEEKEND"]),
+  note: z.string().trim().max(300, "Nota muito longa.").optional(),
+});
+
+export type CreateExceptionInput = z.infer<typeof createExceptionSchema>;
+
+/**
+ * Register a new {@link AutoApprovalException} (consultant × project × type).
+ * Upserts on the unique (consultantId, projectId, type) key so re-registering a
+ * previously deactivated exception simply reactivates it. Audited, since it
+ * widens what the engine auto-approves.
+ */
+export async function createAutoApprovalException(
+  input: CreateExceptionInput,
+): Promise<ActionResult<{ id: string }>> {
+  const user = await requireRole([...ADMIN_ROLES]);
+
+  if (!isDatabaseConfigured()) {
+    return {
+      ok: false,
+      error: "NO_DATABASE",
+      message: "Banco de dados não configurado.",
+    };
+  }
+
+  const parsed = createExceptionSchema.safeParse(input);
+  if (!parsed.success) {
+    const message = parsed.error.issues[0]?.message ?? "Dados inválidos.";
+    return { ok: false, error: "INVALID_INPUT", message };
+  }
+  const { consultantId, projectId, type, note } = parsed.data;
+
+  // The unique (consultant, project, type) key means re-creating an existing
+  // exception reactivates it instead of failing — the intent is the same.
+  const exception = await prisma.autoApprovalException.upsert({
+    where: {
+      consultantId_projectId_type: { consultantId, projectId, type },
+    },
+    update: { active: true, note: note || null },
+    create: { consultantId, projectId, type, note: note || null, active: true },
+    select: { id: true },
+  });
+
+  const dbUser = await resolveDbUser(user);
+  await recordAuditEvent({
+    actorUserId: dbUser?.id ?? null,
+    entityType: "AutoApprovalException",
+    entityId: exception.id,
+    action: "AUTO_APPROVAL_EXCEPTION_CREATED",
+    after: { consultantId, projectId, type, active: true },
+  });
+
+  revalidatePath(ROUTE);
+  return { ok: true, data: { id: exception.id } };
+}
+
 /**
  * Activate or deactivate a single {@link AutoApprovalException}. A flipped
  * `active` flag changes which entries the engine auto-approves, so the change

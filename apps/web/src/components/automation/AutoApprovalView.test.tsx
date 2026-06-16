@@ -36,11 +36,17 @@ const setExceptionActive = vi.fn(
     return h.toggleResult;
   },
 );
+const createAutoApprovalException = vi.fn(async (input: unknown) => {
+  void input;
+  return { ok: true as const, data: { id: "new-exc" } };
+});
 
 vi.mock("@/app/app/automacoes/aprovacao-automatica/actions", () => ({
   runAutoApprovalNow: () => runAutoApprovalNow(),
   setExceptionActive: (input: { exceptionId: string; active: boolean }) =>
     setExceptionActive(input),
+  createAutoApprovalException: (input: unknown) =>
+    createAutoApprovalException(input),
 }));
 
 function overview(over: Partial<AutoApprovalOverview> = {}): AutoApprovalOverview {
@@ -80,6 +86,8 @@ function overview(over: Partial<AutoApprovalOverview> = {}): AutoApprovalOvervie
         reasons: ["Aguardando intervalo mínimo após o envio"],
       },
     ],
+    consultantOptions: [{ id: "con-1", name: "Ana Martins" }],
+    projectOptions: [{ id: "proj-1", name: "Apollo", clientName: "Acme" }],
     ...over,
   };
 }
@@ -94,6 +102,7 @@ function liveRegion(): HTMLElement {
 beforeEach(() => {
   runAutoApprovalNow.mockClear();
   setExceptionActive.mockClear();
+  createAutoApprovalException.mockClear();
   h.runResult = {
     ok: true,
     data: {
@@ -314,6 +323,37 @@ describe("AutoApprovalView — exception toggle", () => {
     );
     await waitFor(() =>
       expect(liveRegion()).toHaveTextContent("Exceção reativada."),
+    );
+  });
+});
+
+describe("AutoApprovalView — create exception", () => {
+  it("registers a new exception through the modal", async () => {
+    render(<AutoApprovalView overview={overview()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Nova exceção/ }));
+
+    const dialog = screen.getByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText("Consultor"), {
+      target: { value: "con-1" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Projeto"), {
+      target: { value: "proj-1" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Tipo de exceção"), {
+      target: { value: "WEEKEND" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: /Cadastrar/ }));
+
+    await waitFor(() =>
+      expect(createAutoApprovalException).toHaveBeenCalledWith({
+        consultantId: "con-1",
+        projectId: "proj-1",
+        type: "WEEKEND",
+        note: undefined,
+      }),
+    );
+    await waitFor(() =>
+      expect(liveRegion()).toHaveTextContent("Exceção cadastrada."),
     );
   });
 });

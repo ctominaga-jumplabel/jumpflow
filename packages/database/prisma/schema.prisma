@@ -67,6 +67,7 @@ enum AllocationStatus {
   PLANNED
   ENDED
   CANCELLED
+  INACTIVE
 }
 
 enum TimesheetPeriodStatus {
@@ -513,6 +514,7 @@ model BillingType {
   description  String?
   active       Boolean             @default(true)
   clients      Client[]
+  projects     Project[]
   createdAt    DateTime            @default(now())
   updatedAt    DateTime            @updatedAt
 }
@@ -527,6 +529,8 @@ model Project {
   startDate              DateTime
   endDate                DateTime?
   managerUserId          String?
+  billingTypeId          String?
+  billingType            BillingType?            @relation(fields: [billingTypeId], references: [id], onDelete: SetNull)
   billingHourlyRate      Decimal?                @db.Decimal(12, 2)
   budgetHours            Decimal?                @db.Decimal(10, 2)
   costCenter             String?
@@ -544,6 +548,7 @@ model Project {
 
   @@index([clientId])
   @@index([managerUserId])
+  @@index([billingTypeId])
 }
 
 model Allocation {
@@ -623,6 +628,13 @@ model TimesheetDefault {
   weekdays     Int[]      @default([1, 2, 3, 4, 5])
   billable     Boolean    @default(true)
   description  String?
+  // Padrao de horario (formato "HH:mm"). Quando preenchido, alimenta o calculo de
+  // horas no relogio de ponto e a comparacao com o "padrao definido" na aprovacao
+  // automatica. breakStart/breakEnd nulos = sem pausa.
+  startTime    String?
+  breakStart   String?
+  breakEnd     String?
+  endTime      String?
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 }
@@ -653,7 +665,14 @@ model TimeEntry {
   allocationId           String?
   allocation             Allocation?             @relation(fields: [allocationId], references: [id])
   date                   DateTime
+  // `hours` e derivado e persistido a partir dos horarios de ponto
+  // (Saida - Inicio - pausa). Mantido como Decimal porque revenue/payment leem
+  // diretamente entry.hours. Linhas legadas podem ter horarios nulos.
   hours                  Decimal                 @db.Decimal(5, 2)
+  startTime              String?
+  breakStart             String?
+  breakEnd               String?
+  endTime                String?
   activityType           String
   description            String?
   billable               Boolean                 @default(true)

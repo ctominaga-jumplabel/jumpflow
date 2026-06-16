@@ -12,6 +12,12 @@ import {
   type ActivityType,
   type WeekDay,
 } from "@/lib/timesheet/types";
+import {
+  ClockFields,
+  clockHours,
+  emptyClock,
+  type ClockFieldsValue,
+} from "./ClockFields";
 
 export interface TimeEntryFormValue {
   mode: "daily" | "weekly";
@@ -24,7 +30,8 @@ export interface TimeEntryFormValue {
   activity: string;
   /** ISO date (yyyy-mm-dd) of the day being logged. */
   date: string;
-  hours: number;
+  /** Relógio de ponto: Início / Pausa / Retorno / Saída. */
+  clock: ClockFieldsValue;
   weekdays: number[];
   description: string;
   billable: boolean;
@@ -67,7 +74,7 @@ const emptyValue = (days: WeekDay[]): TimeEntryFormValue => ({
   projectId: "",
   activity: "WORKDAY",
   date: days[0]?.date ?? "",
-  hours: 0,
+  clock: { ...emptyClock },
   weekdays: [1, 2, 3, 4, 5],
   description: "",
   billable: true,
@@ -79,13 +86,14 @@ const weekdayOptions = [
   { value: 3, label: "Qua" },
   { value: 4, label: "Qui" },
   { value: 5, label: "Sex" },
-  { value: 6, label: "Sab" },
+  { value: 6, label: "Sáb" },
   { value: 7, label: "Dom" },
 ];
 
 /**
  * New/edit time-entry form (modal). One entry = a project+activity for a given
- * date. Client-side validation (project required, hours > 0 and ≤ 24) is a
+ * date, logged via the relógio de ponto (Início/Pausa/Retorno/Saída). Hours are
+ * derived from the clock; description is mandatory. Client-side validation is a
  * pre-check only — the server action is the authority.
  */
 export function TimeEntryForm({
@@ -101,9 +109,6 @@ export function TimeEntryForm({
   const [value, setValue] = useState<TimeEntryFormValue>(
     initial ?? emptyValue(days),
   );
-  const [hoursText, setHoursText] = useState(
-    initial && initial.hours > 0 ? String(initial.hours) : "",
-  );
   const [showErrors, setShowErrors] = useState(false);
 
   // Re-initialize when the modal (re)opens for a different entry (new vs edit).
@@ -116,27 +121,22 @@ export function TimeEntryForm({
   if (session.open !== open || session.initial !== initial) {
     setSession({ open, initial });
     if (open) {
-      const next = initial ?? emptyValue(days);
-      setValue(next);
-      setHoursText(next.hours > 0 ? String(next.hours) : "");
+      setValue(initial ?? emptyValue(days));
       setShowErrors(false);
     }
   }
 
-  const hoursValue = Number(hoursText.replace(",", "."));
   const errors = useMemo(
     () => ({
       projectId: !value.projectId,
       weekdays: value.mode === "weekly" && value.weekdays.length === 0,
-      hours:
-        !hoursText ||
-        Number.isNaN(hoursValue) ||
-        hoursValue <= 0 ||
-        hoursValue > 24,
+      clock: clockHours(value.clock) === null,
+      description: value.description.trim().length === 0,
     }),
-    [value.mode, value.projectId, value.weekdays.length, hoursText, hoursValue],
+    [value.mode, value.projectId, value.weekdays.length, value.clock, value.description],
   );
-  const hasErrors = errors.projectId || errors.hours || errors.weekdays;
+  const hasErrors =
+    errors.projectId || errors.clock || errors.weekdays || errors.description;
 
   const isEditing = Boolean(initial);
 
@@ -145,7 +145,7 @@ export function TimeEntryForm({
       setShowErrors(true);
       return;
     }
-    onSubmit({ ...value, hours: hoursValue });
+    onSubmit(value);
   }
 
   function toggleWeekday(day: number) {
@@ -165,8 +165,8 @@ export function TimeEntryForm({
       title={isEditing ? "Editar lançamento" : "Novo lançamento"}
       description={
         isEditing
-          ? "Informe projeto, atividade, dia e horas."
-          : "Informe projeto, atividade, modo e horas."
+          ? "Informe projeto, atividade, dia e horários."
+          : "Informe projeto, atividade, modo e horários."
       }
       footer={
         <>
@@ -176,7 +176,7 @@ export function TimeEntryForm({
               size="sm"
               icon={Trash2}
               disabled={busy}
-              onClick={() => onDelete({ ...value, hours: hoursValue })}
+              onClick={() => onDelete(value)}
               className="mr-auto"
             >
               Excluir
@@ -258,7 +258,7 @@ export function TimeEntryForm({
                     onChange={() => setValue((v) => ({ ...v, mode }))}
                     className="sr-only"
                   />
-                  {mode === "daily" ? "Diario" : "Semanal"}
+                  {mode === "daily" ? "Diário" : "Semanal"}
                 </label>
               ))}
             </div>
@@ -345,31 +345,19 @@ export function TimeEntryForm({
           </fieldset>
         ) : null}
 
-        <div>
-          <label htmlFor="entry-hours" className={labelClass}>
-            Horas
-          </label>
-          <input
-            id="entry-hours"
-            type="text"
-            inputMode="decimal"
-            value={hoursText}
-            onChange={(e) => setHoursText(e.target.value)}
-            placeholder="0"
-            aria-invalid={showErrors && errors.hours}
-            className={inputClass(showErrors && errors.hours)}
+        <fieldset>
+          <legend className={labelClass}>Horários</legend>
+          <ClockFields
+            value={value.clock}
+            onChange={(clock) => setValue((v) => ({ ...v, clock }))}
+            showError={showErrors}
+            idPrefix="entry"
           />
-          {showErrors && errors.hours ? (
-            <p className="mt-1 text-xs text-danger">
-              Informe horas entre 0 e 24.
-            </p>
-          ) : null}
-        </div>
+        </fieldset>
 
         <div>
           <label htmlFor="entry-description" className={labelClass}>
-            Descrição{" "}
-            <span className="font-normal text-soft">(opcional)</span>
+            Descrição
           </label>
           <textarea
             id="entry-description"
@@ -379,8 +367,12 @@ export function TimeEntryForm({
             }
             rows={2}
             placeholder="O que foi feito neste dia."
-            className={cn(inputClass(false), "resize-y")}
+            aria-invalid={showErrors && errors.description}
+            className={cn(inputClass(showErrors && errors.description), "resize-y")}
           />
+          {showErrors && errors.description ? (
+            <p className="mt-1 text-xs text-danger">Descrição é obrigatória.</p>
+          ) : null}
         </div>
 
         <label className="flex items-center gap-2 text-sm text-medium">

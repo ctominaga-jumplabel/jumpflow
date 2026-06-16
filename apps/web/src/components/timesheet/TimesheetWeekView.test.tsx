@@ -63,8 +63,10 @@ describe("TimesheetWeekView actions (demo mode)", () => {
     fireEvent.change(within(dialog).getByLabelText("Projeto"), {
       target: { value: "prj-nimbus" },
     });
-    fireEvent.change(within(dialog).getByLabelText("Horas"), {
-      target: { value: "6" },
+    // Default clock (09:00–18:00 with break) already yields valid hours; only
+    // the (now mandatory) description must be filled.
+    fireEvent.change(within(dialog).getByLabelText("Descrição"), {
+      target: { value: "Trabalho no Nimbus" },
     });
     fireEvent.click(within(dialog).getByRole("button", { name: /Salvar/ }));
 
@@ -86,13 +88,14 @@ describe("TimesheetWeekView actions (demo mode)", () => {
       target: { value: "prj-nimbus" },
     });
     fireEvent.click(within(dialog).getByText("Semanal"));
-    fireEvent.change(within(dialog).getByLabelText("Horas"), {
-      target: { value: "2" },
+    fireEvent.change(within(dialog).getByLabelText("Descrição"), {
+      target: { value: "Rotina semanal" },
     });
     fireEvent.click(within(dialog).getByRole("button", { name: /Salvar/ }));
 
     expect(screen.getAllByText(/enviado/).length).toBeGreaterThan(0);
-    expect(within(screen.getByRole("table")).getAllByText("10").length).toBe(2);
+    // The weekly entry shows up as a single Nimbus row in the grid.
+    expect(within(screen.getByRole("table")).getByText("Nimbus")).toBeInTheDocument();
   });
 
   it("edits an existing draft entry", () => {
@@ -108,8 +111,8 @@ describe("TimesheetWeekView actions (demo mode)", () => {
     const dialog = screen.getByRole("dialog");
     // Project/activity are locked while editing.
     expect(within(dialog).getByLabelText("Projeto")).toBeDisabled();
-    fireEvent.change(within(dialog).getByLabelText("Horas"), {
-      target: { value: "5" },
+    fireEvent.change(within(dialog).getByLabelText("Descrição"), {
+      target: { value: "Sobreaviso revisado" },
     });
     fireEvent.click(within(dialog).getByRole("button", { name: /Salvar/ }));
     // Editing a DRAFT row resubmits it for approval (Rodada 4.3).
@@ -127,8 +130,8 @@ describe("TimesheetWeekView actions (demo mode)", () => {
       }),
     );
     const dialog = screen.getByRole("dialog");
-    fireEvent.change(within(dialog).getByLabelText("Horas"), {
-      target: { value: "4" },
+    fireEvent.change(within(dialog).getByLabelText("Descrição"), {
+      target: { value: "Dia útil revisado" },
     });
     fireEvent.click(within(dialog).getByRole("button", { name: /Salvar/ }));
     // The edited entry stays in the approval flow (SUBMITTED).
@@ -137,26 +140,36 @@ describe("TimesheetWeekView actions (demo mode)", () => {
     ).toBeInTheDocument();
   });
 
-  it("rejects hours outside the 0–24 range", () => {
+  it("rejects an invalid clock interval (saída antes do início)", () => {
     render(<TimesheetWeekView mode="demo" />);
     fireEvent.click(screen.getByRole("button", { name: /Novo lançamento/ }));
     const dialog = screen.getByRole("dialog");
     fireEvent.change(within(dialog).getByLabelText("Projeto"), {
       target: { value: "prj-nimbus" },
     });
-    fireEvent.change(within(dialog).getByLabelText("Horas"), {
-      target: { value: "25" },
+    fireEvent.change(within(dialog).getByLabelText("Descrição"), {
+      target: { value: "Horário inválido" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Início"), {
+      target: { value: "18:00" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Saída"), {
+      target: { value: "09:00" },
     });
     fireEvent.click(within(dialog).getByRole("button", { name: /Salvar/ }));
     expect(
-      within(dialog).getByText(/Informe horas entre 0 e 24/),
+      within(dialog).getByText(/saída deve ser maior que o de início/),
     ).toBeInTheDocument();
   });
 
-  it("copies eligible entries from the previous week", () => {
+  it("copies eligible entries from the previous week (via modal)", () => {
     render(<TimesheetWeekView mode="demo" />);
     fireEvent.click(
       screen.getByRole("button", { name: /Copiar semana anterior/ }),
+    );
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: /Copiar e salvar/ }),
     );
     // Rodada 4.3: copied entries enter approval directly (no "rascunho").
     expect(
@@ -266,27 +279,21 @@ describe("TimesheetWeekView actions (demo mode)", () => {
     expect(orionIndex).toBeGreaterThanOrEqual(0);
   });
 
-  it('"Ir para data" navigates to an available demo week', () => {
+  it("opens the copy-previous-week modal with a single week description", () => {
     render(<TimesheetWeekView mode="demo" />);
-    expect(screen.getByText(/Semana 24/)).toBeInTheDocument();
-    // Pick any day inside the previous demo week (Mon 2026-06-01 .. Sun 06-07).
-    fireEvent.change(screen.getByLabelText("Ir para data"), {
-      target: { value: "2026-06-03" },
-    });
-    expect(screen.getByText(/Semana 23/)).toBeInTheDocument();
-  });
-
-  it('"Ir para data" reports when the demo week is not available', () => {
-    render(<TimesheetWeekView mode="demo" />);
-    // A date far outside the three seeded demo weeks.
-    fireEvent.change(screen.getByLabelText("Ir para data"), {
-      target: { value: "2026-08-10" },
-    });
+    fireEvent.click(
+      screen.getByRole("button", { name: /Copiar semana anterior/ }),
+    );
+    const dialog = screen.getByRole("dialog");
     expect(
-      screen.getByText(/Esta semana não está disponível na demonstração/),
+      within(dialog).getByLabelText("Descrição de atividades da semana"),
     ).toBeInTheDocument();
-    // The current week stays put.
-    expect(screen.getByText(/Semana 24/)).toBeInTheDocument();
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: /Copiar e salvar/ }),
+    );
+    expect(
+      screen.getByText(/copiados e enviados para aprovação/),
+    ).toBeInTheDocument();
   });
 });
 

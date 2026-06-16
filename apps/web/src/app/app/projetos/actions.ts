@@ -12,6 +12,7 @@ import { isDatabaseConfigured } from "@/lib/db/config";
 import { resolveDbUser } from "@/lib/db/users";
 import {
   allocationInputSchema,
+  allocationRemoveSchema,
   allocationSkillInputSchema,
   allocationSkillRemoveSchema,
   allocationSkillUpdateSchema,
@@ -21,6 +22,7 @@ import {
   saleRateInputSchema,
   saleRateUpdateSchema,
   type AllocationInput,
+  type AllocationRemoveInput,
   type AllocationSkillInput,
   type AllocationSkillRemoveInput,
   type AllocationSkillUpdateInput,
@@ -125,6 +127,9 @@ function projectData(
   if (!includeCommercialFields) return data;
   return {
     ...data,
+    // Tipo de cobrança é decisão comercial: gravado junto dos demais campos
+    // comerciais (apenas perfis com acesso a valores podem alterá-lo).
+    billingTypeId: input.billingTypeId ?? null,
     billingHourlyRate: input.billingHourlyRate,
     budgetHours: input.budgetHours,
     costCenter: input.costCenter,
@@ -341,6 +346,75 @@ export async function updateAllocation(
     await audit("Allocation", parsed.id, "ALLOCATION_UPDATED", previous, parsed);
     revalidatePath(PROJETOS_PATH);
     return { ok: true, data: { id: parsed.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+export interface RemoveAllocationResult {
+  id: string;
+  /** "deactivated" = kept as INACTIVE (had hours); "deleted" = hard removed. */
+  outcome: "deactivated" | "deleted";
+}
+
+/**
+ * Remove a consultant link from a project.
+ * - If the allocation already has ANY time entry, it is kept for history and
+ *   flagged INACTIVE (so logged hours, revenue and payments stay intact).
+ * - If it has NO time entry, it is treated as a linking mistake and hard
+ *   deleted, cleaning up its dependent rows (timesheet default, sale/cost rates,
+ *   allocation skills) in a single transaction.
+ */
+export async function removeAllocation(
+  input: AllocationRemoveInput,
+): Promise<ActionResult<RemoveAllocationResult>> {
+  try {
+    ensureDatabase();
+    await requireRole(PROJECT_WRITE_ROLES);
+    const parsed = parseInput(allocationRemoveSchema, input);
+    const allocation = await prisma.allocation.findUnique({
+      where: { id: parsed.id },
+      select: { id: true, status: true, consultantId: true, projectId: true },
+    });
+    if (!allocation) throw new ActionError("NOT_FOUND", "Vinculo nao encontrado.");
+
+    const entryCount = await prisma.timeEntry.count({
+      where: { allocationId: parsed.id },
+    });
+
+    if (entryCount > 0) {
+      // Has logged hours: deactivate, keep the row for history.
+      if (allocation.status === "INACTIVE") {
+        return { ok: true, data: { id: parsed.id, outcome: "deactivated" } };
+      }
+      await prisma.allocation.update({
+        where: { id: parsed.id },
+        data: { status: "INACTIVE" },
+      });
+      await audit(
+        "Allocation",
+        parsed.id,
+        "ALLOCATION_DEACTIVATED",
+        allocation,
+        { status: "INACTIVE" },
+      );
+      revalidatePath(PROJETOS_PATH);
+      return { ok: true, data: { id: parsed.id, outcome: "deactivated" } };
+    }
+
+    // No logged hours: linking mistake — hard delete with dependent cleanup.
+    await prisma.$transaction(async (tx) => {
+      await tx.allocationSkill.deleteMany({ where: { allocationId: parsed.id } });
+      await tx.projectSaleRate.deleteMany({ where: { allocationId: parsed.id } });
+      await tx.consultantAllocationCostRate.deleteMany({
+        where: { allocationId: parsed.id },
+      });
+      await tx.timesheetDefault.deleteMany({ where: { allocationId: parsed.id } });
+      await tx.allocation.delete({ where: { id: parsed.id } });
+    });
+    await audit("Allocation", parsed.id, "ALLOCATION_DELETED", allocation, null);
+    revalidatePath(PROJETOS_PATH);
+    return { ok: true, data: { id: parsed.id, outcome: "deleted" } };
   } catch (error) {
     return toFailure(error);
   }

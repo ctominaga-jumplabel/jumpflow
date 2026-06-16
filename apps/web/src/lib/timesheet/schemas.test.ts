@@ -12,7 +12,10 @@ const validEntry = {
   projectId: "seed-project-portal",
   activityType: "WORKDAY" as const,
   date: "2026-06-10",
-  hours: 8,
+  startTime: "09:00",
+  breakStart: "12:00",
+  breakEnd: "13:00",
+  endTime: "18:00",
   description: "Trabalho no portal",
   billable: true,
 };
@@ -22,22 +25,59 @@ describe("timeEntryInputSchema", () => {
     expect(timeEntryInputSchema.safeParse(validEntry).success).toBe(true);
   });
 
-  it("accepts up to 2 decimal places and omitted description", () => {
-    const rest = { ...validEntry, description: undefined };
-    expect(
-      timeEntryInputSchema.safeParse({ ...rest, hours: 7.25 }).success,
-    ).toBe(true);
+  it("accepts an entry without a break (Pausa/Retorno removidos)", () => {
+    const noBreak = {
+      ...validEntry,
+      breakStart: null,
+      breakEnd: null,
+    };
+    expect(timeEntryInputSchema.safeParse(noBreak).success).toBe(true);
   });
 
-  it("rejects zero, negative and > 24 hours", () => {
-    expect(timeEntryInputSchema.safeParse({ ...validEntry, hours: 0 }).success).toBe(false);
-    expect(timeEntryInputSchema.safeParse({ ...validEntry, hours: -1 }).success).toBe(false);
-    expect(timeEntryInputSchema.safeParse({ ...validEntry, hours: 24.5 }).success).toBe(false);
+  it("rejects an inverted or zero-length interval", () => {
+    expect(
+      timeEntryInputSchema.safeParse({
+        ...validEntry,
+        startTime: "18:00",
+        endTime: "09:00",
+      }).success,
+    ).toBe(false);
+    expect(
+      timeEntryInputSchema.safeParse({
+        ...validEntry,
+        startTime: "09:00",
+        endTime: "09:00",
+      }).success,
+    ).toBe(false);
   });
 
-  it("rejects more than 2 decimal places", () => {
+  it("rejects a break outside the worked interval", () => {
     expect(
-      timeEntryInputSchema.safeParse({ ...validEntry, hours: 8.333 }).success,
+      timeEntryInputSchema.safeParse({
+        ...validEntry,
+        breakStart: "08:00",
+        breakEnd: "08:30",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects only one of Pausa/Retorno", () => {
+    expect(
+      timeEntryInputSchema.safeParse({
+        ...validEntry,
+        breakStart: "12:00",
+        breakEnd: null,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("requires a non-empty description", () => {
+    expect(
+      timeEntryInputSchema.safeParse({ ...validEntry, description: "  " }).success,
+    ).toBe(false);
+    expect(
+      timeEntryInputSchema.safeParse({ ...validEntry, description: undefined })
+        .success,
     ).toBe(false);
   });
 
@@ -68,7 +108,11 @@ describe("updateTimeEntryInputSchema", () => {
     expect(
       updateTimeEntryInputSchema.safeParse({
         id: "entry-1",
-        hours: 6,
+        startTime: "09:00",
+        endTime: "15:00",
+        breakStart: null,
+        breakEnd: null,
+        description: "Ajuste",
         billable: false,
       }).success,
     ).toBe(true);
@@ -76,8 +120,13 @@ describe("updateTimeEntryInputSchema", () => {
 
   it("rejects an empty id", () => {
     expect(
-      updateTimeEntryInputSchema.safeParse({ id: " ", hours: 6, billable: true })
-        .success,
+      updateTimeEntryInputSchema.safeParse({
+        id: " ",
+        startTime: "09:00",
+        endTime: "15:00",
+        description: "Ajuste",
+        billable: true,
+      }).success,
     ).toBe(false);
   });
 });
@@ -96,23 +145,29 @@ describe("weeklyTimeEntryInputSchema", () => {
         projectId: "seed-project-portal",
         activityType: "WORKDAY",
         weekStart: "2026-06-08",
-        hoursPerDay: 8,
+        startTime: "09:00",
+        breakStart: "12:00",
+        breakEnd: "13:00",
+        endTime: "18:00",
         weekdays: [1, 2, 3, 4, 5],
-        description: "",
+        description: "Rotina semanal",
         billable: true,
       }).success,
     ).toBe(true);
   });
 
-  it("requires at least one weekday and valid daily hours", () => {
+  it("requires at least one weekday and valid clock times", () => {
     expect(
       weeklyTimeEntryInputSchema.safeParse({
         projectId: "seed-project-portal",
         activityType: "WORKDAY",
         weekStart: "2026-06-08",
-        hoursPerDay: 25,
+        startTime: "18:00",
+        endTime: "09:00",
+        breakStart: null,
+        breakEnd: null,
         weekdays: [],
-        description: "",
+        description: "Rotina semanal",
         billable: true,
       }).success,
     ).toBe(false);

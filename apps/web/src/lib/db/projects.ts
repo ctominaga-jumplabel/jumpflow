@@ -94,6 +94,7 @@ export async function listProjects(options?: {
   const rows = await prisma.project.findMany({
     include: {
       client: { select: { id: true, name: true } },
+      billingType: { select: { name: true } },
       allocations: {
         include: {
           consultant: { select: { name: true } },
@@ -196,6 +197,10 @@ export async function listProjects(options?: {
         : undefined,
       startDate: dateToIso(row.startDate),
       endDate: row.endDate ? dateToIso(row.endDate) : undefined,
+      billingTypeId: includeFinancials ? (row.billingTypeId ?? undefined) : undefined,
+      billingTypeName: includeFinancials
+        ? (row.billingType?.name ?? undefined)
+        : undefined,
       billingHourlyRate: includeFinancials
         ? decimalToNumber(row.billingHourlyRate)
         : undefined,

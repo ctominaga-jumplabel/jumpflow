@@ -1,5 +1,10 @@
 export type ProjectStatus = "PROPOSAL" | "ACTIVE" | "PAUSED" | "CLOSED";
-export type AllocationStatus = "ACTIVE" | "PLANNED" | "ENDED" | "CANCELLED";
+export type AllocationStatus =
+  | "ACTIVE"
+  | "PLANNED"
+  | "ENDED"
+  | "CANCELLED"
+  | "INACTIVE";
 export type SkillLevel = "BASIC" | "INTERMEDIATE" | "ADVANCED" | "SPECIALIST";
 
 export interface ProjectSkillOption {
@@ -31,6 +36,12 @@ export interface ProjectConsultantOption {
 export interface ProjectManagerOption {
   id: string;
   name: string;
+}
+
+export interface ProjectBillingTypeOption {
+  id: string;
+  name: string;
+  chargeType: string;
 }
 
 export interface ProjectAllocationItem {
@@ -71,6 +82,8 @@ export interface ProjectItem {
   managerName?: string;
   startDate: string;
   endDate?: string;
+  billingTypeId?: string;
+  billingTypeName?: string;
   billingHourlyRate?: number;
   budgetHours?: number;
   costCenter?: string;

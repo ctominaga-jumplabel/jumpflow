@@ -1,7 +1,16 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { Edit, FolderKanban, Link2, Plus, ReceiptText, Tag, X } from "lucide-react";
+import {
+  Edit,
+  FolderKanban,
+  Link2,
+  Plus,
+  ReceiptText,
+  Tag,
+  Trash2,
+  X,
+} from "lucide-react";
 import { ActionButton } from "@/components/ui/ActionButton";
 import { DataTable, type DataTableColumn } from "@/components/ui/DataTable";
 import { DataToolbar } from "@/components/ui/DataToolbar";
@@ -14,7 +23,9 @@ import {
   createAllocation,
   createProject,
   createSaleRate,
+  removeAllocation,
   removeAllocationSkill,
+  updateAllocation,
   updateProject,
 } from "@/app/app/projetos/actions";
 import type {
@@ -32,7 +43,9 @@ import {
   demoProjectSkills,
 } from "@/lib/projects/mock-data";
 import type {
+  AllocationStatus,
   ProjectAllocationItem,
+  ProjectBillingTypeOption,
   ProjectClientOption,
   ProjectConsultantOption,
   ProjectItem,
@@ -55,10 +68,18 @@ type Mode = "demo" | "db";
 type DetailTab = "ALLOCATIONS" | "SKILLS" | "RATES";
 
 const skillLevelLabels: Record<SkillLevel, string> = {
-  BASIC: "Basico",
-  INTERMEDIATE: "Intermediario",
-  ADVANCED: "Avancado",
+  BASIC: "Básico",
+  INTERMEDIATE: "Intermediário",
+  ADVANCED: "Avançado",
   SPECIALIST: "Especialista",
+};
+
+const allocationStatusLabels: Record<AllocationStatus, string> = {
+  PLANNED: "Planejado",
+  ACTIVE: "Ativo",
+  ENDED: "Encerrado",
+  CANCELLED: "Cancelado",
+  INACTIVE: "Inativo",
 };
 
 interface ProjectsViewProps {
@@ -68,6 +89,7 @@ interface ProjectsViewProps {
   consultants?: ProjectConsultantOption[];
   managers?: ProjectManagerOption[];
   skills?: ProjectSkillOption[];
+  billingTypes?: ProjectBillingTypeOption[];
   canManageProjects: boolean;
   canViewCommercials: boolean;
   canManageSaleRates: boolean;
@@ -89,6 +111,7 @@ const emptyProject: ProjectInput = {
   startDate: new Date().toISOString().slice(0, 10),
   endDate: undefined,
   managerUserId: "",
+  billingTypeId: undefined,
   billingHourlyRate: undefined,
   budgetHours: undefined,
   costCenter: "",
@@ -103,6 +126,7 @@ function projectToInput(project: ProjectItem): ProjectInput {
     startDate: project.startDate,
     endDate: project.endDate,
     managerUserId: project.managerUserId ?? "",
+    billingTypeId: project.billingTypeId,
     billingHourlyRate: project.billingHourlyRate,
     budgetHours: project.budgetHours,
     costCenter: project.costCenter ?? "",
@@ -125,6 +149,7 @@ export function ProjectsView({
   consultants = demoProjectConsultants,
   managers = demoProjectManagers,
   skills = demoProjectSkills,
+  billingTypes = [],
   canManageProjects,
   canViewCommercials,
   canManageSaleRates,
@@ -140,10 +165,18 @@ export function ProjectsView({
   const [editing, setEditing] = useState<ProjectItem | null>(null);
   const [projectForm, setProjectForm] = useState<ProjectInput>(emptyProject);
   const [projectOpen, setProjectOpen] = useState(false);
-  const [detailProject, setDetailProject] = useState<ProjectItem | null>(null);
+  // Hold only the id of the open project: the detail object is derived from
+  // `items` below so that data refreshed by a server action (db mode) or local
+  // optimistic update (demo mode) reflows into the open dialog immediately,
+  // instead of showing a stale snapshot captured when the dialog was opened.
+  const [detailProjectId, setDetailProjectId] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState<DetailTab>("ALLOCATIONS");
   const [feedback, setFeedback] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+
+  const detailProject = detailProjectId
+    ? (items.find((project) => project.id === detailProjectId) ?? null)
+    : null;
 
   const rows = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -181,7 +214,7 @@ export function ProjectsView({
     },
     {
       key: "period",
-      header: "Periodo",
+      header: "Período",
       cell: (project) => (
         <span className="tabular-nums">
           {formatDate(project.startDate)} -{" "}
@@ -236,7 +269,7 @@ export function ProjectsView({
           type="button"
           className="rounded-md px-2 py-1 tabular-nums hover:bg-surface-muted"
           onClick={() => {
-            setDetailProject(project);
+            setDetailProjectId(project.id);
             setDetailTab("ALLOCATIONS");
           }}
         >
@@ -252,8 +285,8 @@ export function ProjectsView({
         <div className="flex justify-end gap-1">
           <button
             type="button"
-            aria-label={`Vinculos e valores de ${project.name}`}
-            onClick={() => setDetailProject(project)}
+            aria-label={`Vínculos e valores de ${project.name}`}
+            onClick={() => setDetailProjectId(project.id)}
             className="rounded-md p-2 text-medium hover:bg-surface-muted"
           >
             <Link2 aria-hidden="true" className="size-4" />
@@ -343,21 +376,77 @@ export function ProjectsView({
             : project,
         ),
       );
-      setDetailProject((current) =>
-        current && current.id === value.projectId
-          ? {
-              ...current,
-              allocatedConsultants: current.allocatedConsultants + 1,
-              allocations: [...current.allocations, nextAllocation],
-            }
-          : current,
-      );
-      setFeedback("Vinculo salvo localmente.");
+      setFeedback("Vínculo salvo localmente.");
       return;
     }
     startTransition(async () => {
       const result = await createAllocation(value);
-      setFeedback(result.ok ? "Vinculo salvo." : result.message);
+      setFeedback(result.ok ? "Vínculo salvo." : result.message);
+    });
+  }
+
+  function editAllocation(id: string, value: AllocationInput) {
+    if (mode === "demo") {
+      const consultant = consultants.find((item) => item.id === value.consultantId);
+      setLocalItems((current) =>
+        current.map((project) =>
+          project.id === value.projectId
+            ? {
+                ...project,
+                allocations: project.allocations.map((item) =>
+                  item.id === id
+                    ? {
+                        ...item,
+                        ...value,
+                        consultantName: consultant?.name ?? item.consultantName,
+                      }
+                    : item,
+                ),
+              }
+            : project,
+        ),
+      );
+      setFeedback("Vínculo atualizado localmente.");
+      return;
+    }
+    startTransition(async () => {
+      const result = await updateAllocation({ id, ...value });
+      setFeedback(result.ok ? "Vínculo atualizado." : result.message);
+    });
+  }
+
+  function deleteAllocation(allocation: ProjectAllocationItem) {
+    if (mode === "demo") {
+      setLocalItems((current) =>
+        current.map((project) =>
+          project.id === allocation.projectId
+            ? {
+                ...project,
+                allocations: project.allocations.filter(
+                  (item) => item.id !== allocation.id,
+                ),
+                allocatedConsultants: project.allocations.filter(
+                  (item) =>
+                    item.id !== allocation.id && item.status === "ACTIVE",
+                ).length,
+              }
+            : project,
+        ),
+      );
+      setFeedback("Vínculo removido localmente.");
+      return;
+    }
+    startTransition(async () => {
+      const result = await removeAllocation({ id: allocation.id });
+      if (!result.ok) {
+        setFeedback(result.message);
+        return;
+      }
+      setFeedback(
+        result.data.outcome === "deactivated"
+          ? "Consultor tinha horas lançadas: vínculo marcado como Inativo."
+          : "Vínculo removido (sem horas lançadas).",
+      );
     });
   }
 
@@ -385,11 +474,6 @@ export function ProjectsView({
             : project,
         ),
       );
-      setDetailProject((current) =>
-        current && current.id === value.projectId
-          ? { ...current, saleRates: [...current.saleRates, nextRate] }
-          : current,
-      );
       setFeedback("Valor de venda salvo localmente.");
       return;
     }
@@ -416,7 +500,6 @@ export function ProjectsView({
             ),
           };
     setLocalItems((current) => current.map(updater));
-    setDetailProject((current) => (current ? updater(current) : current));
   }
 
   function addSkill(value: AllocationSkillInput) {
@@ -439,12 +522,12 @@ export function ProjectsView({
           },
         ]);
       }
-      setFeedback("Skill da alocacao salva localmente.");
+      setFeedback("Skill da alocação salva localmente.");
       return;
     }
     startTransition(async () => {
       const result = await addAllocationSkill(value);
-      setFeedback(result.ok ? "Skill adicionada a alocacao." : result.message);
+      setFeedback(result.ok ? "Skill adicionada a alocação." : result.message);
     });
   }
 
@@ -464,12 +547,12 @@ export function ProjectsView({
           (current) => current.filter((skill) => skill.id !== input.id),
         );
       }
-      setFeedback("Skill removida da alocacao localmente.");
+      setFeedback("Skill removida da alocação localmente.");
       return;
     }
     startTransition(async () => {
       const result = await removeAllocationSkill(input);
-      setFeedback(result.ok ? "Skill removida da alocacao." : result.message);
+      setFeedback(result.ok ? "Skill removida da alocação." : result.message);
     });
   }
 
@@ -477,7 +560,7 @@ export function ProjectsView({
     <div className="space-y-4">
       {mode === "demo" ? (
         <p className="rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm font-medium text-warning">
-          Modo demonstracao: projetos, vinculos e valores ficam apenas nesta sessao.
+          Modo demonstração: projetos, vínculos e valores ficam apenas nesta sessão.
         </p>
       ) : null}
       {feedback ? (
@@ -557,6 +640,7 @@ export function ProjectsView({
         value={projectForm}
         clients={clients}
         managers={managers}
+        billingTypes={billingTypes}
         canViewCommercials={canViewCommercials}
         isPending={isPending}
         onChange={setProjectForm}
@@ -573,8 +657,10 @@ export function ProjectsView({
         canManageSaleRates={canManageSaleRates}
         isPending={isPending}
         onTabChange={setDetailTab}
-        onClose={() => setDetailProject(null)}
+        onClose={() => setDetailProjectId(null)}
         onAddAllocation={addAllocation}
+        onEditAllocation={editAllocation}
+        onRemoveAllocation={deleteAllocation}
         onAddSaleRate={addSaleRate}
         onAddSkill={addSkill}
         onRemoveSkill={removeSkill}
@@ -588,6 +674,7 @@ function ProjectModal({
   value,
   clients,
   managers,
+  billingTypes,
   canViewCommercials,
   isPending,
   onChange,
@@ -598,6 +685,7 @@ function ProjectModal({
   value: ProjectInput;
   clients: ProjectClientOption[];
   managers: ProjectManagerOption[];
+  billingTypes: ProjectBillingTypeOption[];
   canViewCommercials: boolean;
   isPending: boolean;
   onChange: (value: ProjectInput) => void;
@@ -691,6 +779,24 @@ function ProjectModal({
           value={value.endDate ?? ""}
           onChange={(next) => onChange({ ...value, endDate: next || undefined })}
         />
+        <label className="space-y-1 text-sm font-medium text-medium">
+          Tipo de cobrança
+          <select
+            value={value.billingTypeId ?? ""}
+            disabled={!canViewCommercials}
+            onChange={(event) =>
+              onChange({ ...value, billingTypeId: event.target.value || undefined })
+            }
+            className={fieldClass()}
+          >
+            <option value="">Herdar do cliente</option>
+            {billingTypes.map((type) => (
+              <option key={type.id} value={type.id}>
+                {type.name}
+              </option>
+            ))}
+          </select>
+        </label>
         <NumberField
           label="Valor hora legado"
           value={value.billingHourlyRate}
@@ -715,7 +821,7 @@ function ProjectModal({
           />
         </label>
         <label className="space-y-1 text-sm font-medium text-medium md:col-span-2">
-          Descricao
+          Descrição
           <textarea
             value={value.description ?? ""}
             onChange={(event) =>
@@ -741,6 +847,8 @@ function ProjectDetailModal({
   onTabChange,
   onClose,
   onAddAllocation,
+  onEditAllocation,
+  onRemoveAllocation,
   onAddSaleRate,
   onAddSkill,
   onRemoveSkill,
@@ -756,11 +864,15 @@ function ProjectDetailModal({
   onTabChange: (tab: DetailTab) => void;
   onClose: () => void;
   onAddAllocation: (value: AllocationInput) => void;
+  onEditAllocation: (id: string, value: AllocationInput) => void;
+  onRemoveAllocation: (allocation: ProjectAllocationItem) => void;
   onAddSaleRate: (value: SaleRateInput) => void;
   onAddSkill: (value: AllocationSkillInput) => void;
   onRemoveSkill: (value: AllocationSkillRemoveInput) => void;
 }) {
   const [allocation, setAllocation] = useState<AllocationInput | null>(null);
+  // When set, the allocation modal is in edit mode for this allocation id.
+  const [allocationEditId, setAllocationEditId] = useState<string | null>(null);
   const [rate, setRate] = useState<SaleRateInput | null>(null);
   const [skillFor, setSkillFor] = useState<ProjectAllocationItem | null>(null);
 
@@ -775,7 +887,7 @@ function ProjectDetailModal({
       open={project !== null}
       onClose={onClose}
       title={project.name}
-      description="Vinculos de consultores e valores comerciais por vigencia."
+      description="Vínculos de consultores e valores comerciais por vigência."
       className="max-w-4xl"
       footer={
         <>
@@ -786,7 +898,8 @@ function ProjectDetailModal({
             <ActionButton
               icon={Link2}
               disabled={!canManageProjects}
-              onClick={() =>
+              onClick={() => {
+                setAllocationEditId(null);
                 setAllocation({
                   projectId: project.id,
                   consultantId: "",
@@ -795,10 +908,10 @@ function ProjectDetailModal({
                   startDate: project.startDate,
                   endDate: undefined,
                   status: "PLANNED",
-                })
-              }
+                });
+              }}
             >
-              Novo vinculo
+              Novo vínculo
             </ActionButton>
           ) : tab === "RATES" ? (
             <ActionButton
@@ -807,7 +920,10 @@ function ProjectDetailModal({
               onClick={() =>
                 setRate({
                   projectId: project.id,
-                  consultantId: undefined,
+                  // Comercial cadastra o valor a nível de Consultor: o escopo
+                  // padrão é o primeiro consultor alocado (cai para Projeto se
+                  // não houver alocação).
+                  consultantId: project.allocations[0]?.consultantId,
                   allocationId: undefined,
                   startsAt: project.startDate,
                   endsAt: undefined,
@@ -825,7 +941,7 @@ function ProjectDetailModal({
     >
       <div className="mb-4 flex flex-wrap gap-2">
         <FilterChip
-          label="Vinculos"
+          label="Vínculos"
           active={tab === "ALLOCATIONS"}
           onClick={() => onTabChange("ALLOCATIONS")}
         />
@@ -861,17 +977,71 @@ function ProjectDetailModal({
             },
             {
               key: "period",
-              header: "Periodo",
+              header: "Período",
               cell: (item) =>
                 `${formatDate(item.startDate)} - ${
                   item.endDate ? formatDate(item.endDate) : "em aberto"
                 }`,
             },
-            { key: "status", header: "Status", cell: (item) => item.status },
+            {
+              key: "status",
+              header: "Status",
+              cell: (item) => allocationStatusLabels[item.status],
+            },
+            {
+              key: "actions",
+              header: "Ações",
+              align: "right",
+              cell: (item) => (
+                <div className="flex justify-end gap-1">
+                  <ActionButton
+                    size="sm"
+                    variant="secondary"
+                    icon={Edit}
+                    disabled={!canManageProjects}
+                    aria-label={`Editar vínculo de ${item.consultantName}`}
+                    onClick={() => {
+                      setAllocationEditId(item.id);
+                      setAllocation({
+                        projectId: item.projectId,
+                        consultantId: item.consultantId,
+                        role: item.role,
+                        allocationPercent: item.allocationPercent,
+                        startDate: item.startDate,
+                        endDate: item.endDate,
+                        status: item.status,
+                      });
+                    }}
+                  >
+                    Editar
+                  </ActionButton>
+                  <ActionButton
+                    size="sm"
+                    variant="danger"
+                    icon={Trash2}
+                    disabled={!canManageProjects}
+                    aria-label={`Remover vínculo de ${item.consultantName}`}
+                    onClick={() => {
+                      const message =
+                        "Remover este vínculo?\n\n" +
+                        "Se o consultor já tiver horas lançadas, o vínculo fica " +
+                        "Inativo (mantém o histórico). Caso contrário, é apagado " +
+                        "do projeto.";
+                      if (typeof window !== "undefined" && !window.confirm(message)) {
+                        return;
+                      }
+                      onRemoveAllocation(item);
+                    }}
+                  >
+                    Remover
+                  </ActionButton>
+                </div>
+              ),
+            },
           ]}
           rows={project.allocations}
           rowKey={(item) => item.id}
-          empty={<p className="text-center text-sm text-soft">Sem vinculos.</p>}
+          empty={<p className="text-center text-sm text-soft">Sem vínculos.</p>}
         />
       ) : tab === "SKILLS" ? (
         <AllocationSkillsPanel
@@ -891,7 +1061,7 @@ function ProjectDetailModal({
             },
             {
               key: "period",
-              header: "Vigencia",
+              header: "Vigência",
               cell: (item) =>
                 `${formatDate(item.startsAt)} - ${
                   item.endsAt ? formatDate(item.endsAt) : "em aberto"
@@ -922,12 +1092,21 @@ function ProjectDetailModal({
         <AllocationModal
           value={allocation}
           consultants={consultants}
+          isEditing={allocationEditId !== null}
           isPending={isPending}
           onChange={setAllocation}
-          onClose={() => setAllocation(null)}
-          onSave={() => {
-            onAddAllocation(allocation);
+          onClose={() => {
             setAllocation(null);
+            setAllocationEditId(null);
+          }}
+          onSave={() => {
+            if (allocationEditId) {
+              onEditAllocation(allocationEditId, allocation);
+            } else {
+              onAddAllocation(allocation);
+            }
+            setAllocation(null);
+            setAllocationEditId(null);
           }}
         />
       ) : null}
@@ -975,7 +1154,7 @@ function AllocationSkillsPanel({
   if (allocations.length === 0) {
     return (
       <p className="text-center text-sm text-soft">
-        Adicione um vinculo para registrar skills.
+        Adicione um vínculo para registrar skills.
       </p>
     );
   }
@@ -1004,7 +1183,7 @@ function AllocationSkillsPanel({
             </ActionButton>
           </div>
           {allocation.skills.length === 0 ? (
-            <p className="mt-3 text-sm text-soft">Sem skills nesta alocacao.</p>
+            <p className="mt-3 text-sm text-soft">Sem skills nesta alocação.</p>
           ) : (
             <ul className="mt-3 flex flex-wrap gap-2">
               {allocation.skills.map((skill) => (
@@ -1068,7 +1247,7 @@ function AllocationSkillModal({
     <Modal
       open
       onClose={onClose}
-      title="Skill da alocacao"
+      title="Skill da alocação"
       description={`Skill do catalogo usada por ${allocation.consultantName} neste projeto.`}
       footer={
         <>
@@ -1189,6 +1368,7 @@ function NumberField({
 function AllocationModal({
   value,
   consultants,
+  isEditing = false,
   isPending,
   onChange,
   onClose,
@@ -1196,6 +1376,7 @@ function AllocationModal({
 }: {
   value: AllocationInput;
   consultants: ProjectConsultantOption[];
+  isEditing?: boolean;
   isPending: boolean;
   onChange: (value: AllocationInput) => void;
   onClose: () => void;
@@ -1205,7 +1386,7 @@ function AllocationModal({
     <Modal
       open
       onClose={onClose}
-      title="Vinculo"
+      title={isEditing ? "Editar vínculo" : "Vínculo"}
       description="Consultor, skill/papel e periodo no projeto."
       footer={
         <>
@@ -1223,10 +1404,11 @@ function AllocationModal({
           Consultor
           <select
             value={value.consultantId}
+            disabled={isEditing}
             onChange={(event) =>
               onChange({ ...value, consultantId: event.target.value })
             }
-            className={fieldClass()}
+            className={cn(fieldClass(), isEditing && "opacity-70")}
           >
             <option value="">Selecione</option>
             {consultants.map((consultant) => (
@@ -1245,7 +1427,7 @@ function AllocationModal({
           />
         </label>
         <NumberField
-          label="Alocacao (%)"
+          label="Alocação (%)"
           value={value.allocationPercent}
           onChange={(next) =>
             onChange({ ...value, allocationPercent: next ?? 100 })
@@ -1267,6 +1449,7 @@ function AllocationModal({
             <option value="ACTIVE">Ativo</option>
             <option value="ENDED">Encerrado</option>
             <option value="CANCELLED">Cancelado</option>
+            <option value="INACTIVE">Inativo</option>
           </select>
         </label>
         <DateField
@@ -1306,7 +1489,7 @@ function SaleRateModal({
       open
       onClose={onClose}
       title="Valor de venda"
-      description="Valor comercial por escopo e vigencia."
+      description="Valor comercial por escopo e vigência."
       footer={
         <>
           <ActionButton variant="secondary" onClick={onClose}>

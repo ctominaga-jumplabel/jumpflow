@@ -8,6 +8,7 @@ import {
   Hourglass,
   Pause,
   Play,
+  Plus,
   Power,
   Timer,
 } from "lucide-react";
@@ -16,16 +17,27 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { ActionButton } from "@/components/ui/ActionButton";
+import { Modal } from "@/components/ui/Modal";
 import { FeedbackBanner, useFeedback } from "@/components/ui/Feedback";
+import { cn } from "@/lib/utils";
+import { focusRingInput } from "@/lib/styles";
 import { formatHours } from "@/lib/format";
 import {
   exceptionTypeLabelOf,
   type AutoApprovalOverview,
 } from "@/lib/db/automation";
 import {
+  createAutoApprovalException,
   runAutoApprovalNow,
   setExceptionActive,
 } from "@/app/app/automacoes/aprovacao-automatica/actions";
+
+type ExceptionType = "ANY_HOURS" | "WEEKEND";
+
+const inputClass =
+  "w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-strong placeholder:text-soft " +
+  focusRingInput;
+const formLabelClass = "mb-1 block text-xs font-semibold text-medium";
 
 const thClass =
   "px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-soft";
@@ -65,14 +77,63 @@ export interface AutoApprovalViewProps {
  * and report honestly through a polite live region.
  */
 export function AutoApprovalView({ overview }: AutoApprovalViewProps) {
-  const { config, activeExceptionsCount, exceptions, recentAutoApprovals, pending } =
-    overview;
+  const {
+    config,
+    activeExceptionsCount,
+    exceptions,
+    recentAutoApprovals,
+    pending,
+    consultantOptions,
+    projectOptions,
+  } = overview;
   const { feedback, notify } = useFeedback();
   const [isRunning, startRun] = useTransition();
   const [pendingExceptionId, setPendingExceptionId] = useState<string | null>(
     null,
   );
   const [isToggling, startToggle] = useTransition();
+
+  const [createOpen, setCreateOpen] = useState(false);
+  const [isCreating, startCreate] = useTransition();
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [newException, setNewException] = useState<{
+    consultantId: string;
+    projectId: string;
+    type: ExceptionType;
+    note: string;
+  }>({ consultantId: "", projectId: "", type: "ANY_HOURS", note: "" });
+
+  function openCreate() {
+    setNewException({
+      consultantId: consultantOptions[0]?.id ?? "",
+      projectId: projectOptions[0]?.id ?? "",
+      type: "ANY_HOURS",
+      note: "",
+    });
+    setCreateError(null);
+    setCreateOpen(true);
+  }
+
+  function handleCreate() {
+    if (!newException.consultantId || !newException.projectId) {
+      setCreateError("Selecione o consultor e o projeto.");
+      return;
+    }
+    startCreate(async () => {
+      const result = await createAutoApprovalException({
+        consultantId: newException.consultantId,
+        projectId: newException.projectId,
+        type: newException.type,
+        note: newException.note || undefined,
+      });
+      if (!result.ok) {
+        setCreateError(result.message);
+        return;
+      }
+      setCreateOpen(false);
+      notify("success", "Exceção cadastrada.");
+    });
+  }
 
   function handleRun() {
     startRun(async () => {
@@ -242,6 +303,16 @@ export function AutoApprovalView({ overview }: AutoApprovalViewProps) {
       <SectionPanel
         title="Exceções de aprovação"
         description="Pares consultor × projeto com regra de exceção. Desative para que voltem à regra padrão."
+        action={
+          <ActionButton
+            size="sm"
+            icon={Plus}
+            onClick={openCreate}
+            disabled={consultantOptions.length === 0 || projectOptions.length === 0}
+          >
+            Nova exceção
+          </ActionButton>
+        }
       >
         {exceptions.length === 0 ? (
           <EmptyState
@@ -363,6 +434,127 @@ export function AutoApprovalView({ overview }: AutoApprovalViewProps) {
           </div>
         )}
       </SectionPanel>
+
+      <Modal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        title="Nova exceção"
+        description="Cadastre uma exceção de aprovação automática para um par consultor × projeto."
+        footer={
+          <>
+            <ActionButton
+              variant="secondary"
+              size="sm"
+              disabled={isCreating}
+              onClick={() => setCreateOpen(false)}
+            >
+              Cancelar
+            </ActionButton>
+            <ActionButton
+              variant="primary"
+              size="sm"
+              icon={Plus}
+              disabled={isCreating}
+              aria-busy={isCreating}
+              onClick={handleCreate}
+            >
+              {isCreating ? "Salvando…" : "Cadastrar"}
+            </ActionButton>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          {createError ? (
+            <div className="rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm font-medium text-warning">
+              {createError}
+            </div>
+          ) : null}
+
+          <div>
+            <label htmlFor="exc-consultant" className={formLabelClass}>
+              Consultor
+            </label>
+            <select
+              id="exc-consultant"
+              value={newException.consultantId}
+              onChange={(event) =>
+                setNewException((value) => ({
+                  ...value,
+                  consultantId: event.target.value,
+                }))
+              }
+              className={inputClass}
+            >
+              {consultantOptions.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label htmlFor="exc-project" className={formLabelClass}>
+              Projeto
+            </label>
+            <select
+              id="exc-project"
+              value={newException.projectId}
+              onChange={(event) =>
+                setNewException((value) => ({
+                  ...value,
+                  projectId: event.target.value,
+                }))
+              }
+              className={inputClass}
+            >
+              {projectOptions.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} · {p.clientName}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label htmlFor="exc-type" className={formLabelClass}>
+              Tipo de exceção
+            </label>
+            <select
+              id="exc-type"
+              value={newException.type}
+              onChange={(event) =>
+                setNewException((value) => ({
+                  ...value,
+                  type: event.target.value as ExceptionType,
+                }))
+              }
+              className={inputClass}
+            >
+              <option value="ANY_HOURS">{exceptionTypeLabelOf("ANY_HOURS")}</option>
+              <option value="WEEKEND">{exceptionTypeLabelOf("WEEKEND")}</option>
+            </select>
+          </div>
+
+          <div>
+            <label htmlFor="exc-note" className={formLabelClass}>
+              Nota <span className="font-normal text-soft">(opcional)</span>
+            </label>
+            <textarea
+              id="exc-note"
+              value={newException.note}
+              onChange={(event) =>
+                setNewException((value) => ({
+                  ...value,
+                  note: event.target.value,
+                }))
+              }
+              rows={2}
+              className={cn(inputClass, "resize-y")}
+            />
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

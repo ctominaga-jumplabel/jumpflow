@@ -75,12 +75,26 @@ export interface PendingEntryView {
   reasons: string[];
 }
 
+export interface ExceptionConsultantOption {
+  id: string;
+  name: string;
+}
+
+export interface ExceptionProjectOption {
+  id: string;
+  name: string;
+  clientName: string;
+}
+
 export interface AutoApprovalOverview {
   config: AutoApprovalConfigView;
   activeExceptionsCount: number;
   exceptions: AutoApprovalExceptionView[];
   recentAutoApprovals: RecentAutoApprovalView[];
   pending: PendingEntryView[];
+  /** Options for the "Nova exceção" form. */
+  consultantOptions: ExceptionConsultantOption[];
+  projectOptions: ExceptionProjectOption[];
 }
 
 const RECENT_LIMIT = 20;
@@ -93,21 +107,31 @@ const RECENT_LIMIT = 20;
 export async function getAutoApprovalOverview(
   now: Date = new Date(),
 ): Promise<AutoApprovalOverview> {
-  const [config, activeExceptionsCount, exceptionRows] = await Promise.all([
-    loadAutomationConfig(),
-    prisma.autoApprovalException.count({ where: { active: true } }),
-    prisma.autoApprovalException.findMany({
-      orderBy: { updatedAt: "desc" },
-      take: 50,
-      select: {
-        id: true,
-        type: true,
-        active: true,
-        consultant: { select: { name: true } },
-        project: { select: { name: true } },
-      },
-    }),
-  ]);
+  const [config, activeExceptionsCount, exceptionRows, consultantRows, projectRows] =
+    await Promise.all([
+      loadAutomationConfig(),
+      prisma.autoApprovalException.count({ where: { active: true } }),
+      prisma.autoApprovalException.findMany({
+        orderBy: { updatedAt: "desc" },
+        take: 50,
+        select: {
+          id: true,
+          type: true,
+          active: true,
+          consultant: { select: { name: true } },
+          project: { select: { name: true } },
+        },
+      }),
+      prisma.consultant.findMany({
+        orderBy: { name: "asc" },
+        select: { id: true, name: true },
+      }),
+      prisma.project.findMany({
+        where: { status: { not: "CLOSED" } },
+        orderBy: { name: "asc" },
+        select: { id: true, name: true, client: { select: { name: true } } },
+      }),
+    ]);
 
   const exceptions: AutoApprovalExceptionView[] = exceptionRows.map((e) => ({
     id: e.id,
@@ -193,5 +217,11 @@ export async function getAutoApprovalOverview(
     exceptions,
     recentAutoApprovals,
     pending,
+    consultantOptions: consultantRows.map((c) => ({ id: c.id, name: c.name })),
+    projectOptions: projectRows.map((p) => ({
+      id: p.id,
+      name: p.name,
+      clientName: p.client.name,
+    })),
   };
 }
