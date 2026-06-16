@@ -1,16 +1,20 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import {
   CheckCircle2,
+  Download,
   FileCheck2,
   FilePlus2,
+  FileText,
   Lock,
+  Mail,
   RotateCw,
 } from "lucide-react";
 import { ActionButton } from "@/components/ui/ActionButton";
 import { DataTable, type DataTableColumn } from "@/components/ui/DataTable";
 import { FeedbackBanner, useFeedback } from "@/components/ui/Feedback";
+import { Modal } from "@/components/ui/Modal";
 import { SectionPanel } from "@/components/ui/SectionPanel";
 import { StatusBadge, type StatusTone } from "@/components/ui/StatusBadge";
 import { formatCurrency, formatCurrencyPrecise, formatHours } from "@/lib/format";
@@ -24,7 +28,9 @@ import {
   advanceRevenueClosing,
   createFiscalDocumentDraft,
   generateMonthlyRevenueClosings,
+  generatePreInvoice,
   requestFiscalDocumentIssue,
+  sendPreInvoiceEmail,
 } from "@/app/app/financeiro/actions";
 
 const toneByStatus: Record<RevenueClosingStatus, StatusTone> = {
@@ -58,6 +64,67 @@ export function MonthlyClosingTable({
   const isDemo = mode === "demo";
   const [isPending, startTransition] = useTransition();
   const { feedback, notify } = useFeedback();
+  const [preview, setPreview] = useState<{
+    html: string;
+    downloadUrl: string | null;
+    stored: boolean;
+  } | null>(null);
+
+  function handlePreInvoice(id: string) {
+    if (isDemo) {
+      notify("info", "Pre-fatura local simulada.");
+      return;
+    }
+    startTransition(async () => {
+      const result = await generatePreInvoice({ closingId: id });
+      if (result.ok) {
+        setPreview({
+          html: result.data.html,
+          downloadUrl: result.data.downloadUrl,
+          stored: result.data.stored,
+        });
+        notify(
+          "success",
+          result.data.stored
+            ? "Pre-fatura gerada e armazenada."
+            : "Pre-fatura gerada (visualizacao em tela; storage nao configurado).",
+        );
+      } else {
+        notify("warning", result.message);
+      }
+    });
+  }
+
+  function handleSendPreInvoice(id: string) {
+    if (isDemo) {
+      notify("info", "Envio de pre-fatura local simulado.");
+      return;
+    }
+    startTransition(async () => {
+      const result = await sendPreInvoiceEmail({ closingId: id });
+      if (result.ok) {
+        notify(
+          "success",
+          result.data.alreadySent
+            ? "Pre-fatura ja havia sido enviada ao cliente."
+            : "Pre-fatura enviada ao cliente.",
+        );
+      } else {
+        notify("warning", result.message);
+      }
+    });
+  }
+
+  function handleDownloadPreview() {
+    if (!preview) return;
+    const blob = new Blob([preview.html], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "pre-fatura.html";
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
 
   function handleGenerate() {
     if (isDemo) {
@@ -227,6 +294,28 @@ export function MonthlyClosingTable({
               Fechar
             </ActionButton>
           ) : null}
+          {r.status === "CLOSED" ? (
+            <ActionButton
+              size="sm"
+              variant="secondary"
+              icon={FileText}
+              disabled={isPending}
+              onClick={() => handlePreInvoice(r.id)}
+            >
+              Pre-fatura
+            </ActionButton>
+          ) : null}
+          {r.status === "CLOSED" ? (
+            <ActionButton
+              size="sm"
+              variant="secondary"
+              icon={Mail}
+              disabled={isPending}
+              onClick={() => handleSendPreInvoice(r.id)}
+            >
+              Enviar cliente
+            </ActionButton>
+          ) : null}
           {r.status === "CLOSED" && !r.fiscalDocument ? (
             <ActionButton
               size="sm"
@@ -290,6 +379,44 @@ export function MonthlyClosingTable({
           caption="Fechamento mensal por projeto"
         />
       </SectionPanel>
+
+      <Modal
+        open={preview != null}
+        onClose={() => setPreview(null)}
+        title="Pre-fatura"
+        description="Validacao financeira antes da emissao fiscal. Nao constitui documento fiscal."
+        className="max-w-2xl"
+        footer={
+          <>
+            {preview?.downloadUrl ? (
+              <a
+                href={preview.downloadUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-sm font-medium text-accent underline"
+              >
+                Abrir artefato armazenado
+              </a>
+            ) : null}
+            <ActionButton
+              size="sm"
+              variant="secondary"
+              icon={Download}
+              onClick={handleDownloadPreview}
+            >
+              Baixar HTML
+            </ActionButton>
+          </>
+        }
+      >
+        {preview ? (
+          <iframe
+            title="Pre-fatura"
+            srcDoc={preview.html}
+            className="h-[60vh] w-full rounded-md border border-border bg-white"
+          />
+        ) : null}
+      </Modal>
     </div>
   );
 }

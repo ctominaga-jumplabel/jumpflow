@@ -1,10 +1,13 @@
 import { Prisma, prisma } from "@jumpflow/database";
 import { buildConsultantPaymentAmounts } from "@/lib/payments/amounts";
+import type { ConsultantPaymentStatus } from "@/lib/payments/state-machine";
 import type {
   PaymentForecastView,
   ConsultantPaymentLineView,
   ConsultantPaymentView,
 } from "@/lib/payments/types";
+
+type ConsultantContractType = "CLT" | "PJ" | "CLT_FLEX";
 import { sendPaymentForecastEmail } from "@/lib/payments/notify";
 
 function monthBounds(month: number, year: number) {
@@ -55,12 +58,31 @@ function paymentLineView(row: {
   };
 }
 
+export async function listPaymentConsultants(): Promise<
+  { id: string; name: string }[]
+> {
+  return prisma.consultant.findMany({
+    where: { payments: { some: {} } },
+    select: { id: true, name: true },
+    orderBy: { name: "asc" },
+  });
+}
+
 export async function listConsultantPayments(input: {
   month: number;
   year: number;
+  consultantId?: string;
+  status?: ConsultantPaymentStatus;
+  contractType?: ConsultantContractType;
 }): Promise<ConsultantPaymentView[]> {
   const rows = await prisma.consultantPayment.findMany({
-    where: { month: input.month, year: input.year },
+    where: {
+      month: input.month,
+      year: input.year,
+      ...(input.consultantId ? { consultantId: input.consultantId } : {}),
+      ...(input.status ? { status: input.status } : {}),
+      ...(input.contractType ? { contractType: input.contractType } : {}),
+    },
     include: {
       consultant: { select: { name: true, email: true } },
       lines: {
@@ -323,9 +345,23 @@ export async function sendConsultantPaymentForecast(input: {
 }) {
   const payment = await prisma.consultantPayment.findUnique({
     where: { id: input.paymentId },
-    include: { consultant: { select: { id: true, name: true, email: true } } },
+    include: {
+      consultant: { select: { id: true, name: true, email: true } },
+      lines: {
+        where: { projectId: { not: null } },
+        include: { project: { select: { name: true } } },
+        orderBy: [{ project: { name: "asc" } }, { createdAt: "asc" }],
+      },
+    },
   });
   if (!payment) return null;
+
+  const projectLines = payment.lines.map((line) => ({
+    projectName: line.project?.name ?? line.description,
+    hours: toNumber(line.hours),
+    unitRate: toNumber(line.unitRate),
+    amount: toNumber(line.amount),
+  }));
 
   const sent = await sendPaymentForecastEmail({
     consultantName: payment.consultant.name,
@@ -335,6 +371,7 @@ export async function sendConsultantPaymentForecast(input: {
     totalAmount: toNumber(payment.totalAmount),
     expectedPaymentAt: toIsoDate(input.expectedPaymentAt)!,
     responseDeadlineAt: toIsoDate(input.responseDeadlineAt)!,
+    projectLines,
   });
 
   await prisma.$transaction(async (tx) => {

@@ -7,6 +7,7 @@ import {
   activityLabelOf,
   isRowEditable,
   rowTotal,
+  timeEntryStatusLabels,
   type TimeEntryRow as TimeEntryRowData,
   type WeekDay,
 } from "@/lib/timesheet/types";
@@ -21,15 +22,22 @@ export interface TimeEntryRowProps {
 }
 
 /**
- * One project+activity line in the weekly timesheet grid. Editable rows (DRAFT
- * or REJECTED) expose an edit affordance; submitted/approved/closed rows render
+ * One project+activity line in the weekly timesheet grid. Editable rows (DRAFT,
+ * REJECTED or SUBMITTED) expose an edit affordance; approved/closed rows render
  * as read-only so they never look editable to the consultant.
  */
 export function TimeEntryRow({ row, days, onEdit }: TimeEntryRowProps) {
   const editable = isRowEditable(row) && Boolean(onEdit);
+  const total = rowTotal(row);
+  // Hover tooltip mirroring PeriodOverview's day cards: total hours of the row
+  // plus the readable status, so the consultant gets the same at-a-glance
+  // context on the main grid without opening the entry.
+  const rowTitle = `${row.projectName} · ${activityLabelOf(row.activity)} · ${formatHours(
+    total,
+  )} · ${timeEntryStatusLabels[row.status]}`;
 
   return (
-    <tr className="transition-colors hover:bg-surface-muted/60">
+    <tr title={rowTitle} className="transition-colors hover:bg-surface-muted/60">
       <td className="px-4 py-3 align-middle">
         {editable ? (
           <button
@@ -78,7 +86,7 @@ export function TimeEntryRow({ row, days, onEdit }: TimeEntryRowProps) {
         );
       })}
       <td className="px-4 py-3 text-right align-middle text-sm font-semibold tabular-nums text-strong">
-        {formatHours(rowTotal(row))}
+        {formatHours(total)}
       </td>
       <td className="px-4 py-3 align-middle">
         <TimeEntryStatusBadge status={row.status} />

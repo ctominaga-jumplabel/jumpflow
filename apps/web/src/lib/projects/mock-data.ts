@@ -3,7 +3,15 @@ import type {
   ProjectConsultantOption,
   ProjectItem,
   ProjectManagerOption,
+  ProjectSkillOption,
 } from "./types";
+
+export const demoProjectSkills: ProjectSkillOption[] = [
+  { id: "skill-qa-automation", name: "QA Automation", category: "Qualidade" },
+  { id: "skill-react", name: "React", category: "Frontend" },
+  { id: "skill-node", name: "Node.js", category: "Backend" },
+  { id: "skill-data", name: "Data Analysis", category: "Dados" },
+];
 
 export const demoProjectClients: ProjectClientOption[] = [
   { id: "cli-atlas", name: "Atlas Energia" },
@@ -49,6 +57,17 @@ export const demoProjects: ProjectItem[] = [
         allocationPercent: 80,
         startDate: "2026-01-15",
         status: "ACTIVE",
+        skills: [
+          {
+            id: "alloc-skill-atlas-ana-qa",
+            allocationId: "alloc-atlas-ana",
+            skillId: "skill-qa-automation",
+            skillName: "QA Automation",
+            skillCategory: "Qualidade",
+            level: "ADVANCED",
+            note: "Cobertura E2E do portal.",
+          },
+        ],
       },
     ],
     saleRates: [

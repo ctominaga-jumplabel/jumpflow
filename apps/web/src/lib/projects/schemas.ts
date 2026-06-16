@@ -103,9 +103,45 @@ export const saleRateUpdateSchema = saleRateInputSchema.extend({
   id: entityId,
 });
 
+const skillLevel = z.enum(["BASIC", "INTERMEDIATE", "ADVANCED", "SPECIALIST"]);
+
+const optionalSkillLevel = z.preprocess(
+  (value) => (value === "" || value === null ? undefined : value),
+  skillLevel.optional(),
+);
+
+// Skill tagged on a specific Allocation (consultant on a project). This is a
+// catalog Skill reference scoped to the allocation; it is intentionally
+// independent from ConsultantSkill (the consultant's validated profile).
+// `level`/`note` keys stay optional (may be omitted entirely) while empty
+// strings normalize to undefined.
+export const allocationSkillInputSchema = z.object({
+  allocationId: entityId,
+  skillId: entityId,
+  level: optionalSkillLevel.optional(),
+  note: optionalText(300).optional(),
+});
+
+export const allocationSkillRemoveSchema = z.object({
+  id: entityId,
+});
+
+export const allocationSkillUpdateSchema = z.object({
+  id: entityId,
+  level: optionalSkillLevel.optional(),
+  note: optionalText(300).optional(),
+});
+
 export type ProjectInput = z.infer<typeof projectInputSchema>;
 export type ProjectUpdateInput = z.infer<typeof projectUpdateSchema>;
 export type AllocationInput = z.infer<typeof allocationInputSchema>;
 export type AllocationUpdateInput = z.infer<typeof allocationUpdateSchema>;
 export type SaleRateInput = z.infer<typeof saleRateInputSchema>;
 export type SaleRateUpdateInput = z.infer<typeof saleRateUpdateSchema>;
+export type AllocationSkillInput = z.infer<typeof allocationSkillInputSchema>;
+export type AllocationSkillRemoveInput = z.infer<
+  typeof allocationSkillRemoveSchema
+>;
+export type AllocationSkillUpdateInput = z.infer<
+  typeof allocationSkillUpdateSchema
+>;

@@ -566,7 +566,7 @@ describe("createWeeklyTimeEntries", () => {
 });
 
 describe("updateTimeEntry / deleteTimeEntry — editability", () => {
-  it.each(["SUBMITTED", "APPROVED", "CLOSED"])(
+  it.each(["APPROVED", "CLOSED"])(
     "refuses to edit a %s entry",
     async (status) => {
       // Period stays open so the entry status (not PERIOD_CLOSED) is the blocker.
@@ -581,6 +581,29 @@ describe("updateTimeEntry / deleteTimeEntry — editability", () => {
     },
   );
 
+  it("re-submits a SUBMITTED entry on edit, auditing the reopened status", async () => {
+    // A still-pending (SUBMITTED) entry stays editable; the save re-submits it
+    // with a fresh submittedAt and records the previous status in the audit.
+    seedCurrentPeriod("SUBMITTED");
+    const submittedAt = new Date("2026-06-08T10:00:00Z");
+    const entry = seedEntry({ status: "SUBMITTED", submittedAt });
+    const result = await updateTimeEntry({ id: entry.id, hours: 6, billable: true });
+    expect(result.ok).toBe(true);
+    expect(h.store.entries[0].status).toBe("SUBMITTED");
+    expect(h.store.entries[0].hours).toBe(6);
+    // submittedAt is refreshed so the auto-approval delay restarts.
+    expect(h.store.entries[0].submittedAt).toBeInstanceOf(Date);
+    expect(h.store.entries[0].submittedAt?.getTime()).toBeGreaterThan(
+      submittedAt.getTime(),
+    );
+    expect(h.store.audits[0]).toMatchObject({
+      action: "TIME_ENTRY_SUBMITTED_ON_SAVE",
+      actorUserId: "user-1",
+      before: { status: "SUBMITTED" },
+      after: { entryId: entry.id, resubmit: true },
+    });
+  });
+
   it("resubmits a REJECTED entry for approval on edit", async () => {
     seedCurrentPeriod("REJECTED");
     const entry = seedEntry({ status: "REJECTED", submittedAt: new Date() });
@@ -594,6 +617,7 @@ describe("updateTimeEntry / deleteTimeEntry — editability", () => {
     expect(h.store.audits[0]).toMatchObject({
       action: "TIME_ENTRY_SUBMITTED_ON_SAVE",
       actorUserId: "user-1",
+      before: { status: "REJECTED" },
       after: { entryId: entry.id, resubmit: true },
     });
   });
@@ -967,6 +991,149 @@ describe("decideHours", () => {
     });
     expect(h.store.entries[0].status).toBe("REJECTED");
     expect(h.store.periods[0].status).toBe("REJECTED");
+  });
+
+  it("reopens an APPROVED entry back to SUBMITTED with a MANUAL Approval + audit", async () => {
+    seedCurrentPeriod("APPROVED");
+    const entry = seedEntry({ consultantId: "con-2", status: "APPROVED" });
+    const result = await decideHours({
+      entryIds: [entry.id],
+      decision: "SUBMITTED",
+      comment: "Reabrir para revisão.",
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      data: { decided: 1, alreadyDecided: 0 },
+    });
+    // Entry returns to the pending queue.
+    expect(h.store.entries[0].status).toBe("SUBMITTED");
+    // A MANUAL Approval (isAutomatic:false) is written so the auto-approval
+    // engine treats the entry as already human-handled and never re-approves.
+    expect(h.store.approvals).toHaveLength(1);
+    expect(h.store.approvals[0]).toMatchObject({
+      entityType: "TIME_ENTRY",
+      entityId: entry.id,
+      approverUserId: "user-1",
+      isAutomatic: false,
+    });
+    // The reopen intent is captured in the audit (before/after status).
+    expect(h.store.audits).toHaveLength(1);
+    expect(h.store.audits[0]).toMatchObject({
+      action: "TIME_ENTRY_REOPENED",
+      actorUserId: "user-1",
+      before: { status: "APPROVED" },
+      after: { status: "SUBMITTED" },
+    });
+    // Period recomputed back to SUBMITTED.
+    expect(h.store.periods[0].status).toBe("SUBMITTED");
+  });
+
+  it("reopens a REJECTED entry back to SUBMITTED", async () => {
+    seedCurrentPeriod("REJECTED");
+    const entry = seedEntry({ consultantId: "con-2", status: "REJECTED" });
+    const result = await decideHours({
+      entryIds: [entry.id],
+      decision: "SUBMITTED",
+      comment: "",
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      data: { decided: 1, alreadyDecided: 0 },
+    });
+    expect(h.store.entries[0].status).toBe("SUBMITTED");
+    expect(h.store.periods[0].status).toBe("SUBMITTED");
+  });
+
+  it("switches an APPROVED entry directly to REJECTED", async () => {
+    seedCurrentPeriod("APPROVED");
+    const entry = seedEntry({ consultantId: "con-2", status: "APPROVED" });
+    const result = await decideHours({
+      entryIds: [entry.id],
+      decision: "REJECTED",
+      comment: "Revertendo a aprovação.",
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      data: { decided: 1, alreadyDecided: 0 },
+    });
+    expect(h.store.entries[0].status).toBe("REJECTED");
+    expect(h.store.approvals[0]).toMatchObject({ status: "REJECTED" });
+  });
+
+  it("refuses a CLOSED entry (terminal), mutating nothing", async () => {
+    seedCurrentPeriod("APPROVED");
+    const entry = seedEntry({ consultantId: "con-2", status: "CLOSED" });
+    const result = await decideHours({
+      entryIds: [entry.id],
+      decision: "SUBMITTED",
+      comment: "",
+    });
+    expect(result).toMatchObject({ ok: false, error: "PERIOD_CLOSED" });
+    expect(h.store.entries[0].status).toBe("CLOSED");
+    expect(h.store.approvals).toHaveLength(0);
+    expect(h.store.audits).toHaveLength(0);
+  });
+
+  it("refuses any entry in a CLOSED period (terminal), mutating nothing", async () => {
+    seedCurrentPeriod("CLOSED");
+    const entry = seedEntry({ consultantId: "con-2", status: "APPROVED" });
+    const result = await decideHours({
+      entryIds: [entry.id],
+      decision: "SUBMITTED",
+      comment: "",
+    });
+    expect(result).toMatchObject({ ok: false, error: "PERIOD_CLOSED" });
+    expect(h.store.entries[0].status).toBe("APPROVED");
+    expect(h.store.approvals).toHaveLength(0);
+  });
+
+  it("blocks reopening the user's OWN hours (SELF_APPROVAL)", async () => {
+    seedCurrentPeriod("APPROVED");
+    const entry = seedEntry({ consultantId: "con-1", status: "APPROVED" });
+    const result = await decideHours({
+      entryIds: [entry.id],
+      decision: "SUBMITTED",
+      comment: "",
+    });
+    expect(result).toMatchObject({ ok: false, error: "SELF_APPROVAL" });
+    expect(h.store.entries[0].status).toBe("APPROVED");
+    expect(h.store.approvals).toHaveLength(0);
+  });
+
+  it("forbids a PROJECT_MANAGER reopening outside the project scope", async () => {
+    h.store.currentUser.roles = ["PROJECT_MANAGER"];
+    seedCurrentPeriod("APPROVED");
+    const entry = seedEntry({
+      consultantId: "con-2",
+      projectId: "proj-other",
+      status: "APPROVED",
+    });
+    const result = await decideHours({
+      entryIds: [entry.id],
+      decision: "SUBMITTED",
+      comment: "",
+    });
+    expect(result).toMatchObject({ ok: false, error: "FORBIDDEN" });
+    expect(h.store.entries[0].status).toBe("APPROVED");
+  });
+
+  it("is idempotent: reopening a still-SUBMITTED entry counts as alreadyDecided", async () => {
+    // SUBMITTED is not an allowed SOURCE for a reopen (only APPROVED/REJECTED),
+    // so the status-guard updateMany matches nothing and writes no Approval.
+    seedCurrentPeriod("SUBMITTED");
+    const entry = seedSubmitted();
+    const result = await decideHours({
+      entryIds: [entry.id],
+      decision: "SUBMITTED",
+      comment: "",
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      data: { decided: 0, alreadyDecided: 1 },
+    });
+    expect(h.store.entries[0].status).toBe("SUBMITTED");
+    expect(h.store.approvals).toHaveLength(0);
+    expect(h.store.audits).toHaveLength(0);
   });
 });
 

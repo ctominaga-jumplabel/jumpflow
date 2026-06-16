@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   allocationInputSchema,
+  allocationSkillInputSchema,
+  allocationSkillRemoveSchema,
   projectUpdateSchema,
   saleRateUpdateSchema,
 } from "./schemas";
@@ -77,5 +79,61 @@ describe("projects schemas accept non-cuid entity ids", () => {
         currency: "BRL",
       }).success,
     ).toBe(true);
+  });
+});
+
+describe("allocation skill schemas", () => {
+  it("requires allocationId and skillId, level/note optional", () => {
+    const result = allocationSkillInputSchema.safeParse({
+      allocationId: "alloc-1",
+      skillId: "skill-react",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.level).toBeUndefined();
+      expect(result.data.note).toBeUndefined();
+    }
+  });
+
+  it("accepts an optional SkillLevel and note", () => {
+    const result = allocationSkillInputSchema.safeParse({
+      allocationId: "alloc-1",
+      skillId: "skill-react",
+      level: "ADVANCED",
+      note: "Lider tecnico",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.level).toBe("ADVANCED");
+      expect(result.data.note).toBe("Lider tecnico");
+    }
+  });
+
+  it("treats empty level/note as undefined", () => {
+    const result = allocationSkillInputSchema.safeParse({
+      allocationId: "alloc-1",
+      skillId: "skill-react",
+      level: "",
+      note: "",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.level).toBeUndefined();
+      expect(result.data.note).toBeUndefined();
+    }
+  });
+
+  it("rejects an invalid level and missing ids", () => {
+    expect(
+      allocationSkillInputSchema.safeParse({
+        allocationId: "alloc-1",
+        skillId: "skill-react",
+        level: "GURU",
+      }).success,
+    ).toBe(false);
+    expect(
+      allocationSkillInputSchema.safeParse({ skillId: "skill-react" }).success,
+    ).toBe(false);
+    expect(allocationSkillRemoveSchema.safeParse({ id: "" }).success).toBe(false);
   });
 });

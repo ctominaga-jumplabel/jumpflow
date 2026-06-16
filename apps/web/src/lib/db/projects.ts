@@ -2,11 +2,14 @@ import { prisma } from "@jumpflow/database";
 import type { Prisma } from "@jumpflow/database";
 import type {
   ProjectAllocationItem,
+  ProjectAllocationSkillItem,
   ProjectClientOption,
   ProjectConsultantOption,
   ProjectItem,
   ProjectManagerOption,
   ProjectSaleRateItem,
+  ProjectSkillOption,
+  SkillLevel,
 } from "@/lib/projects/types";
 import { isDatabaseConfigured } from "./config";
 
@@ -52,6 +55,20 @@ export async function listProjectConsultants(): Promise<ProjectConsultantOption[
   return rows;
 }
 
+export async function listSkillCatalog(): Promise<ProjectSkillOption[]> {
+  if (!isDatabaseConfigured()) return [];
+  const rows = await prisma.skill.findMany({
+    where: { status: "ACTIVE" },
+    select: { id: true, name: true, category: true },
+    orderBy: [{ category: "asc" }, { name: "asc" }],
+  });
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    category: row.category ?? undefined,
+  }));
+}
+
 export async function listProjectManagers(): Promise<ProjectManagerOption[]> {
   if (!isDatabaseConfigured()) return [];
   const rows = await prisma.user.findMany({
@@ -78,7 +95,15 @@ export async function listProjects(options?: {
     include: {
       client: { select: { id: true, name: true } },
       allocations: {
-        include: { consultant: { select: { name: true } } },
+        include: {
+          consultant: { select: { name: true } },
+          allocationSkills: {
+            include: {
+              skill: { select: { name: true, category: true } },
+            },
+            orderBy: { createdAt: "asc" },
+          },
+        },
         orderBy: [{ status: "asc" }, { startDate: "desc" }],
       },
       saleRates: includeFinancials
@@ -112,17 +137,31 @@ export async function listProjects(options?: {
   const managerNames = new Map(managers.map((manager) => [manager.id, manager.name]));
 
   return rows.map((row) => {
-    const allocations: ProjectAllocationItem[] = row.allocations.map((item) => ({
-      id: item.id,
-      projectId: item.projectId,
-      consultantId: item.consultantId,
-      consultantName: item.consultant.name,
-      role: item.role,
-      allocationPercent: item.allocationPercent,
-      startDate: dateToIso(item.startDate),
-      endDate: item.endDate ? dateToIso(item.endDate) : undefined,
-      status: item.status,
-    }));
+    const allocations: ProjectAllocationItem[] = row.allocations.map((item) => {
+      const skills: ProjectAllocationSkillItem[] = item.allocationSkills.map(
+        (link) => ({
+          id: link.id,
+          allocationId: link.allocationId,
+          skillId: link.skillId,
+          skillName: link.skill.name,
+          skillCategory: link.skill.category ?? undefined,
+          level: (link.level as SkillLevel | null) ?? undefined,
+          note: link.note ?? undefined,
+        }),
+      );
+      return {
+        id: item.id,
+        projectId: item.projectId,
+        consultantId: item.consultantId,
+        consultantName: item.consultant.name,
+        role: item.role,
+        allocationPercent: item.allocationPercent,
+        startDate: dateToIso(item.startDate),
+        endDate: item.endDate ? dateToIso(item.endDate) : undefined,
+        status: item.status,
+        skills,
+      };
+    });
     const rateRows = includeFinancials
       ? (row.saleRates as ProjectSaleRateWithNames[])
       : [];

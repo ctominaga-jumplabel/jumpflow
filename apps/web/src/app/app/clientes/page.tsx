@@ -7,6 +7,7 @@ import type { RoleName } from "@/lib/auth/types";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { listBillingTypes, listClients } from "@/lib/db/clients";
 import { isCnpjLookupConfigured } from "@/lib/cnpj/provider";
+import { isStorageConfigured } from "@/lib/storage/provider";
 
 export const metadata: Metadata = { title: "Clientes" };
 
@@ -45,6 +46,7 @@ export default async function ClientesPage() {
         canViewFinancials={canViewFinancials}
         canManageBillingTypes={canManageBillingTypes}
         cnpjLookupAvailable={isCnpjLookupConfigured()}
+        logoUploadAvailable={isStorageConfigured()}
       />
     </div>
   );

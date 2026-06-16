@@ -63,6 +63,39 @@ const h = vi.hoisted(() => {
     },
     autoApprovalException: { findMany: async () => [] },
     approval: {
+      // Honors the manual-history query: entityType TIME_ENTRY, entityId in [..],
+      // isAutomatic: false. Reads from the same `approvals` store, so manual
+      // decisions seeded by a test are visible to the engine.
+      findMany: async ({
+        where,
+      }: {
+        where: {
+          entityType?: string;
+          entityId?: { in: string[] };
+          isAutomatic?: boolean;
+        };
+      }) => {
+        return store.approvals
+          .filter((a) => {
+            if (where.entityType && a.entityType !== where.entityType) {
+              return false;
+            }
+            if (
+              where.entityId &&
+              !where.entityId.in.includes(a.entityId as string)
+            ) {
+              return false;
+            }
+            if (
+              where.isAutomatic !== undefined &&
+              a.isAutomatic !== where.isAutomatic
+            ) {
+              return false;
+            }
+            return true;
+          })
+          .map((a) => ({ entityId: a.entityId }));
+      },
       create: async ({ data }: { data: Record<string, unknown> }) => {
         store.approvals.push(data);
         return data;
@@ -258,5 +291,56 @@ describe("runAutoApproval — rule outcomes", () => {
     const result = await runAutoApproval(NOW);
     expect(result.approved).toBe(0);
     expect(result.pending).toBe(1);
+  });
+});
+
+describe("runAutoApproval — manual decision history guard", () => {
+  it("keeps a SUBMITTED entry PENDING when it already had a MANUAL decision, even if the default rule is satisfied", async () => {
+    // A standard 8h weekday entry, delay elapsed: would APPROVE on its own.
+    h.store.entries = [entry({ id: "reopened" })];
+    // But it was decided manually once (e.g. approved then reopened to SUBMITTED).
+    h.store.approvals = [
+      {
+        entityType: "TIME_ENTRY",
+        entityId: "reopened",
+        status: "APPROVED",
+        isAutomatic: false,
+        ruleKey: null,
+      },
+    ];
+
+    // Read-only path surfaces the reason for the admin view.
+    const collection = await collectAutoApprovalDecisions(NOW);
+    const decision = collection.evaluations.find((e) => e.id === "reopened")
+      ?.decision;
+    expect(decision?.outcome).toBe("PENDING");
+    expect(decision?.reasons).toContain("MANUAL_DECISION_HISTORY");
+
+    // Write path does not auto-approve and writes no new Approval/audit.
+    const result = await runAutoApproval(NOW);
+    expect(result.approved).toBe(0);
+    expect(result.pending).toBe(1);
+    expect(h.store.entries.find((e) => e.id === "reopened")?.status).toBe(
+      "SUBMITTED",
+    );
+    expect(h.store.approvals).toHaveLength(1); // only the pre-existing manual one
+    expect(h.store.audits).toHaveLength(0);
+  });
+
+  it("still auto-approves a SUBMITTED entry that has NO manual history (normal flow unchanged)", async () => {
+    h.store.entries = [entry({ id: "fresh" })];
+    h.store.approvals = []; // no prior decisions
+
+    const result = await runAutoApproval(NOW);
+    expect(result.approved).toBe(1);
+    expect(h.store.entries.find((e) => e.id === "fresh")?.status).toBe(
+      "APPROVED",
+    );
+
+    // Idempotency: the auto Approval it just created (isAutomatic: true) must
+    // NOT be mistaken for manual history on a re-run.
+    const second = await runAutoApproval(NOW);
+    expect(second.approved).toBe(0);
+    expect(second.processed).toBe(0);
   });
 });

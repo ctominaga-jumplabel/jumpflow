@@ -12,12 +12,18 @@ import { isDatabaseConfigured } from "@/lib/db/config";
 import { resolveDbUser } from "@/lib/db/users";
 import {
   allocationInputSchema,
+  allocationSkillInputSchema,
+  allocationSkillRemoveSchema,
+  allocationSkillUpdateSchema,
   allocationUpdateSchema,
   projectInputSchema,
   projectUpdateSchema,
   saleRateInputSchema,
   saleRateUpdateSchema,
   type AllocationInput,
+  type AllocationSkillInput,
+  type AllocationSkillRemoveInput,
+  type AllocationSkillUpdateInput,
   type AllocationUpdateInput,
   type ProjectInput,
   type ProjectUpdateInput,
@@ -67,6 +73,17 @@ function parseInput<T>(schema: ZodType<T>, input: unknown): T {
 }
 
 function toFailure(error: unknown): ActionResult<never> {
+  // Never swallow framework control-flow errors (redirect/notFound), e.g. the
+  // redirect("/access-denied") thrown by requireRole on an RBAC failure.
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "digest" in error &&
+    typeof (error as { digest?: unknown }).digest === "string" &&
+    (error as { digest: string }).digest.startsWith("NEXT_")
+  ) {
+    throw error;
+  }
   if (error instanceof ActionError) {
     return { ok: false, error: error.code, message: error.message };
   }
@@ -371,6 +388,131 @@ export async function updateSaleRate(
       });
     });
     await audit("ProjectSaleRate", parsed.id, "PROJECT_SALE_RATE_UPDATED", previous, parsed);
+    revalidatePath(PROJETOS_PATH);
+    return { ok: true, data: { id: parsed.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+async function ensureActiveSkill(skillId: string): Promise<void> {
+  const skill = await prisma.skill.findUnique({
+    where: { id: skillId },
+    select: { status: true },
+  });
+  if (!skill) {
+    throw new ActionError("NOT_FOUND", "Skill nao encontrada no catalogo.");
+  }
+  if (skill.status !== "ACTIVE") {
+    throw new ActionError(
+      "INVALID_INPUT",
+      "Selecione uma skill ativa do catalogo.",
+    );
+  }
+}
+
+// Tags a catalog Skill onto a specific Allocation (consultant on a project).
+// This is intentionally independent from ConsultantSkill (the consultant's own
+// validated skill profile) — it only records the skill used on this project.
+export async function addAllocationSkill(
+  input: AllocationSkillInput,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(PROJECT_WRITE_ROLES);
+    const parsed = parseInput(allocationSkillInputSchema, input);
+    const allocation = await prisma.allocation.findUnique({
+      where: { id: parsed.allocationId },
+      select: { id: true },
+    });
+    if (!allocation) {
+      throw new ActionError("NOT_FOUND", "Vinculo nao encontrado.");
+    }
+    await ensureActiveSkill(parsed.skillId);
+    const created = await prisma.allocationSkill.create({
+      data: {
+        allocationId: parsed.allocationId,
+        skillId: parsed.skillId,
+        level: parsed.level,
+        note: parsed.note,
+      },
+    });
+    await audit(
+      "AllocationSkill",
+      created.id,
+      "ALLOCATION_SKILL_ADDED",
+      null,
+      parsed,
+    );
+    revalidatePath(PROJETOS_PATH);
+    return { ok: true, data: { id: created.id } };
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      return {
+        ok: false,
+        error: "INVALID_INPUT",
+        message: "Skill ja adicionada a esta alocacao.",
+      };
+    }
+    return toFailure(error);
+  }
+}
+
+export async function updateAllocationSkill(
+  input: AllocationSkillUpdateInput,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(PROJECT_WRITE_ROLES);
+    const parsed = parseInput(allocationSkillUpdateSchema, input);
+    const previous = await prisma.allocationSkill.findUnique({
+      where: { id: parsed.id },
+    });
+    if (!previous) {
+      throw new ActionError("NOT_FOUND", "Skill da alocacao nao encontrada.");
+    }
+    await prisma.allocationSkill.update({
+      where: { id: parsed.id },
+      data: { level: parsed.level ?? null, note: parsed.note ?? null },
+    });
+    await audit(
+      "AllocationSkill",
+      parsed.id,
+      "ALLOCATION_SKILL_UPDATED",
+      previous,
+      parsed,
+    );
+    revalidatePath(PROJETOS_PATH);
+    return { ok: true, data: { id: parsed.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+export async function removeAllocationSkill(
+  input: AllocationSkillRemoveInput,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(PROJECT_WRITE_ROLES);
+    const parsed = parseInput(allocationSkillRemoveSchema, input);
+    const previous = await prisma.allocationSkill.findUnique({
+      where: { id: parsed.id },
+    });
+    if (!previous) {
+      throw new ActionError("NOT_FOUND", "Skill da alocacao nao encontrada.");
+    }
+    await prisma.allocationSkill.delete({ where: { id: parsed.id } });
+    await audit(
+      "AllocationSkill",
+      parsed.id,
+      "ALLOCATION_SKILL_REMOVED",
+      previous,
+      null,
+    );
     revalidatePath(PROJETOS_PATH);
     return { ok: true, data: { id: parsed.id } };
   } catch (error) {

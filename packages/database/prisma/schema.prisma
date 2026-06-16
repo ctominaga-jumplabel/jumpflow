@@ -144,6 +144,10 @@ enum AutoApprovalExceptionType {
 
 enum AutomationEmailType {
   MISSING_TIMESHEET_REPORT
+  // Fase G: pre-fatura enviada ao cliente (uma por RevenueClosing + competencia).
+  PRE_INVOICE
+  // Fase H: NFS-e emitida enviada ao cliente (uma por FiscalDocument + competencia).
+  NFSE_ISSUED
 }
 
 enum EmailDeliveryStatus {
@@ -151,11 +155,28 @@ enum EmailDeliveryStatus {
   FAILED
 }
 
+/// Catalogo de modelos de cobranca. Os quatro primeiros (HOURLY, MONTHLY,
+/// CONSULTANT_HOURLY, FIXED) sao os valores originais e NAO devem ser
+/// renomeados/removidos: CONSULTANT_HOURLY e base de NF na Fase D. Postgres so
+/// permite adicionar valores ao enum (ALTER TYPE ... ADD VALUE), entao a ordem
+/// de declaracao reflete a evolucao historica.
 enum BillingChargeType {
   HOURLY
   MONTHLY
   CONSULTANT_HOURLY
   FIXED
+  HOURLY_PLUS_FIXED
+  HOUR_PACKAGE
+  PER_ALLOCATED_CONSULTANT
+  PER_PROJECT
+  MILESTONE
+  PER_SPRINT
+  TIME_AND_MATERIAL
+  ON_DEMAND
+  SUBSCRIPTION
+  PAY_AS_YOU_GO
+  SUCCESS_FEE
+  MIXED
 }
 
 enum BillingRoundingRule {
@@ -459,6 +480,7 @@ model Client {
   id                String              @id @default(cuid())
   name              String
   document          String?
+  contactEmail      String?
   logoUrl           String?
   billingTypeId     String?
   billingType       BillingType?        @relation(fields: [billingTypeId], references: [id], onDelete: SetNull)
@@ -541,6 +563,7 @@ model Allocation {
   saleRates              ProjectSaleRate[]
   costRates              ConsultantAllocationCostRate[]
   consultantPaymentLines ConsultantPaymentLine[]
+  allocationSkills       AllocationSkill[]
   createdAt              DateTime                       @default(now())
   updatedAt              DateTime                       @updatedAt
 
@@ -677,10 +700,33 @@ model Skill {
   status      SkillStatus       @default(ACTIVE)
   consultants ConsultantSkill[]
   suggestions SkillSuggestion[]
+  allocations AllocationSkill[]
   createdAt   DateTime          @default(now())
   updatedAt   DateTime          @updatedAt
 
   @@unique([name, category])
+}
+
+/// Skill tag attached to a specific project Allocation. It is intentionally
+/// isolated from ConsultantSkill: this records which catalog skill the
+/// consultant is using ON THIS PROJECT, without touching the consultant's own
+/// validated skill profile. Deleting the allocation removes its skill tags
+/// (Cascade); catalog skills are protected (Restrict) so a referenced skill
+/// cannot be deleted while still tagged on an allocation.
+model AllocationSkill {
+  id           String      @id @default(cuid())
+  allocationId String
+  allocation   Allocation  @relation(fields: [allocationId], references: [id], onDelete: Cascade)
+  skillId      String
+  skill        Skill       @relation(fields: [skillId], references: [id], onDelete: Restrict)
+  level        SkillLevel?
+  note         String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@unique([allocationId, skillId])
+  @@index([allocationId])
+  @@index([skillId])
 }
 
 model ConsultantSkill {

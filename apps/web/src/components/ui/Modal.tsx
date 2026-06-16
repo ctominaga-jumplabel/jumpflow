@@ -40,6 +40,17 @@ export function Modal({
   const titleId = useId();
   const descId = useId();
 
+  // Callers pass inline arrow functions for onClose, so its identity changes on
+  // every parent re-render. The focus-management effect below must run only when
+  // `open` toggles — never on every keystroke of a controlled field whose state
+  // lives in the parent. Keeping onClose in a ref decouples the two: a re-render
+  // updates the ref without re-running (and thus re-focusing) the effect, which
+  // previously stole focus away from the field being typed into.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
+
   useEffect(() => {
     if (!open) return;
 
@@ -55,7 +66,7 @@ export function Modal({
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.stopPropagation();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (event.key !== "Tab") return;
@@ -85,7 +96,7 @@ export function Modal({
       document.body.style.overflow = "";
       restoreFocusRef.current?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   return (
     <AnimatePresence>

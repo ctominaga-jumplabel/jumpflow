@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { Edit, FolderKanban, Link2, Plus, ReceiptText } from "lucide-react";
+import { Edit, FolderKanban, Link2, Plus, ReceiptText, Tag, X } from "lucide-react";
 import { ActionButton } from "@/components/ui/ActionButton";
 import { DataTable, type DataTableColumn } from "@/components/ui/DataTable";
 import { DataToolbar } from "@/components/ui/DataToolbar";
@@ -10,13 +10,17 @@ import { FilterChip } from "@/components/ui/FilterChip";
 import { Modal } from "@/components/ui/Modal";
 import { SectionPanel } from "@/components/ui/SectionPanel";
 import {
+  addAllocationSkill,
   createAllocation,
   createProject,
   createSaleRate,
+  removeAllocationSkill,
   updateProject,
 } from "@/app/app/projetos/actions";
 import type {
   AllocationInput,
+  AllocationSkillInput,
+  AllocationSkillRemoveInput,
   ProjectInput,
   SaleRateInput,
 } from "@/lib/projects/schemas";
@@ -25,13 +29,17 @@ import {
   demoProjectConsultants,
   demoProjectManagers,
   demoProjects,
+  demoProjectSkills,
 } from "@/lib/projects/mock-data";
 import type {
+  ProjectAllocationItem,
   ProjectClientOption,
   ProjectConsultantOption,
   ProjectItem,
   ProjectManagerOption,
+  ProjectSkillOption,
   ProjectStatus,
+  SkillLevel,
 } from "@/lib/projects/types";
 import {
   formatCurrencyPrecise,
@@ -44,7 +52,14 @@ import { cn } from "@/lib/utils";
 import { ProjectStatusBadge, projectStatusLabels } from "./ProjectStatusBadge";
 
 type Mode = "demo" | "db";
-type DetailTab = "ALLOCATIONS" | "RATES";
+type DetailTab = "ALLOCATIONS" | "SKILLS" | "RATES";
+
+const skillLevelLabels: Record<SkillLevel, string> = {
+  BASIC: "Basico",
+  INTERMEDIATE: "Intermediario",
+  ADVANCED: "Avancado",
+  SPECIALIST: "Especialista",
+};
 
 interface ProjectsViewProps {
   mode: Mode;
@@ -52,6 +67,7 @@ interface ProjectsViewProps {
   clients?: ProjectClientOption[];
   consultants?: ProjectConsultantOption[];
   managers?: ProjectManagerOption[];
+  skills?: ProjectSkillOption[];
   canManageProjects: boolean;
   canViewCommercials: boolean;
   canManageSaleRates: boolean;
@@ -108,6 +124,7 @@ export function ProjectsView({
   clients = demoProjectClients,
   consultants = demoProjectConsultants,
   managers = demoProjectManagers,
+  skills = demoProjectSkills,
   canManageProjects,
   canViewCommercials,
   canManageSaleRates,
@@ -309,10 +326,11 @@ export function ProjectsView({
   function addAllocation(value: AllocationInput) {
     if (mode === "demo") {
       const consultant = consultants.find((item) => item.id === value.consultantId);
-      const nextAllocation = {
+      const nextAllocation: ProjectAllocationItem = {
         ...value,
         id: `alloc-local-${Date.now()}`,
         consultantName: consultant?.name ?? "Consultor",
+        skills: [],
       };
       setLocalItems((current) =>
         current.map((project) =>
@@ -378,6 +396,80 @@ export function ProjectsView({
     startTransition(async () => {
       const result = await createSaleRate(value);
       setFeedback(result.ok ? "Valor de venda salvo." : result.message);
+    });
+  }
+
+  function applyAllocationSkills(
+    projectId: string,
+    allocationId: string,
+    next: (skills: ProjectAllocationItem["skills"]) => ProjectAllocationItem["skills"],
+  ) {
+    const updater = (project: ProjectItem): ProjectItem =>
+      project.id !== projectId
+        ? project
+        : {
+            ...project,
+            allocations: project.allocations.map((allocation) =>
+              allocation.id === allocationId
+                ? { ...allocation, skills: next(allocation.skills) }
+                : allocation,
+            ),
+          };
+    setLocalItems((current) => current.map(updater));
+    setDetailProject((current) => (current ? updater(current) : current));
+  }
+
+  function addSkill(value: AllocationSkillInput) {
+    const project = items.find((item) =>
+      item.allocations.some((allocation) => allocation.id === value.allocationId),
+    );
+    if (mode === "demo") {
+      const skill = skills.find((item) => item.id === value.skillId);
+      if (project) {
+        applyAllocationSkills(project.id, value.allocationId, (current) => [
+          ...current,
+          {
+            id: `alloc-skill-local-${Date.now()}`,
+            allocationId: value.allocationId,
+            skillId: value.skillId,
+            skillName: skill?.name ?? "Skill",
+            skillCategory: skill?.category,
+            level: value.level,
+            note: value.note,
+          },
+        ]);
+      }
+      setFeedback("Skill da alocacao salva localmente.");
+      return;
+    }
+    startTransition(async () => {
+      const result = await addAllocationSkill(value);
+      setFeedback(result.ok ? "Skill adicionada a alocacao." : result.message);
+    });
+  }
+
+  function removeSkill(input: AllocationSkillRemoveInput) {
+    const located = items
+      .flatMap((project) =>
+        project.allocations.map((allocation) => ({ project, allocation })),
+      )
+      .find(({ allocation }) =>
+        allocation.skills.some((skill) => skill.id === input.id),
+      );
+    if (mode === "demo") {
+      if (located) {
+        applyAllocationSkills(
+          located.project.id,
+          located.allocation.id,
+          (current) => current.filter((skill) => skill.id !== input.id),
+        );
+      }
+      setFeedback("Skill removida da alocacao localmente.");
+      return;
+    }
+    startTransition(async () => {
+      const result = await removeAllocationSkill(input);
+      setFeedback(result.ok ? "Skill removida da alocacao." : result.message);
     });
   }
 
@@ -475,6 +567,7 @@ export function ProjectsView({
         project={detailProject}
         tab={detailTab}
         consultants={consultants}
+        skills={skills}
         canViewCommercials={canViewCommercials}
         canManageProjects={canManageProjects}
         canManageSaleRates={canManageSaleRates}
@@ -483,6 +576,8 @@ export function ProjectsView({
         onClose={() => setDetailProject(null)}
         onAddAllocation={addAllocation}
         onAddSaleRate={addSaleRate}
+        onAddSkill={addSkill}
+        onRemoveSkill={removeSkill}
       />
     </div>
   );
@@ -638,6 +733,7 @@ function ProjectDetailModal({
   project,
   tab,
   consultants,
+  skills,
   canViewCommercials,
   canManageProjects,
   canManageSaleRates,
@@ -646,10 +742,13 @@ function ProjectDetailModal({
   onClose,
   onAddAllocation,
   onAddSaleRate,
+  onAddSkill,
+  onRemoveSkill,
 }: {
   project: ProjectItem | null;
   tab: DetailTab;
   consultants: ProjectConsultantOption[];
+  skills: ProjectSkillOption[];
   canViewCommercials: boolean;
   canManageProjects: boolean;
   canManageSaleRates: boolean;
@@ -658,9 +757,12 @@ function ProjectDetailModal({
   onClose: () => void;
   onAddAllocation: (value: AllocationInput) => void;
   onAddSaleRate: (value: SaleRateInput) => void;
+  onAddSkill: (value: AllocationSkillInput) => void;
+  onRemoveSkill: (value: AllocationSkillRemoveInput) => void;
 }) {
   const [allocation, setAllocation] = useState<AllocationInput | null>(null);
   const [rate, setRate] = useState<SaleRateInput | null>(null);
+  const [skillFor, setSkillFor] = useState<ProjectAllocationItem | null>(null);
 
   if (!project) return null;
   const allocationOptions = project.allocations.map((item) => ({
@@ -698,7 +800,7 @@ function ProjectDetailModal({
             >
               Novo vinculo
             </ActionButton>
-          ) : (
+          ) : tab === "RATES" ? (
             <ActionButton
               icon={ReceiptText}
               disabled={!canManageSaleRates}
@@ -717,7 +819,7 @@ function ProjectDetailModal({
             >
               Novo valor
             </ActionButton>
-          )}
+          ) : null}
         </>
       }
     >
@@ -726,6 +828,11 @@ function ProjectDetailModal({
           label="Vinculos"
           active={tab === "ALLOCATIONS"}
           onClick={() => onTabChange("ALLOCATIONS")}
+        />
+        <FilterChip
+          label="Skills"
+          active={tab === "SKILLS"}
+          onClick={() => onTabChange("SKILLS")}
         />
         <FilterChip
           label="Valores de venda"
@@ -765,6 +872,13 @@ function ProjectDetailModal({
           rows={project.allocations}
           rowKey={(item) => item.id}
           empty={<p className="text-center text-sm text-soft">Sem vinculos.</p>}
+        />
+      ) : tab === "SKILLS" ? (
+        <AllocationSkillsPanel
+          allocations={project.allocations}
+          canManageProjects={canManageProjects}
+          onAddSkill={(item) => setSkillFor(item)}
+          onRemoveSkill={onRemoveSkill}
         />
       ) : canViewCommercials ? (
         <DataTable
@@ -831,6 +945,194 @@ function ProjectDetailModal({
           }}
         />
       ) : null}
+      {skillFor ? (
+        <AllocationSkillModal
+          allocation={skillFor}
+          skills={skills}
+          isPending={isPending}
+          onClose={() => setSkillFor(null)}
+          onSave={(value) => {
+            onAddSkill(value);
+            setSkillFor(null);
+          }}
+        />
+      ) : null}
+    </Modal>
+  );
+}
+
+function AllocationSkillsPanel({
+  allocations,
+  canManageProjects,
+  onAddSkill,
+  onRemoveSkill,
+}: {
+  allocations: ProjectAllocationItem[];
+  canManageProjects: boolean;
+  onAddSkill: (allocation: ProjectAllocationItem) => void;
+  onRemoveSkill: (value: AllocationSkillRemoveInput) => void;
+}) {
+  if (allocations.length === 0) {
+    return (
+      <p className="text-center text-sm text-soft">
+        Adicione um vinculo para registrar skills.
+      </p>
+    );
+  }
+  return (
+    <div className="space-y-4">
+      {allocations.map((allocation) => (
+        <div
+          key={allocation.id}
+          className="rounded-md border border-border bg-surface p-3"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="font-medium text-strong">
+                {allocation.consultantName}
+              </p>
+              <p className="text-xs text-soft">{allocation.role}</p>
+            </div>
+            <ActionButton
+              variant="secondary"
+              size="sm"
+              icon={Tag}
+              disabled={!canManageProjects}
+              onClick={() => onAddSkill(allocation)}
+            >
+              Adicionar skill
+            </ActionButton>
+          </div>
+          {allocation.skills.length === 0 ? (
+            <p className="mt-3 text-sm text-soft">Sem skills nesta alocacao.</p>
+          ) : (
+            <ul className="mt-3 flex flex-wrap gap-2">
+              {allocation.skills.map((skill) => (
+                <li
+                  key={skill.id}
+                  className="flex items-center gap-2 rounded-full border border-border bg-surface-muted px-3 py-1 text-xs"
+                >
+                  <span className="font-medium text-strong">
+                    {skill.skillName}
+                  </span>
+                  {skill.level ? (
+                    <span className="text-soft">
+                      {skillLevelLabels[skill.level]}
+                    </span>
+                  ) : null}
+                  {skill.note ? (
+                    <span className="text-soft" title={skill.note}>
+                      *
+                    </span>
+                  ) : null}
+                  {canManageProjects ? (
+                    <button
+                      type="button"
+                      aria-label={`Remover ${skill.skillName} de ${allocation.consultantName}`}
+                      onClick={() => onRemoveSkill({ id: skill.id })}
+                      className="rounded-full p-0.5 text-medium hover:bg-surface"
+                    >
+                      <X aria-hidden="true" className="size-3.5" />
+                    </button>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AllocationSkillModal({
+  allocation,
+  skills,
+  isPending,
+  onClose,
+  onSave,
+}: {
+  allocation: ProjectAllocationItem;
+  skills: ProjectSkillOption[];
+  isPending: boolean;
+  onClose: () => void;
+  onSave: (value: AllocationSkillInput) => void;
+}) {
+  const [skillId, setSkillId] = useState("");
+  const [level, setLevel] = useState<SkillLevel | "">("");
+  const [note, setNote] = useState("");
+  const usedSkillIds = new Set(allocation.skills.map((skill) => skill.skillId));
+  const available = skills.filter((skill) => !usedSkillIds.has(skill.id));
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Skill da alocacao"
+      description={`Skill do catalogo usada por ${allocation.consultantName} neste projeto.`}
+      footer={
+        <>
+          <ActionButton variant="secondary" onClick={onClose}>
+            Cancelar
+          </ActionButton>
+          <ActionButton
+            disabled={isPending || !skillId}
+            onClick={() =>
+              onSave({
+                allocationId: allocation.id,
+                skillId,
+                level: level || undefined,
+                note: note.trim() || undefined,
+              })
+            }
+          >
+            Salvar
+          </ActionButton>
+        </>
+      }
+    >
+      <form className="grid gap-4 md:grid-cols-2">
+        <label className="space-y-1 text-sm font-medium text-medium">
+          Skill
+          <select
+            value={skillId}
+            onChange={(event) => setSkillId(event.target.value)}
+            className={fieldClass()}
+          >
+            <option value="">Selecione</option>
+            {available.map((skill) => (
+              <option key={skill.id} value={skill.id}>
+                {skill.category ? `${skill.category} - ${skill.name}` : skill.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="space-y-1 text-sm font-medium text-medium">
+          Nivel
+          <select
+            value={level}
+            onChange={(event) => setLevel(event.target.value as SkillLevel | "")}
+            className={fieldClass()}
+          >
+            <option value="">Sem nivel</option>
+            {(
+              ["BASIC", "INTERMEDIATE", "ADVANCED", "SPECIALIST"] as SkillLevel[]
+            ).map((item) => (
+              <option key={item} value={item}>
+                {skillLevelLabels[item]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="space-y-1 text-sm font-medium text-medium md:col-span-2">
+          Nota
+          <textarea
+            value={note}
+            onChange={(event) => setNote(event.target.value)}
+            className={cn(fieldClass(), "min-h-20 py-2")}
+          />
+        </label>
+      </form>
     </Modal>
   );
 }

@@ -19,6 +19,14 @@ const optionalText = (max: number) =>
     .optional()
     .transform((value) => (value ? value : undefined));
 
+// Empty input becomes undefined (field is optional); a non-empty value must be
+// a valid e-mail. Mirrors the optionalText shape used by the other fields.
+const optionalEmail = z.preprocess(
+  (value) =>
+    typeof value === "string" && value.trim() === "" ? undefined : value,
+  z.string().trim().max(254).email().optional(),
+);
+
 const nullableNumber = z.preprocess(
   (value) => (value === "" || value === null ? undefined : value),
   z.coerce.number().nonnegative().optional(),
@@ -32,6 +40,7 @@ const dayOfMonth = z.preprocess(
 export const clientInputSchema = z.object({
   name: z.string().trim().min(2).max(120),
   document: optionalText(20),
+  contactEmail: optionalEmail,
   logoUrl: optionalText(500),
   billingTypeId: optionalText(80),
   defaultHourlyRate: nullableNumber,
@@ -64,7 +73,24 @@ export const clientUpdateSchema = clientInputSchema.extend({
 
 export const billingTypeInputSchema = z.object({
   name: z.string().trim().min(2).max(80),
-  chargeType: z.enum(["HOURLY", "MONTHLY", "CONSULTANT_HOURLY", "FIXED"]),
+  chargeType: z.enum([
+    "HOURLY",
+    "MONTHLY",
+    "CONSULTANT_HOURLY",
+    "FIXED",
+    "HOURLY_PLUS_FIXED",
+    "HOUR_PACKAGE",
+    "PER_ALLOCATED_CONSULTANT",
+    "PER_PROJECT",
+    "MILESTONE",
+    "PER_SPRINT",
+    "TIME_AND_MATERIAL",
+    "ON_DEMAND",
+    "SUBSCRIPTION",
+    "PAY_AS_YOU_GO",
+    "SUCCESS_FEE",
+    "MIXED",
+  ]),
   roundingRule: z.enum([
     "NONE",
     "NEAREST_15_MINUTES",

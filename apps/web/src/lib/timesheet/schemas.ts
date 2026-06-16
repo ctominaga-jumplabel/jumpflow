@@ -121,7 +121,9 @@ export const COMMENT_REQUIRED_MESSAGE =
 export const decideHoursSchema = z
   .object({
     entryIds: z.array(idSchema).min(1, "Selecione ao menos um lançamento."),
-    decision: z.enum(["APPROVED", "REJECTED"]),
+    // APPROVED/REJECTED are decisions; SUBMITTED reopens a decided entry back
+    // to the pending queue (counts as a fresh MANUAL decision — see actions).
+    decision: z.enum(["APPROVED", "REJECTED", "SUBMITTED"]),
     comment: z.string(),
   })
   .superRefine((value, ctx) => {
@@ -135,3 +137,16 @@ export const decideHoursSchema = z
   });
 
 export type DecideHoursInput = z.infer<typeof decideHoursSchema>;
+
+/** Statuses a `decideHours` transition may legally start FROM, per target. */
+export const DECIDE_HOURS_SOURCE_STATUS: Record<
+  DecideHoursInput["decision"],
+  readonly string[]
+> = {
+  // Decide a pending entry, or switch a previously decided one directly.
+  APPROVED: ["SUBMITTED", "REJECTED"],
+  REJECTED: ["SUBMITTED", "APPROVED"],
+  // Reopen: an APPROVED/REJECTED entry goes back to the pending queue. CLOSED
+  // is intentionally absent (terminal — guarded again at the action level).
+  SUBMITTED: ["APPROVED", "REJECTED"],
+};

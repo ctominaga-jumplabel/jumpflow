@@ -78,3 +78,41 @@ describe("TimeEntryRow activity label", () => {
     expect(within(container).getByText(/não faturável/)).toBeInTheDocument();
   });
 });
+
+describe("TimeEntryRow hover tooltip", () => {
+  it("sets a row title with total hours and the readable status", () => {
+    renderRow(row({ status: "SUBMITTED", hours: [6, 6, 0, 0, 0, 0, 0] }));
+    const tr = screen.getByRole("row");
+    // Mirrors PeriodOverview: project · activity · total · status.
+    expect(tr).toHaveAttribute(
+      "title",
+      "Atlas · Dia Útil · 12h · Enviado",
+    );
+  });
+
+  it("renders a readable status label for a rejected row", () => {
+    renderRow(row({ status: "REJECTED", hours: [0, 0, 0, 0, 0, 0, 0] }));
+    expect(screen.getByRole("row")).toHaveAttribute(
+      "title",
+      expect.stringContaining("Reprovado"),
+    );
+  });
+});
+
+describe("TimeEntryRow edit affordance", () => {
+  it("exposes an edit button for a SUBMITTED row (now editable)", () => {
+    const onEdit = vi.fn();
+    renderRow(row({ status: "SUBMITTED" }), onEdit);
+    expect(
+      screen.getByRole("button", { name: /Editar lançamento de Atlas/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("renders APPROVED and CLOSED rows as read-only (no edit button)", () => {
+    const onEdit = vi.fn();
+    renderRow(row({ status: "APPROVED" }), onEdit);
+    expect(
+      screen.queryByRole("button", { name: /Editar lançamento/ }),
+    ).not.toBeInTheDocument();
+  });
+});

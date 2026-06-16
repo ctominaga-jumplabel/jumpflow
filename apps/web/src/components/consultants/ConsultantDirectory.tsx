@@ -22,12 +22,15 @@ import {
   saveBankAccount,
   saveCompensation,
   saveConsultantIdentity,
+  saveVoucherBenefits,
 } from "@/app/app/consultores/actions";
 import type {
   BankAccountInput,
   CompensationInput,
   ConsultantIdentityInput,
+  VoucherBenefitsInput,
 } from "@/lib/consultants/schemas";
+import { computeCompensation } from "@/lib/consultants/compensation";
 import { ConsultantAvailabilityBadge } from "./ConsultantAvailabilityBadge";
 import { ConsultantSkillChips } from "./ConsultantSkillChips";
 
@@ -201,6 +204,13 @@ function ConsultantDetailModal({
   const [bankKind, setBankKind] = useState<"CLT" | "PJ">("CLT");
   const [pixKey, setPixKey] = useState("");
   const [compensation, setCompensation] = useState<CompensationInput | null>(null);
+  const [vouchers, setVouchers] = useState<{
+    vr?: number;
+    va?: number;
+    vt?: number;
+  }>({});
+  const [dependents, setDependents] = useState<number>(0);
+  const [autoCltCharges, setAutoCltCharges] = useState<boolean>(true);
   if (!consultant) return null;
   const consultantId = consultant.id;
 
@@ -262,6 +272,37 @@ function ConsultantDetailModal({
     const result = await saveCompensation(currentCompensation);
     onMessage(result.ok ? "Compensacao salva." : result.message);
   }
+
+  async function saveVouchers() {
+    const input: VoucherBenefitsInput = {
+      consultantId,
+      startsAt: currentCompensation.startsAt,
+      vr: vouchers.vr,
+      va: vouchers.va,
+      vt: vouchers.vt,
+    };
+    const result = await saveVoucherBenefits(input);
+    onMessage(result.ok ? "Beneficios VA/VR/VT salvos." : result.message);
+  }
+
+  // Live preview of agreed value + benefits + automatic CLT charges. Mirrors
+  // computeCompensation so the operator sees INSS/IRRF/FGTS and the net before
+  // saving. FGTS is shown as employer cost only and never reduces the net.
+  const preview = computeCompensation(
+    {
+      contractType: currentCompensation.contractType,
+      cltAmount: currentCompensation.cltAmount,
+      pjAmount: currentCompensation.pjAmount,
+      benefitCardAmount: currentCompensation.benefitCardAmount,
+      cltCharges:
+        currentCompensation.contractType === "PJ"
+          ? null
+          : { autoApplyDeductions: autoCltCharges, dependents },
+    },
+    [vouchers.vr, vouchers.va, vouchers.vt]
+      .filter((value): value is number => typeof value === "number" && value > 0)
+      .map((amount) => ({ amount })),
+  );
 
   return (
     <Modal
@@ -367,7 +408,7 @@ function ConsultantDetailModal({
         <section className="space-y-3 rounded-md border border-border p-3">
           <div className="flex items-center gap-2 text-sm font-semibold text-strong">
             <BadgeDollarSign aria-hidden="true" className="size-4" />
-            CLT FLEX
+            Valor acordado
           </div>
           <div className="grid gap-3 md:grid-cols-3">
             <NumberInput
@@ -394,19 +435,108 @@ function ConsultantDetailModal({
                 })
               }
             />
+            <NumberInput
+              label="VR (Vale Refeicao)"
+              value={vouchers.vr}
+              onChange={(value) => setVouchers({ ...vouchers, vr: value })}
+            />
+            <NumberInput
+              label="VA (Vale Alimentacao)"
+              value={vouchers.va}
+              onChange={(value) => setVouchers({ ...vouchers, va: value })}
+            />
+            <NumberInput
+              label="VT (Vale Transporte)"
+              value={vouchers.vt}
+              onChange={(value) => setVouchers({ ...vouchers, vt: value })}
+            />
           </div>
-          <ActionButton
-            size="sm"
-            disabled={!canManageFinancials}
-            onClick={saveFlex}
-            icon={BadgeDollarSign}
-          >
-            Salvar compensacao
-          </ActionButton>
+          <div className="flex flex-wrap items-end gap-3">
+            <NumberInput
+              label="Dependentes (IRRF)"
+              value={dependents}
+              onChange={(value) => setDependents(value ?? 0)}
+            />
+            <label className="flex items-center gap-2 text-sm font-medium text-medium">
+              <input
+                type="checkbox"
+                checked={autoCltCharges}
+                onChange={(event) => setAutoCltCharges(event.target.checked)}
+              />
+              Aplicar encargos CLT (INSS/IRRF) ao liquido
+            </label>
+          </div>
+
+          {currentCompensation.contractType !== "PJ" &&
+          preview.cltCharges ? (
+            <dl className="grid gap-2 rounded-md border border-border bg-surface-muted p-3 text-sm text-medium md:grid-cols-2">
+              <div className="flex justify-between gap-2">
+                <dt>INSS (desconto)</dt>
+                <dd className="font-semibold text-strong">
+                  {formatBRL(preview.cltCharges.inss)}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt>IRRF (desconto)</dt>
+                <dd className="font-semibold text-strong">
+                  {formatBRL(preview.cltCharges.irrf)}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt>FGTS (encargo patronal, informativo)</dt>
+                <dd className="font-semibold text-strong">
+                  {formatBRL(preview.cltCharges.fgts)}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt>Beneficios</dt>
+                <dd className="font-semibold text-strong">
+                  {formatBRL(preview.benefitAmount)}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-2 border-t border-border pt-2 md:col-span-2">
+                <dt className="font-semibold text-strong">
+                  Liquido estimado (sem FGTS)
+                </dt>
+                <dd className="font-semibold text-strong">
+                  {formatBRL(preview.netAmount)}
+                </dd>
+              </div>
+            </dl>
+          ) : null}
+
+          <div className="flex flex-wrap gap-2">
+            <ActionButton
+              size="sm"
+              disabled={!canManageFinancials}
+              onClick={saveFlex}
+              icon={BadgeDollarSign}
+            >
+              Salvar compensacao
+            </ActionButton>
+            <ActionButton
+              size="sm"
+              variant="secondary"
+              disabled={!canManageFinancials}
+              onClick={saveVouchers}
+              icon={CreditCard}
+            >
+              Salvar VA/VR/VT
+            </ActionButton>
+          </div>
         </section>
       </div>
     </Modal>
   );
+}
+
+const brlFormatter = new Intl.NumberFormat("pt-BR", {
+  style: "currency",
+  currency: "BRL",
+});
+
+function formatBRL(value: number) {
+  return brlFormatter.format(value);
 }
 
 function fieldClass() {

@@ -736,7 +736,8 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
       let rows = w.rows;
 
       if (editingRowId) {
-        // Update the row being edited (only DRAFT/REJECTED reach here).
+        // Update the row being edited (DRAFT/REJECTED/SUBMITTED reach here).
+        // Editing keeps/sets it SUBMITTED so it stays in the approval queue.
         rows = rows.map((r) =>
           r.id === editingRowId
             ? {

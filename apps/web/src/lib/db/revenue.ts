@@ -140,6 +140,105 @@ export async function listRevenueClosings(input: {
   };
 }
 
+export interface RevenueClosingForPreInvoice {
+  closing: {
+    id: string;
+    month: number;
+    year: number;
+    status: string;
+    adjustmentAmount: number;
+  };
+  client: {
+    id: string;
+    name: string;
+    document: string | null;
+    contactEmail: string | null;
+    municipality: string | null;
+    issRate: number | null;
+  };
+  lines: Array<{
+    projectId: string;
+    projectName: string;
+    hours: number;
+    unitRate: number;
+    amount: number;
+  }>;
+}
+
+/**
+ * Load everything the pure pre-invoice builder needs: the closing, its client
+ * billing data (document, municipality, issRate, contactEmail) and the lines
+ * grouped by project. Lines are summed per project so the pre-invoice shows one
+ * row per project (not one per time entry).
+ */
+export async function getRevenueClosingForPreInvoice(
+  id: string,
+): Promise<RevenueClosingForPreInvoice | null> {
+  const closing = await prisma.revenueClosing.findUnique({
+    where: { id },
+    include: {
+      client: {
+        select: {
+          id: true,
+          name: true,
+          document: true,
+          contactEmail: true,
+          municipality: true,
+          issRate: true,
+        },
+      },
+      lines: {
+        include: { project: { select: { name: true } } },
+        orderBy: { createdAt: "asc" },
+      },
+    },
+  });
+  if (!closing) return null;
+
+  const grouped = new Map<
+    string,
+    { projectId: string; projectName: string; hours: number; amount: number }
+  >();
+  for (const line of closing.lines) {
+    const current = grouped.get(line.projectId) ?? {
+      projectId: line.projectId,
+      projectName: line.project.name,
+      hours: 0,
+      amount: 0,
+    };
+    current.hours += toNumber(line.hours);
+    current.amount += toNumber(line.amount);
+    grouped.set(line.projectId, current);
+  }
+
+  const lines = [...grouped.values()].map((g) => ({
+    projectId: g.projectId,
+    projectName: g.projectName,
+    hours: g.hours,
+    unitRate: closingAverageRate(g.hours, g.amount),
+    amount: g.amount,
+  }));
+
+  return {
+    closing: {
+      id: closing.id,
+      month: closing.month,
+      year: closing.year,
+      status: closing.status,
+      adjustmentAmount: toNumber(closing.adjustmentAmount),
+    },
+    client: {
+      id: closing.client.id,
+      name: closing.client.name,
+      document: closing.client.document,
+      contactEmail: closing.client.contactEmail,
+      municipality: closing.client.municipality,
+      issRate: closing.client.issRate == null ? null : toNumber(closing.client.issRate),
+    },
+    lines,
+  };
+}
+
 export async function generateRevenueClosings(input: {
   month: number;
   year: number;
