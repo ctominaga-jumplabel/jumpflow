@@ -9,23 +9,20 @@ Base do MVP **publicada em producao**. **Fases A-H TODAS CONCLUIDAS** (verde:
 tela 100% executado. Proximo: aplicar migrations pendentes + setup de infra/cert
 (ver abaixo) e validacao manual em homologacao.
 
-## MIGRATIONS PENDENTES DE APLICAR (rodar `npm run db:deploy` com .env do DB)
+## MIGRATIONS - APLICADAS EM PRODUCAO (2026-06-16, via `npm run db:deploy`)
 
-- `20260615120000_expand_billing_charge_type` (Fase C) - enum BillingChargeType
-  para 16 valores. Aditiva (ALTER TYPE ADD VALUE), segura. Fora de transacao.
-- `20260615130000_add_allocation_skill` (Fase D) - tabela AllocationSkill. Nasce
-  vazia, nao afeta dados existentes.
-- `20260615140000_add_client_contact_email` (Fase G) - coluna Client.contactEmail
-  nullable. Aditiva.
-- `20260615150000_add_pre_invoice_email_type` (Fase G) - enum AutomationEmailType
-  +PRE_INVOICE. Aditiva (ALTER TYPE ADD VALUE).
-- `20260615160000_add_nfse_issued_email_type` (Fase H) - enum AutomationEmailType
-  +NFSE_ISSUED. Aditiva (ALTER TYPE ADD VALUE).
+As 5 migrations das Fases C-H foram aplicadas com sucesso no Supabase
+(pooler aws-1-us-east-2). PR #2 mergeado na `main` (commit 13065a1) -> auto-deploy
+Vercel disparado. Gate de schema resolvido.
 
-## PRE-REQUISITO INFRA (devops)
+Nota .env: o root `.env` e UTF-8 com BOM; a 1a chave (`DATABASE_URL`) vem colada ao
+BOM, entao para carregar use grep+sed e strip de BOM/CR (ver [[deploy-migrations-gate]]).
 
-- Bucket Supabase privado `client-logos` (Fase C, analogo a `expense-receipts`).
-  Sem ele/sem envs SUPABASE_*, upload de logo degrada para input de URL.
+## PRE-REQUISITO INFRA PENDENTE (devops) - gate LEVE (features degradam, nao quebram)
+
+- Buckets Supabase privados: `client-logos`, `pre-invoices`, `nfse`. Sem eles +
+  envs SUPABASE_*, upload de logo / pre-fatura / XML de NFS-e degradam honestamente.
+- NFS-e real: certificado A1 + credenciais homologacao SP + `setNfseSigner(...)`.
 
 ## O que funciona (Pronto)
 
@@ -117,6 +114,25 @@ tela 100% executado. Proximo: aplicar migrations pendentes + setup de infra/cert
   NFSE_AMBIENTE(homologacao|producao). Registrar um `NfseSigner` real (XMLDSig com
   A1) via `setNfseSigner(...)` - hoje o signer default recusa honestamente.
 - Bucket Supabase `nfse` (privado) + `pre-invoices` + `client-logos`.
+
+## Pos-deploy: provisionamento de consultor a partir de Acessos (2026-06-16)
+
+- Causa: `Acessos` (User, criado em `syncUserFromAuth` no login Entra) e
+  `Consultores` (Consultant) eram desconectados; nada criava Consultant ao entrar.
+  Lista vinha do DB mas populada com seed/demo (val-c1..c7, seed-*).
+- Feito: `ensureConsultantForUser` em `lib/db/users.ts` cria/vincula um Consultant
+  por padrao (status ACTIVE, seniority MID_LEVEL) no `syncUserFromAuth`,
+  idempotente e NAO-FATAL (falha nao quebra login). Sem conceder roles (RBAC
+  separado). Lista nao filtra inativos (permanecem visiveis).
+- Consequencia: usuarios existentes (christopher, patricia) ganham consultant no
+  proximo login pos-deploy; novos tambem.
+
+## FOLLOW-UP: sync ativo/inativo com Entra ID
+
+Aspiracao do usuario: puxar consultores ativos do Entra ID e inativar no app
+quando inativados no Entra (mantendo inativos visiveis na lista). Exige Microsoft
+Graph API + permissao no app Entra + job agendado (detectar inativacao de quem
+nao loga). Nao implementado - depende de credencial/permissao externa.
 
 ## Roadmap concluido
 
