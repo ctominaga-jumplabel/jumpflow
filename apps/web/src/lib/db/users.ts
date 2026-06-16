@@ -41,10 +41,85 @@ export function mapPersistedRoles(
 }
 
 /**
+ * Default seniority for a Consultant auto-created from an authenticated login.
+ * `Seniority` has no schema default and is required, so a sensible mid value is
+ * chosen; admins can refine it later. Kept as a const so tests and callers
+ * share the same expectation.
+ */
+export const DEFAULT_CONSULTANT_SENIORITY = "MID_LEVEL" as const;
+
+/**
+ * Idempotently guarantee a `Consultant` profile for an authenticated identity.
+ *
+ * Every user that logs in gets a Consultant profile by default so they show up
+ * in the Consultores directory. The function is idempotent and only writes when
+ * the profile is missing:
+ *
+ * - User already has a linked consultant (its `userId` was returned): no-op.
+ * - A consultant exists for the same email with `userId === null`: link it
+ *   (covers seeds and pre-registered emails). No duplicate row is created.
+ * - A consultant exists for the email but is linked to ANOTHER user: leave it
+ *   untouched and log — never steal an existing link.
+ * - No consultant for the email: create one (ACTIVE, default seniority).
+ *
+ * This MUST NOT be fatal: roles/RBAC and login do not depend on it. Callers
+ * should still wrap it defensively, but errors here are caught and logged.
+ *
+ * @param db Prisma client (or transaction) — keeps it testable.
+ * @param hasLinkedConsultant Whether the user already owns a consultant, taken
+ *   from the user upsert `include`. Avoids an extra query on the common path.
+ */
+export async function ensureConsultantForUser(
+  db: typeof prisma,
+  input: { userId: string; email: string; name: string },
+  hasLinkedConsultant: boolean,
+): Promise<void> {
+  // Common path: the user already owns a consultant. Read-only, nothing to do.
+  if (hasLinkedConsultant) return;
+
+  const existing = await db.consultant.findUnique({
+    where: { email: input.email },
+    select: { id: true, userId: true },
+  });
+
+  if (existing) {
+    if (existing.userId === null) {
+      // Pre-registered / seeded consultant: attach this user to it.
+      await db.consultant.update({
+        where: { id: existing.id },
+        data: { userId: input.userId },
+      });
+      return;
+    }
+    if (existing.userId !== input.userId) {
+      // Email belongs to a consultant linked to another user — do not touch.
+      console.warn(
+        `[ensureConsultantForUser] consultant ${existing.id} for ${input.email} is linked to a different user; skipping`,
+      );
+    }
+    return;
+  }
+
+  await db.consultant.create({
+    data: {
+      userId: input.userId,
+      name: input.name,
+      email: input.email,
+      status: "ACTIVE",
+      seniority: DEFAULT_CONSULTANT_SENIORITY,
+    },
+  });
+}
+
+/**
  * Idempotently sync the authenticated identity into the `User` table and
  * return the persisted user together with its roles. Email is the natural key
  * (unique). Existing rows have their display name refreshed; roles are NOT
  * granted here — role provisioning is a separate, audited admin action.
+ *
+ * As a side effect, every authenticated identity is guaranteed a `Consultant`
+ * profile (see {@link ensureConsultantForUser}). That step is non-fatal: if it
+ * fails, login still succeeds and the persisted user is returned.
  */
 export async function syncUserFromAuth(
   input: SyncUserInput,
@@ -56,8 +131,25 @@ export async function syncUserFromAuth(
     where: { email },
     update: { name },
     create: { email, name },
-    include: { roles: { include: { role: true } } },
+    include: {
+      roles: { include: { role: true } },
+      consultant: { select: { id: true } },
+    },
   });
+
+  try {
+    await ensureConsultantForUser(
+      prisma,
+      { userId: user.id, email: user.email, name: user.name },
+      user.consultant !== null,
+    );
+  } catch (error) {
+    // Non-fatal: auth must never break because of consultant provisioning.
+    console.error(
+      `[syncUserFromAuth] failed to ensure consultant for ${user.email}`,
+      error,
+    );
+  }
 
   return {
     id: user.id,

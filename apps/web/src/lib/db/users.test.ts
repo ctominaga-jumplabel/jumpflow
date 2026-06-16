@@ -2,6 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const upsert = vi.fn();
 const findUnique = vi.fn();
+const consultantFindUnique = vi.fn();
+const consultantUpdate = vi.fn();
+const consultantCreate = vi.fn();
 
 // Mock the database package so no real Prisma client / connection is needed.
 vi.mock("@jumpflow/database", () => ({
@@ -10,14 +13,32 @@ vi.mock("@jumpflow/database", () => ({
       upsert: (...args: unknown[]) => upsert(...args),
       findUnique: (...args: unknown[]) => findUnique(...args),
     },
+    consultant: {
+      findUnique: (...args: unknown[]) => consultantFindUnique(...args),
+      update: (...args: unknown[]) => consultantUpdate(...args),
+      create: (...args: unknown[]) => consultantCreate(...args),
+    },
   },
 }));
 
 import {
+  DEFAULT_CONSULTANT_SENIORITY,
+  ensureConsultantForUser,
   loadUserRoles,
   mapPersistedRoles,
   syncUserFromAuth,
 } from "@/lib/db/users";
+
+// Cast to the Prisma client shape expected by ensureConsultantForUser; the
+// mocked surface is all the function touches.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const db: any = {
+  consultant: {
+    findUnique: (...args: unknown[]) => consultantFindUnique(...args),
+    update: (...args: unknown[]) => consultantUpdate(...args),
+    create: (...args: unknown[]) => consultantCreate(...args),
+  },
+};
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -47,6 +68,7 @@ describe("syncUserFromAuth", () => {
       name: "Real User",
       email: "user@x.com",
       roles: [{ role: { name: "FINANCE" } }, { role: { name: "BAD" } }],
+      consultant: { id: "c1" },
     });
 
     const result = await syncUserFromAuth({
@@ -75,12 +97,132 @@ describe("syncUserFromAuth", () => {
       name: "user@x.com",
       email: "user@x.com",
       roles: [],
+      consultant: { id: "c2" },
     });
 
     await syncUserFromAuth({ email: "user@x.com", name: "  " });
 
     const arg = upsert.mock.calls[0][0] as { create: { name: string } };
     expect(arg.create.name).toBe("user@x.com");
+  });
+
+  it("creates a consultant for a brand-new user with no consultant", async () => {
+    upsert.mockResolvedValue({
+      id: "u3",
+      name: "New User",
+      email: "new@x.com",
+      roles: [],
+      consultant: null,
+    });
+    consultantFindUnique.mockResolvedValue(null);
+    consultantCreate.mockResolvedValue({ id: "c3" });
+
+    const result = await syncUserFromAuth({
+      email: "new@x.com",
+      name: "New User",
+    });
+
+    expect(result.id).toBe("u3");
+    expect(consultantCreate).toHaveBeenCalledWith({
+      data: {
+        userId: "u3",
+        name: "New User",
+        email: "new@x.com",
+        status: "ACTIVE",
+        seniority: DEFAULT_CONSULTANT_SENIORITY,
+      },
+    });
+    expect(consultantUpdate).not.toHaveBeenCalled();
+  });
+
+  it("does not break login when consultant provisioning fails", async () => {
+    upsert.mockResolvedValue({
+      id: "u4",
+      name: "Flaky User",
+      email: "flaky@x.com",
+      roles: [{ role: { name: "ADMIN" } }],
+      consultant: null,
+    });
+    consultantFindUnique.mockRejectedValue(new Error("db down"));
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await syncUserFromAuth({
+      email: "flaky@x.com",
+      name: "Flaky User",
+    });
+
+    expect(result).toEqual({
+      id: "u4",
+      name: "Flaky User",
+      email: "flaky@x.com",
+      roles: ["ADMIN"],
+    });
+    expect(errorSpy).toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+});
+
+describe("ensureConsultantForUser", () => {
+  const user = { userId: "u1", email: "user@x.com", name: "Real User" };
+
+  it("is a no-op when the user already has a linked consultant", async () => {
+    await ensureConsultantForUser(db, user, true);
+
+    expect(consultantFindUnique).not.toHaveBeenCalled();
+    expect(consultantUpdate).not.toHaveBeenCalled();
+    expect(consultantCreate).not.toHaveBeenCalled();
+  });
+
+  it("creates an ACTIVE consultant with the default seniority when none exists", async () => {
+    consultantFindUnique.mockResolvedValue(null);
+    consultantCreate.mockResolvedValue({ id: "c1" });
+
+    await ensureConsultantForUser(db, user, false);
+
+    expect(consultantCreate).toHaveBeenCalledWith({
+      data: {
+        userId: "u1",
+        name: "Real User",
+        email: "user@x.com",
+        status: "ACTIVE",
+        seniority: DEFAULT_CONSULTANT_SENIORITY,
+      },
+    });
+    expect(consultantUpdate).not.toHaveBeenCalled();
+  });
+
+  it("links an unlinked consultant for the same email instead of duplicating", async () => {
+    consultantFindUnique.mockResolvedValue({ id: "c9", userId: null });
+    consultantUpdate.mockResolvedValue({ id: "c9" });
+
+    await ensureConsultantForUser(db, user, false);
+
+    expect(consultantUpdate).toHaveBeenCalledWith({
+      where: { id: "c9" },
+      data: { userId: "u1" },
+    });
+    expect(consultantCreate).not.toHaveBeenCalled();
+  });
+
+  it("leaves a consultant linked to another user untouched", async () => {
+    consultantFindUnique.mockResolvedValue({ id: "c9", userId: "other-user" });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await ensureConsultantForUser(db, user, false);
+
+    expect(consultantUpdate).not.toHaveBeenCalled();
+    expect(consultantCreate).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it("is a no-op when the consultant is already linked to this same user", async () => {
+    consultantFindUnique.mockResolvedValue({ id: "c1", userId: "u1" });
+
+    await ensureConsultantForUser(db, user, false);
+
+    expect(consultantUpdate).not.toHaveBeenCalled();
+    expect(consultantCreate).not.toHaveBeenCalled();
   });
 });
 
