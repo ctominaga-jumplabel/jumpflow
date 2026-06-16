@@ -1,7 +1,14 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { Check, ClipboardCheck, ListChecks, TriangleAlert, X } from "lucide-react";
+import {
+  Check,
+  ClipboardCheck,
+  ListChecks,
+  TriangleAlert,
+  Undo2,
+  X,
+} from "lucide-react";
 import { ActionButton } from "@/components/ui/ActionButton";
 import { SectionPanel } from "@/components/ui/SectionPanel";
 import { StatusBadge } from "@/components/ui/StatusBadge";
@@ -28,6 +35,8 @@ import { ApprovalStatusBadge } from "./ApprovalStatusBadge";
 import { ApprovalDecisionPanel } from "./ApprovalDecisionPanel";
 
 type Tab = "PENDING" | "HISTORY";
+/** Bulk actions: the two decisions plus REOPEN (decided -> pending again). */
+type BulkAction = "APPROVED" | "REJECTED" | "REOPEN";
 type KindFilter = ApprovalKind | "ALL";
 type StatusFilter = ApprovalStatus | "ALL";
 
@@ -86,14 +95,23 @@ export interface ApprovalQueueProps {
  * (Approval + AuditEvent in one transaction; the route revalidates after).
  * Items with `source: "mock"` (expenses, or hours without a database) keep the
  * original local behavior with honest "(local)" feedback.
+ *
+ * Bulk actions work on both tabs: PENDING decides (approve/reject), HISTORY
+ * reopens a decided item to the pending queue or switches its decision. CLOSED
+ * is terminal and is never surfaced as an approval item (the server also
+ * refuses it).
  */
 export function ApprovalQueue({
   items: seed = defaultItems,
   demoBanner = false,
 }: ApprovalQueueProps) {
   // Local decisions apply only to mock items; db items refresh via the server.
+  // PENDING here is a reopen (a decided item sent back to the pending queue).
   const [mockDecisions, setMockDecisions] = useState<
-    Record<string, { status: "APPROVED" | "REJECTED"; comment?: string }>
+    Record<
+      string,
+      { status: "APPROVED" | "REJECTED" | "PENDING"; comment?: string }
+    >
   >({});
   const [tab, setTab] = useState<Tab>("PENDING");
   const [kind, setKind] = useState<KindFilter>("ALL");
@@ -161,13 +179,22 @@ export function ApprovalQueue({
   const list = tab === "PENDING" ? pending : history;
   const selected = list.find((i) => i.id === selectedId) ?? list[0] ?? null;
   const activeId = selected?.id ?? null;
-  const selectedPending = selectedIds
-    .map((id) => pending.find((item) => item.id === id))
+  // Bulk selection follows the active tab: PENDING -> decide; HISTORY
+  // (Aprovados/Reprovados) -> reopen or switch the decision.
+  const selectedItems = selectedIds
+    .map((id) => list.find((item) => item.id === id))
     .filter((item): item is ApprovalItem => Boolean(item));
 
   function selectNextPending(decidedId: string) {
     const remaining = pending.filter((i) => i.id !== decidedId);
     setSelectedId(remaining[0]?.id ?? null);
+  }
+
+  function switchTab(next: Tab) {
+    // Selections never carry across tabs (a pending pick must not become a
+    // reopen target by accident, and vice-versa).
+    setTab(next);
+    setSelectedIds([]);
   }
 
   function toggleSelected(id: string) {
@@ -178,8 +205,8 @@ export function ApprovalQueue({
     );
   }
 
-  function toggleAllVisiblePending() {
-    const ids = pending.map((item) => item.id);
+  function toggleAllVisible() {
+    const ids = list.map((item) => item.id);
     setSelectedIds((current) =>
       ids.every((id) => current.includes(id))
         ? current.filter((id) => !ids.includes(id))
@@ -187,30 +214,36 @@ export function ApprovalQueue({
     );
   }
 
-  function decideMany(status: "APPROVED" | "REJECTED") {
+  // A bulk action is the SUBMITTED reopen plus the two decisions. REOPEN maps
+  // to decideHours({ decision: "SUBMITTED" }) for db hours and to a local
+  // PENDING status for mock items.
+  function decideMany(action: BulkAction) {
     const comment = bulkComment.trim();
-    if (status === "REJECTED" && comment.length === 0) {
+    if (action === "REJECTED" && comment.length === 0) {
       notify("warning", "Informe uma justificativa para reprovar em massa.");
       return;
     }
-    if (selectedPending.length === 0) {
-      notify("info", "Selecione ao menos uma pendencia.");
+    if (selectedItems.length === 0) {
+      notify("info", "Selecione ao menos um item.");
       return;
     }
+
+    const decision = action === "REOPEN" ? "SUBMITTED" : action;
 
     startTransition(async () => {
       const successfulIds = new Set<string>();
       const errors: string[] = [];
-      const hourEntryIds = selectedPending
-        .filter((item) => item.source === "db" && item.type === "HOURS")
-        .flatMap((item) => item.entryIds ?? []);
+      const hourItems = selectedItems.filter(
+        (item) => item.source === "db" && item.type === "HOURS",
+      );
+      const hourEntryIds = hourItems.flatMap((item) => item.entryIds ?? []);
       let decided = 0;
       let alreadyDecided = 0;
 
       if (hourEntryIds.length > 0) {
         const result = await decideHours({
           entryIds: hourEntryIds,
-          decision: status,
+          decision,
           comment,
         });
         if (!result.ok) {
@@ -218,41 +251,45 @@ export function ApprovalQueue({
         } else {
           decided += result.data.decided;
           alreadyDecided += result.data.alreadyDecided;
-          for (const item of selectedPending) {
-            if (item.source === "db" && item.type === "HOURS") {
-              successfulIds.add(item.id);
-            }
+          for (const item of hourItems) successfulIds.add(item.id);
+        }
+      }
+
+      // Expenses run their own two-stage chain and have no reopen; only
+      // decisions route through the expense actions.
+      const expenseItems = selectedItems.filter(
+        (item) =>
+          item.source === "db" && item.type === "EXPENSE" && item.expenseId,
+      );
+      if (action === "REOPEN" && expenseItems.length > 0) {
+        errors.push("Reabertura não disponível para despesas.");
+      } else {
+        for (const item of expenseItems) {
+          const decideExpense =
+            item.stage === "FINANCE" ? decideAsFinance : decideAsManager;
+          const result = await decideExpense({
+            expenseId: item.expenseId!,
+            decision: decision as "APPROVED" | "REJECTED",
+            comment,
+          });
+          if (!result.ok) {
+            errors.push(result.message);
+            continue;
           }
+          decided += 1;
+          successfulIds.add(item.id);
         }
       }
 
-      for (const item of selectedPending) {
-        if (item.source !== "db" || item.type !== "EXPENSE" || !item.expenseId) {
-          continue;
-        }
-        const decideExpense =
-          item.stage === "FINANCE" ? decideAsFinance : decideAsManager;
-        const result = await decideExpense({
-          expenseId: item.expenseId,
-          decision: status,
-          comment,
-        });
-        if (!result.ok) {
-          errors.push(result.message);
-          continue;
-        }
-        decided += 1;
-        successfulIds.add(item.id);
-      }
-
-      const mockIds = selectedPending
+      const mockIds = selectedItems
         .filter((item) => item.source === "mock")
         .map((item) => item.id);
       if (mockIds.length > 0) {
+        const mockStatus = action === "REOPEN" ? "PENDING" : action;
         setMockDecisions((current) => {
           const next = { ...current };
           for (const id of mockIds) {
-            next[id] = { status, comment: comment || undefined };
+            next[id] = { status: mockStatus, comment: comment || undefined };
           }
           return next;
         });
@@ -260,12 +297,12 @@ export function ApprovalQueue({
         for (const id of mockIds) successfulIds.add(id);
       }
 
-      const remaining = pending.filter((item) => !successfulIds.has(item.id));
       setSelectedIds((current) => current.filter((id) => !successfulIds.has(id)));
       setBulkComment("");
-      setSelectedId(remaining[0]?.id ?? null);
+      const nextPending = pending.filter((item) => !successfulIds.has(item.id));
+      setSelectedId(nextPending[0]?.id ?? null);
       const suffix =
-        alreadyDecided > 0 ? ` ${alreadyDecided} ja decidido(s).` : "";
+        alreadyDecided > 0 ? ` ${alreadyDecided} ja processado(s).` : "";
       if (errors.length > 0) {
         notify(
           "warning",
@@ -273,11 +310,15 @@ export function ApprovalQueue({
         );
         return;
       }
+      const verb =
+        action === "APPROVED"
+          ? "aprovado(s)"
+          : action === "REJECTED"
+            ? "reprovado(s) com justificativa"
+            : "reaberto(s) para a fila pendente";
       notify(
-        status === "APPROVED" ? "success" : "info",
-        status === "APPROVED"
-          ? `${decided} item(ns) aprovado(s).${suffix}`
-          : `${decided} item(ns) reprovado(s) com justificativa.${suffix}`,
+        action === "REJECTED" ? "info" : "success",
+        `${decided} item(ns) ${verb}.${suffix}`,
       );
     });
   }
@@ -548,23 +589,27 @@ export function ApprovalQueue({
               label="Pendentes"
               count={pending.length}
               active={tab === "PENDING"}
-              onClick={() => setTab("PENDING")}
+              onClick={() => switchTab("PENDING")}
             />
             <FilterChip
               label="Histórico"
               count={history.length}
               active={tab === "HISTORY"}
-              onClick={() => setTab("HISTORY")}
+              onClick={() => switchTab("HISTORY")}
             />
           </div>
 
-          {tab === "PENDING" && pending.length > 0 ? (
+          {list.length > 0 ? (
             <SectionPanel
-              title="Decisao em massa"
-              description="A decisao usa as mesmas regras e auditoria do fluxo individual."
+              title={tab === "PENDING" ? "Decisao em massa" : "Revisao em massa"}
+              description={
+                tab === "PENDING"
+                  ? "A decisao usa as mesmas regras e auditoria do fluxo individual."
+                  : "Reabra para a fila ou troque a decisao; cada item gera Approval e auditoria. Itens fechados nao podem ser alterados."
+              }
               action={
                 <StatusBadge tone="info">
-                  {selectedPending.length} selecionado(s)
+                  {selectedItems.length} selecionado(s)
                 </StatusBadge>
               }
             >
@@ -581,7 +626,7 @@ export function ApprovalQueue({
                     value={bulkComment}
                     onChange={(event) => setBulkComment(event.target.value)}
                     rows={2}
-                    placeholder="Obrigatoria para reprovar; opcional para aprovar."
+                    placeholder="Obrigatoria para reprovar; opcional para aprovar ou reabrir."
                     className={cn(
                       "w-full resize-y rounded-md border border-border bg-surface px-3 py-2 text-sm text-strong placeholder:text-soft",
                       focusRing,
@@ -594,15 +639,26 @@ export function ApprovalQueue({
                     size="sm"
                     icon={ListChecks}
                     disabled={isPending}
-                    onClick={toggleAllVisiblePending}
+                    onClick={toggleAllVisible}
                   >
                     Selecionar visiveis
                   </ActionButton>
+                  {tab === "HISTORY" ? (
+                    <ActionButton
+                      variant="secondary"
+                      size="sm"
+                      icon={Undo2}
+                      disabled={isPending || selectedItems.length === 0}
+                      onClick={() => decideMany("REOPEN")}
+                    >
+                      Reabrir selecao
+                    </ActionButton>
+                  ) : null}
                   <ActionButton
                     variant="success"
                     size="sm"
                     icon={Check}
-                    disabled={isPending || selectedPending.length === 0}
+                    disabled={isPending || selectedItems.length === 0}
                     onClick={() => decideMany("APPROVED")}
                   >
                     Aprovar selecao
@@ -613,7 +669,7 @@ export function ApprovalQueue({
                     icon={X}
                     disabled={
                       isPending ||
-                      selectedPending.length === 0 ||
+                      selectedItems.length === 0 ||
                       bulkComment.trim().length === 0
                     }
                     onClick={() => decideMany("REJECTED")}
@@ -658,24 +714,21 @@ export function ApprovalQueue({
                   return (
                     <li key={item.id}>
                       <div className="flex items-start">
-                        {tab === "PENDING" ? (
-                          <label className="flex h-full px-5 py-4">
-                            <input
-                              type="checkbox"
-                              checked={isSelected}
-                              onChange={() => toggleSelected(item.id)}
-                              aria-label={`Selecionar ${item.consultantName}`}
-                              className="size-4 rounded border-border text-brand focus:ring-brand"
-                            />
-                          </label>
-                        ) : null}
+                        <label className="flex h-full px-5 py-4">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleSelected(item.id)}
+                            aria-label={`Selecionar ${item.consultantName}`}
+                            className="size-4 rounded border-border text-brand focus:ring-brand"
+                          />
+                        </label>
                         <button
                           type="button"
                           onClick={() => setSelectedId(item.id)}
                           aria-pressed={isActive}
                           className={cn(
                             "flex min-w-0 flex-1 items-start gap-3 py-3.5 pr-5 text-left transition-colors",
-                            tab !== "PENDING" && "pl-5",
                             focusRing,
                             isActive
                               ? "bg-brand-soft/50"

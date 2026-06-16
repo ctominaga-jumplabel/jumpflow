@@ -83,4 +83,39 @@ describe("ApprovalQueue", () => {
     ).toBeInTheDocument();
     expect(await screen.findByText("0 pendentes")).toBeInTheDocument();
   });
+
+  it("offers a 'Reabrir selecao' action only on the history tab", () => {
+    render(<ApprovalQueue />);
+    // Pending tab: no reopen action.
+    expect(
+      screen.queryByRole("button", { name: /Reabrir selecao/ }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Histórico/ }));
+    expect(
+      screen.getByRole("button", { name: /Reabrir selecao/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("reopens decided history items back to the pending queue in bulk", async () => {
+    render(<ApprovalQueue />);
+    expect(screen.getByText("5 pendentes")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Histórico/ }));
+    // Select every decided item, then reopen the selection.
+    fireEvent.click(screen.getByRole("button", { name: /Selecionar visiveis/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Reabrir selecao/ }));
+    expect(
+      await screen.findByText(/item\(ns\) reaberto\(s\) para a fila pendente/),
+    ).toBeInTheDocument();
+    // All 5 decided mock items (auto-approved/approved/rejected, hours and
+    // despesas) return to PENDING, joining the 5 already pending -> 10.
+    expect(await screen.findByText("10 pendentes")).toBeInTheDocument();
+  });
+
+  it("clears the selection when switching tabs", () => {
+    render(<ApprovalQueue />);
+    fireEvent.click(screen.getByRole("button", { name: /Selecionar visiveis/ }));
+    expect(screen.getByText(/5 selecionado/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Histórico/ }));
+    expect(screen.getByText(/0 selecionado/)).toBeInTheDocument();
+  });
 });

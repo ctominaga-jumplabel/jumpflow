@@ -142,9 +142,18 @@ export function cloneWeek(week: TimesheetWeek): TimesheetWeek {
   };
 }
 
-/** A row is editable by the consultant only while in DRAFT or REJECTED. */
+/**
+ * A row is editable by the consultant while in DRAFT, REJECTED or SUBMITTED.
+ * SUBMITTED stays editable so a consultant can fix a still-pending entry; the
+ * save re-submits it for approval (a new submittedAt resets the auto-approval
+ * delay). APPROVED and CLOSED are terminal/locked and never editable here.
+ */
 export function isRowEditable(row: TimeEntryRow): boolean {
-  return row.status === "DRAFT" || row.status === "REJECTED";
+  return (
+    row.status === "DRAFT" ||
+    row.status === "REJECTED" ||
+    row.status === "SUBMITTED"
+  );
 }
 
 /** Whether a row may be carried over when copying the previous week. */

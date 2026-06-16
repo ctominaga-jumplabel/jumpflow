@@ -5,7 +5,23 @@ import {
   activityLabels,
   activityOrder,
   isActivityType,
+  isRowEditable,
+  type TimeEntryRow,
+  type TimeEntryStatus,
 } from "./types";
+
+function row(status: TimeEntryStatus): TimeEntryRow {
+  return {
+    id: "r1",
+    projectId: "p1",
+    projectName: "Atlas",
+    clientName: "Vix Energia",
+    activity: "WORKDAY",
+    billable: true,
+    status,
+    hours: [8, 0, 0, 0, 0, 0, 0],
+  };
+}
 
 describe("activity catalog (Rodada 4.2)", () => {
   it("is the new canonical catalog, in form order, WORKDAY first", () => {
@@ -58,5 +74,20 @@ describe("activityLabelOf", () => {
   it("falls back to the raw value for an unknown code (no wrong coercion)", () => {
     expect(activityLabelOf("SOMETHING_NEW")).toBe("SOMETHING_NEW");
     expect(activityLabelOf("")).toBe("");
+  });
+});
+
+describe("isRowEditable", () => {
+  it("allows editing DRAFT, REJECTED and SUBMITTED rows", () => {
+    // SUBMITTED stays editable so a consultant can fix a still-pending entry;
+    // the save re-submits it for approval.
+    expect(isRowEditable(row("DRAFT"))).toBe(true);
+    expect(isRowEditable(row("REJECTED"))).toBe(true);
+    expect(isRowEditable(row("SUBMITTED"))).toBe(true);
+  });
+
+  it("locks APPROVED and CLOSED rows", () => {
+    expect(isRowEditable(row("APPROVED"))).toBe(false);
+    expect(isRowEditable(row("CLOSED"))).toBe(false);
   });
 });

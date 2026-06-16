@@ -61,7 +61,15 @@ export type AutoApprovalReason =
   | "DELAY_NOT_ELAPSED"
   | "DUPLICATE"
   | "WEEKEND_NOT_ALLOWED"
-  | "DAILY_TOTAL_MISMATCH";
+  | "DAILY_TOTAL_MISMATCH"
+  /**
+   * The entry already had a MANUAL approval decision (an Approval with
+   * isAutomatic = false). It was reopened/changed by a human, so the engine
+   * must never auto-approve it again — it stays for manual handling. Detected
+   * by the DB layer and injected via {@link withManualDecisionHistory}, because
+   * the pure evaluator has no access to approval history.
+   */
+  | "MANUAL_DECISION_HISTORY";
 
 /** Canonical order so a reasons array is deterministic for equality tests. */
 const REASON_ORDER: AutoApprovalReason[] = [
@@ -72,6 +80,7 @@ const REASON_ORDER: AutoApprovalReason[] = [
   "DUPLICATE",
   "WEEKEND_NOT_ALLOWED",
   "DAILY_TOTAL_MISMATCH",
+  "MANUAL_DECISION_HISTORY",
 ];
 
 export interface AutoApprovalDecision {
@@ -156,6 +165,27 @@ export function evaluateAutoApproval(
     reasons: ordered,
     appliedRules,
     ruleKey: appliedRules.join("+"),
+  };
+}
+
+/**
+ * Force a decision to PENDING because the entry already had a MANUAL approval
+ * decision in its history (reopened/changed by a human). The original applied
+ * rules are preserved and the MANUAL_DECISION_HISTORY reason is merged in
+ * (deduplicated, canonical order) so the admin read-only view explains exactly
+ * why the engine declined. Idempotent: re-applying does not duplicate the
+ * reason. The DB layer calls this after detecting non-automatic Approvals; the
+ * pure evaluator has no access to approval history.
+ */
+export function withManualDecisionHistory(
+  decision: AutoApprovalDecision,
+): AutoApprovalDecision {
+  const reasons = new Set<AutoApprovalReason>(decision.reasons);
+  reasons.add("MANUAL_DECISION_HISTORY");
+  return {
+    ...decision,
+    outcome: "PENDING",
+    reasons: REASON_ORDER.filter((r) => reasons.has(r)),
   };
 }
 

@@ -21,6 +21,8 @@ import {
   consultantIdentitySchema,
   lookupInputSchema,
   personalInfoSchema,
+  voucherBenefitsSchema,
+  VOUCHER_TYPE_BY_KEY,
   type AddressInput,
   type BankAccountInput,
   type BenefitInput,
@@ -28,6 +30,8 @@ import {
   type CompensationInput,
   type ConsultantIdentityInput,
   type PersonalInfoInput,
+  type VoucherBenefitsInput,
+  type VoucherKey,
 } from "@/lib/consultants/schemas";
 
 const CONSULTORES_PATH = "/app/consultores";
@@ -408,6 +412,114 @@ export async function saveBenefit(
     );
     revalidatePath(CONSULTORES_PATH);
     return { ok: true, data: { id: benefit.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/**
+ * Persists the VA/VR/VT shortcuts shown in "Valor acordado". For each voucher
+ * type it keeps a single active ConsultantBenefit row with the current
+ * vigencia (startsAt). Behaviour per type:
+ *  - amount > 0: closes any other active row of that type (endsAt = day before
+ *    startsAt) and upserts one active row for the new vigencia.
+ *  - amount cleared/0: closes any active row of that type (no zero-amount row,
+ *    since benefit.amount must be positive).
+ * Every create/update/close emits an AuditEvent (financial data).
+ */
+export async function saveVoucherBenefits(
+  input: VoucherBenefitsInput,
+): Promise<ActionResult<{ consultantId: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(FINANCIAL_ROLES);
+    const parsed = parseInput(voucherBenefitsSchema, input);
+    const startsAt = new Date(`${parsed.startsAt}T00:00:00.000Z`);
+    const closedAt = new Date(startsAt.getTime() - 24 * 60 * 60 * 1000);
+
+    const entries: Array<[VoucherKey, number | undefined]> = [
+      ["vr", parsed.vr],
+      ["va", parsed.va],
+      ["vt", parsed.vt],
+    ];
+
+    for (const [key, rawAmount] of entries) {
+      const type = VOUCHER_TYPE_BY_KEY[key];
+      const amount = Number(rawAmount ?? 0);
+      const active = await prisma.consultantBenefit.findMany({
+        where: { consultantId: parsed.consultantId, type, endsAt: null },
+        orderBy: { startsAt: "desc" },
+      });
+
+      if (amount <= 0) {
+        // Clearing the voucher: close every active row of this type.
+        for (const row of active) {
+          await prisma.consultantBenefit.update({
+            where: { id: row.id },
+            data: { endsAt: closedAt },
+          });
+          await audit(
+            "ConsultantBenefit",
+            row.id,
+            "CONSULTANT_BENEFIT_ENDED",
+            row,
+            { endsAt: closedAt },
+          );
+        }
+        continue;
+      }
+
+      // Keep one active row: reuse the most recent active one if present,
+      // close any extras, and create a fresh row otherwise.
+      const [current, ...extras] = active;
+      for (const extra of extras) {
+        await prisma.consultantBenefit.update({
+          where: { id: extra.id },
+          data: { endsAt: closedAt },
+        });
+        await audit(
+          "ConsultantBenefit",
+          extra.id,
+          "CONSULTANT_BENEFIT_ENDED",
+          extra,
+          { endsAt: closedAt },
+        );
+      }
+
+      const data = {
+        consultantId: parsed.consultantId,
+        type,
+        amount,
+        startsAt,
+        endsAt: null,
+        note: null,
+      };
+      if (current) {
+        const updated = await prisma.consultantBenefit.update({
+          where: { id: current.id },
+          data: { amount, startsAt, endsAt: null },
+        });
+        await audit(
+          "ConsultantBenefit",
+          updated.id,
+          "CONSULTANT_BENEFIT_UPDATED",
+          current,
+          data,
+        );
+      } else {
+        const created = await prisma.consultantBenefit.create({ data });
+        await audit(
+          "ConsultantBenefit",
+          created.id,
+          "CONSULTANT_BENEFIT_CREATED",
+          null,
+          data,
+        );
+      }
+    }
+
+    revalidatePath(CONSULTORES_PATH);
+    return { ok: true, data: { consultantId: parsed.consultantId } };
   } catch (error) {
     return toFailure(error);
   }

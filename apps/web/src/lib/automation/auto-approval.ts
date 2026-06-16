@@ -4,6 +4,7 @@ import {
   evaluateAutoApproval,
   findDuplicateEntryIds,
   hoursToMinutes,
+  withManualDecisionHistory,
   type AutoApprovalDecision,
   type AutoApprovalFlags,
 } from "@jumpflow/shared";
@@ -146,6 +147,21 @@ export async function collectAutoApprovalDecisions(
     flagsByPair.set(key, current);
   }
 
+  // Manual-decision history: any entry that already received a MANUAL approval
+  // decision (Approval with isAutomatic = false) was handled by a human. If a
+  // gestor reopened it to SUBMITTED, the engine must NOT auto-approve it again —
+  // it stays for manual handling. We never auto-approve over a human decision.
+  const submittedIds = submitted.map((e) => e.id);
+  const manualApprovals = await prisma.approval.findMany({
+    where: {
+      entityType: "TIME_ENTRY",
+      entityId: { in: submittedIds },
+      isAutomatic: false,
+    },
+    select: { entityId: true },
+  });
+  const manualDecisionIds = new Set(manualApprovals.map((a) => a.entityId));
+
   const evaluations: EvaluatedEntry[] = submitted.map((entry) => {
     const flags =
       flagsByPair.get(`${entry.consultantId}|${entry.projectId}`) ?? {
@@ -153,7 +169,7 @@ export async function collectAutoApprovalDecisions(
         allowWeekend: false,
       };
 
-    const decision = evaluateAutoApproval(
+    const baseDecision = evaluateAutoApproval(
       {
         status: entry.status,
         hours: Number(entry.hours),
@@ -167,6 +183,12 @@ export async function collectAutoApprovalDecisions(
       config.settings,
       now,
     );
+
+    // A human already decided this entry once; force PENDING with a clear,
+    // structured reason that surfaces in the admin read-only view.
+    const decision = manualDecisionIds.has(entry.id)
+      ? withManualDecisionHistory(baseDecision)
+      : baseDecision;
 
     return {
       id: entry.id,

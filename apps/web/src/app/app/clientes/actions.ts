@@ -23,6 +23,15 @@ import {
 } from "@/lib/clients/schemas";
 import { getCnpjProvider } from "@/lib/cnpj/provider";
 import type { CnpjLookupResult } from "@/lib/clients/types";
+import {
+  buildClientLogoKey,
+  validateLogoFile,
+} from "@/lib/storage/file-validation";
+import {
+  CLIENT_LOGOS_BUCKET,
+  getStorageProvider,
+  isStorageConfigured,
+} from "@/lib/storage/provider";
 
 const CLIENTES_PATH = "/app/clientes";
 const CLIENT_WRITE_ROLES: RoleName[] = [
@@ -96,6 +105,7 @@ function clientData(
   const data: Prisma.ClientUncheckedCreateInput = {
     name: input.name,
     document: input.document,
+    contactEmail: input.contactEmail,
     logoUrl: input.logoUrl,
     status: input.status,
   };
@@ -257,6 +267,105 @@ export async function lookupCnpj(input: {
       provider: result.provider,
     });
     return { ok: true, data: result };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+const LOGO_PREVIEW_TTL_SECONDS = 3600;
+
+/**
+ * Upload a client logo to the client-logos bucket and store the STORAGE KEY in
+ * the existing `logoUrl` column (the Client model has no dedicated bucket/key
+ * fields yet — see report for the future split). The image is validated
+ * server-side (image MIME only, 2 MB cap) and degrades honestly when storage
+ * is not configured. Returns the persisted key plus a signed preview URL.
+ *
+ * For an existing client (`clientId` present) the key is keyed by the real id
+ * and persisted immediately. For a new client the caller omits `clientId`; the
+ * key is parked under `temp/` and saved with the form on create.
+ */
+export async function uploadClientLogo(
+  formData: FormData,
+): Promise<ActionResult<{ logoKey: string; previewUrl: string }>> {
+  try {
+    await requireRole(CLIENT_WRITE_ROLES);
+    // Honest degradation: never fake an upload when storage is absent.
+    if (!isStorageConfigured()) {
+      throw new ActionError(
+        "NO_STORAGE",
+        "Upload de logo indisponivel: storage nao configurado.",
+      );
+    }
+
+    const file = formData.get("file");
+    if (!(file instanceof File)) {
+      throw new ActionError("INVALID_FILE", "Nenhum arquivo enviado.");
+    }
+    const invalid = validateLogoFile({
+      name: file.name,
+      type: file.type,
+      size: file.size,
+    });
+    if (invalid) {
+      throw new ActionError(invalid.code, invalid.message);
+    }
+
+    const rawClientId = formData.get("clientId");
+    const clientId =
+      typeof rawClientId === "string" && rawClientId.trim().length > 0
+        ? rawClientId.trim()
+        : null;
+
+    // Existing client: confirm it exists before touching storage.
+    const previous = clientId
+      ? await prisma.client.findUnique({
+          where: { id: clientId },
+          select: { id: true, logoUrl: true },
+        })
+      : null;
+    if (clientId && !previous) {
+      throw new ActionError("NOT_FOUND", "Cliente nao encontrado.");
+    }
+
+    const provider = getStorageProvider(CLIENT_LOGOS_BUCKET)!;
+    const logoKey = buildClientLogoKey(clientId ?? "temp", file.name);
+    await provider.upload(logoKey, await file.arrayBuffer(), file.type);
+
+    // Persist immediately only for an existing client; for a new client the key
+    // rides along with createClient (the form keeps it in logoUrl).
+    if (clientId && previous) {
+      const previousKey =
+        previous.logoUrl && previous.logoUrl.startsWith(`${CLIENT_LOGOS_BUCKET}/`)
+          ? previous.logoUrl
+          : null;
+      await prisma.client.update({
+        where: { id: clientId },
+        data: { logoUrl: logoKey },
+      });
+      await audit(
+        "CLIENT_LOGO_UPDATED",
+        clientId,
+        { logoUrl: previous.logoUrl },
+        { logoUrl: logoKey },
+      );
+      // Best-effort cleanup of the replaced object, only AFTER the new key is
+      // persisted; an orphan in the bucket is acceptable.
+      if (previousKey && previousKey !== logoKey) {
+        try {
+          await provider.delete(previousKey);
+        } catch (error) {
+          console.error("[clients] failed to delete replaced logo", error);
+        }
+      }
+      revalidatePath(CLIENTES_PATH);
+    }
+
+    const previewUrl = await provider.getSignedUrl(
+      logoKey,
+      LOGO_PREVIEW_TTL_SECONDS,
+    );
+    return { ok: true, data: { logoKey, previewUrl } };
   } catch (error) {
     return toFailure(error);
   }

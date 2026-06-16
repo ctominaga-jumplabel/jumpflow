@@ -21,6 +21,9 @@ export type ErrorCode =
   | "ALREADY_DECIDED"
   | "COMMENT_REQUIRED"
   | "NO_STORAGE"
+  // Fase G (pre-fatura): degrade honesto de e-mail ao cliente.
+  | "NO_EMAIL"
+  | "NO_CONTACT_EMAIL"
   | "INVALID_FILE"
   | "FILE_TOO_LARGE"
   | "ATTACHMENT_LOCKED"

@@ -30,6 +30,7 @@ function renderDemo(canViewFinancials = true) {
       canViewFinancials={canViewFinancials}
       canManageBillingTypes
       cnpjLookupAvailable={false}
+      logoUploadAvailable={false}
     />,
   );
 }
@@ -82,6 +83,7 @@ describe("ClientsView", () => {
         canViewFinancials
         canManageBillingTypes
         cnpjLookupAvailable={false}
+        logoUploadAvailable={false}
       />,
     );
     expect(screen.getByText("Atlas Energia")).toBeInTheDocument();
@@ -96,9 +98,29 @@ describe("ClientsView", () => {
         canViewFinancials
         canManageBillingTypes
         cnpjLookupAvailable={false}
+        logoUploadAvailable={false}
       />,
     );
     expect(screen.getByText("Atlas Energia Renovavel")).toBeInTheDocument();
     expect(screen.queryByText("Atlas Energia")).not.toBeInTheDocument();
+  });
+
+  // Regression: typing in CNPJ used to steal focus back to the dialog (the
+  // Modal focus-management effect re-ran on every keystroke because its inline
+  // onClose identity changed on each parent re-render). Focus must stay put.
+  it("keeps focus on the CNPJ field while typing", () => {
+    renderDemo();
+    fireEvent.click(screen.getByRole("button", { name: /Novo cliente/ }));
+    const dialog = screen.getByRole("dialog");
+    const cnpj = within(dialog).getByLabelText("CNPJ") as HTMLInputElement;
+
+    cnpj.focus();
+    expect(document.activeElement).toBe(cnpj);
+
+    fireEvent.change(cnpj, { target: { value: "11" } });
+    expect(document.activeElement).toBe(cnpj);
+
+    fireEvent.change(cnpj, { target: { value: "11.222" } });
+    expect(document.activeElement).toBe(cnpj);
   });
 });

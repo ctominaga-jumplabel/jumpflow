@@ -15,7 +15,7 @@ vi.mock("@/app/app/despesas/actions", () => ({
   getReceiptUrl: vi.fn(async () => ({ ok: false, error: "NO_STORAGE", message: "x" })),
 }));
 
-import { submitExpense } from "@/app/app/despesas/actions";
+import { getReceiptUrl, submitExpense } from "@/app/app/despesas/actions";
 
 function renderDemo() {
   return render(
@@ -161,6 +161,104 @@ describe("ExpensesView (db mode)", () => {
       await screen.findByText("Despesa enviada para aprovação."),
     ).toBeInTheDocument();
     expect(vi.mocked(submitExpense)).toHaveBeenCalledWith({ id: "exp-db-1" });
+  });
+
+  it("previews an image attachment with an <img>, not an iframe", async () => {
+    vi.mocked(getReceiptUrl).mockResolvedValueOnce({
+      ok: true,
+      data: { url: "https://signed.example/recibo.png" },
+    } as never);
+    render(
+      <ExpensesView
+        mode="db"
+        consultantName="Ana Tester"
+        today="2026-06-10"
+        expenses={[
+          {
+            ...dbExpense,
+            attachment: {
+              fileName: "recibo.png",
+              contentType: "image/png",
+              size: 4096,
+            },
+          },
+        ]}
+        projects={[{ id: "proj-1", name: "Portal", clientName: "Cliente X" }]}
+        storageAvailable
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: /Ver comprovante de Despesa real/ }),
+    );
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: /^Visualizar$/ }));
+
+    const image = await within(dialog).findByAltText(/Comprovante: recibo.png/);
+    expect(image.tagName).toBe("IMG");
+    expect(image).toHaveAttribute("src", "https://signed.example/recibo.png");
+  });
+
+  it("previews a PDF attachment in an iframe", async () => {
+    vi.mocked(getReceiptUrl).mockResolvedValueOnce({
+      ok: true,
+      data: { url: "https://signed.example/nota.pdf" },
+    } as never);
+    render(
+      <ExpensesView
+        mode="db"
+        consultantName="Ana Tester"
+        today="2026-06-10"
+        expenses={[dbExpense]}
+        projects={[{ id: "proj-1", name: "Portal", clientName: "Cliente X" }]}
+        storageAvailable
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: /Ver comprovante de Despesa real/ }),
+    );
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: /^Visualizar$/ }));
+
+    const frame = await within(dialog).findByTitle(/Preview de nota.pdf/);
+    expect(frame.tagName).toBe("IFRAME");
+    expect(frame).toHaveAttribute("src", "https://signed.example/nota.pdf");
+  });
+
+  it("offers download-only for non-previewable attachment types", () => {
+    render(
+      <ExpensesView
+        mode="db"
+        consultantName="Ana Tester"
+        today="2026-06-10"
+        expenses={[
+          {
+            ...dbExpense,
+            attachment: {
+              fileName: "planilha.xlsx",
+              contentType:
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+              size: 8192,
+            },
+          },
+        ]}
+        projects={[{ id: "proj-1", name: "Portal", clientName: "Cliente X" }]}
+        storageAvailable
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: /Ver comprovante de Despesa real/ }),
+    );
+    const dialog = screen.getByRole("dialog");
+    // No in-page preview action is offered, only the download fallback.
+    expect(
+      within(dialog).queryByRole("button", { name: /^Visualizar$/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(dialog).getByRole("button", { name: /^Baixar$/ }),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(/não pode ser exibido na tela/),
+    ).toBeInTheDocument();
   });
 
   it("shows the storage-unavailable warning in the form", () => {

@@ -1,7 +1,16 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
-import { Building2, Edit, Plus, Search, Settings2 } from "lucide-react";
+import { useMemo, useRef, useState, useTransition } from "react";
+import {
+  Building2,
+  Edit,
+  ImageIcon,
+  Plus,
+  Search,
+  Settings2,
+  TriangleAlert,
+  Upload,
+} from "lucide-react";
 import { ActionButton } from "@/components/ui/ActionButton";
 import { DataTable, type DataTableColumn } from "@/components/ui/DataTable";
 import { DataToolbar } from "@/components/ui/DataToolbar";
@@ -15,12 +24,17 @@ import {
   lookupCnpj,
   updateBillingType,
   updateClient,
+  uploadClientLogo,
 } from "@/app/app/clientes/actions";
 import type {
   BillingTypeInput,
   ClientInput,
 } from "@/lib/clients/schemas";
-import type { BillingTypeItem, ClientItem } from "@/lib/clients/types";
+import type {
+  BillingChargeType,
+  BillingTypeItem,
+  ClientItem,
+} from "@/lib/clients/types";
 import { demoBillingTypes, demoClients } from "@/lib/clients/mock-data";
 import { formatCurrencyPrecise, MASKED_VALUE } from "@/lib/format";
 import { focusRingInput } from "@/lib/styles";
@@ -31,11 +45,23 @@ type Mode = "demo" | "db";
 type Tab = "CLIENTS" | "BILLING_TYPES";
 
 const chargeTypeLabels = {
-  HOURLY: "Por hora",
-  MONTHLY: "Mensal",
+  HOURLY: "Hora trabalhada",
+  MONTHLY: "Mensalidade fixa",
   CONSULTANT_HOURLY: "Hora por consultor",
   FIXED: "Fixo",
-} as const;
+  HOURLY_PLUS_FIXED: "Hora + Fixo",
+  HOUR_PACKAGE: "Pacote de horas (Franquia)",
+  PER_ALLOCATED_CONSULTANT: "Preço por consultor alocado",
+  PER_PROJECT: "Preço por projeto",
+  MILESTONE: "Por entrega (Milestone)",
+  PER_SPRINT: "Por sprint",
+  TIME_AND_MATERIAL: "T&M (Time & Material)",
+  ON_DEMAND: "Sob demanda",
+  SUBSCRIPTION: "Assinatura (Subscription)",
+  PAY_AS_YOU_GO: "Consumo (Pay as you go)",
+  SUCCESS_FEE: "Sucesso (Success Fee)",
+  MIXED: "Misto",
+} satisfies Record<BillingChargeType, string>;
 
 const roundingLabels = {
   NONE: "Sem arredondar",
@@ -55,11 +81,13 @@ interface ClientsViewProps {
   canViewFinancials: boolean;
   canManageBillingTypes: boolean;
   cnpjLookupAvailable: boolean;
+  logoUploadAvailable: boolean;
 }
 
 const emptyClient: ClientInput = {
   name: "",
   document: "",
+  contactEmail: "",
   logoUrl: "",
   billingTypeId: "",
   defaultHourlyRate: undefined,
@@ -87,7 +115,9 @@ function clientToInput(client: ClientItem): ClientInput {
   return {
     name: client.name,
     document: client.document ?? "",
-    logoUrl: client.logoUrl ?? "",
+    contactEmail: client.contactEmail ?? "",
+    // Persisted value (storage key or plain URL), not the signed display URL.
+    logoUrl: client.logoRef ?? client.logoUrl ?? "",
     billingTypeId: client.billingTypeId ?? "",
     defaultHourlyRate: client.defaultHourlyRate,
     monthlyFee: client.monthlyFee,
@@ -126,6 +156,7 @@ export function ClientsView({
   canViewFinancials,
   canManageBillingTypes,
   cnpjLookupAvailable,
+  logoUploadAvailable,
 }: ClientsViewProps) {
   // In db mode `items`/`types` derive straight from props, so data revalidated
   // by a server action shows up immediately without a reload. Demo mode keeps
@@ -140,6 +171,9 @@ export function ClientsView({
   const [editingClient, setEditingClient] = useState<ClientItem | null>(null);
   const [clientForm, setClientForm] = useState<ClientInput>(emptyClient);
   const [clientOpen, setClientOpen] = useState(false);
+  // Display-only logo preview (signed URL from the server, or a plain URL).
+  // Kept apart from clientForm.logoUrl, which carries the PERSISTED value.
+  const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [editingType, setEditingType] = useState<BillingTypeItem | null>(null);
   const [typeForm, setTypeForm] = useState<BillingTypeInput>(emptyBillingType);
   const [typeOpen, setTypeOpen] = useState(false);
@@ -296,7 +330,40 @@ export function ClientsView({
   function openClient(client?: ClientItem) {
     setEditingClient(client ?? null);
     setClientForm(client ? clientToInput(client) : emptyClient);
+    setLogoPreview(client?.logoUrl ?? null);
     setClientOpen(true);
+  }
+
+  function handleLogoUpload(file: File) {
+    if (mode === "demo") {
+      // No server in demo mode: preview locally and store the object URL so the
+      // optimistic row shows the picked image for the session.
+      const objectUrl = URL.createObjectURL(file);
+      setLogoPreview(objectUrl);
+      setClientForm((current) => ({ ...current, logoUrl: objectUrl }));
+      setFeedback("Logo aplicada localmente.");
+      return;
+    }
+    const data = new FormData();
+    data.set("file", file);
+    if (editingClient) data.set("clientId", editingClient.id);
+    startTransition(async () => {
+      const result = await uploadClientLogo(data);
+      if (result.ok) {
+        setLogoPreview(result.data.previewUrl);
+        setClientForm((current) => ({
+          ...current,
+          logoUrl: result.data.logoKey,
+        }));
+        setFeedback(
+          editingClient
+            ? "Logo atualizada."
+            : "Logo enviada. Salve o cliente para concluir.",
+        );
+      } else {
+        setFeedback(result.message);
+      }
+    });
   }
 
   function openType(item?: BillingTypeItem) {
@@ -518,6 +585,9 @@ export function ClientsView({
         billingTypes={types}
         canViewFinancials={canViewFinancials}
         cnpjLookupAvailable={cnpjLookupAvailable}
+        logoUploadAvailable={logoUploadAvailable}
+        logoPreview={logoPreview}
+        onLogoUpload={handleLogoUpload}
         isPending={isPending}
         onLookup={handleLookupCnpj}
         onSave={saveClient}
@@ -542,6 +612,9 @@ interface ClientModalProps {
   billingTypes: BillingTypeItem[];
   canViewFinancials: boolean;
   cnpjLookupAvailable: boolean;
+  logoUploadAvailable: boolean;
+  logoPreview: string | null;
+  onLogoUpload: (file: File) => void;
   isPending: boolean;
   onLookup: () => void;
   onSave: () => void;
@@ -559,6 +632,9 @@ function ClientModal({
   billingTypes,
   canViewFinancials,
   cnpjLookupAvailable,
+  logoUploadAvailable,
+  logoPreview,
+  onLogoUpload,
   isPending,
   onLookup,
   onSave,
@@ -590,14 +666,14 @@ function ClientModal({
             className={fieldClass()}
           />
         </label>
-        <label className="space-y-1 text-sm font-medium text-medium">
-          Logo URL
-          <input
-            value={value.logoUrl ?? ""}
-            onChange={(event) => onChange({ ...value, logoUrl: event.target.value })}
-            className={fieldClass()}
-          />
-        </label>
+        <LogoField
+          value={value}
+          onChange={onChange}
+          uploadAvailable={logoUploadAvailable}
+          preview={logoPreview}
+          onUpload={onLogoUpload}
+          isPending={isPending}
+        />
         <label className="space-y-1 text-sm font-medium text-medium">
           CNPJ
           <div className="flex gap-2">
@@ -618,6 +694,19 @@ function ClientModal({
               <Search aria-hidden="true" className="size-4" />
             </button>
           </div>
+        </label>
+        <label className="space-y-1 text-sm font-medium text-medium">
+          E-mail de contato
+          <input
+            type="email"
+            inputMode="email"
+            placeholder="financeiro@cliente.com"
+            value={value.contactEmail ?? ""}
+            onChange={(event) =>
+              onChange({ ...value, contactEmail: event.target.value })
+            }
+            className={fieldClass()}
+          />
         </label>
         <label className="space-y-1 text-sm font-medium text-medium">
           Status
@@ -747,6 +836,92 @@ function ClientModal({
         </label>
       </form>
     </Modal>
+  );
+}
+
+const ACCEPTED_LOGO_ATTR = ".png,.jpg,.jpeg,.webp,.svg";
+
+function LogoField({
+  value,
+  onChange,
+  uploadAvailable,
+  preview,
+  onUpload,
+  isPending,
+}: {
+  value: ClientInput;
+  onChange: (value: ClientInput) => void;
+  uploadAvailable: boolean;
+  preview: string | null;
+  onUpload: (file: File) => void;
+  isPending: boolean;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  return (
+    <div className="space-y-1 text-sm font-medium text-medium">
+      <span className="block">Logo</span>
+      <div className="flex items-center gap-3">
+        <div className="grid size-12 shrink-0 place-items-center overflow-hidden rounded-md border border-border bg-surface-muted">
+          {preview ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              alt="Pre-visualizacao da logo"
+              src={preview}
+              className="size-full object-cover"
+            />
+          ) : (
+            <ImageIcon aria-hidden="true" className="size-5 text-soft" />
+          )}
+        </div>
+
+        {uploadAvailable ? (
+          <button
+            type="button"
+            disabled={isPending}
+            onClick={() => inputRef.current?.click()}
+            className={cn(
+              "inline-flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-xs font-semibold text-medium transition-colors hover:border-brand hover:text-strong disabled:opacity-50",
+              focusRingInput,
+            )}
+          >
+            <Upload aria-hidden="true" className="size-4" />
+            {preview ? "Trocar logo" : "Enviar logo"}
+          </button>
+        ) : null}
+      </div>
+
+      {uploadAvailable ? (
+        <input
+          ref={inputRef}
+          type="file"
+          accept={ACCEPTED_LOGO_ATTR}
+          className="sr-only"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) onUpload(file);
+            event.target.value = "";
+          }}
+        />
+      ) : (
+        // Honest fallback when storage is not configured: keep the URL input.
+        <>
+          <p className="flex items-center gap-2 rounded-md border border-warning/30 bg-warning-soft px-2 py-1 text-xs font-medium text-warning">
+            <TriangleAlert aria-hidden="true" className="size-3.5 shrink-0" />
+            Upload indisponivel: storage nao configurado. Informe uma URL.
+          </p>
+          <input
+            aria-label="Logo URL"
+            placeholder="https://..."
+            value={value.logoUrl ?? ""}
+            onChange={(event) =>
+              onChange({ ...value, logoUrl: event.target.value })
+            }
+            className={fieldClass()}
+          />
+        </>
+      )}
+    </div>
   );
 }
 

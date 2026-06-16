@@ -23,6 +23,9 @@ export interface StorageProvider {
 /** Private bucket for expense receipts (created via devops, never public). */
 export const EXPENSE_RECEIPTS_BUCKET = "expense-receipts";
 
+/** Private bucket for client logos (created via devops, never public). */
+export const CLIENT_LOGOS_BUCKET = "client-logos";
+
 /**
  * Storage is configured only when BOTH envs are present. These envs do not
  * exist yet in any environment — callers must degrade honestly (NO_STORAGE),
@@ -39,12 +42,24 @@ export function isStorageConfigured(): boolean {
   );
 }
 
-/** Resolve the configured provider, or null when storage is unavailable. */
-export function getStorageProvider(): StorageProvider | null {
+/**
+ * Resolve a configured provider for `bucket`, or null when storage is
+ * unavailable. Defaults to the expense-receipts bucket so existing callers keep
+ * working unchanged; pass a bucket constant to target another domain (e.g.
+ * CLIENT_LOGOS_BUCKET).
+ */
+export function getStorageProvider(
+  bucket: string = EXPENSE_RECEIPTS_BUCKET,
+): StorageProvider | null {
   if (!isStorageConfigured()) return null;
   return createSupabaseStorageProvider({
     url: (process.env.SUPABASE_URL as string).trim().replace(/\/$/, ""),
     serviceRoleKey: (process.env.SUPABASE_SERVICE_ROLE_KEY as string).trim(),
-    bucket: EXPENSE_RECEIPTS_BUCKET,
+    bucket,
   });
+}
+
+/** Convenience resolver for the client-logos bucket. */
+export function getClientLogoStorageProvider(): StorageProvider | null {
+  return getStorageProvider(CLIENT_LOGOS_BUCKET);
 }

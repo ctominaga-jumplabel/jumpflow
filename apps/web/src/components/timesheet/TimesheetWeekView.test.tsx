@@ -97,9 +97,13 @@ describe("TimesheetWeekView actions (demo mode)", () => {
 
   it("edits an existing draft entry", () => {
     render(<TimesheetWeekView mode="demo" />);
-    // te-2 (Atlas · Reunião) is a DRAFT row, so it exposes an edit affordance.
+    // te-2 (Atlas · Sobreaviso) is a DRAFT row, so it exposes an edit
+    // affordance. te-1 (Atlas · Dia Útil) is SUBMITTED and now also editable,
+    // so target the activity explicitly to avoid an ambiguous match.
     fireEvent.click(
-      screen.getByRole("button", { name: /Editar lançamento de Atlas/ }),
+      screen.getByRole("button", {
+        name: /Editar lançamento de Atlas · Sobreaviso/,
+      }),
     );
     const dialog = screen.getByRole("dialog");
     // Project/activity are locked while editing.
@@ -109,6 +113,25 @@ describe("TimesheetWeekView actions (demo mode)", () => {
     });
     fireEvent.click(within(dialog).getByRole("button", { name: /Salvar/ }));
     // Editing a DRAFT row resubmits it for approval (Rodada 4.3).
+    expect(
+      screen.getByText(/enviado para aprovação \(demo\)/),
+    ).toBeInTheDocument();
+  });
+
+  it("edits a SUBMITTED entry and keeps it in approval", () => {
+    render(<TimesheetWeekView mode="demo" />);
+    // te-1 (Atlas · Dia Útil) is SUBMITTED; it is now editable.
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: /Editar lançamento de Atlas · Dia Útil/,
+      }),
+    );
+    const dialog = screen.getByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText("Horas"), {
+      target: { value: "4" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: /Salvar/ }));
+    // The edited entry stays in the approval flow (SUBMITTED).
     expect(
       screen.getByText(/enviado para aprovação \(demo\)/),
     ).toBeInTheDocument();

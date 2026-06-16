@@ -16,6 +16,7 @@ import {
 import { resolveDbUser } from "@/lib/db/users";
 import {
   COMMENT_REQUIRED_MESSAGE,
+  DECIDE_HOURS_SOURCE_STATUS,
   applyTimesheetDefaultInputSchema,
   decideHoursSchema,
   deleteTimeEntryInputSchema,
@@ -443,12 +444,21 @@ export async function updateTimeEntry(
         "Esta semana já foi fechada e não aceita alterações.",
       );
     }
-    if (entry.status !== "DRAFT" && entry.status !== "REJECTED") {
+    if (
+      entry.status !== "DRAFT" &&
+      entry.status !== "REJECTED" &&
+      entry.status !== "SUBMITTED"
+    ) {
+      // APPROVED/CLOSED are terminal: a decided or closed entry must never be
+      // mutated by the consultant (mirrors isRowEditable in lib/timesheet/types).
       throw new ActionError(
         "NOT_EDITABLE",
-        "Lançamento enviado, aprovado ou fechado não pode ser alterado.",
+        "Lançamento aprovado ou fechado não pode ser alterado.",
       );
     }
+    // Captured before the update so the audit trail records the reopened state
+    // (a SUBMITTED entry being edited is a re-submission, not a first submit).
+    const previousStatus = entry.status;
 
     let date = entry.date;
     let allocationId = entry.allocationId;
@@ -490,8 +500,9 @@ export async function updateTimeEntry(
     const dbUser = await requireDbUser(user);
 
     await prisma.$transaction(async (tx) => {
-      // Editing a DRAFT/REJECTED entry resubmits it for approval (Rodada 4.3):
-      // status = SUBMITTED + new submittedAt.
+      // Editing a DRAFT/REJECTED/SUBMITTED entry resubmits it for approval
+      // (Rodada 4.3): status = SUBMITTED + new submittedAt. The new submittedAt
+      // also resets the auto-approval delay for an already-submitted entry.
       const now = new Date();
       await tx.timeEntry.update({
         where: { id: entry.id },
@@ -512,6 +523,10 @@ export async function updateTimeEntry(
           entityType: "TimeEntry",
           entityId: entry.id,
           action: "TIME_ENTRY_SUBMITTED_ON_SAVE",
+          // `before.status` records the reopened state for traceability: a
+          // SUBMITTED -> SUBMITTED edit is an in-place re-submission of a
+          // still-pending entry, distinct from correcting a REJECTED one.
+          before: { status: previousStatus },
           after: { entryId: entry.id, resubmit: true },
         }),
       });
@@ -1057,10 +1072,25 @@ export async function decideHours(
       include: {
         project: { select: { managerUserId: true } },
         consultant: { select: { userId: true, email: true } },
+        period: { select: { status: true } },
       },
     });
     if (entries.length === 0) {
       throw new ActionError("NOT_FOUND", "Nenhum lançamento encontrado.");
+    }
+
+    // CLOSED is terminal: a closed entry (or any entry in a CLOSED period) can
+    // never be approved, rejected OR reopened. Fail the whole batch so the
+    // caller never gets a misleading partial success.
+    if (
+      entries.some(
+        (entry) => entry.status === "CLOSED" || entry.period.status === "CLOSED",
+      )
+    ) {
+      throw new ActionError(
+        "PERIOD_CLOSED",
+        "Lançamentos fechados não podem ser alterados.",
+      );
     }
 
     // PROJECT_MANAGER decides only entries of projects they manage;
@@ -1097,21 +1127,43 @@ export async function decideHours(
     }
 
     const comment = parsed.comment.trim() || null;
-    const auditAction =
-      parsed.decision === "APPROVED"
+    // SUBMITTED here is a REOPEN (decided -> pending). It is recorded as a
+    // MANUAL Approval (isAutomatic:false) so the auto-approval engine treats
+    // the entry as already manually handled and never re-approves it on its own.
+    const isReopen = parsed.decision === "SUBMITTED";
+    const auditAction = isReopen
+      ? "TIME_ENTRY_REOPENED"
+      : parsed.decision === "APPROVED"
         ? "TIME_ENTRY_APPROVED"
         : "TIME_ENTRY_REJECTED";
+    // The Approval enum only allows APPROVED/REJECTED. A reopen is the reversal
+    // of a prior decision, so it is recorded as a MANUAL REJECTED Approval — the
+    // exact value the status field can hold AND the marker the auto-approval
+    // engine reads (any isAutomatic:false Approval blocks re-approval; see
+    // collectAutoApprovalDecisions). The audited intent (TIME_ENTRY_REOPENED +
+    // before/after status) is the authoritative human-readable record.
+    const approvalStatus: "APPROVED" | "REJECTED" = isReopen
+      ? "REJECTED"
+      : (parsed.decision as "APPROVED" | "REJECTED");
+    // Statuses this transition is allowed to start FROM (idempotency guard).
+    // Cast to the Prisma enum literal union (the guard is the source of truth).
+    const sourceStatuses = [...DECIDE_HOURS_SOURCE_STATUS[parsed.decision]] as (
+      | "SUBMITTED"
+      | "APPROVED"
+      | "REJECTED"
+    )[];
 
     let decided = 0;
     // Ids not found in the database count as already decided (race-safe).
     let alreadyDecided = parsed.entryIds.length - entries.length;
     for (const entry of entries) {
       // Same transactional pattern as the auto-approval engine: the status
-      // guard makes the decision idempotent, and Approval + AuditEvent are
+      // guard makes the transition idempotent (only entries currently in an
+      // allowed source status are touched), and Approval + AuditEvent are
       // written in the SAME transaction as the status change.
       const applied = await prisma.$transaction(async (tx) => {
         const updated = await tx.timeEntry.updateMany({
-          where: { id: entry.id, status: "SUBMITTED" },
+          where: { id: entry.id, status: { in: sourceStatuses } },
           data: { status: parsed.decision },
         });
         if (updated.count !== 1) return false;
@@ -1121,7 +1173,7 @@ export async function decideHours(
             entityType: "TIME_ENTRY",
             entityId: entry.id,
             approverUserId: dbUser.id,
-            status: parsed.decision,
+            status: approvalStatus,
             comment,
             isAutomatic: false,
           },
@@ -1132,7 +1184,8 @@ export async function decideHours(
             entityType: "TimeEntry",
             entityId: entry.id,
             action: auditAction,
-            after: { comment },
+            before: { status: entry.status },
+            after: { status: parsed.decision, comment },
           }),
         });
         return true;

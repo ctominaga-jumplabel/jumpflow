@@ -1,5 +1,22 @@
 export type ProjectStatus = "PROPOSAL" | "ACTIVE" | "PAUSED" | "CLOSED";
 export type AllocationStatus = "ACTIVE" | "PLANNED" | "ENDED" | "CANCELLED";
+export type SkillLevel = "BASIC" | "INTERMEDIATE" | "ADVANCED" | "SPECIALIST";
+
+export interface ProjectSkillOption {
+  id: string;
+  name: string;
+  category?: string;
+}
+
+export interface ProjectAllocationSkillItem {
+  id: string;
+  allocationId: string;
+  skillId: string;
+  skillName: string;
+  skillCategory?: string;
+  level?: SkillLevel;
+  note?: string;
+}
 
 export interface ProjectClientOption {
   id: string;
@@ -26,6 +43,7 @@ export interface ProjectAllocationItem {
   startDate: string;
   endDate?: string;
   status: AllocationStatus;
+  skills: ProjectAllocationSkillItem[];
 }
 
 export interface ProjectSaleRateItem {

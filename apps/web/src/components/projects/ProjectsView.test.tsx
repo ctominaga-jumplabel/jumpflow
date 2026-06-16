@@ -10,6 +10,9 @@ vi.mock("@/app/app/projetos/actions", () => ({
   updateAllocation: vi.fn(),
   createSaleRate: vi.fn(),
   updateSaleRate: vi.fn(),
+  addAllocationSkill: vi.fn(),
+  removeAllocationSkill: vi.fn(),
+  updateAllocationSkill: vi.fn(),
 }));
 
 function dbProject(managerName: string): ProjectItem {
@@ -83,6 +86,35 @@ describe("ProjectsView", () => {
     detail = screen.getByRole("dialog");
     expect(within(detail).getByText(/410,00/)).toBeInTheDocument();
     expect(screen.getByText("Valor de venda salvo localmente.")).toBeInTheDocument();
+  });
+
+  it("adds a skill to an allocation in the project detail (demo mode)", () => {
+    renderDemo();
+    fireEvent.click(
+      screen.getByRole("button", { name: /Vinculos e valores de Atlas/ }),
+    );
+    let detail = screen.getByRole("dialog");
+    fireEvent.click(within(detail).getByRole("button", { name: "Skills" }));
+    // The seeded Atlas allocation (Ana Tester) already carries one skill tag.
+    detail = screen.getByRole("dialog");
+    expect(within(detail).getByText("QA Automation")).toBeInTheDocument();
+    fireEvent.click(
+      within(detail).getByRole("button", { name: /Adicionar skill/ }),
+    );
+    const dialogs = screen.getAllByRole("dialog");
+    const skillDialog = dialogs[dialogs.length - 1];
+    fireEvent.change(within(skillDialog).getByLabelText("Skill"), {
+      target: { value: "skill-react" },
+    });
+    fireEvent.change(within(skillDialog).getByLabelText("Nivel"), {
+      target: { value: "ADVANCED" },
+    });
+    fireEvent.click(within(skillDialog).getByRole("button", { name: "Salvar" }));
+    detail = screen.getByRole("dialog");
+    expect(within(detail).getByText("React")).toBeInTheDocument();
+    expect(
+      screen.getByText("Skill da alocacao salva localmente."),
+    ).toBeInTheDocument();
   });
 
   it("re-syncs the table when revalidated props change in db mode", () => {

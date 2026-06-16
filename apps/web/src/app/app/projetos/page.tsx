@@ -11,12 +11,14 @@ import {
   listProjectConsultants,
   listProjectManagers,
   listProjects,
+  listSkillCatalog,
 } from "@/lib/db/projects";
 import {
   demoProjectClients,
   demoProjectConsultants,
   demoProjectManagers,
   demoProjects,
+  demoProjectSkills,
 } from "@/lib/projects/mock-data";
 
 export const metadata: Metadata = { title: "Projetos" };
@@ -40,18 +42,20 @@ export default async function ProjetosPage() {
   const canManageProjects = hasRole(user, PROJECT_WRITE_ROLES);
   const canViewCommercials = hasRole(user, SALE_RATE_ROLES);
   const canManageSaleRates = hasRole(user, SALE_RATE_ROLES);
-  const [projects, clients, consultants, managers] = databaseReady
+  const [projects, clients, consultants, managers, skills] = databaseReady
     ? await Promise.all([
         listProjects({ includeFinancials: canViewCommercials }),
         listProjectClients(),
         listProjectConsultants(),
         listProjectManagers(),
+        listSkillCatalog(),
       ])
     : [
         demoProjects,
         demoProjectClients,
         demoProjectConsultants,
         demoProjectManagers,
+        demoProjectSkills,
       ];
 
   return (
@@ -68,6 +72,7 @@ export default async function ProjetosPage() {
         clients={clients}
         consultants={consultants}
         managers={managers}
+        skills={skills}
         canManageProjects={canManageProjects}
         canViewCommercials={canViewCommercials}
         canManageSaleRates={canManageSaleRates}

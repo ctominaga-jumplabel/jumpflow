@@ -2,7 +2,19 @@ export type BillingChargeType =
   | "HOURLY"
   | "MONTHLY"
   | "CONSULTANT_HOURLY"
-  | "FIXED";
+  | "FIXED"
+  | "HOURLY_PLUS_FIXED"
+  | "HOUR_PACKAGE"
+  | "PER_ALLOCATED_CONSULTANT"
+  | "PER_PROJECT"
+  | "MILESTONE"
+  | "PER_SPRINT"
+  | "TIME_AND_MATERIAL"
+  | "ON_DEMAND"
+  | "SUBSCRIPTION"
+  | "PAY_AS_YOU_GO"
+  | "SUCCESS_FEE"
+  | "MIXED";
 
 export type BillingRoundingRule =
   | "NONE"
@@ -30,7 +42,12 @@ export interface ClientItem {
   id: string;
   name: string;
   document?: string;
+  /** Contact e-mail used to send the pre-invoice to the client. */
+  contactEmail?: string;
+  /** Display URL: a signed URL for stored logos, or a plain pass-through URL. */
   logoUrl?: string;
+  /** Raw persisted value of the logoUrl column (storage key OR plain URL). */
+  logoRef?: string;
   billingTypeId?: string;
   billingTypeName?: string;
   defaultHourlyRate?: number;

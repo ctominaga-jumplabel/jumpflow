@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState, useTransition } from "react";
-import { Download, ExternalLink, Plus, TriangleAlert } from "lucide-react";
+import { Download, ExternalLink, Plus, TriangleAlert, X } from "lucide-react";
 import { ActionButton } from "@/components/ui/ActionButton";
 import { FilterChip } from "@/components/ui/FilterChip";
 import { SectionPanel } from "@/components/ui/SectionPanel";
@@ -56,6 +56,16 @@ const STATUS_FILTERS: (ExpenseStatus | "ALL")[] = [
 const statusFilterLabel = (status: ExpenseStatus | "ALL") =>
   status === "ALL" ? "Todas" : expenseStatusLabels[status];
 
+/** How a receipt should be rendered in-page, decided from its content type. */
+type ReceiptRenderKind = "image" | "pdf" | "other";
+
+function receiptRenderKind(contentType: string | undefined): ReceiptRenderKind {
+  const type = (contentType ?? "").toLowerCase();
+  if (type.startsWith("image/")) return "image";
+  if (type === "application/pdf") return "pdf";
+  return "other";
+}
+
 /** Demo-mode projects a consultant may log expenses to (not closed). */
 const demoProjects: ExpenseFormProject[] = allProjects
   .filter((p) => p.status !== "CLOSED")
@@ -96,6 +106,8 @@ export function ExpensesView(props: ExpensesViewProps) {
   const [editing, setEditing] = useState<Expense | null>(null);
   const [attachmentOf, setAttachmentOf] = useState<Expense | null>(null);
   const [receiptPreviewUrl, setReceiptPreviewUrl] = useState<string | null>(null);
+  /** Which expense the open preview belongs to (guards stale previews). */
+  const [previewExpenseId, setPreviewExpenseId] = useState<string | null>(null);
   const { feedback, notify } = useFeedback();
   const [isPending, startTransition] = useTransition();
   const idCounter = useRef(0);
@@ -292,11 +304,35 @@ export function ExpensesView(props: ExpensesViewProps) {
     });
   }
 
+  /** Open the comprovante modal, always starting with a clean preview. */
+  function openAttachment(expense: Expense) {
+    setAttachmentOf(expense);
+    setReceiptPreviewUrl(null);
+    setPreviewExpenseId(null);
+  }
+
+  function closeAttachment() {
+    setAttachmentOf(null);
+    setReceiptPreviewUrl(null);
+    setPreviewExpenseId(null);
+  }
+
+  function clearPreview() {
+    setReceiptPreviewUrl(null);
+    setPreviewExpenseId(null);
+  }
+
   function handleViewReceipt(expense: Expense) {
+    // Toggle: a second click on the already-open preview hides it.
+    if (previewExpenseId === expense.id && receiptPreviewUrl) {
+      clearPreview();
+      return;
+    }
     startTransition(async () => {
       const result = await getReceiptUrl({ expenseId: expense.id });
       if (result.ok) {
         setReceiptPreviewUrl(result.data.url);
+        setPreviewExpenseId(expense.id);
       } else {
         notify("warning", result.message);
       }
@@ -428,7 +464,7 @@ export function ExpensesView(props: ExpensesViewProps) {
 
       <ExpenseList
         expenses={filtered}
-        onViewAttachment={setAttachmentOf}
+        onViewAttachment={openAttachment}
         onEdit={openEdit}
         onDelete={handleDelete}
         onSubmitExpense={handleSubmitExpense}
@@ -452,10 +488,7 @@ export function ExpensesView(props: ExpensesViewProps) {
 
       <Modal
         open={attachmentOf !== null}
-        onClose={() => {
-          setAttachmentOf(null);
-          setReceiptPreviewUrl(null);
-        }}
+        onClose={closeAttachment}
         title="Comprovante"
         description="Preview e download do anexo da despesa."
       >
@@ -497,35 +530,66 @@ export function ExpensesView(props: ExpensesViewProps) {
             </div>
             {!isDemo ? (
               storageAvailable ? (
-                <div className="space-y-3">
-                  <div className="flex flex-wrap gap-2">
-                    <ActionButton
-                      variant="secondary"
-                      size="sm"
-                      icon={ExternalLink}
-                      disabled={isPending}
-                      onClick={() => handleViewReceipt(attachmentOf)}
-                    >
-                      Visualizar
-                    </ActionButton>
-                    <ActionButton
-                      variant="secondary"
-                      size="sm"
-                      icon={Download}
-                      disabled={isPending}
-                      onClick={() => handleDownloadReceipt(attachmentOf)}
-                    >
-                      Baixar
-                    </ActionButton>
-                  </div>
-                  {receiptPreviewUrl ? (
-                    <iframe
-                      title={`Preview de ${attachmentOf.attachment.fileName}`}
-                      src={receiptPreviewUrl}
-                      className="h-96 w-full rounded-md border border-border bg-surface"
-                    />
-                  ) : null}
-                </div>
+                (() => {
+                  const kind = receiptRenderKind(
+                    attachmentOf.attachment.contentType,
+                  );
+                  const canPreviewInPage = kind !== "other";
+                  const previewOpen =
+                    previewExpenseId === attachmentOf.id &&
+                    receiptPreviewUrl !== null;
+                  return (
+                    <div className="space-y-3">
+                      <div className="flex flex-wrap gap-2">
+                        {canPreviewInPage ? (
+                          <ActionButton
+                            variant="secondary"
+                            size="sm"
+                            icon={previewOpen ? X : ExternalLink}
+                            disabled={isPending}
+                            aria-expanded={previewOpen}
+                            onClick={() => handleViewReceipt(attachmentOf)}
+                          >
+                            {previewOpen ? "Fechar preview" : "Visualizar"}
+                          </ActionButton>
+                        ) : null}
+                        <ActionButton
+                          variant="secondary"
+                          size="sm"
+                          icon={Download}
+                          disabled={isPending}
+                          onClick={() => handleDownloadReceipt(attachmentOf)}
+                        >
+                          Baixar
+                        </ActionButton>
+                      </div>
+
+                      {!canPreviewInPage ? (
+                        <p className="rounded-md border border-border bg-surface-muted/50 px-3 py-2 text-xs text-soft">
+                          Este tipo de arquivo não pode ser exibido na tela. Use
+                          o botão Baixar para abri-lo.
+                        </p>
+                      ) : null}
+
+                      {previewOpen && receiptPreviewUrl ? (
+                        kind === "image" ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={receiptPreviewUrl}
+                            alt={`Comprovante: ${attachmentOf.attachment.fileName}`}
+                            className="max-h-96 w-full rounded-md border border-border bg-surface object-contain"
+                          />
+                        ) : (
+                          <iframe
+                            title={`Preview de ${attachmentOf.attachment.fileName}`}
+                            src={receiptPreviewUrl}
+                            className="h-96 w-full rounded-md border border-border bg-surface"
+                          />
+                        )
+                      ) : null}
+                    </div>
+                  );
+                })()
               ) : (
                 <p className="rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-xs font-medium text-warning">
                   Anexos indisponíveis: storage não configurado.

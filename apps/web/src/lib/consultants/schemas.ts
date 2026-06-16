@@ -130,6 +130,23 @@ export const benefitSchema = z
     path: ["endsAt"],
   });
 
+/**
+ * VA/VR/VT shortcuts shown next to "Valor acordado". Each maps to a single
+ * active {@link benefitSchema} row of the corresponding type:
+ * - vr (Vale Refeicao)      -> MEAL_VOUCHER
+ * - va (Vale Alimentacao)   -> FOOD_VOUCHER
+ * - vt (Vale Transporte)    -> TRANSPORTATION_VOUCHER
+ * A value of 0/undefined means "no benefit of that type" and ends any current
+ * row (does not create a zero-amount benefit, since benefit.amount is positive).
+ */
+export const voucherBenefitsSchema = z.object({
+  consultantId: entityId,
+  startsAt: z.string().trim().min(10).max(10),
+  vr: optionalNumber,
+  va: optionalNumber,
+  vt: optionalNumber,
+});
+
 export const lookupInputSchema = z.object({
   consultantId: entityId,
   value: z.string().trim().min(8).max(20),
@@ -142,4 +159,14 @@ export type AddressInput = z.infer<typeof addressSchema>;
 export type BankAccountInput = z.infer<typeof bankAccountSchema>;
 export type CompensationInput = z.infer<typeof compensationSchema>;
 export type BenefitInput = z.infer<typeof benefitSchema>;
+export type VoucherBenefitsInput = z.infer<typeof voucherBenefitsSchema>;
+
+/** Maps the pt-BR voucher shortcut keys to ConsultantBenefit.type values. */
+export const VOUCHER_TYPE_BY_KEY = {
+  vr: "MEAL_VOUCHER",
+  va: "FOOD_VOUCHER",
+  vt: "TRANSPORTATION_VOUCHER",
+} as const;
+
+export type VoucherKey = keyof typeof VOUCHER_TYPE_BY_KEY;
 

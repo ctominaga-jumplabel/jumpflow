@@ -25,6 +25,7 @@ export const reasonLabels: Record<AutoApprovalReason, string> = {
   DUPLICATE: "Lançamento duplicado",
   WEEKEND_NOT_ALLOWED: "Fim de semana não liberado",
   DAILY_TOTAL_MISMATCH: "Total diário diferente do esperado",
+  MANUAL_DECISION_HISTORY: "Já teve decisão manual (aprovação reservada ao gestor)",
 };
 
 /** Readable pt-BR label for a reason code (falls back to the raw code). */
