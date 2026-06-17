@@ -22,6 +22,7 @@ import {
   allocationSkillUpdateSchema,
   allocationUpdateSchema,
   projectBillingConfigSchema,
+  projectBillingTypeSchema,
   projectCommercialSchema,
   projectInputSchema,
   projectUpdateSchema,
@@ -34,6 +35,7 @@ import {
   type AllocationSkillUpdateInput,
   type AllocationUpdateInput,
   type ProjectBillingConfigInput,
+  type ProjectBillingTypeInput,
   type ProjectCommercialInput,
   type ProjectInput,
   type ProjectUpdateInput,
@@ -343,6 +345,34 @@ export async function updateProjectCommercial(
       billingTypeId: parsed.billingTypeId ?? null,
       budgetHours: parsed.budgetHours ?? null,
     };
+    await prisma.project.update({ where: { id: parsed.id }, data });
+    await audit("Project", parsed.id, "PROJECT_UPDATED", previous, data);
+    revalidateProjectViews();
+    return { ok: true, data: { id: parsed.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/**
+ * Atualiza apenas o Tipo de Cobrança do projeto, a partir do Financeiro. O
+ * BillingType define o chargeType que o motor de regras consome, então o
+ * Financeiro precisa selecioná-lo junto da configuração de cobrança. Patch
+ * isolado (não toca budget/valores de venda do Comercial). Gated FINANCIAL_ROLES.
+ */
+export async function updateProjectBillingType(
+  input: ProjectBillingTypeInput,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(FINANCIAL_ROLES);
+    const parsed = parseInput(projectBillingTypeSchema, input);
+    const previous = await prisma.project.findUnique({
+      where: { id: parsed.id },
+      select: { billingTypeId: true },
+    });
+    if (!previous) throw new ActionError("NOT_FOUND", "Projeto nao encontrado.");
+    const data = { billingTypeId: parsed.billingTypeId ?? null };
     await prisma.project.update({ where: { id: parsed.id }, data });
     await audit("Project", parsed.id, "PROJECT_UPDATED", previous, data);
     revalidateProjectViews();

@@ -68,7 +68,10 @@ vi.mock("@/lib/auth/guards", () => ({
   requireRole: vi.fn(async () => h.store.currentUser),
 }));
 
-import { updateProjectCommercial } from "./actions";
+import {
+  updateProjectBillingType,
+  updateProjectCommercial,
+} from "./actions";
 
 beforeEach(() => {
   vi.stubEnv("DATABASE_URL", "postgresql://u:p@localhost:5432/db");
@@ -112,6 +115,31 @@ describe("updateProjectCommercial", () => {
 
   it("returns NOT_FOUND for an unknown project", async () => {
     const result = await updateProjectCommercial({ id: "missing" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBe("NOT_FOUND");
+  });
+});
+
+describe("updateProjectBillingType", () => {
+  it("writes only billingTypeId (never budget) and audits PROJECT_UPDATED", async () => {
+    h.store.projects = [
+      { id: "prj-1", billingTypeId: null, budgetHours: 80 },
+    ];
+    const result = await updateProjectBillingType({
+      id: "prj-1",
+      billingTypeId: "billing-hour-package",
+    });
+    expect(result.ok).toBe(true);
+    expect(h.store.updates[0].data).toEqual({
+      billingTypeId: "billing-hour-package",
+    });
+    // Must not touch budget owned by Comercial.
+    expect(h.store.updates[0].data).not.toHaveProperty("budgetHours");
+    expect(h.store.audits[0]).toMatchObject({ action: "PROJECT_UPDATED" });
+  });
+
+  it("returns NOT_FOUND for an unknown project", async () => {
+    const result = await updateProjectBillingType({ id: "missing" });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toBe("NOT_FOUND");
   });

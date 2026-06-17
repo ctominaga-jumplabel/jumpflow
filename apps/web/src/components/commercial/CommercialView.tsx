@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { ReceiptText, TrendingUp } from "lucide-react";
+import { Edit, ReceiptText, TrendingUp } from "lucide-react";
 import { ActionButton } from "@/components/ui/ActionButton";
 import { DataTable, type DataTableColumn } from "@/components/ui/DataTable";
 import { DataToolbar } from "@/components/ui/DataToolbar";
@@ -12,6 +12,7 @@ import { SectionPanel } from "@/components/ui/SectionPanel";
 import {
   createSaleRate,
   updateProjectCommercial,
+  updateSaleRate,
 } from "@/app/app/projetos/actions";
 import type { SaleRateInput } from "@/lib/projects/schemas";
 import {
@@ -22,6 +23,7 @@ import type {
   ProjectBillingTypeOption,
   ProjectConsultantOption,
   ProjectItem,
+  ProjectSaleRateItem,
   ProjectStatus,
 } from "@/lib/projects/types";
 import { formatCurrencyPrecise, formatDate, formatHours } from "@/lib/format";
@@ -156,6 +158,46 @@ export function CommercialView({
     startTransition(async () => {
       const result = await createSaleRate(value);
       setFeedback(result.ok ? "Valor de venda salvo." : result.message);
+    });
+  }
+
+  function editSaleRate(id: string, value: SaleRateInput) {
+    if (mode === "demo") {
+      const consultant = consultants.find((item) => item.id === value.consultantId);
+      const today = new Date().toISOString().slice(0, 10);
+      setLocalItems((current) =>
+        current.map((project) => {
+          if (project.id !== value.projectId) return project;
+          const saleRates = project.saleRates.map((rate) =>
+            rate.id === id
+              ? {
+                  ...rate,
+                  consultantId: value.consultantId,
+                  consultantName: consultant?.name,
+                  allocationId: value.allocationId,
+                  startsAt: value.startsAt,
+                  endsAt: value.endsAt,
+                  hourlyRate: value.hourlyRate,
+                  note: value.note,
+                }
+              : rate,
+          );
+          return {
+            ...project,
+            saleRates,
+            // Reavalia a presença de valor base vigente após a edição.
+            hasActiveSaleRate: saleRates.some((rate) =>
+              isProjectBaseSaleRateActive(rate, today),
+            ),
+          };
+        }),
+      );
+      setFeedback("Valor de venda atualizado localmente.");
+      return;
+    }
+    startTransition(async () => {
+      const result = await updateSaleRate({ id, ...value });
+      setFeedback(result.ok ? "Valor de venda atualizado." : result.message);
     });
   }
 
@@ -308,6 +350,7 @@ export function CommercialView({
           onClose={() => setPricingId(null)}
           onSaveCommercial={saveCommercial}
           onAddSaleRate={addSaleRate}
+          onEditSaleRate={editSaleRate}
         />
       ) : null}
     </div>
@@ -322,6 +365,7 @@ function PricingModal({
   onClose,
   onSaveCommercial,
   onAddSaleRate,
+  onEditSaleRate,
 }: {
   project: ProjectItem;
   consultants: ProjectConsultantOption[];
@@ -334,17 +378,33 @@ function PricingModal({
     budgetHours: number | undefined,
   ) => void;
   onAddSaleRate: (value: SaleRateInput) => void;
+  onEditSaleRate: (id: string, value: SaleRateInput) => void;
 }) {
   const [billingTypeId, setBillingTypeId] = useState(project.billingTypeId ?? "");
   const [budgetHours, setBudgetHours] = useState<number | undefined>(
     project.budgetHours,
   );
   const [rate, setRate] = useState<SaleRateInput | null>(null);
+  // When set, the sale-rate modal edits this existing rate; null = creating.
+  const [editingRateId, setEditingRateId] = useState<string | null>(null);
 
   const allocationOptions = project.allocations.map((item) => ({
     id: item.id,
     label: `${item.consultantName} - ${item.role}`,
   }));
+
+  function rateToInput(item: ProjectSaleRateItem): SaleRateInput {
+    return {
+      projectId: project.id,
+      consultantId: item.consultantId,
+      allocationId: item.allocationId,
+      startsAt: item.startsAt,
+      endsAt: item.endsAt,
+      hourlyRate: item.hourlyRate ?? 0,
+      currency: item.currency,
+      note: item.note,
+    };
+  }
 
   return (
     <Modal
@@ -412,7 +472,8 @@ function PricingModal({
               size="sm"
               variant="secondary"
               icon={ReceiptText}
-              onClick={() =>
+              onClick={() => {
+                setEditingRateId(null);
                 setRate({
                   projectId: project.id,
                   consultantId: undefined,
@@ -422,8 +483,8 @@ function PricingModal({
                   hourlyRate: 0,
                   currency: "BRL",
                   note: "",
-                })
-              }
+                });
+              }}
             >
               Novo valor
             </ActionButton>
@@ -454,6 +515,25 @@ function PricingModal({
                     : formatCurrencyPrecise(item.hourlyRate),
               },
               { key: "note", header: "Nota", cell: (item) => item.note ?? "-" },
+              {
+                key: "actions",
+                header: "",
+                align: "right",
+                cell: (item) => (
+                  <ActionButton
+                    size="sm"
+                    variant="secondary"
+                    icon={Edit}
+                    aria-label={`Editar valor de ${item.allocationLabel ?? item.consultantName ?? "projeto"}`}
+                    onClick={() => {
+                      setEditingRateId(item.id);
+                      setRate(rateToInput(item));
+                    }}
+                  >
+                    Editar
+                  </ActionButton>
+                ),
+              },
             ]}
             rows={project.saleRates}
             rowKey={(item) => item.id}
@@ -474,10 +554,18 @@ function PricingModal({
           allocations={allocationOptions}
           isPending={isPending}
           onChange={setRate}
-          onClose={() => setRate(null)}
-          onSave={() => {
-            onAddSaleRate(rate);
+          onClose={() => {
             setRate(null);
+            setEditingRateId(null);
+          }}
+          onSave={() => {
+            if (editingRateId) {
+              onEditSaleRate(editingRateId, rate);
+            } else {
+              onAddSaleRate(rate);
+            }
+            setRate(null);
+            setEditingRateId(null);
           }}
         />
       ) : null}

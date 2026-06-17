@@ -9,11 +9,19 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { FilterChip } from "@/components/ui/FilterChip";
 import { Modal } from "@/components/ui/Modal";
 import { SectionPanel } from "@/components/ui/SectionPanel";
-import { upsertProjectBillingConfig } from "@/app/app/projetos/actions";
+import {
+  updateProjectBillingType,
+  upsertProjectBillingConfig,
+} from "@/app/app/projetos/actions";
 import type { ProjectBillingConfigInput } from "@/lib/projects/schemas";
 import { isMissingBillingConfig } from "@/lib/projects/pending";
-import type { ProjectItem, ProjectStatus } from "@/lib/projects/types";
+import type {
+  ProjectBillingTypeOption,
+  ProjectItem,
+  ProjectStatus,
+} from "@/lib/projects/types";
 import { formatCurrencyPrecise } from "@/lib/format";
+import { fieldClass } from "@/components/projects/shared/fields";
 import {
   ProjectStatusBadge,
   projectStatusLabels,
@@ -30,6 +38,7 @@ type Mode = "demo" | "db";
 interface ProjectBillingViewProps {
   mode: Mode;
   projects: ProjectItem[];
+  billingTypes: ProjectBillingTypeOption[];
 }
 
 const statusFilters: (ProjectStatus | "ALL")[] = [
@@ -49,7 +58,11 @@ function baseRateLabel(project: ProjectItem): string {
   return formatCurrencyPrecise(base.hourlyRate);
 }
 
-export function ProjectBillingView({ mode, projects }: ProjectBillingViewProps) {
+export function ProjectBillingView({
+  mode,
+  projects,
+  billingTypes,
+}: ProjectBillingViewProps) {
   const [localItems, setLocalItems] = useState(projects);
   const items = mode === "db" ? projects : localItems;
   const [search, setSearch] = useState("");
@@ -107,6 +120,33 @@ export function ProjectBillingView({ mode, projects }: ProjectBillingViewProps) 
     startTransition(async () => {
       const result = await upsertProjectBillingConfig(billingForm);
       setFeedback(result.ok ? "Regra de cobrança salva." : result.message);
+    });
+  }
+
+  function saveBillingType(projectId: string, billingTypeId: string | undefined) {
+    if (mode === "demo") {
+      const billingType = billingTypes.find((type) => type.id === billingTypeId);
+      setLocalItems((current) =>
+        current.map((project) =>
+          project.id === projectId
+            ? {
+                ...project,
+                billingTypeId,
+                billingTypeName: billingType?.name,
+                billingChargeType: billingType?.chargeType,
+              }
+            : project,
+        ),
+      );
+      setFeedback("Tipo de cobrança salvo localmente.");
+      return;
+    }
+    startTransition(async () => {
+      const result = await updateProjectBillingType({
+        id: projectId,
+        billingTypeId,
+      });
+      setFeedback(result.ok ? "Tipo de cobrança salvo." : result.message);
     });
   }
 
@@ -275,6 +315,13 @@ export function ProjectBillingView({ mode, projects }: ProjectBillingViewProps) 
                 </p>
               }
             />
+            <BillingTypeEditor
+              key={configProject.id}
+              project={configProject}
+              billingTypes={billingTypes}
+              isPending={isPending}
+              onSave={saveBillingType}
+            />
             <BillingConfigPanel
               chargeType={configProject.billingChargeType}
               value={billingForm}
@@ -284,5 +331,54 @@ export function ProjectBillingView({ mode, projects }: ProjectBillingViewProps) 
         </Modal>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Editor do Tipo de Cobrança (BillingType) por projeto, no contexto Financeiro.
+ * O tipo define o chargeType que o motor de regras consome — por isso fica aqui,
+ * junto da configuração de cobrança. Mantém estado próprio para um save isolado
+ * (não toca budget/valores de venda do Comercial).
+ */
+function BillingTypeEditor({
+  project,
+  billingTypes,
+  isPending,
+  onSave,
+}: {
+  project: ProjectItem;
+  billingTypes: ProjectBillingTypeOption[];
+  isPending: boolean;
+  onSave: (projectId: string, billingTypeId: string | undefined) => void;
+}) {
+  const [billingTypeId, setBillingTypeId] = useState(project.billingTypeId ?? "");
+  return (
+    <section className="space-y-3">
+      <h3 className="text-sm font-semibold text-strong">Tipo de cobrança</h3>
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="flex-1 space-y-1 text-sm font-medium text-medium">
+          Modelo de cobrança do projeto
+          <select
+            value={billingTypeId}
+            onChange={(event) => setBillingTypeId(event.target.value)}
+            className={fieldClass()}
+          >
+            <option value="">Herdar do cliente</option>
+            {billingTypes.map((type) => (
+              <option key={type.id} value={type.id}>
+                {type.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <ActionButton
+          size="sm"
+          disabled={isPending}
+          onClick={() => onSave(project.id, billingTypeId || undefined)}
+        >
+          Salvar tipo
+        </ActionButton>
+      </div>
+    </section>
   );
 }
