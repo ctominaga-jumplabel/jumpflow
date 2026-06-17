@@ -923,9 +923,10 @@ describe("decideHours", () => {
     expect(h.store.audits).toHaveLength(0);
   });
 
-  it("blocks deciding the user's OWN hours (SELF_APPROVAL), even as ADMIN", async () => {
-    // The current ADMIN session resolves to con-1 (same email under dev auth);
-    // approving con-1's own SUBMITTED entry must be refused.
+  it("lets an ADMIN decide their OWN hours (segregation exempt for ADMIN/AREA_MANAGER)", async () => {
+    // The current ADMIN session resolves to con-1 (same email under dev auth).
+    // In a small operation the same person logs and approves hours, so ADMIN
+    // is exempt from the self-decision guard.
     seedCurrentPeriod("SUBMITTED");
     const entry = seedSubmitted({ consultantId: "con-1" });
     const result = await decideHours({
@@ -933,25 +934,44 @@ describe("decideHours", () => {
       decision: "APPROVED",
       comment: "",
     });
-    expect(result).toMatchObject({ ok: false, error: "SELF_APPROVAL" });
-    // Nothing was mutated, approved or audited.
-    expect(h.store.entries[0].status).toBe("SUBMITTED");
-    expect(h.store.approvals).toHaveLength(0);
-    expect(h.store.audits).toHaveLength(0);
+    expect(result).toMatchObject({
+      ok: true,
+      data: { decided: 1, alreadyDecided: 0 },
+    });
+    expect(h.store.entries[0].status).toBe("APPROVED");
+    expect(h.store.approvals).toHaveLength(1);
   });
 
-  it("blocks a batch that MIXES own hours with others' (SELF_APPROVAL)", async () => {
+  it("decides a MIXED batch (own + others') in full when ADMIN", async () => {
     seedCurrentPeriod("SUBMITTED");
     const own = seedSubmitted({ consultantId: "con-1" });
     const other = seedSubmitted({ consultantId: "con-2", activityType: "MEETING" });
     const result = await decideHours({
       entryIds: [own.id, other.id],
+      decision: "REJECTED",
+      comment: "Reenviar com detalhamento.",
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      data: { decided: 2, alreadyDecided: 0 },
+    });
+    expect(h.store.entries.every((e) => e.status === "REJECTED")).toBe(true);
+    expect(h.store.approvals).toHaveLength(2);
+  });
+
+  it("still blocks a PROJECT_MANAGER from deciding their OWN hours (SELF_APPROVAL)", async () => {
+    // A restricted role (PROJECT_MANAGER) keeps the segregation guard. The PM
+    // manages proj-1 (scope ok), but con-1 is their own linked consultant.
+    h.store.currentUser.roles = ["PROJECT_MANAGER"];
+    seedCurrentPeriod("SUBMITTED");
+    const entry = seedSubmitted({ consultantId: "con-1", projectId: "proj-1" });
+    const result = await decideHours({
+      entryIds: [entry.id],
       decision: "APPROVED",
       comment: "",
     });
     expect(result).toMatchObject({ ok: false, error: "SELF_APPROVAL" });
-    // The whole batch is refused: even the other consultant's entry is untouched.
-    expect(h.store.entries.every((e) => e.status === "SUBMITTED")).toBe(true);
+    expect(h.store.entries[0].status).toBe("SUBMITTED");
     expect(h.store.approvals).toHaveLength(0);
   });
 
@@ -1114,7 +1134,7 @@ describe("decideHours", () => {
     expect(h.store.approvals).toHaveLength(0);
   });
 
-  it("blocks reopening the user's OWN hours (SELF_APPROVAL)", async () => {
+  it("lets an ADMIN reopen their OWN hours (segregation exempt for ADMIN/AREA_MANAGER)", async () => {
     seedCurrentPeriod("APPROVED");
     const entry = seedEntry({ consultantId: "con-1", status: "APPROVED" });
     const result = await decideHours({
@@ -1122,9 +1142,13 @@ describe("decideHours", () => {
       decision: "SUBMITTED",
       comment: "",
     });
-    expect(result).toMatchObject({ ok: false, error: "SELF_APPROVAL" });
-    expect(h.store.entries[0].status).toBe("APPROVED");
-    expect(h.store.approvals).toHaveLength(0);
+    expect(result).toMatchObject({
+      ok: true,
+      data: { decided: 1, alreadyDecided: 0 },
+    });
+    expect(h.store.entries[0].status).toBe("SUBMITTED");
+    // Reopen is recorded as a MANUAL REJECTED Approval (blocks re-auto-approval).
+    expect(h.store.approvals).toHaveLength(1);
   });
 
   it("forbids a PROJECT_MANAGER reopening outside the project scope", async () => {

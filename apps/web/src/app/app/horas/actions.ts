@@ -1148,23 +1148,28 @@ export async function decideHours(
       );
     }
 
-    // Segregation of duties: nobody approves or rejects their OWN hours — not
-    // even ADMIN (mirrors assertNotSelf in despesas/actions). In dev auth the
-    // session id never matches db rows, so the consultant email is also
-    // compared (same constraint as getConsultantForUser/resolveDbUser).
-    const decidesOwnHours = entries.some((entry) => {
-      const sameUser = entry.consultant.userId === dbUser.id;
-      const sameDevEmail =
-        isDevAuthEnabled() &&
-        entry.consultant.email.toLowerCase() ===
-          user.email.trim().toLowerCase();
-      return sameUser || sameDevEmail;
-    });
-    if (decidesOwnHours) {
-      throw new ActionError(
-        "SELF_APPROVAL",
-        "Você não pode decidir os próprios lançamentos de horas.",
-      );
+    // Segregation of duties: a PROJECT_MANAGER never decides their OWN hours
+    // (mirrors assertNotSelf in despesas/actions). ADMIN/AREA_MANAGER are
+    // exempt — in a small operation the same person often logs and approves
+    // hours, so the guard would otherwise block the entire approval flow
+    // (incl. a mixed bulk selection). In dev auth the session id never matches
+    // db rows, so the consultant email is also compared (same constraint as
+    // getConsultantForUser/resolveDbUser).
+    if (restricted) {
+      const decidesOwnHours = entries.some((entry) => {
+        const sameUser = entry.consultant.userId === dbUser.id;
+        const sameDevEmail =
+          isDevAuthEnabled() &&
+          entry.consultant.email.toLowerCase() ===
+            user.email.trim().toLowerCase();
+        return sameUser || sameDevEmail;
+      });
+      if (decidesOwnHours) {
+        throw new ActionError(
+          "SELF_APPROVAL",
+          "Você não pode decidir os próprios lançamentos de horas.",
+        );
+      }
     }
 
     const comment = parsed.comment.trim() || null;
