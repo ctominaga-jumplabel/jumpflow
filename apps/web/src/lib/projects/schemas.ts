@@ -80,6 +80,14 @@ export const projectCommercialSchema = z.object({
   budgetHours: optionalNumber,
 });
 
+// Tipo de cobrança por projeto, editado pelo Financeiro junto da regra de
+// cobrança (o BillingType define o chargeType que o motor consome). Patch
+// isolado para não tocar nos campos comerciais (budget/valor de venda).
+export const projectBillingTypeSchema = z.object({
+  id: entityId,
+  billingTypeId: optionalCuid,
+});
+
 // Configuracao de cobranca por projeto (motor de regras parametrizavel).
 // Editada pelo Financeiro. Todos os parametros numericos sao opcionais: cada
 // tipo de cobranca usa apenas os que fazem sentido (ex.: HOUR_PACKAGE usa
@@ -197,6 +205,7 @@ export const allocationSkillUpdateSchema = z.object({
 export type ProjectInput = z.infer<typeof projectInputSchema>;
 export type ProjectUpdateInput = z.infer<typeof projectUpdateSchema>;
 export type ProjectCommercialInput = z.infer<typeof projectCommercialSchema>;
+export type ProjectBillingTypeInput = z.infer<typeof projectBillingTypeSchema>;
 export type ProjectBillingConfigInput = z.infer<
   typeof projectBillingConfigSchema
 >;
