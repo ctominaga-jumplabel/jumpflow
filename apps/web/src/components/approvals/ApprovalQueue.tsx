@@ -302,7 +302,7 @@ export function ApprovalQueue({
       const nextPending = pending.filter((item) => !successfulIds.has(item.id));
       setSelectedId(nextPending[0]?.id ?? null);
       const suffix =
-        alreadyDecided > 0 ? ` ${alreadyDecided} ja processado(s).` : "";
+        alreadyDecided > 0 ? ` ${alreadyDecided} já processado(s).` : "";
       if (errors.length > 0) {
         notify(
           "warning",
@@ -431,12 +431,12 @@ export function ApprovalQueue({
 
       <SectionPanel
         title="Filtros"
-        description="Combine periodo, status, projeto, consultor e atividade."
+        description="Combine período, status, projeto, consultor e atividade."
       >
         <div className="grid gap-4 px-5 py-4 sm:grid-cols-2 lg:grid-cols-5">
           <div>
             <label htmlFor="approval-start" className="mb-1 block text-xs font-semibold text-medium">
-              Inicio
+              Início
             </label>
             <input
               id="approval-start"
@@ -601,11 +601,11 @@ export function ApprovalQueue({
 
           {list.length > 0 ? (
             <SectionPanel
-              title={tab === "PENDING" ? "Decisao em massa" : "Revisao em massa"}
+              title={tab === "PENDING" ? "Decisão em massa" : "Revisão em massa"}
               description={
                 tab === "PENDING"
-                  ? "A decisao usa as mesmas regras e auditoria do fluxo individual."
-                  : "Reabra para a fila ou troque a decisao; cada item gera Approval e auditoria. Itens fechados nao podem ser alterados."
+                  ? "A decisão usa as mesmas regras e auditoria do fluxo individual."
+                  : "Reabra para a fila ou troque a decisão; cada item gera Approval e auditoria. Itens fechados não podem ser alterados."
               }
               action={
                 <StatusBadge tone="info">
@@ -626,7 +626,7 @@ export function ApprovalQueue({
                     value={bulkComment}
                     onChange={(event) => setBulkComment(event.target.value)}
                     rows={2}
-                    placeholder="Obrigatoria para reprovar; opcional para aprovar ou reabrir."
+                    placeholder="Obrigatória para reprovar; opcional para aprovar ou reabrir."
                     className={cn(
                       "w-full resize-y rounded-md border border-border bg-surface px-3 py-2 text-sm text-strong placeholder:text-soft",
                       focusRing,
@@ -641,7 +641,7 @@ export function ApprovalQueue({
                     disabled={isPending}
                     onClick={toggleAllVisible}
                   >
-                    Selecionar visiveis
+                    Selecionar visíveis
                   </ActionButton>
                   {tab === "HISTORY" ? (
                     <ActionButton
@@ -651,7 +651,7 @@ export function ApprovalQueue({
                       disabled={isPending || selectedItems.length === 0}
                       onClick={() => decideMany("REOPEN")}
                     >
-                      Reabrir selecao
+                      Reabrir seleção
                     </ActionButton>
                   ) : null}
                   <ActionButton
@@ -661,20 +661,16 @@ export function ApprovalQueue({
                     disabled={isPending || selectedItems.length === 0}
                     onClick={() => decideMany("APPROVED")}
                   >
-                    Aprovar selecao
+                    Aprovar seleção
                   </ActionButton>
                   <ActionButton
                     variant="danger"
                     size="sm"
                     icon={X}
-                    disabled={
-                      isPending ||
-                      selectedItems.length === 0 ||
-                      bulkComment.trim().length === 0
-                    }
+                    disabled={isPending || selectedItems.length === 0}
                     onClick={() => decideMany("REJECTED")}
                   >
-                    Reprovar selecao
+                    Reprovar seleção
                   </ActionButton>
                 </div>
               </div>

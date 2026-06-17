@@ -344,3 +344,58 @@ describe("runAutoApproval — manual decision history guard", () => {
     expect(second.processed).toBe(0);
   });
 });
+
+describe("runAutoApproval — a rejected entry never re-enters the engine", () => {
+  it("ignores a REJECTED entry entirely (only SUBMITTED is eligible)", async () => {
+    // Even a standard 8h weekday entry with the delay elapsed must stay out of
+    // the engine once a human rejected it.
+    h.store.entries = [entry({ id: "rejected", status: "REJECTED" })];
+    h.store.approvals = [
+      {
+        entityType: "TIME_ENTRY",
+        entityId: "rejected",
+        status: "REJECTED",
+        isAutomatic: false,
+        ruleKey: null,
+      },
+    ];
+
+    const collection = await collectAutoApprovalDecisions(NOW);
+    expect(collection.evaluations).toHaveLength(0); // never even loaded
+
+    const result = await runAutoApproval(NOW);
+    expect(result.processed).toBe(0);
+    expect(result.approved).toBe(0);
+    expect(h.store.entries.find((e) => e.id === "rejected")?.status).toBe(
+      "REJECTED",
+    );
+  });
+
+  it("keeps a rejected-then-resubmitted entry PENDING (manual REJECTED history blocks it)", async () => {
+    // Consultant fixed and resubmitted a rejected entry: status is SUBMITTED
+    // again, but the prior MANUAL REJECTED Approval keeps it off auto-approval.
+    h.store.entries = [entry({ id: "resubmitted" })];
+    h.store.approvals = [
+      {
+        entityType: "TIME_ENTRY",
+        entityId: "resubmitted",
+        status: "REJECTED",
+        isAutomatic: false,
+        ruleKey: null,
+      },
+    ];
+
+    const collection = await collectAutoApprovalDecisions(NOW);
+    const decision = collection.evaluations.find((e) => e.id === "resubmitted")
+      ?.decision;
+    expect(decision?.outcome).toBe("PENDING");
+    expect(decision?.reasons).toContain("MANUAL_DECISION_HISTORY");
+
+    const result = await runAutoApproval(NOW);
+    expect(result.approved).toBe(0);
+    expect(result.pending).toBe(1);
+    expect(h.store.entries.find((e) => e.id === "resubmitted")?.status).toBe(
+      "SUBMITTED",
+    );
+  });
+});

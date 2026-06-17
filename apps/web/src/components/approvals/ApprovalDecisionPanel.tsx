@@ -27,8 +27,9 @@ export interface ApprovalDecisionPanelProps {
 
 /**
  * Decision panel for a selected approval. Enforces the business rule that a
- * rejection requires a justification (the "Reprovar" button stays disabled
- * until a comment is typed).
+ * rejection requires a justification: the "Reprovar" button stays clickable,
+ * but clicking it without a comment shows an inline validation message instead
+ * of deciding (the server enforces the same rule for db-backed items).
  *
  * The handlers live in ApprovalQueue: db-backed items go through the
  * decideHours server action (Approval + AuditEvent in one transaction); mock
@@ -41,6 +42,10 @@ export function ApprovalDecisionPanel({
   busy = false,
 }: ApprovalDecisionPanelProps) {
   const [comment, setComment] = useState("");
+  // Inline validation: the "Reprovar" button is always clickable, but a
+  // rejection without a justification surfaces this message instead of silently
+  // doing nothing (the server enforces the same rule for db-backed items).
+  const [rejectError, setRejectError] = useState(false);
 
   // Reset the comment whenever the selected item changes (render-time state
   // adjustment — the React-recommended alternative to an effect).
@@ -49,6 +54,7 @@ export function ApprovalDecisionPanel({
   if (currentId !== prevId) {
     setPrevId(currentId);
     setComment("");
+    setRejectError(false);
   }
 
   if (!item) {
@@ -63,6 +69,15 @@ export function ApprovalDecisionPanel({
 
   const canReject = comment.trim().length > 0;
   const isExpense = item.type === "EXPENSE";
+
+  function handleReject() {
+    if (!canReject) {
+      setRejectError(true);
+      return;
+    }
+    setRejectError(false);
+    onReject(item!.id, comment.trim());
+  }
 
   return (
     <SectionPanel
@@ -121,7 +136,7 @@ export function ApprovalDecisionPanel({
           </div>
           {item.entryIds?.length ? (
             <div className="col-span-2">
-              <dt className="text-xs text-soft">Lancamentos</dt>
+              <dt className="text-xs text-soft">Lançamentos</dt>
               <dd className="break-all text-medium">
                 {item.entryIds.length} item(ns) - {item.entryIds.join(", ")}
               </dd>
@@ -154,14 +169,26 @@ export function ApprovalDecisionPanel({
           <textarea
             id="approval-comment"
             value={comment}
-            onChange={(e) => setComment(e.target.value)}
+            onChange={(e) => {
+              setComment(e.target.value);
+              if (rejectError && e.target.value.trim().length > 0) {
+                setRejectError(false);
+              }
+            }}
             rows={3}
+            aria-invalid={rejectError}
             placeholder="Descreva o motivo da reprovação ou uma observação na aprovação."
             className={cn(
               "w-full resize-y rounded-md border border-border bg-surface px-3 py-2 text-sm text-strong placeholder:text-soft",
               focusRingInput,
+              rejectError && "border-danger",
             )}
           />
+          {rejectError ? (
+            <p className="mt-1 text-xs font-medium text-danger">
+              Informe uma justificativa para reprovar.
+            </p>
+          ) : null}
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -178,8 +205,8 @@ export function ApprovalDecisionPanel({
             variant="danger"
             size="sm"
             icon={X}
-            disabled={item.status !== "PENDING" || !canReject || busy}
-            onClick={() => onReject(item.id, comment.trim())}
+            disabled={item.status !== "PENDING" || busy}
+            onClick={handleReject}
           >
             Reprovar
           </ActionButton>

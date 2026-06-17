@@ -20,17 +20,6 @@ describe("ApprovalQueue", () => {
     expect(screen.queryByText("Em breve")).not.toBeInTheDocument();
   });
 
-  it("requires a comment before rejection is allowed", () => {
-    render(<ApprovalQueue />);
-    const reject = screen.getByRole("button", { name: /^Reprovar$/ });
-    expect(reject).toBeDisabled();
-
-    fireEvent.change(screen.getByLabelText(/Comentário/), {
-      target: { value: "Ajustar descrição." },
-    });
-    expect(reject).not.toBeDisabled();
-  });
-
   it("switches to the history tab", () => {
     render(<ApprovalQueue />);
     fireEvent.click(screen.getByRole("button", { name: /Histórico/ }));
@@ -62,6 +51,19 @@ describe("ApprovalQueue", () => {
     expect(screen.getByText(/reprovado com justificativa/)).toBeInTheDocument();
   });
 
+  it("keeps the Reprovar button enabled but blocks rejecting without a justification", () => {
+    render(<ApprovalQueue />);
+    const reject = screen.getByRole("button", { name: /^Reprovar$/ });
+    // The button is clickable (not disabled) so the user gets feedback.
+    expect(reject).not.toBeDisabled();
+    fireEvent.click(reject);
+    // No decision was applied: the inline validation message shows instead.
+    expect(
+      screen.getByText(/Informe uma justificativa para reprovar/),
+    ).toBeInTheDocument();
+    expect(screen.getByText("5 pendentes")).toBeInTheDocument();
+  });
+
   it("filters approvals by project", () => {
     render(<ApprovalQueue />);
     fireEvent.change(screen.getByLabelText("Projeto"), {
@@ -72,27 +74,27 @@ describe("ApprovalQueue", () => {
 
   it("decides visible pending items in bulk with a justification", async () => {
     render(<ApprovalQueue />);
-    fireEvent.click(screen.getByRole("button", { name: /Selecionar visiveis/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Selecionar visíveis/ }));
     expect(await screen.findByText(/5 selecionado/)).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Justificativa de massa"), {
       target: { value: "Revisao em lote." },
     });
-    fireEvent.click(screen.getByRole("button", { name: /Reprovar selecao/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Reprovar seleção/ }));
     expect(
       await screen.findByText(/5 item\(ns\) reprovado\(s\)/),
     ).toBeInTheDocument();
     expect(await screen.findByText("0 pendentes")).toBeInTheDocument();
   });
 
-  it("offers a 'Reabrir selecao' action only on the history tab", () => {
+  it("offers a 'Reabrir seleção' action only on the history tab", () => {
     render(<ApprovalQueue />);
     // Pending tab: no reopen action.
     expect(
-      screen.queryByRole("button", { name: /Reabrir selecao/ }),
+      screen.queryByRole("button", { name: /Reabrir seleção/ }),
     ).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Histórico/ }));
     expect(
-      screen.getByRole("button", { name: /Reabrir selecao/ }),
+      screen.getByRole("button", { name: /Reabrir seleção/ }),
     ).toBeInTheDocument();
   });
 
@@ -101,8 +103,8 @@ describe("ApprovalQueue", () => {
     expect(screen.getByText("5 pendentes")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Histórico/ }));
     // Select every decided item, then reopen the selection.
-    fireEvent.click(screen.getByRole("button", { name: /Selecionar visiveis/ }));
-    fireEvent.click(screen.getByRole("button", { name: /Reabrir selecao/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Selecionar visíveis/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Reabrir seleção/ }));
     expect(
       await screen.findByText(/item\(ns\) reaberto\(s\) para a fila pendente/),
     ).toBeInTheDocument();
@@ -113,7 +115,7 @@ describe("ApprovalQueue", () => {
 
   it("clears the selection when switching tabs", () => {
     render(<ApprovalQueue />);
-    fireEvent.click(screen.getByRole("button", { name: /Selecionar visiveis/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Selecionar visíveis/ }));
     expect(screen.getByText(/5 selecionado/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Histórico/ }));
     expect(screen.getByText(/0 selecionado/)).toBeInTheDocument();
