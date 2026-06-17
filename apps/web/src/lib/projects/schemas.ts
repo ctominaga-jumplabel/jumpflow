@@ -71,6 +71,15 @@ export const projectUpdateSchema = projectInputSchema.extend({
   id: entityId,
 });
 
+// Campos comerciais do projeto, editados na superfície Comercial (separados do
+// ciclo de vida operacional). Tipo de cobrança e budget de horas; o valor de
+// venda por vigência fica em ProjectSaleRate (saleRate schemas abaixo).
+export const projectCommercialSchema = z.object({
+  id: entityId,
+  billingTypeId: optionalCuid,
+  budgetHours: optionalNumber,
+});
+
 // Configuracao de cobranca por projeto (motor de regras parametrizavel).
 // Editada pelo Financeiro. Todos os parametros numericos sao opcionais: cada
 // tipo de cobranca usa apenas os que fazem sentido (ex.: HOUR_PACKAGE usa
@@ -187,6 +196,7 @@ export const allocationSkillUpdateSchema = z.object({
 
 export type ProjectInput = z.infer<typeof projectInputSchema>;
 export type ProjectUpdateInput = z.infer<typeof projectUpdateSchema>;
+export type ProjectCommercialInput = z.infer<typeof projectCommercialSchema>;
 export type ProjectBillingConfigInput = z.infer<
   typeof projectBillingConfigSchema
 >;

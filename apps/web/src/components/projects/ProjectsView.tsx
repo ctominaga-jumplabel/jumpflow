@@ -44,14 +44,13 @@ import {
   demoProjects,
   demoProjectSkills,
 } from "@/lib/projects/mock-data";
+import {
+  isMissingBillingConfig,
+  isMissingSaleRate,
+  isProjectBaseSaleRateActive,
+} from "@/lib/projects/pending";
 import type {
-  AdjustmentIndex,
-  AllocationStatus,
-  BillingPeriodicity,
-  BillingRoundingRule,
-  OverageTreatment,
   ProjectAllocationItem,
-  ProjectBillingConfigItem,
   ProjectBillingTypeOption,
   ProjectClientOption,
   ProjectConsultantOption,
@@ -67,59 +66,20 @@ import {
   formatHours,
   MASKED_VALUE,
 } from "@/lib/format";
-import { focusRingInput } from "@/lib/styles";
 import { cn } from "@/lib/utils";
+import { focusRingInput } from "@/lib/styles";
 import { ProjectStatusBadge, projectStatusLabels } from "./ProjectStatusBadge";
+import {
+  billingConfigToForm,
+  formToBillingConfigItem,
+} from "./shared/billing-form";
+import { BillingConfigPanel } from "./shared/BillingConfigPanel";
+import { DateField, NumberField, fieldClass } from "./shared/fields";
+import { allocationStatusLabels, skillLevelLabels } from "./shared/labels";
+import { SaleRateModal } from "./shared/SaleRateModal";
 
 type Mode = "demo" | "db";
 type DetailTab = "ALLOCATIONS" | "SKILLS" | "RATES" | "BILLING";
-
-const periodicityLabels: Record<BillingPeriodicity, string> = {
-  MONTHLY: "Mensal",
-  BIWEEKLY: "Quinzenal",
-  WEEKLY: "Semanal",
-  PER_EVENT: "Por evento",
-};
-
-const overageLabels: Record<OverageTreatment, string> = {
-  BILL_EXTRA: "Cobrar excedente",
-  BLOCK_AT_LIMIT: "Bloquear no limite",
-  INCLUDE_FREE: "Incluir sem custo",
-  CARRY_OVER: "Acumular p/ próximo período",
-};
-
-const adjustmentLabels: Record<AdjustmentIndex, string> = {
-  NONE: "Sem reajuste",
-  IPCA: "IPCA",
-  IGPM: "IGP-M",
-  CDI: "CDI",
-  FIXED: "Percentual fixo",
-};
-
-const billingRoundingLabels: Record<BillingRoundingRule, string> = {
-  NONE: "Sem arredondamento",
-  NEAREST_15_MINUTES: "Mais próximo 15min",
-  NEAREST_30_MINUTES: "Mais próximo 30min",
-  NEAREST_HOUR: "Mais próxima hora",
-  CEIL_15_MINUTES: "Teto 15min",
-  CEIL_30_MINUTES: "Teto 30min",
-  CEIL_HOUR: "Teto hora",
-};
-
-const skillLevelLabels: Record<SkillLevel, string> = {
-  BASIC: "Básico",
-  INTERMEDIATE: "Intermediário",
-  ADVANCED: "Avançado",
-  SPECIALIST: "Especialista",
-};
-
-const allocationStatusLabels: Record<AllocationStatus, string> = {
-  PLANNED: "Planejado",
-  ACTIVE: "Ativo",
-  ENDED: "Encerrado",
-  CANCELLED: "Cancelado",
-  INACTIVE: "Inativo",
-};
 
 interface ProjectsViewProps {
   mode: Mode;
@@ -166,6 +126,8 @@ function projectToInput(project: ProjectItem): ProjectInput {
     startDate: project.startDate,
     endDate: project.endDate,
     managerUserId: project.managerUserId ?? "",
+    // Campos comerciais não são editados na Operação, mas trafegam inalterados
+    // para não serem zerados quando um perfil comercial salva o projeto aqui.
     billingTypeId: project.billingTypeId,
     billingHourlyRate: project.billingHourlyRate,
     budgetHours: project.budgetHours,
@@ -173,65 +135,27 @@ function projectToInput(project: ProjectItem): ProjectInput {
   };
 }
 
-function billingConfigToForm(project: ProjectItem): ProjectBillingConfigInput {
-  const c = project.billingConfig;
-  return {
-    projectId: project.id,
-    periodicity: c?.periodicity ?? "MONTHLY",
-    roundingRule: c?.roundingRule ?? "NONE",
-    fixedAmount: c?.fixedAmount,
-    includedHours: c?.includedHours,
-    overageRate: c?.overageRate,
-    overageTreatment: c?.overageTreatment ?? "BILL_EXTRA",
-    perConsultantAmount: c?.perConsultantAmount,
-    reimbursableExpenses: c?.reimbursableExpenses ?? false,
-    reimbursableMarkupPct: c?.reimbursableMarkupPct,
-    discountPct: c?.discountPct,
-    penaltyPct: c?.penaltyPct,
-    adjustmentIndex: c?.adjustmentIndex ?? "NONE",
-    adjustmentPct: c?.adjustmentPct,
-    withholdIss: c?.withholdIss ?? false,
-    withholdingPct: c?.withholdingPct,
-    closingDay: c?.closingDay,
-    dueDay: c?.dueDay,
-    requireApproval: c?.requireApproval ?? true,
-    notes: c?.notes ?? "",
-  };
-}
-
-function formToBillingConfigItem(
-  form: ProjectBillingConfigInput,
-): ProjectBillingConfigItem {
-  return {
-    periodicity: form.periodicity,
-    roundingRule: form.roundingRule,
-    fixedAmount: form.fixedAmount,
-    includedHours: form.includedHours,
-    overageRate: form.overageRate,
-    overageTreatment: form.overageTreatment,
-    perConsultantAmount: form.perConsultantAmount,
-    reimbursableExpenses: form.reimbursableExpenses,
-    reimbursableMarkupPct: form.reimbursableMarkupPct,
-    discountPct: form.discountPct,
-    penaltyPct: form.penaltyPct,
-    adjustmentIndex: form.adjustmentIndex,
-    adjustmentPct: form.adjustmentPct,
-    withholdIss: form.withholdIss,
-    withholdingPct: form.withholdingPct,
-    closingDay: form.closingDay,
-    dueDay: form.dueDay,
-    requireApproval: form.requireApproval,
-    notes: form.notes,
-  };
-}
-
-function fieldClass() {
-  return cn("h-10 rounded-md border border-border bg-surface px-3 text-sm", focusRingInput);
-}
-
-function budgetPercent(project: ProjectItem): number {
-  if (!project.budgetHours || project.budgetHours <= 0) return 0;
-  return Math.round((project.consumedHours / project.budgetHours) * 100);
+/** Read-only pendency chips that point Operação at the áreas donas. */
+function ProjectPendingBadges({ project }: { project: ProjectItem }) {
+  const missingSale = isMissingSaleRate(project);
+  const missingBilling = isMissingBillingConfig(project);
+  if (!missingSale && !missingBilling) {
+    return <span className="text-xs text-soft">-</span>;
+  }
+  return (
+    <div className="flex flex-wrap justify-end gap-1">
+      {missingSale ? (
+        <span className="rounded-full border border-warning/30 bg-warning-soft px-2 py-0.5 text-[11px] font-medium text-warning">
+          Sem valor de venda
+        </span>
+      ) : null}
+      {missingBilling ? (
+        <span className="rounded-full border border-warning/30 bg-warning-soft px-2 py-0.5 text-[11px] font-medium text-warning">
+          Sem regra de cobrança
+        </span>
+      ) : null}
+    </div>
+  );
 }
 
 export function ProjectsView({
@@ -241,7 +165,6 @@ export function ProjectsView({
   consultants = demoProjectConsultants,
   managers = demoProjectManagers,
   skills = demoProjectSkills,
-  billingTypes = [],
   canManageProjects,
   canViewCommercials,
   canManageSaleRates,
@@ -319,41 +242,19 @@ export function ProjectsView({
       className: "hidden lg:table-cell",
     },
     {
-      key: "rate",
-      header: "Valor hora",
+      key: "consumed",
+      header: "Consumo",
       align: "right",
       cell: (project) => (
-        <span className="tabular-nums">
-          {canViewCommercials
-            ? project.billingHourlyRate === undefined
-              ? "-"
-              : formatCurrencyPrecise(project.billingHourlyRate)
-            : MASKED_VALUE}
-        </span>
+        <span className="tabular-nums">{formatHours(project.consumedHours)}</span>
       ),
     },
     {
-      key: "budget",
-      header: canViewCommercials ? "Budget" : "Consumo",
-      cell: (project) => {
-        const pct = budgetPercent(project);
-        return (
-          <div className="min-w-[120px]">
-            <div className="flex justify-between gap-3 text-xs">
-              <span className="tabular-nums">
-                {canViewCommercials && project.budgetHours
-                  ? `${formatHours(project.consumedHours)} / ${formatHours(project.budgetHours)}`
-                  : formatHours(project.consumedHours)}
-              </span>
-              {canViewCommercials && project.budgetHours ? (
-                <span className={pct > 100 ? "text-danger" : "text-soft"}>
-                  {pct}%
-                </span>
-              ) : null}
-            </div>
-          </div>
-        );
-      },
+      key: "pending",
+      header: "Situação",
+      align: "right",
+      cell: (project) => <ProjectPendingBadges project={project} />,
+      className: "hidden md:table-cell",
     },
     {
       key: "team",
@@ -422,6 +323,8 @@ export function ProjectsView({
           saleRates: [],
           consumedHours: 0,
           allocatedConsultants: 0,
+          hasActiveSaleRate: false,
+          hasBillingConfig: false,
         }),
         ...projectForm,
         clientId: projectForm.clientId,
@@ -466,7 +369,11 @@ export function ProjectsView({
       setLocalItems((current) =>
         current.map((project) =>
           project.id === billingForm.projectId
-            ? { ...project, billingConfig: formToBillingConfigItem(billingForm) }
+            ? {
+                ...project,
+                billingConfig: formToBillingConfigItem(billingForm),
+                hasBillingConfig: true,
+              }
             : project,
         ),
       );
@@ -595,6 +502,14 @@ export function ProjectsView({
             ? {
                 ...project,
                 saleRates: [...project.saleRates, nextRate],
+                // Um valor base vigente satisfaz a fila de pendência (mesma
+                // semântica do servidor).
+                hasActiveSaleRate:
+                  project.hasActiveSaleRate ||
+                  isProjectBaseSaleRateActive(
+                    value,
+                    new Date().toISOString().slice(0, 10),
+                  ),
               }
             : project,
         ),
@@ -765,8 +680,6 @@ export function ProjectsView({
         value={projectForm}
         clients={clients}
         managers={managers}
-        billingTypes={billingTypes}
-        canViewCommercials={canViewCommercials}
         isPending={isPending}
         onChange={setProjectForm}
         onClose={() => setProjectOpen(false)}
@@ -798,13 +711,16 @@ export function ProjectsView({
   );
 }
 
+/**
+ * Operação cria/edita apenas os dados de ciclo de vida do projeto. Os campos
+ * comerciais (tipo de cobrança, valor hora, budget) migraram para a superfície
+ * Comercial; o valor de venda por vigência vive em ProjectSaleRate.
+ */
 function ProjectModal({
   open,
   value,
   clients,
   managers,
-  billingTypes,
-  canViewCommercials,
   isPending,
   onChange,
   onClose,
@@ -814,8 +730,6 @@ function ProjectModal({
   value: ProjectInput;
   clients: ProjectClientOption[];
   managers: ProjectManagerOption[];
-  billingTypes: ProjectBillingTypeOption[];
-  canViewCommercials: boolean;
   isPending: boolean;
   onChange: (value: ProjectInput) => void;
   onClose: () => void;
@@ -826,7 +740,7 @@ function ProjectModal({
       open={open}
       onClose={onClose}
       title="Projeto"
-      description="Dados operacionais, comerciais e periodo."
+      description="Dados operacionais e período. Valores comerciais e regras de cobrança são definidos pelas áreas donas."
       className="max-w-3xl"
       footer={
         <>
@@ -909,40 +823,9 @@ function ProjectModal({
           onChange={(next) => onChange({ ...value, endDate: next || undefined })}
         />
         <label className="space-y-1 text-sm font-medium text-medium">
-          Tipo de cobrança
-          <select
-            value={value.billingTypeId ?? ""}
-            disabled={!canViewCommercials}
-            onChange={(event) =>
-              onChange({ ...value, billingTypeId: event.target.value || undefined })
-            }
-            className={fieldClass()}
-          >
-            <option value="">Herdar do cliente</option>
-            {billingTypes.map((type) => (
-              <option key={type.id} value={type.id}>
-                {type.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <NumberField
-          label="Valor hora legado"
-          value={value.billingHourlyRate}
-          disabled={!canViewCommercials}
-          onChange={(next) => onChange({ ...value, billingHourlyRate: next })}
-        />
-        <NumberField
-          label="Budget horas"
-          value={value.budgetHours}
-          disabled={!canViewCommercials}
-          onChange={(next) => onChange({ ...value, budgetHours: next })}
-        />
-        <label className="space-y-1 text-sm font-medium text-medium">
           Centro de custo
           <input
             value={value.costCenter ?? ""}
-            disabled={!canViewCommercials}
             onChange={(event) =>
               onChange({ ...value, costCenter: event.target.value })
             }
@@ -964,6 +847,12 @@ function ProjectModal({
   );
 }
 
+/**
+ * Detalhe 360 do projeto: leitura consolidada com edição por bloco conforme o
+ * papel. Operação edita vínculos/skills; Comercial edita valores de venda;
+ * Financeiro edita a regra de cobrança. As abas comerciais aparecem read-only
+ * para quem não é dono, para ninguém trabalhar no escuro.
+ */
 function ProjectDetailModal({
   project,
   tab,
@@ -1024,7 +913,7 @@ function ProjectDetailModal({
       open={project !== null}
       onClose={onClose}
       title={project.name}
-      description="Vínculos de consultores e valores comerciais por vigência."
+      description="Visão consolidada do projeto: vínculos, skills, valores de venda e cobrança."
       className="max-w-4xl"
       footer={
         <>
@@ -1050,10 +939,9 @@ function ProjectDetailModal({
             >
               Novo vínculo
             </ActionButton>
-          ) : tab === "RATES" ? (
+          ) : tab === "RATES" && canManageSaleRates ? (
             <ActionButton
               icon={ReceiptText}
-              disabled={!canManageSaleRates}
               onClick={() =>
                 setRate({
                   projectId: project.id,
@@ -1204,37 +1092,37 @@ function ProjectDetailModal({
         />
       ) : tab === "RATES" ? (
         canViewCommercials ? (
-        <DataTable
-          columns={[
-            {
-              key: "scope",
-              header: "Escopo",
-              cell: (item) =>
-                item.allocationLabel ?? item.consultantName ?? "Projeto",
-            },
-            {
-              key: "period",
-              header: "Vigência",
-              cell: (item) =>
-                `${formatDate(item.startsAt)} - ${
-                  item.endsAt ? formatDate(item.endsAt) : "em aberto"
-                }`,
-            },
-            {
-              key: "rate",
-              header: "Valor",
-              align: "right",
-              cell: (item) =>
-                item.hourlyRate === undefined
-                  ? MASKED_VALUE
-                  : formatCurrencyPrecise(item.hourlyRate),
-            },
-            { key: "note", header: "Nota", cell: (item) => item.note ?? "-" },
-          ]}
-          rows={project.saleRates}
-          rowKey={(item) => item.id}
-          empty={<p className="text-center text-sm text-soft">Sem valores.</p>}
-        />
+          <DataTable
+            columns={[
+              {
+                key: "scope",
+                header: "Escopo",
+                cell: (item) =>
+                  item.allocationLabel ?? item.consultantName ?? "Projeto",
+              },
+              {
+                key: "period",
+                header: "Vigência",
+                cell: (item) =>
+                  `${formatDate(item.startsAt)} - ${
+                    item.endsAt ? formatDate(item.endsAt) : "em aberto"
+                  }`,
+              },
+              {
+                key: "rate",
+                header: "Valor",
+                align: "right",
+                cell: (item) =>
+                  item.hourlyRate === undefined
+                    ? MASKED_VALUE
+                    : formatCurrencyPrecise(item.hourlyRate),
+              },
+              { key: "note", header: "Nota", cell: (item) => item.note ?? "-" },
+            ]}
+            rows={project.saleRates}
+            rowKey={(item) => item.id}
+            empty={<p className="text-center text-sm text-soft">Sem valores.</p>}
+          />
         ) : (
           <p className="rounded-md border border-border bg-surface-muted px-3 py-2 text-sm text-soft">
             Valores comerciais restritos por perfil.
@@ -1480,266 +1368,6 @@ function AllocationSkillModal({
   );
 }
 
-function DateField({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <label className="space-y-1 text-sm font-medium text-medium">
-      {label}
-      <input
-        type="date"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className={fieldClass()}
-      />
-    </label>
-  );
-}
-
-function NumberField({
-  label,
-  value,
-  disabled,
-  onChange,
-}: {
-  label: string;
-  value?: number;
-  disabled?: boolean;
-  onChange: (value: number | undefined) => void;
-}) {
-  return (
-    <label className="space-y-1 text-sm font-medium text-medium">
-      {label}
-      <input
-        type="number"
-        value={value ?? ""}
-        disabled={disabled}
-        onChange={(event) =>
-          onChange(event.target.value === "" ? undefined : Number(event.target.value))
-        }
-        className={fieldClass()}
-      />
-    </label>
-  );
-}
-
-function BillingConfigSelect<T extends string>({
-  label,
-  value,
-  options,
-  hint,
-  onChange,
-}: {
-  label: string;
-  value: T;
-  options: Record<T, string>;
-  hint?: string;
-  onChange: (value: T) => void;
-}) {
-  return (
-    <label className="space-y-1 text-sm font-medium text-medium">
-      {label}
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value as T)}
-        className={fieldClass()}
-      >
-        {(Object.entries(options) as [T, string][]).map(([key, optionLabel]) => (
-          <option key={key} value={key}>
-            {optionLabel}
-          </option>
-        ))}
-      </select>
-      {hint ? <span className="text-xs font-normal text-soft">{hint}</span> : null}
-    </label>
-  );
-}
-
-function BillingConfigCheckbox({
-  label,
-  checked,
-  onChange,
-}: {
-  label: string;
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-}) {
-  return (
-    <label className="flex items-center gap-2 text-sm font-medium text-medium">
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(event) => onChange(event.target.checked)}
-      />
-      {label}
-    </label>
-  );
-}
-
-/**
- * Formulario de configuracao de cobranca por projeto (motor parametrizavel).
- * Editado pelo Financeiro. Todos os campos sao opcionais: cada tipo de cobranca
- * usa apenas os que fazem sentido — o cabecalho lembra o modelo do projeto.
- */
-function BillingConfigPanel({
-  chargeType,
-  value,
-  onChange,
-}: {
-  chargeType?: string;
-  value: ProjectBillingConfigInput;
-  onChange: (value: ProjectBillingConfigInput) => void;
-}) {
-  function groupTitle(text: string) {
-    return (
-      <p className="md:col-span-2 text-xs font-semibold uppercase tracking-wide text-soft">
-        {text}
-      </p>
-    );
-  }
-  return (
-    <div className="space-y-4">
-      <p className="rounded-md border border-border bg-surface-muted px-3 py-2 text-sm text-medium">
-        Modelo de cálculo do projeto:{" "}
-        <span className="font-semibold text-strong">{chargeType ?? "não definido"}</span>.
-        Preencha apenas os parâmetros usados por este modelo.
-      </p>
-      <form className="grid gap-4 md:grid-cols-2">
-        {groupTitle("Periodicidade e datas")}
-        <BillingConfigSelect
-          label="Periodicidade"
-          value={value.periodicity}
-          options={periodicityLabels}
-          onChange={(periodicity) => onChange({ ...value, periodicity })}
-        />
-        <NumberField
-          label="Dia de fechamento"
-          value={value.closingDay}
-          onChange={(closingDay) => onChange({ ...value, closingDay })}
-        />
-        <NumberField
-          label="Dia de vencimento"
-          value={value.dueDay}
-          onChange={(dueDay) => onChange({ ...value, dueDay })}
-        />
-
-        {groupTitle("Cálculo e excedentes")}
-        <BillingConfigSelect
-          label="Arredondamento"
-          value={value.roundingRule}
-          options={billingRoundingLabels}
-          onChange={(roundingRule) => onChange({ ...value, roundingRule })}
-        />
-        <NumberField
-          label="Valor fixo / mensalidade (R$)"
-          value={value.fixedAmount}
-          onChange={(fixedAmount) => onChange({ ...value, fixedAmount })}
-        />
-        <NumberField
-          label="Horas inclusas (franquia)"
-          value={value.includedHours}
-          onChange={(includedHours) => onChange({ ...value, includedHours })}
-        />
-        <NumberField
-          label="Valor hora excedente (R$)"
-          value={value.overageRate}
-          onChange={(overageRate) => onChange({ ...value, overageRate })}
-        />
-        <BillingConfigSelect
-          label="Tratamento de excedentes"
-          value={value.overageTreatment}
-          options={overageLabels}
-          onChange={(overageTreatment) =>
-            onChange({ ...value, overageTreatment })
-          }
-        />
-        <NumberField
-          label="Valor por consultor alocado (R$)"
-          value={value.perConsultantAmount}
-          onChange={(perConsultantAmount) =>
-            onChange({ ...value, perConsultantAmount })
-          }
-        />
-
-        {groupTitle("Reembolsos, descontos e multas")}
-        <BillingConfigCheckbox
-          label="Despesas reembolsáveis"
-          checked={value.reimbursableExpenses}
-          onChange={(reimbursableExpenses) =>
-            onChange({ ...value, reimbursableExpenses })
-          }
-        />
-        <NumberField
-          label="Markup sobre reembolso (%)"
-          value={value.reimbursableMarkupPct}
-          onChange={(reimbursableMarkupPct) =>
-            onChange({ ...value, reimbursableMarkupPct })
-          }
-        />
-        <NumberField
-          label="Desconto (%)"
-          value={value.discountPct}
-          onChange={(discountPct) => onChange({ ...value, discountPct })}
-        />
-        <NumberField
-          label="Multa (%)"
-          value={value.penaltyPct}
-          onChange={(penaltyPct) => onChange({ ...value, penaltyPct })}
-        />
-
-        {groupTitle("Reajuste e impostos")}
-        <BillingConfigSelect
-          label="Índice de reajuste"
-          value={value.adjustmentIndex}
-          options={adjustmentLabels}
-          hint="IPCA/IGP-M/CDI ficam registrados; apenas o percentual fixo é aplicado automaticamente."
-          onChange={(adjustmentIndex) => onChange({ ...value, adjustmentIndex })}
-        />
-        <NumberField
-          label="Percentual de reajuste (%)"
-          value={value.adjustmentPct}
-          onChange={(adjustmentPct) => onChange({ ...value, adjustmentPct })}
-        />
-        <BillingConfigCheckbox
-          label="Reter ISS"
-          checked={value.withholdIss}
-          onChange={(withholdIss) => onChange({ ...value, withholdIss })}
-        />
-        <NumberField
-          label="Retenção de impostos (%)"
-          value={value.withholdingPct}
-          onChange={(withholdingPct) => onChange({ ...value, withholdingPct })}
-        />
-
-        {groupTitle("Aprovação e observações")}
-        <div className="md:col-span-2">
-          <BillingConfigCheckbox
-            label="Exigir aprovação antes da emissão da nota"
-            checked={value.requireApproval}
-            onChange={(requireApproval) =>
-              onChange({ ...value, requireApproval })
-            }
-          />
-        </div>
-        <label className="md:col-span-2 space-y-1 text-sm font-medium text-medium">
-          Observações
-          <textarea
-            value={value.notes ?? ""}
-            onChange={(event) => onChange({ ...value, notes: event.target.value })}
-            className={cn(fieldClass(), "min-h-20 py-2")}
-          />
-        </label>
-      </form>
-    </div>
-  );
-}
-
 function AllocationModal({
   value,
   consultants,
@@ -1837,96 +1465,6 @@ function AllocationModal({
           value={value.endDate ?? ""}
           onChange={(next) => onChange({ ...value, endDate: next || undefined })}
         />
-      </form>
-    </Modal>
-  );
-}
-
-function SaleRateModal({
-  value,
-  consultants,
-  allocations,
-  isPending,
-  onChange,
-  onClose,
-  onSave,
-}: {
-  value: SaleRateInput;
-  consultants: ProjectConsultantOption[];
-  allocations: { id: string; label: string }[];
-  isPending: boolean;
-  onChange: (value: SaleRateInput) => void;
-  onClose: () => void;
-  onSave: () => void;
-}) {
-  return (
-    <Modal
-      open
-      onClose={onClose}
-      title="Valor de venda"
-      description="Valor comercial por escopo e vigência."
-      footer={
-        <>
-          <ActionButton variant="secondary" onClick={onClose}>
-            Cancelar
-          </ActionButton>
-          <ActionButton disabled={isPending} onClick={onSave}>
-            Salvar
-          </ActionButton>
-        </>
-      }
-    >
-      <form className="grid gap-4 md:grid-cols-2">
-        <label className="space-y-1 text-sm font-medium text-medium">
-          Escopo
-          <select
-            value={value.allocationId ? `allocation:${value.allocationId}` : value.consultantId ? `consultant:${value.consultantId}` : "project"}
-            onChange={(event) => {
-              const [kind, id] = event.target.value.split(":");
-              onChange({
-                ...value,
-                allocationId: kind === "allocation" ? id : undefined,
-                consultantId: kind === "consultant" ? id : undefined,
-              });
-            }}
-            className={fieldClass()}
-          >
-            <option value="project">Projeto</option>
-            {consultants.map((consultant) => (
-              <option key={consultant.id} value={`consultant:${consultant.id}`}>
-                {consultant.name}
-              </option>
-            ))}
-            {allocations.map((allocation) => (
-              <option key={allocation.id} value={`allocation:${allocation.id}`}>
-                {allocation.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <NumberField
-          label="Valor hora"
-          value={value.hourlyRate}
-          onChange={(next) => onChange({ ...value, hourlyRate: next ?? 0 })}
-        />
-        <DateField
-          label="Inicio"
-          value={value.startsAt}
-          onChange={(next) => onChange({ ...value, startsAt: next })}
-        />
-        <DateField
-          label="Fim"
-          value={value.endsAt ?? ""}
-          onChange={(next) => onChange({ ...value, endsAt: next || undefined })}
-        />
-        <label className="space-y-1 text-sm font-medium text-medium md:col-span-2">
-          Nota
-          <textarea
-            value={value.note ?? ""}
-            onChange={(event) => onChange({ ...value, note: event.target.value })}
-            className={cn(fieldClass(), "min-h-20 py-2")}
-          />
-        </label>
       </form>
     </Modal>
   );

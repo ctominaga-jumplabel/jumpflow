@@ -5,8 +5,12 @@ import { Prisma, prisma } from "@jumpflow/database";
 import type { ZodType } from "zod";
 import type { ActionResult, ErrorCode } from "@/lib/actions/result";
 import { requireRole, requireUser } from "@/lib/auth/guards";
-import { FINANCIAL_ROLES, hasRole } from "@/lib/auth/route-permissions";
-import type { RoleName } from "@/lib/auth/types";
+import {
+  FINANCIAL_ROLES,
+  hasRole,
+  PROJECT_WRITE_ROLES,
+  SALE_RATE_ROLES,
+} from "@/lib/auth/route-permissions";
 import { recordAuditEvent } from "@/lib/db/audit";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { resolveDbUser } from "@/lib/db/users";
@@ -18,6 +22,7 @@ import {
   allocationSkillUpdateSchema,
   allocationUpdateSchema,
   projectBillingConfigSchema,
+  projectCommercialSchema,
   projectInputSchema,
   projectUpdateSchema,
   saleRateInputSchema,
@@ -29,6 +34,7 @@ import {
   type AllocationSkillUpdateInput,
   type AllocationUpdateInput,
   type ProjectBillingConfigInput,
+  type ProjectCommercialInput,
   type ProjectInput,
   type ProjectUpdateInput,
   type SaleRateInput,
@@ -36,19 +42,19 @@ import {
 } from "@/lib/projects/schemas";
 import { findOverlappingSaleRate, type SaleRateRange } from "@/lib/projects/rates";
 
+// A single Project is the source of truth behind three surfaces (Operação,
+// Comercial, Financeiro). A change in any one must refresh all three so none
+// shows stale context. PROJECT_WRITE_ROLES/SALE_RATE_ROLES live in
+// route-permissions.ts (shared with the route guards).
 const PROJETOS_PATH = "/app/projetos";
-const PROJECT_WRITE_ROLES: RoleName[] = [
-  "ADMIN",
-  "AREA_MANAGER",
-  "PROJECT_MANAGER",
-  "SALES",
-];
-const SALE_RATE_WRITE_ROLES: RoleName[] = [
-  "ADMIN",
-  "AREA_MANAGER",
-  "FINANCE",
-  "SALES",
-];
+const COMERCIAL_PATH = "/app/comercial";
+const FINANCEIRO_PROJETOS_PATH = "/app/financeiro/projetos";
+
+function revalidateProjectViews(): void {
+  revalidatePath(PROJETOS_PATH);
+  revalidatePath(COMERCIAL_PATH);
+  revalidatePath(FINANCEIRO_PROJETOS_PATH);
+}
 
 class ActionError extends Error {
   constructor(
@@ -125,16 +131,17 @@ function projectData(
     startDate: toDate(input.startDate),
     endDate: input.endDate ? toDate(input.endDate) : null,
     managerUserId: input.managerUserId,
+    // Centro de custo é operacional (não é valor financeiro), gravado pela
+    // Operação junto dos demais dados do projeto.
+    costCenter: input.costCenter,
   };
   if (!includeCommercialFields) return data;
+  // Tipo de cobrança e budget são de titularidade exclusiva do Comercial
+  // (updateProjectCommercial), então a Operação não os escreve aqui — evita
+  // sobrescrita acidental. Resta o valor hora legado, sem dono em outra tela.
   return {
     ...data,
-    // Tipo de cobrança é decisão comercial: gravado junto dos demais campos
-    // comerciais (apenas perfis com acesso a valores podem alterá-lo).
-    billingTypeId: input.billingTypeId ?? null,
     billingHourlyRate: input.billingHourlyRate,
-    budgetHours: input.budgetHours,
-    costCenter: input.costCenter,
   };
 }
 
@@ -283,11 +290,11 @@ export async function createProject(
     ensureDatabase();
     const user = await requireRole(PROJECT_WRITE_ROLES);
     const parsed = parseInput(projectInputSchema, input);
-    const canWriteCommercials = hasRole(user, SALE_RATE_WRITE_ROLES);
+    const canWriteCommercials = hasRole(user, SALE_RATE_ROLES);
     const data = projectData(parsed, canWriteCommercials);
     const project = await prisma.project.create({ data });
     await audit("Project", project.id, "PROJECT_CREATED", null, data);
-    revalidatePath(PROJETOS_PATH);
+    revalidateProjectViews();
     return { ok: true, data: { id: project.id } };
   } catch (error) {
     return toFailure(error);
@@ -303,11 +310,42 @@ export async function updateProject(
     const parsed = parseInput(projectUpdateSchema, input);
     const previous = await prisma.project.findUnique({ where: { id: parsed.id } });
     if (!previous) throw new ActionError("NOT_FOUND", "Projeto nao encontrado.");
-    const canWriteCommercials = hasRole(user, SALE_RATE_WRITE_ROLES);
+    const canWriteCommercials = hasRole(user, SALE_RATE_ROLES);
     const data = projectData(parsed, canWriteCommercials);
     await prisma.project.update({ where: { id: parsed.id }, data });
     await audit("Project", parsed.id, "PROJECT_UPDATED", previous, data);
-    revalidatePath(PROJETOS_PATH);
+    revalidateProjectViews();
+    return { ok: true, data: { id: parsed.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/**
+ * Atualiza apenas os campos comerciais do projeto (tipo de cobrança e budget),
+ * a partir da superfície Comercial. Separado de updateProject (Operação) para
+ * que o Comercial não precise reenviar — nem ter permissão sobre — os dados
+ * operacionais. Gated por SALE_RATE_ROLES; audita como mudança comercial.
+ */
+export async function updateProjectCommercial(
+  input: ProjectCommercialInput,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(SALE_RATE_ROLES);
+    const parsed = parseInput(projectCommercialSchema, input);
+    const previous = await prisma.project.findUnique({
+      where: { id: parsed.id },
+      select: { billingTypeId: true, budgetHours: true },
+    });
+    if (!previous) throw new ActionError("NOT_FOUND", "Projeto nao encontrado.");
+    const data = {
+      billingTypeId: parsed.billingTypeId ?? null,
+      budgetHours: parsed.budgetHours ?? null,
+    };
+    await prisma.project.update({ where: { id: parsed.id }, data });
+    await audit("Project", parsed.id, "PROJECT_UPDATED", previous, data);
+    revalidateProjectViews();
     return { ok: true, data: { id: parsed.id } };
   } catch (error) {
     return toFailure(error);
@@ -374,7 +412,7 @@ export async function upsertProjectBillingConfig(
       previous,
       data,
     );
-    revalidatePath(PROJETOS_PATH);
+    revalidateProjectViews();
     return { ok: true, data: { id: saved.id } };
   } catch (error) {
     return toFailure(error);
@@ -392,7 +430,7 @@ export async function createAllocation(
       data: allocationData(parsed),
     });
     await audit("Allocation", allocation.id, "ALLOCATION_CREATED", null, parsed);
-    revalidatePath(PROJETOS_PATH);
+    revalidateProjectViews();
     return { ok: true, data: { id: allocation.id } };
   } catch (error) {
     return toFailure(error);
@@ -413,7 +451,7 @@ export async function updateAllocation(
       data: allocationData(parsed),
     });
     await audit("Allocation", parsed.id, "ALLOCATION_UPDATED", previous, parsed);
-    revalidatePath(PROJETOS_PATH);
+    revalidateProjectViews();
     return { ok: true, data: { id: parsed.id } };
   } catch (error) {
     return toFailure(error);
@@ -467,7 +505,7 @@ export async function removeAllocation(
         allocation,
         { status: "INACTIVE" },
       );
-      revalidatePath(PROJETOS_PATH);
+      revalidateProjectViews();
       return { ok: true, data: { id: parsed.id, outcome: "deactivated" } };
     }
 
@@ -482,7 +520,7 @@ export async function removeAllocation(
       await tx.allocation.delete({ where: { id: parsed.id } });
     });
     await audit("Allocation", parsed.id, "ALLOCATION_DELETED", allocation, null);
-    revalidatePath(PROJETOS_PATH);
+    revalidateProjectViews();
     return { ok: true, data: { id: parsed.id, outcome: "deleted" } };
   } catch (error) {
     return toFailure(error);
@@ -494,7 +532,7 @@ export async function createSaleRate(
 ): Promise<ActionResult<{ id: string }>> {
   try {
     ensureDatabase();
-    await requireRole(SALE_RATE_WRITE_ROLES);
+    await requireRole(SALE_RATE_ROLES);
     const parsed = parseInput(saleRateInputSchema, input);
     const rate = await prisma.$transaction(async (tx) => {
       const candidate = await ensureSaleRateScope(tx, parsed);
@@ -502,7 +540,7 @@ export async function createSaleRate(
       return tx.projectSaleRate.create({ data: saleRateData(parsed) });
     });
     await audit("ProjectSaleRate", rate.id, "PROJECT_SALE_RATE_CREATED", null, parsed);
-    revalidatePath(PROJETOS_PATH);
+    revalidateProjectViews();
     return { ok: true, data: { id: rate.id } };
   } catch (error) {
     return toFailure(error);
@@ -514,7 +552,7 @@ export async function updateSaleRate(
 ): Promise<ActionResult<{ id: string }>> {
   try {
     ensureDatabase();
-    await requireRole(SALE_RATE_WRITE_ROLES);
+    await requireRole(SALE_RATE_ROLES);
     const parsed = parseInput(saleRateUpdateSchema, input);
     const previous = await prisma.projectSaleRate.findUnique({
       where: { id: parsed.id },
@@ -531,7 +569,7 @@ export async function updateSaleRate(
       });
     });
     await audit("ProjectSaleRate", parsed.id, "PROJECT_SALE_RATE_UPDATED", previous, parsed);
-    revalidatePath(PROJETOS_PATH);
+    revalidateProjectViews();
     return { ok: true, data: { id: parsed.id } };
   } catch (error) {
     return toFailure(error);
@@ -587,7 +625,7 @@ export async function addAllocationSkill(
       null,
       parsed,
     );
-    revalidatePath(PROJETOS_PATH);
+    revalidateProjectViews();
     return { ok: true, data: { id: created.id } };
   } catch (error) {
     if (
@@ -628,7 +666,7 @@ export async function updateAllocationSkill(
       previous,
       parsed,
     );
-    revalidatePath(PROJETOS_PATH);
+    revalidateProjectViews();
     return { ok: true, data: { id: parsed.id } };
   } catch (error) {
     return toFailure(error);
@@ -656,7 +694,7 @@ export async function removeAllocationSkill(
       previous,
       null,
     );
-    revalidatePath(PROJETOS_PATH);
+    revalidateProjectViews();
     return { ok: true, data: { id: parsed.id } };
   } catch (error) {
     return toFailure(error);
