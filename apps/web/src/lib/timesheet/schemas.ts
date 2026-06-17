@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ACTIVITY_TYPES } from "./types";
 import { parseIsoDateUtc } from "./week";
+import { validateClockTimes } from "./time-clock";
 
 /**
  * Shared Zod schemas for the Horas server actions (and their tests).
@@ -21,28 +22,69 @@ const isoDateSchema = z
     message: "Data inválida (use o formato aaaa-mm-dd).",
   });
 
-const hoursSchema = z
-  .number()
-  .gt(0, "Informe horas maiores que zero.")
-  .lte(24, "Informe no máximo 24 horas por dia.")
-  .refine((value) => Math.abs(value * 100 - Math.round(value * 100)) < 1e-9, {
-    message: "Use no máximo 2 casas decimais.",
-  });
+const timeOfDaySchema = z
+  .string()
+  .trim()
+  .regex(/^([01]\d|2[0-3]):([0-5]\d)$/, "Horário inválido (use HH:mm).");
 
+/** Optional break field: blank string is treated as "no break". */
+const optionalTimeOfDaySchema = z
+  .union([timeOfDaySchema, z.literal("")])
+  .optional()
+  .nullable()
+  .transform((value) => (value && value.length > 0 ? value : null));
+
+/**
+ * Clock-in fields shared by every entry input. Hours are derived from these
+ * (Saída - Início - pausa); the break is optional via "Remover pausa".
+ */
+const clockFields = {
+  startTime: timeOfDaySchema,
+  endTime: timeOfDaySchema,
+  breakStart: optionalTimeOfDaySchema,
+  breakEnd: optionalTimeOfDaySchema,
+} as const;
+
+interface ClockShape {
+  startTime: string;
+  endTime: string;
+  breakStart?: string | null;
+  breakEnd?: string | null;
+}
+
+/** Attach the cross-field clock validation (order, break window, total <= 24h). */
+function refineClock<T extends z.ZodTypeAny>(schema: T): T {
+  return schema.superRefine((value, ctx) => {
+    const clock = value as ClockShape;
+    const result = validateClockTimes({
+      startTime: clock.startTime,
+      endTime: clock.endTime,
+      breakStart: clock.breakStart,
+      breakEnd: clock.breakEnd,
+    });
+    if (!result.ok) {
+      ctx.addIssue({ code: "custom", path: ["endTime"], message: result.message });
+    }
+  }) as unknown as T;
+}
+
+/** Description is now mandatory for every entry. */
 const descriptionSchema = z
   .string()
   .trim()
-  .max(500, "Descrição deve ter no máximo 500 caracteres.")
-  .optional();
+  .min(1, "Descrição é obrigatória.")
+  .max(500, "Descrição deve ter no máximo 500 caracteres.");
 
-export const timeEntryInputSchema = z.object({
-  projectId: idSchema,
-  activityType: z.enum(ACTIVITY_TYPES),
-  date: isoDateSchema,
-  hours: hoursSchema,
-  description: descriptionSchema,
-  billable: z.boolean(),
-});
+export const timeEntryInputSchema = refineClock(
+  z.object({
+    projectId: idSchema,
+    activityType: z.enum(ACTIVITY_TYPES),
+    date: isoDateSchema,
+    ...clockFields,
+    description: descriptionSchema,
+    billable: z.boolean(),
+  }),
+);
 
 export type TimeEntryInput = z.infer<typeof timeEntryInputSchema>;
 
@@ -52,29 +94,33 @@ const weekdaySchema = z
   .min(1, "Dia da semana invalido.")
   .max(7, "Dia da semana invalido.");
 
-export const weeklyTimeEntryInputSchema = z.object({
-  projectId: idSchema,
-  activityType: z.enum(ACTIVITY_TYPES),
-  weekStart: isoDateSchema,
-  hoursPerDay: hoursSchema,
-  weekdays: z
-    .array(weekdaySchema)
-    .min(1, "Selecione ao menos um dia.")
-    .max(7, "Selecione no maximo sete dias."),
-  description: descriptionSchema,
-  billable: z.boolean(),
-});
+export const weeklyTimeEntryInputSchema = refineClock(
+  z.object({
+    projectId: idSchema,
+    activityType: z.enum(ACTIVITY_TYPES),
+    weekStart: isoDateSchema,
+    ...clockFields,
+    weekdays: z
+      .array(weekdaySchema)
+      .min(1, "Selecione ao menos um dia.")
+      .max(7, "Selecione no maximo sete dias."),
+    description: descriptionSchema,
+    billable: z.boolean(),
+  }),
+);
 
 export type WeeklyTimeEntryInput = z.infer<typeof weeklyTimeEntryInputSchema>;
 
-export const updateTimeEntryInputSchema = z.object({
-  id: idSchema,
-  hours: hoursSchema,
-  description: descriptionSchema,
-  billable: z.boolean(),
-  /** Optional move to another day of the SAME week. */
-  date: isoDateSchema.optional(),
-});
+export const updateTimeEntryInputSchema = refineClock(
+  z.object({
+    id: idSchema,
+    ...clockFields,
+    description: descriptionSchema,
+    billable: z.boolean(),
+    /** Optional move to another day of the SAME week. */
+    date: isoDateSchema.optional(),
+  }),
+);
 
 export type UpdateTimeEntryInput = z.infer<typeof updateTimeEntryInputSchema>;
 
@@ -89,17 +135,35 @@ export const weekActionInputSchema = z.object({
 
 export type WeekActionInput = z.infer<typeof weekActionInputSchema>;
 
-export const saveTimesheetDefaultInputSchema = z.object({
-  allocationId: idSchema,
-  activityType: z.enum(ACTIVITY_TYPES),
-  hoursPerDay: hoursSchema,
-  weekdays: z
-    .array(weekdaySchema)
-    .min(1, "Selecione ao menos um dia.")
-    .max(7, "Selecione no maximo sete dias."),
-  description: descriptionSchema,
-  billable: z.boolean(),
+/**
+ * "Copiar semana anterior": the modal collects a single week-level description
+ * applied to every copied entry. When omitted/blank, each entry keeps its source
+ * description.
+ */
+export const copyPreviousWeekInputSchema = z.object({
+  weekStart: isoDateSchema,
+  description: z
+    .string()
+    .trim()
+    .max(500, "Descrição deve ter no máximo 500 caracteres.")
+    .optional(),
 });
+
+export type CopyPreviousWeekInput = z.infer<typeof copyPreviousWeekInputSchema>;
+
+export const saveTimesheetDefaultInputSchema = refineClock(
+  z.object({
+    allocationId: idSchema,
+    activityType: z.enum(ACTIVITY_TYPES),
+    ...clockFields,
+    weekdays: z
+      .array(weekdaySchema)
+      .min(1, "Selecione ao menos um dia.")
+      .max(7, "Selecione no maximo sete dias."),
+    description: descriptionSchema,
+    billable: z.boolean(),
+  }),
+);
 
 export type SaveTimesheetDefaultInput = z.infer<
   typeof saveTimesheetDefaultInputSchema

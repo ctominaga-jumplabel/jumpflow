@@ -1,5 +1,10 @@
 export type ProjectStatus = "PROPOSAL" | "ACTIVE" | "PAUSED" | "CLOSED";
-export type AllocationStatus = "ACTIVE" | "PLANNED" | "ENDED" | "CANCELLED";
+export type AllocationStatus =
+  | "ACTIVE"
+  | "PLANNED"
+  | "ENDED"
+  | "CANCELLED"
+  | "INACTIVE";
 export type SkillLevel = "BASIC" | "INTERMEDIATE" | "ADVANCED" | "SPECIALIST";
 
 export interface ProjectSkillOption {
@@ -33,6 +38,12 @@ export interface ProjectManagerOption {
   name: string;
 }
 
+export interface ProjectBillingTypeOption {
+  id: string;
+  name: string;
+  chargeType: string;
+}
+
 export interface ProjectAllocationItem {
   id: string;
   projectId: string;
@@ -60,6 +71,44 @@ export interface ProjectSaleRateItem {
   note?: string;
 }
 
+export type BillingPeriodicity = "MONTHLY" | "BIWEEKLY" | "WEEKLY" | "PER_EVENT";
+export type BillingRoundingRule =
+  | "NONE"
+  | "NEAREST_15_MINUTES"
+  | "NEAREST_30_MINUTES"
+  | "NEAREST_HOUR"
+  | "CEIL_15_MINUTES"
+  | "CEIL_30_MINUTES"
+  | "CEIL_HOUR";
+export type OverageTreatment =
+  | "BILL_EXTRA"
+  | "BLOCK_AT_LIMIT"
+  | "INCLUDE_FREE"
+  | "CARRY_OVER";
+export type AdjustmentIndex = "NONE" | "IPCA" | "IGPM" | "CDI" | "FIXED";
+
+export interface ProjectBillingConfigItem {
+  periodicity: BillingPeriodicity;
+  roundingRule: BillingRoundingRule;
+  fixedAmount?: number;
+  includedHours?: number;
+  overageRate?: number;
+  overageTreatment: OverageTreatment;
+  perConsultantAmount?: number;
+  reimbursableExpenses: boolean;
+  reimbursableMarkupPct?: number;
+  discountPct?: number;
+  penaltyPct?: number;
+  adjustmentIndex: AdjustmentIndex;
+  adjustmentPct?: number;
+  withholdIss: boolean;
+  withholdingPct?: number;
+  closingDay?: number;
+  dueDay?: number;
+  requireApproval: boolean;
+  notes?: string;
+}
+
 export interface ProjectItem {
   id: string;
   clientId: string;
@@ -71,6 +120,10 @@ export interface ProjectItem {
   managerName?: string;
   startDate: string;
   endDate?: string;
+  billingTypeId?: string;
+  billingTypeName?: string;
+  billingChargeType?: string;
+  billingConfig?: ProjectBillingConfigItem;
   billingHourlyRate?: number;
   budgetHours?: number;
   costCenter?: string;

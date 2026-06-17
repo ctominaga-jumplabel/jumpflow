@@ -94,6 +94,14 @@ export interface WeekDay {
   weekend: boolean;
 }
 
+/** Per-day relógio de ponto detail, used to pre-fill the edit form. */
+export interface DayClock {
+  startTime: string | null;
+  endTime: string | null;
+  breakStart: string | null;
+  breakEnd: string | null;
+}
+
 export interface TimeEntryRow {
   id: string;
   projectId: string;
@@ -116,6 +124,12 @@ export interface TimeEntryRow {
    * in db mode. `null` means no entry exists for that day on this row.
    */
   entryIds?: (string | null)[];
+  /**
+   * Per-day relógio de ponto detail (aligned with `hours`). Present when the
+   * entry was logged with clock times; `null` for days without an entry or for
+   * legacy entries with no recorded times.
+   */
+  clock?: (DayClock | null)[];
 }
 
 export interface TimesheetWeek {
@@ -138,6 +152,9 @@ export function cloneWeek(week: TimesheetWeek): TimesheetWeek {
       ...r,
       hours: [...r.hours],
       entryIds: r.entryIds ? [...r.entryIds] : undefined,
+      clock: r.clock
+        ? r.clock.map((cell) => (cell ? { ...cell } : null))
+        : undefined,
     })),
   };
 }

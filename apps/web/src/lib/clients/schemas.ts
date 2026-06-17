@@ -101,6 +101,8 @@ export const billingTypeInputSchema = z.object({
     "CEIL_HOUR",
   ]),
   description: optionalText(300),
+  howItWorks: optionalText(400),
+  example: optionalText(400),
   active: z.boolean(),
 });
 

@@ -1,7 +1,16 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { Edit, FolderKanban, Link2, Plus, ReceiptText, Tag, X } from "lucide-react";
+import {
+  Edit,
+  FolderKanban,
+  Link2,
+  Plus,
+  ReceiptText,
+  Tag,
+  Trash2,
+  X,
+} from "lucide-react";
 import { ActionButton } from "@/components/ui/ActionButton";
 import { DataTable, type DataTableColumn } from "@/components/ui/DataTable";
 import { DataToolbar } from "@/components/ui/DataToolbar";
@@ -14,13 +23,17 @@ import {
   createAllocation,
   createProject,
   createSaleRate,
+  removeAllocation,
   removeAllocationSkill,
+  updateAllocation,
   updateProject,
+  upsertProjectBillingConfig,
 } from "@/app/app/projetos/actions";
 import type {
   AllocationInput,
   AllocationSkillInput,
   AllocationSkillRemoveInput,
+  ProjectBillingConfigInput,
   ProjectInput,
   SaleRateInput,
 } from "@/lib/projects/schemas";
@@ -32,7 +45,14 @@ import {
   demoProjectSkills,
 } from "@/lib/projects/mock-data";
 import type {
+  AdjustmentIndex,
+  AllocationStatus,
+  BillingPeriodicity,
+  BillingRoundingRule,
+  OverageTreatment,
   ProjectAllocationItem,
+  ProjectBillingConfigItem,
+  ProjectBillingTypeOption,
   ProjectClientOption,
   ProjectConsultantOption,
   ProjectItem,
@@ -52,13 +72,53 @@ import { cn } from "@/lib/utils";
 import { ProjectStatusBadge, projectStatusLabels } from "./ProjectStatusBadge";
 
 type Mode = "demo" | "db";
-type DetailTab = "ALLOCATIONS" | "SKILLS" | "RATES";
+type DetailTab = "ALLOCATIONS" | "SKILLS" | "RATES" | "BILLING";
+
+const periodicityLabels: Record<BillingPeriodicity, string> = {
+  MONTHLY: "Mensal",
+  BIWEEKLY: "Quinzenal",
+  WEEKLY: "Semanal",
+  PER_EVENT: "Por evento",
+};
+
+const overageLabels: Record<OverageTreatment, string> = {
+  BILL_EXTRA: "Cobrar excedente",
+  BLOCK_AT_LIMIT: "Bloquear no limite",
+  INCLUDE_FREE: "Incluir sem custo",
+  CARRY_OVER: "Acumular p/ próximo período",
+};
+
+const adjustmentLabels: Record<AdjustmentIndex, string> = {
+  NONE: "Sem reajuste",
+  IPCA: "IPCA",
+  IGPM: "IGP-M",
+  CDI: "CDI",
+  FIXED: "Percentual fixo",
+};
+
+const billingRoundingLabels: Record<BillingRoundingRule, string> = {
+  NONE: "Sem arredondamento",
+  NEAREST_15_MINUTES: "Mais próximo 15min",
+  NEAREST_30_MINUTES: "Mais próximo 30min",
+  NEAREST_HOUR: "Mais próxima hora",
+  CEIL_15_MINUTES: "Teto 15min",
+  CEIL_30_MINUTES: "Teto 30min",
+  CEIL_HOUR: "Teto hora",
+};
 
 const skillLevelLabels: Record<SkillLevel, string> = {
-  BASIC: "Basico",
-  INTERMEDIATE: "Intermediario",
-  ADVANCED: "Avancado",
+  BASIC: "Básico",
+  INTERMEDIATE: "Intermediário",
+  ADVANCED: "Avançado",
   SPECIALIST: "Especialista",
+};
+
+const allocationStatusLabels: Record<AllocationStatus, string> = {
+  PLANNED: "Planejado",
+  ACTIVE: "Ativo",
+  ENDED: "Encerrado",
+  CANCELLED: "Cancelado",
+  INACTIVE: "Inativo",
 };
 
 interface ProjectsViewProps {
@@ -68,9 +128,11 @@ interface ProjectsViewProps {
   consultants?: ProjectConsultantOption[];
   managers?: ProjectManagerOption[];
   skills?: ProjectSkillOption[];
+  billingTypes?: ProjectBillingTypeOption[];
   canManageProjects: boolean;
   canViewCommercials: boolean;
   canManageSaleRates: boolean;
+  canEditBillingConfig: boolean;
 }
 
 const statusFilters: (ProjectStatus | "ALL")[] = [
@@ -89,6 +151,7 @@ const emptyProject: ProjectInput = {
   startDate: new Date().toISOString().slice(0, 10),
   endDate: undefined,
   managerUserId: "",
+  billingTypeId: undefined,
   billingHourlyRate: undefined,
   budgetHours: undefined,
   costCenter: "",
@@ -103,9 +166,62 @@ function projectToInput(project: ProjectItem): ProjectInput {
     startDate: project.startDate,
     endDate: project.endDate,
     managerUserId: project.managerUserId ?? "",
+    billingTypeId: project.billingTypeId,
     billingHourlyRate: project.billingHourlyRate,
     budgetHours: project.budgetHours,
     costCenter: project.costCenter ?? "",
+  };
+}
+
+function billingConfigToForm(project: ProjectItem): ProjectBillingConfigInput {
+  const c = project.billingConfig;
+  return {
+    projectId: project.id,
+    periodicity: c?.periodicity ?? "MONTHLY",
+    roundingRule: c?.roundingRule ?? "NONE",
+    fixedAmount: c?.fixedAmount,
+    includedHours: c?.includedHours,
+    overageRate: c?.overageRate,
+    overageTreatment: c?.overageTreatment ?? "BILL_EXTRA",
+    perConsultantAmount: c?.perConsultantAmount,
+    reimbursableExpenses: c?.reimbursableExpenses ?? false,
+    reimbursableMarkupPct: c?.reimbursableMarkupPct,
+    discountPct: c?.discountPct,
+    penaltyPct: c?.penaltyPct,
+    adjustmentIndex: c?.adjustmentIndex ?? "NONE",
+    adjustmentPct: c?.adjustmentPct,
+    withholdIss: c?.withholdIss ?? false,
+    withholdingPct: c?.withholdingPct,
+    closingDay: c?.closingDay,
+    dueDay: c?.dueDay,
+    requireApproval: c?.requireApproval ?? true,
+    notes: c?.notes ?? "",
+  };
+}
+
+function formToBillingConfigItem(
+  form: ProjectBillingConfigInput,
+): ProjectBillingConfigItem {
+  return {
+    periodicity: form.periodicity,
+    roundingRule: form.roundingRule,
+    fixedAmount: form.fixedAmount,
+    includedHours: form.includedHours,
+    overageRate: form.overageRate,
+    overageTreatment: form.overageTreatment,
+    perConsultantAmount: form.perConsultantAmount,
+    reimbursableExpenses: form.reimbursableExpenses,
+    reimbursableMarkupPct: form.reimbursableMarkupPct,
+    discountPct: form.discountPct,
+    penaltyPct: form.penaltyPct,
+    adjustmentIndex: form.adjustmentIndex,
+    adjustmentPct: form.adjustmentPct,
+    withholdIss: form.withholdIss,
+    withholdingPct: form.withholdingPct,
+    closingDay: form.closingDay,
+    dueDay: form.dueDay,
+    requireApproval: form.requireApproval,
+    notes: form.notes,
   };
 }
 
@@ -125,9 +241,11 @@ export function ProjectsView({
   consultants = demoProjectConsultants,
   managers = demoProjectManagers,
   skills = demoProjectSkills,
+  billingTypes = [],
   canManageProjects,
   canViewCommercials,
   canManageSaleRates,
+  canEditBillingConfig,
 }: ProjectsViewProps) {
   // In db mode `items` derives straight from props, so data revalidated by a
   // server action (e.g. trocar o gestor) shows up immediately without a reload.
@@ -140,10 +258,20 @@ export function ProjectsView({
   const [editing, setEditing] = useState<ProjectItem | null>(null);
   const [projectForm, setProjectForm] = useState<ProjectInput>(emptyProject);
   const [projectOpen, setProjectOpen] = useState(false);
-  const [detailProject, setDetailProject] = useState<ProjectItem | null>(null);
+  // Hold only the id of the open project: the detail object is derived from
+  // `items` below so that data refreshed by a server action (db mode) or local
+  // optimistic update (demo mode) reflows into the open dialog immediately,
+  // instead of showing a stale snapshot captured when the dialog was opened.
+  const [detailProjectId, setDetailProjectId] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState<DetailTab>("ALLOCATIONS");
+  const [billingForm, setBillingForm] =
+    useState<ProjectBillingConfigInput | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+
+  const detailProject = detailProjectId
+    ? (items.find((project) => project.id === detailProjectId) ?? null)
+    : null;
 
   const rows = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -181,7 +309,7 @@ export function ProjectsView({
     },
     {
       key: "period",
-      header: "Periodo",
+      header: "Período",
       cell: (project) => (
         <span className="tabular-nums">
           {formatDate(project.startDate)} -{" "}
@@ -236,7 +364,7 @@ export function ProjectsView({
           type="button"
           className="rounded-md px-2 py-1 tabular-nums hover:bg-surface-muted"
           onClick={() => {
-            setDetailProject(project);
+            setDetailProjectId(project.id);
             setDetailTab("ALLOCATIONS");
           }}
         >
@@ -252,8 +380,8 @@ export function ProjectsView({
         <div className="flex justify-end gap-1">
           <button
             type="button"
-            aria-label={`Vinculos e valores de ${project.name}`}
-            onClick={() => setDetailProject(project)}
+            aria-label={`Vínculos e valores de ${project.name}`}
+            onClick={() => setDetailProjectId(project.id)}
             className="rounded-md p-2 text-medium hover:bg-surface-muted"
           >
             <Link2 aria-hidden="true" className="size-4" />
@@ -323,6 +451,36 @@ export function ProjectsView({
     });
   }
 
+  // Initialize the billing form lazily when the Cobrança tab is opened (avoids
+  // setState-in-effect; the form holds the user's edits across data refreshes).
+  function handleDetailTabChange(next: DetailTab) {
+    if (next === "BILLING" && detailProject) {
+      setBillingForm(billingConfigToForm(detailProject));
+    }
+    setDetailTab(next);
+  }
+
+  function saveBillingConfig() {
+    if (!billingForm) return;
+    if (mode === "demo") {
+      setLocalItems((current) =>
+        current.map((project) =>
+          project.id === billingForm.projectId
+            ? { ...project, billingConfig: formToBillingConfigItem(billingForm) }
+            : project,
+        ),
+      );
+      setFeedback("Configuração de cobrança salva localmente.");
+      return;
+    }
+    startTransition(async () => {
+      const result = await upsertProjectBillingConfig(billingForm);
+      setFeedback(
+        result.ok ? "Configuração de cobrança salva." : result.message,
+      );
+    });
+  }
+
   function addAllocation(value: AllocationInput) {
     if (mode === "demo") {
       const consultant = consultants.find((item) => item.id === value.consultantId);
@@ -343,21 +501,77 @@ export function ProjectsView({
             : project,
         ),
       );
-      setDetailProject((current) =>
-        current && current.id === value.projectId
-          ? {
-              ...current,
-              allocatedConsultants: current.allocatedConsultants + 1,
-              allocations: [...current.allocations, nextAllocation],
-            }
-          : current,
-      );
-      setFeedback("Vinculo salvo localmente.");
+      setFeedback("Vínculo salvo localmente.");
       return;
     }
     startTransition(async () => {
       const result = await createAllocation(value);
-      setFeedback(result.ok ? "Vinculo salvo." : result.message);
+      setFeedback(result.ok ? "Vínculo salvo." : result.message);
+    });
+  }
+
+  function editAllocation(id: string, value: AllocationInput) {
+    if (mode === "demo") {
+      const consultant = consultants.find((item) => item.id === value.consultantId);
+      setLocalItems((current) =>
+        current.map((project) =>
+          project.id === value.projectId
+            ? {
+                ...project,
+                allocations: project.allocations.map((item) =>
+                  item.id === id
+                    ? {
+                        ...item,
+                        ...value,
+                        consultantName: consultant?.name ?? item.consultantName,
+                      }
+                    : item,
+                ),
+              }
+            : project,
+        ),
+      );
+      setFeedback("Vínculo atualizado localmente.");
+      return;
+    }
+    startTransition(async () => {
+      const result = await updateAllocation({ id, ...value });
+      setFeedback(result.ok ? "Vínculo atualizado." : result.message);
+    });
+  }
+
+  function deleteAllocation(allocation: ProjectAllocationItem) {
+    if (mode === "demo") {
+      setLocalItems((current) =>
+        current.map((project) =>
+          project.id === allocation.projectId
+            ? {
+                ...project,
+                allocations: project.allocations.filter(
+                  (item) => item.id !== allocation.id,
+                ),
+                allocatedConsultants: project.allocations.filter(
+                  (item) =>
+                    item.id !== allocation.id && item.status === "ACTIVE",
+                ).length,
+              }
+            : project,
+        ),
+      );
+      setFeedback("Vínculo removido localmente.");
+      return;
+    }
+    startTransition(async () => {
+      const result = await removeAllocation({ id: allocation.id });
+      if (!result.ok) {
+        setFeedback(result.message);
+        return;
+      }
+      setFeedback(
+        result.data.outcome === "deactivated"
+          ? "Consultor tinha horas lançadas: vínculo marcado como Inativo."
+          : "Vínculo removido (sem horas lançadas).",
+      );
     });
   }
 
@@ -385,11 +599,6 @@ export function ProjectsView({
             : project,
         ),
       );
-      setDetailProject((current) =>
-        current && current.id === value.projectId
-          ? { ...current, saleRates: [...current.saleRates, nextRate] }
-          : current,
-      );
       setFeedback("Valor de venda salvo localmente.");
       return;
     }
@@ -416,7 +625,6 @@ export function ProjectsView({
             ),
           };
     setLocalItems((current) => current.map(updater));
-    setDetailProject((current) => (current ? updater(current) : current));
   }
 
   function addSkill(value: AllocationSkillInput) {
@@ -439,12 +647,12 @@ export function ProjectsView({
           },
         ]);
       }
-      setFeedback("Skill da alocacao salva localmente.");
+      setFeedback("Skill da alocação salva localmente.");
       return;
     }
     startTransition(async () => {
       const result = await addAllocationSkill(value);
-      setFeedback(result.ok ? "Skill adicionada a alocacao." : result.message);
+      setFeedback(result.ok ? "Skill adicionada a alocação." : result.message);
     });
   }
 
@@ -464,12 +672,12 @@ export function ProjectsView({
           (current) => current.filter((skill) => skill.id !== input.id),
         );
       }
-      setFeedback("Skill removida da alocacao localmente.");
+      setFeedback("Skill removida da alocação localmente.");
       return;
     }
     startTransition(async () => {
       const result = await removeAllocationSkill(input);
-      setFeedback(result.ok ? "Skill removida da alocacao." : result.message);
+      setFeedback(result.ok ? "Skill removida da alocação." : result.message);
     });
   }
 
@@ -477,7 +685,7 @@ export function ProjectsView({
     <div className="space-y-4">
       {mode === "demo" ? (
         <p className="rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm font-medium text-warning">
-          Modo demonstracao: projetos, vinculos e valores ficam apenas nesta sessao.
+          Modo demonstração: projetos, vínculos e valores ficam apenas nesta sessão.
         </p>
       ) : null}
       {feedback ? (
@@ -557,6 +765,7 @@ export function ProjectsView({
         value={projectForm}
         clients={clients}
         managers={managers}
+        billingTypes={billingTypes}
         canViewCommercials={canViewCommercials}
         isPending={isPending}
         onChange={setProjectForm}
@@ -571,13 +780,19 @@ export function ProjectsView({
         canViewCommercials={canViewCommercials}
         canManageProjects={canManageProjects}
         canManageSaleRates={canManageSaleRates}
+        canEditBillingConfig={canEditBillingConfig}
+        billingForm={billingForm}
         isPending={isPending}
-        onTabChange={setDetailTab}
-        onClose={() => setDetailProject(null)}
+        onTabChange={handleDetailTabChange}
+        onClose={() => setDetailProjectId(null)}
         onAddAllocation={addAllocation}
+        onEditAllocation={editAllocation}
+        onRemoveAllocation={deleteAllocation}
         onAddSaleRate={addSaleRate}
         onAddSkill={addSkill}
         onRemoveSkill={removeSkill}
+        onBillingChange={setBillingForm}
+        onSaveBillingConfig={saveBillingConfig}
       />
     </div>
   );
@@ -588,6 +803,7 @@ function ProjectModal({
   value,
   clients,
   managers,
+  billingTypes,
   canViewCommercials,
   isPending,
   onChange,
@@ -598,6 +814,7 @@ function ProjectModal({
   value: ProjectInput;
   clients: ProjectClientOption[];
   managers: ProjectManagerOption[];
+  billingTypes: ProjectBillingTypeOption[];
   canViewCommercials: boolean;
   isPending: boolean;
   onChange: (value: ProjectInput) => void;
@@ -691,6 +908,24 @@ function ProjectModal({
           value={value.endDate ?? ""}
           onChange={(next) => onChange({ ...value, endDate: next || undefined })}
         />
+        <label className="space-y-1 text-sm font-medium text-medium">
+          Tipo de cobrança
+          <select
+            value={value.billingTypeId ?? ""}
+            disabled={!canViewCommercials}
+            onChange={(event) =>
+              onChange({ ...value, billingTypeId: event.target.value || undefined })
+            }
+            className={fieldClass()}
+          >
+            <option value="">Herdar do cliente</option>
+            {billingTypes.map((type) => (
+              <option key={type.id} value={type.id}>
+                {type.name}
+              </option>
+            ))}
+          </select>
+        </label>
         <NumberField
           label="Valor hora legado"
           value={value.billingHourlyRate}
@@ -715,7 +950,7 @@ function ProjectModal({
           />
         </label>
         <label className="space-y-1 text-sm font-medium text-medium md:col-span-2">
-          Descricao
+          Descrição
           <textarea
             value={value.description ?? ""}
             onChange={(event) =>
@@ -737,13 +972,19 @@ function ProjectDetailModal({
   canViewCommercials,
   canManageProjects,
   canManageSaleRates,
+  canEditBillingConfig,
+  billingForm,
   isPending,
   onTabChange,
   onClose,
   onAddAllocation,
+  onEditAllocation,
+  onRemoveAllocation,
   onAddSaleRate,
   onAddSkill,
   onRemoveSkill,
+  onBillingChange,
+  onSaveBillingConfig,
 }: {
   project: ProjectItem | null;
   tab: DetailTab;
@@ -752,15 +993,23 @@ function ProjectDetailModal({
   canViewCommercials: boolean;
   canManageProjects: boolean;
   canManageSaleRates: boolean;
+  canEditBillingConfig: boolean;
+  billingForm: ProjectBillingConfigInput | null;
   isPending: boolean;
   onTabChange: (tab: DetailTab) => void;
   onClose: () => void;
   onAddAllocation: (value: AllocationInput) => void;
+  onEditAllocation: (id: string, value: AllocationInput) => void;
+  onRemoveAllocation: (allocation: ProjectAllocationItem) => void;
   onAddSaleRate: (value: SaleRateInput) => void;
   onAddSkill: (value: AllocationSkillInput) => void;
   onRemoveSkill: (value: AllocationSkillRemoveInput) => void;
+  onBillingChange: (value: ProjectBillingConfigInput) => void;
+  onSaveBillingConfig: () => void;
 }) {
   const [allocation, setAllocation] = useState<AllocationInput | null>(null);
+  // When set, the allocation modal is in edit mode for this allocation id.
+  const [allocationEditId, setAllocationEditId] = useState<string | null>(null);
   const [rate, setRate] = useState<SaleRateInput | null>(null);
   const [skillFor, setSkillFor] = useState<ProjectAllocationItem | null>(null);
 
@@ -775,7 +1024,7 @@ function ProjectDetailModal({
       open={project !== null}
       onClose={onClose}
       title={project.name}
-      description="Vinculos de consultores e valores comerciais por vigencia."
+      description="Vínculos de consultores e valores comerciais por vigência."
       className="max-w-4xl"
       footer={
         <>
@@ -786,7 +1035,8 @@ function ProjectDetailModal({
             <ActionButton
               icon={Link2}
               disabled={!canManageProjects}
-              onClick={() =>
+              onClick={() => {
+                setAllocationEditId(null);
                 setAllocation({
                   projectId: project.id,
                   consultantId: "",
@@ -795,10 +1045,10 @@ function ProjectDetailModal({
                   startDate: project.startDate,
                   endDate: undefined,
                   status: "PLANNED",
-                })
-              }
+                });
+              }}
             >
-              Novo vinculo
+              Novo vínculo
             </ActionButton>
           ) : tab === "RATES" ? (
             <ActionButton
@@ -807,7 +1057,10 @@ function ProjectDetailModal({
               onClick={() =>
                 setRate({
                   projectId: project.id,
-                  consultantId: undefined,
+                  // Comercial cadastra o valor a nível de Consultor: o escopo
+                  // padrão é o primeiro consultor alocado (cai para Projeto se
+                  // não houver alocação).
+                  consultantId: project.allocations[0]?.consultantId,
                   allocationId: undefined,
                   startsAt: project.startDate,
                   endsAt: undefined,
@@ -819,13 +1072,21 @@ function ProjectDetailModal({
             >
               Novo valor
             </ActionButton>
+          ) : tab === "BILLING" && canEditBillingConfig ? (
+            <ActionButton
+              icon={ReceiptText}
+              disabled={isPending || !billingForm}
+              onClick={onSaveBillingConfig}
+            >
+              Salvar configuração
+            </ActionButton>
           ) : null}
         </>
       }
     >
       <div className="mb-4 flex flex-wrap gap-2">
         <FilterChip
-          label="Vinculos"
+          label="Vínculos"
           active={tab === "ALLOCATIONS"}
           onClick={() => onTabChange("ALLOCATIONS")}
         />
@@ -839,6 +1100,13 @@ function ProjectDetailModal({
           active={tab === "RATES"}
           onClick={() => onTabChange("RATES")}
         />
+        {canEditBillingConfig ? (
+          <FilterChip
+            label="Cobrança"
+            active={tab === "BILLING"}
+            onClick={() => onTabChange("BILLING")}
+          />
+        ) : null}
       </div>
       {tab === "ALLOCATIONS" ? (
         <DataTable
@@ -861,17 +1129,71 @@ function ProjectDetailModal({
             },
             {
               key: "period",
-              header: "Periodo",
+              header: "Período",
               cell: (item) =>
                 `${formatDate(item.startDate)} - ${
                   item.endDate ? formatDate(item.endDate) : "em aberto"
                 }`,
             },
-            { key: "status", header: "Status", cell: (item) => item.status },
+            {
+              key: "status",
+              header: "Status",
+              cell: (item) => allocationStatusLabels[item.status],
+            },
+            {
+              key: "actions",
+              header: "Ações",
+              align: "right",
+              cell: (item) => (
+                <div className="flex justify-end gap-1">
+                  <ActionButton
+                    size="sm"
+                    variant="secondary"
+                    icon={Edit}
+                    disabled={!canManageProjects}
+                    aria-label={`Editar vínculo de ${item.consultantName}`}
+                    onClick={() => {
+                      setAllocationEditId(item.id);
+                      setAllocation({
+                        projectId: item.projectId,
+                        consultantId: item.consultantId,
+                        role: item.role,
+                        allocationPercent: item.allocationPercent,
+                        startDate: item.startDate,
+                        endDate: item.endDate,
+                        status: item.status,
+                      });
+                    }}
+                  >
+                    Editar
+                  </ActionButton>
+                  <ActionButton
+                    size="sm"
+                    variant="danger"
+                    icon={Trash2}
+                    disabled={!canManageProjects}
+                    aria-label={`Remover vínculo de ${item.consultantName}`}
+                    onClick={() => {
+                      const message =
+                        "Remover este vínculo?\n\n" +
+                        "Se o consultor já tiver horas lançadas, o vínculo fica " +
+                        "Inativo (mantém o histórico). Caso contrário, é apagado " +
+                        "do projeto.";
+                      if (typeof window !== "undefined" && !window.confirm(message)) {
+                        return;
+                      }
+                      onRemoveAllocation(item);
+                    }}
+                  >
+                    Remover
+                  </ActionButton>
+                </div>
+              ),
+            },
           ]}
           rows={project.allocations}
           rowKey={(item) => item.id}
-          empty={<p className="text-center text-sm text-soft">Sem vinculos.</p>}
+          empty={<p className="text-center text-sm text-soft">Sem vínculos.</p>}
         />
       ) : tab === "SKILLS" ? (
         <AllocationSkillsPanel
@@ -880,7 +1202,8 @@ function ProjectDetailModal({
           onAddSkill={(item) => setSkillFor(item)}
           onRemoveSkill={onRemoveSkill}
         />
-      ) : canViewCommercials ? (
+      ) : tab === "RATES" ? (
+        canViewCommercials ? (
         <DataTable
           columns={[
             {
@@ -891,7 +1214,7 @@ function ProjectDetailModal({
             },
             {
               key: "period",
-              header: "Vigencia",
+              header: "Vigência",
               cell: (item) =>
                 `${formatDate(item.startsAt)} - ${
                   item.endsAt ? formatDate(item.endsAt) : "em aberto"
@@ -912,9 +1235,20 @@ function ProjectDetailModal({
           rowKey={(item) => item.id}
           empty={<p className="text-center text-sm text-soft">Sem valores.</p>}
         />
+        ) : (
+          <p className="rounded-md border border-border bg-surface-muted px-3 py-2 text-sm text-soft">
+            Valores comerciais restritos por perfil.
+          </p>
+        )
+      ) : canEditBillingConfig && billingForm ? (
+        <BillingConfigPanel
+          chargeType={project.billingChargeType}
+          value={billingForm}
+          onChange={onBillingChange}
+        />
       ) : (
         <p className="rounded-md border border-border bg-surface-muted px-3 py-2 text-sm text-soft">
-          Valores comerciais restritos por perfil.
+          Configuração de cobrança restrita por perfil.
         </p>
       )}
 
@@ -922,12 +1256,21 @@ function ProjectDetailModal({
         <AllocationModal
           value={allocation}
           consultants={consultants}
+          isEditing={allocationEditId !== null}
           isPending={isPending}
           onChange={setAllocation}
-          onClose={() => setAllocation(null)}
-          onSave={() => {
-            onAddAllocation(allocation);
+          onClose={() => {
             setAllocation(null);
+            setAllocationEditId(null);
+          }}
+          onSave={() => {
+            if (allocationEditId) {
+              onEditAllocation(allocationEditId, allocation);
+            } else {
+              onAddAllocation(allocation);
+            }
+            setAllocation(null);
+            setAllocationEditId(null);
           }}
         />
       ) : null}
@@ -975,7 +1318,7 @@ function AllocationSkillsPanel({
   if (allocations.length === 0) {
     return (
       <p className="text-center text-sm text-soft">
-        Adicione um vinculo para registrar skills.
+        Adicione um vínculo para registrar skills.
       </p>
     );
   }
@@ -1004,7 +1347,7 @@ function AllocationSkillsPanel({
             </ActionButton>
           </div>
           {allocation.skills.length === 0 ? (
-            <p className="mt-3 text-sm text-soft">Sem skills nesta alocacao.</p>
+            <p className="mt-3 text-sm text-soft">Sem skills nesta alocação.</p>
           ) : (
             <ul className="mt-3 flex flex-wrap gap-2">
               {allocation.skills.map((skill) => (
@@ -1068,7 +1411,7 @@ function AllocationSkillModal({
     <Modal
       open
       onClose={onClose}
-      title="Skill da alocacao"
+      title="Skill da alocação"
       description={`Skill do catalogo usada por ${allocation.consultantName} neste projeto.`}
       footer={
         <>
@@ -1186,9 +1529,221 @@ function NumberField({
   );
 }
 
+function BillingConfigSelect<T extends string>({
+  label,
+  value,
+  options,
+  hint,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: Record<T, string>;
+  hint?: string;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <label className="space-y-1 text-sm font-medium text-medium">
+      {label}
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value as T)}
+        className={fieldClass()}
+      >
+        {(Object.entries(options) as [T, string][]).map(([key, optionLabel]) => (
+          <option key={key} value={key}>
+            {optionLabel}
+          </option>
+        ))}
+      </select>
+      {hint ? <span className="text-xs font-normal text-soft">{hint}</span> : null}
+    </label>
+  );
+}
+
+function BillingConfigCheckbox({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="flex items-center gap-2 text-sm font-medium text-medium">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+      {label}
+    </label>
+  );
+}
+
+/**
+ * Formulario de configuracao de cobranca por projeto (motor parametrizavel).
+ * Editado pelo Financeiro. Todos os campos sao opcionais: cada tipo de cobranca
+ * usa apenas os que fazem sentido — o cabecalho lembra o modelo do projeto.
+ */
+function BillingConfigPanel({
+  chargeType,
+  value,
+  onChange,
+}: {
+  chargeType?: string;
+  value: ProjectBillingConfigInput;
+  onChange: (value: ProjectBillingConfigInput) => void;
+}) {
+  function groupTitle(text: string) {
+    return (
+      <p className="md:col-span-2 text-xs font-semibold uppercase tracking-wide text-soft">
+        {text}
+      </p>
+    );
+  }
+  return (
+    <div className="space-y-4">
+      <p className="rounded-md border border-border bg-surface-muted px-3 py-2 text-sm text-medium">
+        Modelo de cálculo do projeto:{" "}
+        <span className="font-semibold text-strong">{chargeType ?? "não definido"}</span>.
+        Preencha apenas os parâmetros usados por este modelo.
+      </p>
+      <form className="grid gap-4 md:grid-cols-2">
+        {groupTitle("Periodicidade e datas")}
+        <BillingConfigSelect
+          label="Periodicidade"
+          value={value.periodicity}
+          options={periodicityLabels}
+          onChange={(periodicity) => onChange({ ...value, periodicity })}
+        />
+        <NumberField
+          label="Dia de fechamento"
+          value={value.closingDay}
+          onChange={(closingDay) => onChange({ ...value, closingDay })}
+        />
+        <NumberField
+          label="Dia de vencimento"
+          value={value.dueDay}
+          onChange={(dueDay) => onChange({ ...value, dueDay })}
+        />
+
+        {groupTitle("Cálculo e excedentes")}
+        <BillingConfigSelect
+          label="Arredondamento"
+          value={value.roundingRule}
+          options={billingRoundingLabels}
+          onChange={(roundingRule) => onChange({ ...value, roundingRule })}
+        />
+        <NumberField
+          label="Valor fixo / mensalidade (R$)"
+          value={value.fixedAmount}
+          onChange={(fixedAmount) => onChange({ ...value, fixedAmount })}
+        />
+        <NumberField
+          label="Horas inclusas (franquia)"
+          value={value.includedHours}
+          onChange={(includedHours) => onChange({ ...value, includedHours })}
+        />
+        <NumberField
+          label="Valor hora excedente (R$)"
+          value={value.overageRate}
+          onChange={(overageRate) => onChange({ ...value, overageRate })}
+        />
+        <BillingConfigSelect
+          label="Tratamento de excedentes"
+          value={value.overageTreatment}
+          options={overageLabels}
+          onChange={(overageTreatment) =>
+            onChange({ ...value, overageTreatment })
+          }
+        />
+        <NumberField
+          label="Valor por consultor alocado (R$)"
+          value={value.perConsultantAmount}
+          onChange={(perConsultantAmount) =>
+            onChange({ ...value, perConsultantAmount })
+          }
+        />
+
+        {groupTitle("Reembolsos, descontos e multas")}
+        <BillingConfigCheckbox
+          label="Despesas reembolsáveis"
+          checked={value.reimbursableExpenses}
+          onChange={(reimbursableExpenses) =>
+            onChange({ ...value, reimbursableExpenses })
+          }
+        />
+        <NumberField
+          label="Markup sobre reembolso (%)"
+          value={value.reimbursableMarkupPct}
+          onChange={(reimbursableMarkupPct) =>
+            onChange({ ...value, reimbursableMarkupPct })
+          }
+        />
+        <NumberField
+          label="Desconto (%)"
+          value={value.discountPct}
+          onChange={(discountPct) => onChange({ ...value, discountPct })}
+        />
+        <NumberField
+          label="Multa (%)"
+          value={value.penaltyPct}
+          onChange={(penaltyPct) => onChange({ ...value, penaltyPct })}
+        />
+
+        {groupTitle("Reajuste e impostos")}
+        <BillingConfigSelect
+          label="Índice de reajuste"
+          value={value.adjustmentIndex}
+          options={adjustmentLabels}
+          hint="IPCA/IGP-M/CDI ficam registrados; apenas o percentual fixo é aplicado automaticamente."
+          onChange={(adjustmentIndex) => onChange({ ...value, adjustmentIndex })}
+        />
+        <NumberField
+          label="Percentual de reajuste (%)"
+          value={value.adjustmentPct}
+          onChange={(adjustmentPct) => onChange({ ...value, adjustmentPct })}
+        />
+        <BillingConfigCheckbox
+          label="Reter ISS"
+          checked={value.withholdIss}
+          onChange={(withholdIss) => onChange({ ...value, withholdIss })}
+        />
+        <NumberField
+          label="Retenção de impostos (%)"
+          value={value.withholdingPct}
+          onChange={(withholdingPct) => onChange({ ...value, withholdingPct })}
+        />
+
+        {groupTitle("Aprovação e observações")}
+        <div className="md:col-span-2">
+          <BillingConfigCheckbox
+            label="Exigir aprovação antes da emissão da nota"
+            checked={value.requireApproval}
+            onChange={(requireApproval) =>
+              onChange({ ...value, requireApproval })
+            }
+          />
+        </div>
+        <label className="md:col-span-2 space-y-1 text-sm font-medium text-medium">
+          Observações
+          <textarea
+            value={value.notes ?? ""}
+            onChange={(event) => onChange({ ...value, notes: event.target.value })}
+            className={cn(fieldClass(), "min-h-20 py-2")}
+          />
+        </label>
+      </form>
+    </div>
+  );
+}
+
 function AllocationModal({
   value,
   consultants,
+  isEditing = false,
   isPending,
   onChange,
   onClose,
@@ -1196,6 +1751,7 @@ function AllocationModal({
 }: {
   value: AllocationInput;
   consultants: ProjectConsultantOption[];
+  isEditing?: boolean;
   isPending: boolean;
   onChange: (value: AllocationInput) => void;
   onClose: () => void;
@@ -1205,7 +1761,7 @@ function AllocationModal({
     <Modal
       open
       onClose={onClose}
-      title="Vinculo"
+      title={isEditing ? "Editar vínculo" : "Vínculo"}
       description="Consultor, skill/papel e periodo no projeto."
       footer={
         <>
@@ -1223,10 +1779,11 @@ function AllocationModal({
           Consultor
           <select
             value={value.consultantId}
+            disabled={isEditing}
             onChange={(event) =>
               onChange({ ...value, consultantId: event.target.value })
             }
-            className={fieldClass()}
+            className={cn(fieldClass(), isEditing && "opacity-70")}
           >
             <option value="">Selecione</option>
             {consultants.map((consultant) => (
@@ -1245,7 +1802,7 @@ function AllocationModal({
           />
         </label>
         <NumberField
-          label="Alocacao (%)"
+          label="Alocação (%)"
           value={value.allocationPercent}
           onChange={(next) =>
             onChange({ ...value, allocationPercent: next ?? 100 })
@@ -1267,6 +1824,7 @@ function AllocationModal({
             <option value="ACTIVE">Ativo</option>
             <option value="ENDED">Encerrado</option>
             <option value="CANCELLED">Cancelado</option>
+            <option value="INACTIVE">Inativo</option>
           </select>
         </label>
         <DateField
@@ -1306,7 +1864,7 @@ function SaleRateModal({
       open
       onClose={onClose}
       title="Valor de venda"
-      description="Valor comercial por escopo e vigencia."
+      description="Valor comercial por escopo e vigência."
       footer={
         <>
           <ActionButton variant="secondary" onClick={onClose}>

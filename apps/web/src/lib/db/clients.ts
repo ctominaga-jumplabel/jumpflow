@@ -52,6 +52,8 @@ export async function listBillingTypes(): Promise<BillingTypeItem[]> {
     chargeType: row.chargeType,
     roundingRule: row.roundingRule,
     description: row.description ?? undefined,
+    howItWorks: row.howItWorks ?? undefined,
+    example: row.example ?? undefined,
     active: row.active,
   }));
 }

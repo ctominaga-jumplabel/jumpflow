@@ -64,10 +64,10 @@ const chargeTypeLabels = {
 } satisfies Record<BillingChargeType, string>;
 
 const roundingLabels = {
-  NONE: "Sem arredondar",
-  NEAREST_15_MINUTES: "Mais proximo 15min",
-  NEAREST_30_MINUTES: "Mais proximo 30min",
-  NEAREST_HOUR: "Mais proxima hora",
+  NONE: "Sem arredondamento",
+  NEAREST_15_MINUTES: "Mais próximo 15min",
+  NEAREST_30_MINUTES: "Mais próximo 30min",
+  NEAREST_HOUR: "Mais próxima hora",
   CEIL_15_MINUTES: "Teto 15min",
   CEIL_30_MINUTES: "Teto 30min",
   CEIL_HOUR: "Teto hora",
@@ -108,6 +108,8 @@ const emptyBillingType: BillingTypeInput = {
   chargeType: "HOURLY",
   roundingRule: "NONE",
   description: "",
+  howItWorks: "",
+  example: "",
   active: true,
 };
 
@@ -139,6 +141,8 @@ function billingTypeToInput(item: BillingTypeItem): BillingTypeInput {
     chargeType: item.chargeType,
     roundingRule: item.roundingRule,
     description: item.description ?? "",
+    howItWorks: item.howItWorks ?? "",
+    example: item.example ?? "",
     active: item.active,
   };
 }
@@ -225,7 +229,7 @@ export function ClientsView({
     },
     {
       key: "billing",
-      header: "Cobranca",
+      header: "Cobrança",
       cell: (client) => (
         <div className="text-sm">
           <p className="text-medium">{client.billingTypeName ?? "-"}</p>
@@ -290,14 +294,23 @@ export function ClientsView({
       cell: (item) => (
         <div>
           <p className="font-medium text-strong">{item.name}</p>
-          <p className="text-xs text-soft">{item.description ?? "Sem descricao"}</p>
+          <p className="text-xs text-soft">{chargeTypeLabels[item.chargeType]}</p>
         </div>
       ),
     },
     {
-      key: "chargeType",
-      header: "Regra",
-      cell: (item) => chargeTypeLabels[item.chargeType],
+      key: "howItWorks",
+      header: "Como funciona",
+      cell: (item) => (
+        <span className="text-sm text-medium">{item.howItWorks ?? "-"}</span>
+      ),
+    },
+    {
+      key: "example",
+      header: "Exemplo",
+      cell: (item) => (
+        <span className="text-sm text-soft">{item.example ?? "-"}</span>
+      ),
     },
     {
       key: "rounding",
@@ -409,7 +422,7 @@ export function ClientsView({
 
   function saveType() {
     if (!typeForm.name.trim()) {
-      setFeedback("Informe o nome do tipo de cobranca.");
+      setFeedback("Informe o nome do tipo de cobrança.");
       return;
     }
     if (mode === "demo") {
@@ -423,7 +436,7 @@ export function ClientsView({
           : [next, ...current],
       );
       setTypeOpen(false);
-      setFeedback("Tipo de cobranca salvo localmente.");
+      setFeedback("Tipo de cobrança salvo localmente.");
       return;
     }
     startTransition(async () => {
@@ -432,7 +445,7 @@ export function ClientsView({
         : await createBillingType(typeForm);
       if (result.ok) {
         setTypeOpen(false);
-        setFeedback("Tipo de cobranca salvo.");
+        setFeedback("Tipo de cobrança salvo.");
       } else {
         setFeedback(result.message);
       }
@@ -476,7 +489,7 @@ export function ClientsView({
             ? {
                 value: search,
                 onChange: setSearch,
-                placeholder: "Buscar cliente, CNPJ ou cobranca",
+                placeholder: "Buscar cliente, CNPJ ou cobrança",
               }
             : undefined
         }
@@ -488,7 +501,7 @@ export function ClientsView({
               onClick={() => setTab("CLIENTS")}
             />
             <FilterChip
-              label="Tipos de cobranca"
+              label="Tipos de cobrança"
               active={tab === "BILLING_TYPES"}
               onClick={() => setTab("BILLING_TYPES")}
             />
@@ -558,18 +571,18 @@ export function ClientsView({
         </SectionPanel>
       ) : (
         <SectionPanel
-          title="Tipos de cobranca"
+          title="Tipos de cobrança"
           description={`${types.length} tipos configurados`}
         >
           <DataTable
             columns={typeColumns}
             rows={types}
             rowKey={(item) => item.id}
-            caption="Tipos de cobranca"
+            caption="Tipos de cobrança"
             empty={
               <EmptyState
                 icon={Settings2}
-                title="Nenhum tipo de cobranca"
+                title="Nenhum tipo de cobrança"
                 description="Crie uma regra para associar aos clientes."
               />
             }
@@ -722,7 +735,7 @@ function ClientModal({
           </select>
         </label>
         <label className="space-y-1 text-sm font-medium text-medium">
-          Tipo de cobranca
+          Tipo de cobrança
           <select
             value={value.billingTypeId ?? ""}
             disabled={!canViewFinancials}
@@ -971,8 +984,8 @@ function BillingTypeModal({
     <Modal
       open={open}
       onClose={onClose}
-      title="Tipo de cobranca"
-      description="Regra reutilizavel para contratos e fechamento."
+      title="Tipo de cobrança"
+      description="Regra reutilizável para contratos e fechamento."
       footer={
         <>
           <ActionButton variant="secondary" onClick={onClose}>
@@ -994,7 +1007,7 @@ function BillingTypeModal({
           />
         </label>
         <label className="space-y-1 text-sm font-medium text-medium">
-          Regra
+          Modelo de cálculo
           <select
             value={value.chargeType}
             onChange={(event) =>
@@ -1011,6 +1024,29 @@ function BillingTypeModal({
               </option>
             ))}
           </select>
+          <span className="text-xs font-normal text-soft">
+            Define o comportamento do motor de faturamento.
+          </span>
+        </label>
+        <label className="space-y-1 text-sm font-medium text-medium">
+          Como funciona
+          <textarea
+            value={value.howItWorks ?? ""}
+            onChange={(event) =>
+              onChange({ ...value, howItWorks: event.target.value })
+            }
+            className={cn(fieldClass(), "min-h-16 py-2")}
+          />
+        </label>
+        <label className="space-y-1 text-sm font-medium text-medium">
+          Exemplo
+          <textarea
+            value={value.example ?? ""}
+            onChange={(event) =>
+              onChange({ ...value, example: event.target.value })
+            }
+            className={cn(fieldClass(), "min-h-16 py-2")}
+          />
         </label>
         <label className="space-y-1 text-sm font-medium text-medium">
           Arredondamento
@@ -1030,16 +1066,6 @@ function BillingTypeModal({
               </option>
             ))}
           </select>
-        </label>
-        <label className="space-y-1 text-sm font-medium text-medium">
-          Descricao
-          <textarea
-            value={value.description ?? ""}
-            onChange={(event) =>
-              onChange({ ...value, description: event.target.value })
-            }
-            className={cn(fieldClass(), "min-h-24 py-2")}
-          />
         </label>
         <label className="flex items-center gap-2 text-sm font-medium text-medium">
           <input

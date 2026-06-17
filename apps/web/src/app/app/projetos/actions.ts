@@ -5,26 +5,30 @@ import { Prisma, prisma } from "@jumpflow/database";
 import type { ZodType } from "zod";
 import type { ActionResult, ErrorCode } from "@/lib/actions/result";
 import { requireRole, requireUser } from "@/lib/auth/guards";
-import { hasRole } from "@/lib/auth/route-permissions";
+import { FINANCIAL_ROLES, hasRole } from "@/lib/auth/route-permissions";
 import type { RoleName } from "@/lib/auth/types";
 import { recordAuditEvent } from "@/lib/db/audit";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { resolveDbUser } from "@/lib/db/users";
 import {
   allocationInputSchema,
+  allocationRemoveSchema,
   allocationSkillInputSchema,
   allocationSkillRemoveSchema,
   allocationSkillUpdateSchema,
   allocationUpdateSchema,
+  projectBillingConfigSchema,
   projectInputSchema,
   projectUpdateSchema,
   saleRateInputSchema,
   saleRateUpdateSchema,
   type AllocationInput,
+  type AllocationRemoveInput,
   type AllocationSkillInput,
   type AllocationSkillRemoveInput,
   type AllocationSkillUpdateInput,
   type AllocationUpdateInput,
+  type ProjectBillingConfigInput,
   type ProjectInput,
   type ProjectUpdateInput,
   type SaleRateInput,
@@ -125,6 +129,9 @@ function projectData(
   if (!includeCommercialFields) return data;
   return {
     ...data,
+    // Tipo de cobrança é decisão comercial: gravado junto dos demais campos
+    // comerciais (apenas perfis com acesso a valores podem alterá-lo).
+    billingTypeId: input.billingTypeId ?? null,
     billingHourlyRate: input.billingHourlyRate,
     budgetHours: input.budgetHours,
     costCenter: input.costCenter,
@@ -307,6 +314,73 @@ export async function updateProject(
   }
 }
 
+function billingConfigData(
+  input: ProjectBillingConfigInput,
+): Prisma.ProjectBillingConfigUncheckedCreateInput {
+  return {
+    projectId: input.projectId,
+    periodicity: input.periodicity,
+    roundingRule: input.roundingRule,
+    fixedAmount: input.fixedAmount ?? null,
+    includedHours: input.includedHours ?? null,
+    overageRate: input.overageRate ?? null,
+    overageTreatment: input.overageTreatment,
+    perConsultantAmount: input.perConsultantAmount ?? null,
+    reimbursableExpenses: input.reimbursableExpenses,
+    reimbursableMarkupPct: input.reimbursableMarkupPct ?? null,
+    discountPct: input.discountPct ?? null,
+    penaltyPct: input.penaltyPct ?? null,
+    adjustmentIndex: input.adjustmentIndex,
+    adjustmentPct: input.adjustmentPct ?? null,
+    withholdIss: input.withholdIss,
+    withholdingPct: input.withholdingPct ?? null,
+    closingDay: input.closingDay ?? null,
+    dueDay: input.dueDay ?? null,
+    requireApproval: input.requireApproval,
+    notes: input.notes ?? null,
+  };
+}
+
+/**
+ * Configuracao de cobranca por projeto (motor de regras parametrizavel).
+ * Editada pelo Financeiro (FINANCIAL_ROLES) — distinta do PROJECT_WRITE_ROLES,
+ * pois define as regras comerciais/financeiras que o motor de faturamento usa.
+ */
+export async function upsertProjectBillingConfig(
+  input: ProjectBillingConfigInput,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(FINANCIAL_ROLES);
+    const parsed = parseInput(projectBillingConfigSchema, input);
+    const project = await prisma.project.findUnique({
+      where: { id: parsed.projectId },
+      select: { id: true },
+    });
+    if (!project) throw new ActionError("NOT_FOUND", "Projeto nao encontrado.");
+    const previous = await prisma.projectBillingConfig.findUnique({
+      where: { projectId: parsed.projectId },
+    });
+    const data = billingConfigData(parsed);
+    const saved = await prisma.projectBillingConfig.upsert({
+      where: { projectId: parsed.projectId },
+      update: data,
+      create: data,
+    });
+    await audit(
+      "ProjectBillingConfig",
+      saved.id,
+      "PROJECT_BILLING_CONFIG_UPDATED",
+      previous,
+      data,
+    );
+    revalidatePath(PROJETOS_PATH);
+    return { ok: true, data: { id: saved.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
 export async function createAllocation(
   input: AllocationInput,
 ): Promise<ActionResult<{ id: string }>> {
@@ -341,6 +415,75 @@ export async function updateAllocation(
     await audit("Allocation", parsed.id, "ALLOCATION_UPDATED", previous, parsed);
     revalidatePath(PROJETOS_PATH);
     return { ok: true, data: { id: parsed.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+export interface RemoveAllocationResult {
+  id: string;
+  /** "deactivated" = kept as INACTIVE (had hours); "deleted" = hard removed. */
+  outcome: "deactivated" | "deleted";
+}
+
+/**
+ * Remove a consultant link from a project.
+ * - If the allocation already has ANY time entry, it is kept for history and
+ *   flagged INACTIVE (so logged hours, revenue and payments stay intact).
+ * - If it has NO time entry, it is treated as a linking mistake and hard
+ *   deleted, cleaning up its dependent rows (timesheet default, sale/cost rates,
+ *   allocation skills) in a single transaction.
+ */
+export async function removeAllocation(
+  input: AllocationRemoveInput,
+): Promise<ActionResult<RemoveAllocationResult>> {
+  try {
+    ensureDatabase();
+    await requireRole(PROJECT_WRITE_ROLES);
+    const parsed = parseInput(allocationRemoveSchema, input);
+    const allocation = await prisma.allocation.findUnique({
+      where: { id: parsed.id },
+      select: { id: true, status: true, consultantId: true, projectId: true },
+    });
+    if (!allocation) throw new ActionError("NOT_FOUND", "Vinculo nao encontrado.");
+
+    const entryCount = await prisma.timeEntry.count({
+      where: { allocationId: parsed.id },
+    });
+
+    if (entryCount > 0) {
+      // Has logged hours: deactivate, keep the row for history.
+      if (allocation.status === "INACTIVE") {
+        return { ok: true, data: { id: parsed.id, outcome: "deactivated" } };
+      }
+      await prisma.allocation.update({
+        where: { id: parsed.id },
+        data: { status: "INACTIVE" },
+      });
+      await audit(
+        "Allocation",
+        parsed.id,
+        "ALLOCATION_DEACTIVATED",
+        allocation,
+        { status: "INACTIVE" },
+      );
+      revalidatePath(PROJETOS_PATH);
+      return { ok: true, data: { id: parsed.id, outcome: "deactivated" } };
+    }
+
+    // No logged hours: linking mistake — hard delete with dependent cleanup.
+    await prisma.$transaction(async (tx) => {
+      await tx.allocationSkill.deleteMany({ where: { allocationId: parsed.id } });
+      await tx.projectSaleRate.deleteMany({ where: { allocationId: parsed.id } });
+      await tx.consultantAllocationCostRate.deleteMany({
+        where: { allocationId: parsed.id },
+      });
+      await tx.timesheetDefault.deleteMany({ where: { allocationId: parsed.id } });
+      await tx.allocation.delete({ where: { id: parsed.id } });
+    });
+    await audit("Allocation", parsed.id, "ALLOCATION_DELETED", allocation, null);
+    revalidatePath(PROJETOS_PATH);
+    return { ok: true, data: { id: parsed.id, outcome: "deleted" } };
   } catch (error) {
     return toFailure(error);
   }

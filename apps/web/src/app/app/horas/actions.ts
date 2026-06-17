@@ -18,6 +18,7 @@ import {
   COMMENT_REQUIRED_MESSAGE,
   DECIDE_HOURS_SOURCE_STATUS,
   applyTimesheetDefaultInputSchema,
+  copyPreviousWeekInputSchema,
   decideHoursSchema,
   deleteTimeEntryInputSchema,
   saveTimesheetDefaultInputSchema,
@@ -26,6 +27,7 @@ import {
   weekActionInputSchema,
   weeklyTimeEntryInputSchema,
   type ApplyTimesheetDefaultInput,
+  type CopyPreviousWeekInput,
   type DecideHoursInput,
   type DeleteTimeEntryInput,
   type SaveTimesheetDefaultInput,
@@ -36,10 +38,36 @@ import {
 } from "@/lib/timesheet/schemas";
 import type { ActionResult, ErrorCode } from "@/lib/timesheet/types";
 import {
+  computeHoursFromClock,
+  normalizeBreak,
+  type ClockTimes,
+} from "@/lib/timesheet/time-clock";
+import {
   addDays,
   parseIsoDateUtc,
   weekStartOf,
 } from "@/lib/timesheet/week";
+
+/**
+ * Normalize the clock fields from a parsed input into persistable columns plus
+ * the derived `hours` total. Hours are computed on the server (source of truth);
+ * the break is optional (breakStart/breakEnd null when "Remover pausa" was used).
+ */
+function clockToData(input: ClockTimes) {
+  const { breakStart, breakEnd } = normalizeBreak(input.breakStart, input.breakEnd);
+  return {
+    startTime: input.startTime,
+    endTime: input.endTime,
+    breakStart,
+    breakEnd,
+    hours: computeHoursFromClock({
+      startTime: input.startTime,
+      endTime: input.endTime,
+      breakStart,
+      breakEnd,
+    }),
+  };
+}
 
 /**
  * Server actions for the Horas module (docs/horas-persistencia.md).
@@ -207,7 +235,8 @@ export async function createTimeEntry(
     // the synthetic dev session id).
     const dbUser = await requireDbUser(user);
 
-    const description = parsed.description?.trim() || null;
+    const description = parsed.description.trim();
+    const clock = clockToData(parsed);
     const entry = await prisma.$transaction(async (tx) => {
       const period = await upsertOpenPeriod(tx, consultant.id, date);
       // A complete entry enters approval as soon as it is saved (Rodada 4.3):
@@ -239,7 +268,7 @@ export async function createTimeEntry(
         saved = await tx.timeEntry.update({
           where: { id: existing.id },
           data: {
-            hours: parsed.hours,
+            ...clock,
             description,
             billable: parsed.billable,
             status: "SUBMITTED",
@@ -256,7 +285,7 @@ export async function createTimeEntry(
             projectId: project.id,
             allocationId: allocation.id,
             date,
-            hours: parsed.hours,
+            ...clock,
             activityType: parsed.activityType,
             description,
             billable: parsed.billable,
@@ -319,7 +348,8 @@ export async function createWeeklyTimeEntries(
 
     const dbUser = await requireDbUser(user);
     const weekdays = [...new Set(parsed.weekdays)].sort((a, b) => a - b);
-    const description = parsed.description?.trim() || null;
+    const description = parsed.description.trim();
+    const clock = clockToData(parsed);
 
     const result = await prisma.$transaction(async (tx) => {
       let period = await tx.timesheetPeriod.findUnique({
@@ -379,7 +409,7 @@ export async function createWeeklyTimeEntries(
             projectId: project.id,
             allocationId: allocation.id,
             date,
-            hours: parsed.hoursPerDay,
+            ...clock,
             activityType: parsed.activityType,
             description,
             billable: parsed.billable,
@@ -507,8 +537,8 @@ export async function updateTimeEntry(
       await tx.timeEntry.update({
         where: { id: entry.id },
         data: {
-          hours: parsed.hours,
-          description: parsed.description?.trim() || null,
+          ...clockToData(parsed),
+          description: parsed.description.trim(),
           billable: parsed.billable,
           date,
           allocationId,
@@ -649,25 +679,24 @@ export async function saveTimesheetDefault(
       parsed.allocationId,
     );
     const weekdays = [...new Set(parsed.weekdays)].sort((a, b) => a - b);
+    const clock = clockToData(parsed);
+    const defaultData = {
+      activityType: parsed.activityType,
+      hoursPerDay: clock.hours,
+      startTime: clock.startTime,
+      breakStart: clock.breakStart,
+      breakEnd: clock.breakEnd,
+      endTime: clock.endTime,
+      weekdays,
+      billable: parsed.billable,
+      description: parsed.description.trim(),
+    };
 
     await prisma.$transaction(async (tx) => {
       const saved = await tx.timesheetDefault.upsert({
         where: { allocationId: allocation.id },
-        update: {
-          activityType: parsed.activityType,
-          hoursPerDay: parsed.hoursPerDay,
-          weekdays,
-          billable: parsed.billable,
-          description: parsed.description?.trim() || null,
-        },
-        create: {
-          allocationId: allocation.id,
-          activityType: parsed.activityType,
-          hoursPerDay: parsed.hoursPerDay,
-          weekdays,
-          billable: parsed.billable,
-          description: parsed.description?.trim() || null,
-        },
+        update: defaultData,
+        create: { allocationId: allocation.id, ...defaultData },
       });
       await tx.auditEvent.create({
         data: buildAuditEventData({
@@ -775,6 +804,7 @@ export async function applyTimesheetDefault(
           counts.skippedExisting += 1;
           continue;
         }
+        const def = allocation.timesheetDefault!;
         const created = await tx.timeEntry.create({
           data: {
             periodId: period.id,
@@ -782,10 +812,14 @@ export async function applyTimesheetDefault(
             projectId: allocation.projectId,
             allocationId: allocation.id,
             date,
-            hours: allocation.timesheetDefault!.hoursPerDay,
-            activityType: allocation.timesheetDefault!.activityType,
-            description: allocation.timesheetDefault!.description,
-            billable: allocation.timesheetDefault!.billable,
+            hours: def.hoursPerDay,
+            startTime: def.startTime,
+            breakStart: def.breakStart,
+            breakEnd: def.breakEnd,
+            endTime: def.endTime,
+            activityType: def.activityType,
+            description: def.description ?? "",
+            billable: def.billable,
             status: "SUBMITTED",
             submittedAt,
           },
@@ -829,13 +863,16 @@ export async function applyTimesheetDefault(
 }
 
 export async function copyPreviousWeek(
-  input: WeekActionInput,
+  input: CopyPreviousWeekInput,
 ): Promise<ActionResult<CopyWeekResult>> {
   try {
     ensureDatabase();
     const user = await requireUser();
     const consultant = await requireConsultant(user);
-    const parsed = parseInput(weekActionInputSchema, input);
+    const parsed = parseInput(copyPreviousWeekInputSchema, input);
+    // Single week-level description applied to every copied entry (the modal).
+    // Blank = keep each source entry's own description.
+    const weekDescription = parsed.description?.trim() || null;
     const destStart = weekStartOf(parseIsoDateUtc(parsed.weekStart)!);
     const destEnd = addDays(destStart, 6);
     const sourceStart = addDays(destStart, -7);
@@ -930,8 +967,12 @@ export async function copyPreviousWeek(
             allocationId: allocation.id,
             date: destDate,
             hours: entry.hours,
+            startTime: entry.startTime,
+            breakStart: entry.breakStart,
+            breakEnd: entry.breakEnd,
+            endTime: entry.endTime,
             activityType: entry.activityType,
-            description: entry.description,
+            description: weekDescription ?? entry.description,
             billable: entry.billable,
             status: "SUBMITTED",
             submittedAt,

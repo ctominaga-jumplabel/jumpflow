@@ -50,6 +50,14 @@ const h = vi.hoisted(() => {
           .filter((e) => where.id.in.includes(e.id))
           .map((e) => ({ ...e })),
     },
+    consultant: {
+      findMany: async () => [{ id: "c1", name: "Ana" }],
+    },
+    project: {
+      findMany: async () => [
+        { id: "p1", name: "Apollo", client: { name: "Acme" } },
+      ],
+    },
   };
 
   return { store, prismaMock };

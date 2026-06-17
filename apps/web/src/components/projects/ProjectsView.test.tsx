@@ -39,6 +39,7 @@ function renderDemo(canViewCommercials = true) {
       canManageProjects
       canViewCommercials={canViewCommercials}
       canManageSaleRates={canViewCommercials}
+      canEditBillingConfig={canViewCommercials}
     />,
   );
 }
@@ -72,7 +73,7 @@ describe("ProjectsView", () => {
   it("adds a local sale rate in the project detail", () => {
     renderDemo();
     fireEvent.click(
-      screen.getByRole("button", { name: /Vinculos e valores de Atlas/ }),
+      screen.getByRole("button", { name: /Vínculos e valores de Atlas/ }),
     );
     let detail = screen.getByRole("dialog");
     fireEvent.click(within(detail).getByRole("button", { name: "Valores de venda" }));
@@ -91,7 +92,7 @@ describe("ProjectsView", () => {
   it("adds a skill to an allocation in the project detail (demo mode)", () => {
     renderDemo();
     fireEvent.click(
-      screen.getByRole("button", { name: /Vinculos e valores de Atlas/ }),
+      screen.getByRole("button", { name: /Vínculos e valores de Atlas/ }),
     );
     let detail = screen.getByRole("dialog");
     fireEvent.click(within(detail).getByRole("button", { name: "Skills" }));
@@ -113,7 +114,7 @@ describe("ProjectsView", () => {
     detail = screen.getByRole("dialog");
     expect(within(detail).getByText("React")).toBeInTheDocument();
     expect(
-      screen.getByText("Skill da alocacao salva localmente."),
+      screen.getByText("Skill da alocação salva localmente."),
     ).toBeInTheDocument();
   });
 
@@ -125,6 +126,7 @@ describe("ProjectsView", () => {
         canManageProjects
         canViewCommercials
         canManageSaleRates
+        canEditBillingConfig
       />,
     );
     expect(screen.getByText("Ana Martins")).toBeInTheDocument();
@@ -137,6 +139,7 @@ describe("ProjectsView", () => {
         canManageProjects
         canViewCommercials
         canManageSaleRates
+        canEditBillingConfig
       />,
     );
     expect(screen.getByText("Christopher Tominaga")).toBeInTheDocument();

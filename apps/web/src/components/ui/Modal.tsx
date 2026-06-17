@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef } from "react";
+import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -98,7 +99,16 @@ export function Modal({
     };
   }, [open]);
 
-  return (
+  // Render through a portal to document.body so a modal always overlays the full
+  // viewport at the top of the stacking order. Nested modals (e.g. the allocation
+  // form opened from inside the project detail dialog) would otherwise be trapped
+  // in the parent panel's stacking context: the parent is an animated motion.div
+  // with a transform, which makes a `position: fixed` descendant position relative
+  // to that ancestor instead of the viewport. Modals always start closed, so the
+  // portal renders nothing during SSR/hydration; guard `document` for the server.
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
     <AnimatePresence>
       {open ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -163,6 +173,7 @@ export function Modal({
           </motion.div>
         </div>
       ) : null}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body,
   );
 }

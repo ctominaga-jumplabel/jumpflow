@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
+import { render, screen } from "@testing-library/react";
 import { TimesheetFilters } from "./TimesheetFilters";
 import type { TimesheetFilter } from "@/lib/timesheet/filters";
 
@@ -23,7 +23,6 @@ function renderDb(filter: TimesheetFilter, weekStart = "2026-06-08") {
       weekStart={weekStart}
       filter={filter}
       projects={projects}
-      onPickDate={vi.fn()}
     />,
   );
 }
@@ -58,10 +57,10 @@ describe("TimesheetFilters (db mode) — query string reflection", () => {
       (screen.getByLabelText("Cobrança") as HTMLSelectElement).value,
     ).toBe("false");
     expect(
-      (screen.getByLabelText("Inicio do periodo") as HTMLInputElement).value,
+      (screen.getByLabelText("Início do período") as HTMLInputElement).value,
     ).toBe("2026-06-01");
     expect(
-      (screen.getByLabelText("Fim do periodo") as HTMLInputElement).value,
+      (screen.getByLabelText("Fim do período") as HTMLInputElement).value,
     ).toBe("2026-06-30");
     expect(
       (screen.getByLabelText("Ordenar por") as HTMLSelectElement).value,
@@ -125,9 +124,14 @@ describe("TimesheetFilters — secondary disclosure", () => {
     expect(details(container).open).toBe(true);
   });
 
-  it("opens when the period range is active", () => {
-    const { container } = renderDb({ startDate: "2026-06-01" });
-    expect(details(container).open).toBe(true);
+  it("stays closed when only the (mandatory) period range is set", () => {
+    // Início/Fim do período are primary, always-visible required fields now,
+    // so they never force the secondary disclosure open.
+    const { container } = renderDb({
+      startDate: "2026-06-01",
+      endDate: "2026-06-30",
+    });
+    expect(details(container).open).toBe(false);
   });
 });
 
@@ -159,38 +163,25 @@ describe("TimesheetFilters (db mode) — form and clear", () => {
         weekStart="2026-06-08"
         filter={{ status: "DRAFT" }}
         projects={projects}
-        onPickDate={vi.fn()}
       />,
     );
     expect(screen.getByText(/Filtros aplicados/)).toBeInTheDocument();
   });
 });
 
-describe('TimesheetFilters — "Ir para data"', () => {
-  it("renders the date input with an explanatory hint", () => {
-    renderDb({});
-    const input = screen.getByLabelText("Ir para data");
-    expect(input).toHaveAttribute("type", "date");
-    expect(input).toHaveAttribute("aria-describedby", "hf-date-hint");
-    expect(
-      screen.getByText(/Abre a semana que contém a data/),
-    ).toBeInTheDocument();
+describe("TimesheetFilters — mandatory period range", () => {
+  it("renders Início/Fim do período as required date inputs", () => {
+    renderDb({ startDate: "2026-06-01", endDate: "2026-06-30" });
+    const start = screen.getByLabelText("Início do período");
+    const end = screen.getByLabelText("Fim do período");
+    expect(start).toHaveAttribute("type", "date");
+    expect(start).toBeRequired();
+    expect(end).toHaveAttribute("type", "date");
+    expect(end).toBeRequired();
   });
 
-  it("calls onPickDate with the chosen ISO date", () => {
-    const onPickDate = vi.fn();
-    render(
-      <TimesheetFilters
-        mode="db"
-        weekStart="2026-06-08"
-        filter={{}}
-        projects={projects}
-        onPickDate={onPickDate}
-      />,
-    );
-    fireEvent.change(screen.getByLabelText("Ir para data"), {
-      target: { value: "2026-06-22" },
-    });
-    expect(onPickDate).toHaveBeenCalledWith("2026-06-22");
+  it("no longer renders the removed 'Ir para data' control", () => {
+    renderDb({});
+    expect(screen.queryByLabelText("Ir para data")).not.toBeInTheDocument();
   });
 });

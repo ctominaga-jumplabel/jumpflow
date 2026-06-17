@@ -225,6 +225,7 @@ export async function getWeekForConsultant(
         status: entry.status as TimeEntryStatus,
         hours: [0, 0, 0, 0, 0, 0, 0],
         entryIds: [null, null, null, null, null, null, null],
+        clock: [null, null, null, null, null, null, null],
       };
       rowsByKey.set(key, row);
     }
@@ -234,6 +235,14 @@ export async function getWeekForConsultant(
     if (dayIndex < 0 || dayIndex > 6) continue;
     row.hours[dayIndex] = Number(entry.hours);
     if (row.entryIds) row.entryIds[dayIndex] = entry.id;
+    if (row.clock) {
+      row.clock[dayIndex] = {
+        startTime: entry.startTime,
+        endTime: entry.endTime,
+        breakStart: entry.breakStart,
+        breakEnd: entry.breakEnd,
+      };
+    }
     if (!row.description && entry.description) {
       row.description = entry.description;
     }
@@ -398,6 +407,10 @@ export interface TimesheetDefaultOption extends AllowedProject {
     weekdays: number[];
     billable: boolean;
     description: string;
+    startTime: string | null;
+    breakStart: string | null;
+    breakEnd: string | null;
+    endTime: string | null;
   } | null;
 }
 
@@ -477,6 +490,10 @@ export async function listTimesheetDefaultOptions(
           weekdays: true,
           billable: true,
           description: true,
+          startTime: true,
+          breakStart: true,
+          breakEnd: true,
+          endTime: true,
         },
       },
     },
@@ -495,6 +512,10 @@ export async function listTimesheetDefaultOptions(
           weekdays: allocation.timesheetDefault.weekdays,
           billable: allocation.timesheetDefault.billable,
           description: allocation.timesheetDefault.description ?? "",
+          startTime: allocation.timesheetDefault.startTime,
+          breakStart: allocation.timesheetDefault.breakStart,
+          breakEnd: allocation.timesheetDefault.breakEnd,
+          endTime: allocation.timesheetDefault.endTime,
         }
       : null,
   }));

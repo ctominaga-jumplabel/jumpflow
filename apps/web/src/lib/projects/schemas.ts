@@ -38,6 +38,16 @@ const optionalNumber = z.preprocess(
   z.coerce.number().nonnegative().optional(),
 );
 
+const optionalPercent = z.preprocess(
+  (value) => (value === "" || value === null ? undefined : value),
+  z.coerce.number().min(0).max(100).optional(),
+);
+
+const optionalDayOfMonth = z.preprocess(
+  (value) => (value === "" || value === null ? undefined : value),
+  z.coerce.number().int().min(1).max(31).optional(),
+);
+
 export const projectInputSchema = z
   .object({
     clientId: entityId,
@@ -47,6 +57,7 @@ export const projectInputSchema = z
     startDate: z.string().trim().min(10).max(10),
     endDate: optionalDate,
     managerUserId: optionalText(80),
+    billingTypeId: optionalCuid,
     billingHourlyRate: optionalNumber,
     budgetHours: optionalNumber,
     costCenter: optionalText(80),
@@ -60,6 +71,46 @@ export const projectUpdateSchema = projectInputSchema.extend({
   id: entityId,
 });
 
+// Configuracao de cobranca por projeto (motor de regras parametrizavel).
+// Editada pelo Financeiro. Todos os parametros numericos sao opcionais: cada
+// tipo de cobranca usa apenas os que fazem sentido (ex.: HOUR_PACKAGE usa
+// includedHours + overageRate; MONTHLY usa fixedAmount).
+export const projectBillingConfigSchema = z.object({
+  projectId: entityId,
+  periodicity: z.enum(["MONTHLY", "BIWEEKLY", "WEEKLY", "PER_EVENT"]),
+  roundingRule: z.enum([
+    "NONE",
+    "NEAREST_15_MINUTES",
+    "NEAREST_30_MINUTES",
+    "NEAREST_HOUR",
+    "CEIL_15_MINUTES",
+    "CEIL_30_MINUTES",
+    "CEIL_HOUR",
+  ]),
+  fixedAmount: optionalNumber,
+  includedHours: optionalNumber,
+  overageRate: optionalNumber,
+  overageTreatment: z.enum([
+    "BILL_EXTRA",
+    "BLOCK_AT_LIMIT",
+    "INCLUDE_FREE",
+    "CARRY_OVER",
+  ]),
+  perConsultantAmount: optionalNumber,
+  reimbursableExpenses: z.boolean(),
+  reimbursableMarkupPct: optionalPercent,
+  discountPct: optionalPercent,
+  penaltyPct: optionalPercent,
+  adjustmentIndex: z.enum(["NONE", "IPCA", "IGPM", "CDI", "FIXED"]),
+  adjustmentPct: optionalPercent,
+  withholdIss: z.boolean(),
+  withholdingPct: optionalPercent,
+  closingDay: optionalDayOfMonth,
+  dueDay: optionalDayOfMonth,
+  requireApproval: z.boolean(),
+  notes: optionalText(500),
+});
+
 export const allocationInputSchema = z
   .object({
     projectId: entityId,
@@ -68,7 +119,7 @@ export const allocationInputSchema = z
     allocationPercent: z.coerce.number().int().min(1).max(100),
     startDate: z.string().trim().min(10).max(10),
     endDate: optionalDate,
-    status: z.enum(["ACTIVE", "PLANNED", "ENDED", "CANCELLED"]),
+    status: z.enum(["ACTIVE", "PLANNED", "ENDED", "CANCELLED", "INACTIVE"]),
   })
   .refine((value) => !value.endDate || value.endDate >= value.startDate, {
     message: "Data final deve ser maior ou igual ao inicio.",
@@ -78,6 +129,8 @@ export const allocationInputSchema = z
 export const allocationUpdateSchema = allocationInputSchema.extend({
   id: entityId,
 });
+
+export const allocationRemoveSchema = z.object({ id: entityId });
 
 export const saleRateInputSchema = z
   .object({
@@ -134,8 +187,12 @@ export const allocationSkillUpdateSchema = z.object({
 
 export type ProjectInput = z.infer<typeof projectInputSchema>;
 export type ProjectUpdateInput = z.infer<typeof projectUpdateSchema>;
+export type ProjectBillingConfigInput = z.infer<
+  typeof projectBillingConfigSchema
+>;
 export type AllocationInput = z.infer<typeof allocationInputSchema>;
 export type AllocationUpdateInput = z.infer<typeof allocationUpdateSchema>;
+export type AllocationRemoveInput = z.infer<typeof allocationRemoveSchema>;
 export type SaleRateInput = z.infer<typeof saleRateInputSchema>;
 export type SaleRateUpdateInput = z.infer<typeof saleRateUpdateSchema>;
 export type AllocationSkillInput = z.infer<typeof allocationSkillInputSchema>;

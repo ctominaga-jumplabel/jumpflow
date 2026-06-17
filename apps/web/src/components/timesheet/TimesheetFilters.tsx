@@ -65,8 +65,6 @@ export interface TimesheetFiltersProps {
   onChange?: (next: TimesheetFilter) => void;
   /** demo mode: clear all filters (keeping the week). */
   onClear?: () => void;
-  /** Navigate to the week containing a chosen date (both modes). */
-  onPickDate: (isoDate: string) => void;
 }
 
 /**
@@ -82,7 +80,6 @@ export function TimesheetFilters({
   projects,
   onChange,
   onClear,
-  onPickDate,
 }: TimesheetFiltersProps) {
   const isDemo = mode === "demo";
 
@@ -119,8 +116,6 @@ export function TimesheetFilters({
   // filter is never hidden from view.
   const advancedActive =
     filter.billable !== undefined ||
-    Boolean(filter.startDate) ||
-    Boolean(filter.endDate) ||
     Boolean(filter.sort) ||
     Boolean(filter.direction);
   const anyActive = hasActiveTimesheetFilter(filter);
@@ -205,31 +200,14 @@ export function TimesheetFilters({
         </div>
 
         <div>
-          <label className={labelClass} htmlFor="hf-date">
-            Ir para data
-          </label>
-          <input
-            id="hf-date"
-            type="date"
-            className={fieldClass}
-            aria-describedby="hf-date-hint"
-            onChange={(e) => {
-              if (e.target.value) onPickDate(e.target.value);
-            }}
-          />
-          <p id="hf-date-hint" className="mt-1 text-xs text-soft">
-            Abre a semana que contém a data.
-          </p>
-        </div>
-
-        <div>
           <label className={labelClass} htmlFor="hf-start">
-            Inicio do periodo
+            Início do período
           </label>
           <input
             id="hf-start"
             type="date"
             name="inicio"
+            required
             className={fieldClass}
             {...bind("startDate", filter.startDate)}
           />
@@ -237,12 +215,13 @@ export function TimesheetFilters({
 
         <div>
           <label className={labelClass} htmlFor="hf-end">
-            Fim do periodo
+            Fim do período
           </label>
           <input
             id="hf-end"
             type="date"
             name="fim"
+            required
             className={fieldClass}
             {...bind("endDate", filter.endDate)}
           />

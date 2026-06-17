@@ -3,18 +3,22 @@ import type { BillingTypeItem, ClientItem } from "./types";
 export const demoBillingTypes: BillingTypeItem[] = [
   {
     id: "bt-hourly",
-    name: "Hora por projeto",
+    name: "Hora trabalhada",
     chargeType: "HOURLY",
     roundingRule: "NEAREST_15_MINUTES",
-    description: "Cobranca por horas aprovadas no fechamento mensal.",
+    description: "Cobrança por horas aprovadas no fechamento mensal.",
+    howItWorks: "Cobra pelas horas aprovadas",
+    example: "160h × R$ 180/h",
     active: true,
   },
   {
     id: "bt-monthly",
-    name: "Mensalidade",
+    name: "Mensalidade fixa",
     chargeType: "MONTHLY",
     roundingRule: "NONE",
     description: "Valor mensal fixo com controle de limite de horas.",
+    howItWorks: "Valor fixo independente das horas",
+    example: "R$ 25.000/mês",
     active: true,
   },
 ];

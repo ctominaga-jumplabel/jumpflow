@@ -59,8 +59,10 @@ describe("ClientsView", () => {
 
   it("manages billing types in the secondary tab", () => {
     renderDemo();
-    fireEvent.click(screen.getByRole("button", { name: "Tipos de cobranca" }));
-    expect(screen.getByText("Hora por projeto")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Tipos de cobrança" }));
+    // The "Tipo" cell shows the name plus the charge-model label, which coincide
+    // for the canonical types — assert at least one match.
+    expect(screen.getAllByText("Hora trabalhada").length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("button", { name: /Novo tipo/ }));
     const dialog = screen.getByRole("dialog");
     fireEvent.change(within(dialog).getByLabelText("Nome"), {
@@ -69,7 +71,7 @@ describe("ClientsView", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Salvar" }));
     expect(screen.getByText("Pacote fechado")).toBeInTheDocument();
     expect(
-      screen.getByText("Tipo de cobranca salvo localmente."),
+      screen.getByText("Tipo de cobrança salvo localmente."),
     ).toBeInTheDocument();
   });
 
