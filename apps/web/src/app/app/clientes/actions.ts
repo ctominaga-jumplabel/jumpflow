@@ -231,6 +231,8 @@ export async function updateBillingType(
         chargeType: parsed.chargeType,
         roundingRule: parsed.roundingRule,
         description: parsed.description,
+        howItWorks: parsed.howItWorks,
+        example: parsed.example,
         active: parsed.active,
       },
     });

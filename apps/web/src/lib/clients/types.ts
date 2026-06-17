@@ -35,6 +35,10 @@ export interface BillingTypeItem {
   chargeType: BillingChargeType;
   roundingRule: BillingRoundingRule;
   description?: string;
+  /** "Como funciona" — descricao curta do modelo de cobranca. */
+  howItWorks?: string;
+  /** "Exemplo" — exemplo ilustrativo do modelo de cobranca. */
+  example?: string;
   active: boolean;
 }
 

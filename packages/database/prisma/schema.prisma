@@ -190,6 +190,32 @@ enum BillingRoundingRule {
   CEIL_HOUR
 }
 
+/// Periodicidade de faturamento configurada por projeto (motor parametrizavel).
+enum BillingPeriodicity {
+  MONTHLY
+  BIWEEKLY
+  WEEKLY
+  PER_EVENT
+}
+
+/// Tratamento de horas excedentes (alem da franquia/pacote contratado).
+enum OverageTreatment {
+  BILL_EXTRA
+  BLOCK_AT_LIMIT
+  INCLUDE_FREE
+  CARRY_OVER
+}
+
+/// Indice de reajuste contratual. Apenas FIXED multiplica automaticamente neste
+/// ciclo; IPCA/IGPM/CDI ficam marcados para tratamento futuro (sem fonte externa).
+enum AdjustmentIndex {
+  NONE
+  IPCA
+  IGPM
+  CDI
+  FIXED
+}
+
 enum InvoiceKind {
   SERVICE
   PRODUCT
@@ -512,6 +538,8 @@ model BillingType {
   chargeType   BillingChargeType
   roundingRule BillingRoundingRule @default(NONE)
   description  String?
+  howItWorks   String?
+  example      String?
   active       Boolean             @default(true)
   clients      Client[]
   projects     Project[]
@@ -531,6 +559,7 @@ model Project {
   managerUserId          String?
   billingTypeId          String?
   billingType            BillingType?            @relation(fields: [billingTypeId], references: [id], onDelete: SetNull)
+  billingConfig          ProjectBillingConfig?
   billingHourlyRate      Decimal?                @db.Decimal(12, 2)
   budgetHours            Decimal?                @db.Decimal(10, 2)
   costCenter             String?
@@ -549,6 +578,38 @@ model Project {
   @@index([clientId])
   @@index([managerUserId])
   @@index([billingTypeId])
+}
+
+/// Regras de faturamento parametrizaveis por projeto, editadas pelo Financeiro.
+/// O `chargeType` (comportamento do motor) vem do BillingType; aqui ficam os
+/// parametros que o motor de calculo consome (franquia, excedente, fixo, datas,
+/// reajuste, retencoes) sem necessidade de alterar o codigo-fonte por contrato.
+model ProjectBillingConfig {
+  id                    String              @id @default(cuid())
+  projectId             String              @unique
+  project               Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  periodicity           BillingPeriodicity  @default(MONTHLY)
+  roundingRule          BillingRoundingRule @default(NONE)
+  fixedAmount           Decimal?            @db.Decimal(12, 2)
+  includedHours         Decimal?            @db.Decimal(10, 2)
+  overageRate           Decimal?            @db.Decimal(12, 2)
+  overageTreatment      OverageTreatment    @default(BILL_EXTRA)
+  perConsultantAmount   Decimal?            @db.Decimal(12, 2)
+  reimbursableExpenses  Boolean             @default(false)
+  reimbursableMarkupPct Decimal?            @db.Decimal(5, 2)
+  discountPct           Decimal?            @db.Decimal(5, 2)
+  penaltyPct            Decimal?            @db.Decimal(5, 2)
+  adjustmentIndex       AdjustmentIndex     @default(NONE)
+  adjustmentPct         Decimal?            @db.Decimal(7, 4)
+  withholdIss           Boolean             @default(false)
+  withholdingPct        Decimal?            @db.Decimal(5, 2)
+  closingDay            Int?
+  dueDay                Int?
+  requireApproval       Boolean             @default(true)
+  parameters            Json?
+  notes                 String?
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
 }
 
 model Allocation {

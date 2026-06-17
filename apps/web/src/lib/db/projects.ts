@@ -3,6 +3,7 @@ import type { Prisma } from "@jumpflow/database";
 import type {
   ProjectAllocationItem,
   ProjectAllocationSkillItem,
+  ProjectBillingConfigItem,
   ProjectClientOption,
   ProjectConsultantOption,
   ProjectItem,
@@ -19,6 +20,57 @@ function decimalToNumber(value: Prisma.Decimal | null): number | undefined {
 
 function dateToIso(value: Date): string {
   return value.toISOString().slice(0, 10);
+}
+
+type ProjectBillingConfigRow = {
+  periodicity: string;
+  roundingRule: string;
+  fixedAmount: Prisma.Decimal | null;
+  includedHours: Prisma.Decimal | null;
+  overageRate: Prisma.Decimal | null;
+  overageTreatment: string;
+  perConsultantAmount: Prisma.Decimal | null;
+  reimbursableExpenses: boolean;
+  reimbursableMarkupPct: Prisma.Decimal | null;
+  discountPct: Prisma.Decimal | null;
+  penaltyPct: Prisma.Decimal | null;
+  adjustmentIndex: string;
+  adjustmentPct: Prisma.Decimal | null;
+  withholdIss: boolean;
+  withholdingPct: Prisma.Decimal | null;
+  closingDay: number | null;
+  dueDay: number | null;
+  requireApproval: boolean;
+  notes: string | null;
+};
+
+function mapBillingConfig(
+  row: ProjectBillingConfigRow | null | undefined,
+): ProjectBillingConfigItem | undefined {
+  if (!row) return undefined;
+  return {
+    periodicity: row.periodicity as ProjectBillingConfigItem["periodicity"],
+    roundingRule: row.roundingRule as ProjectBillingConfigItem["roundingRule"],
+    fixedAmount: decimalToNumber(row.fixedAmount),
+    includedHours: decimalToNumber(row.includedHours),
+    overageRate: decimalToNumber(row.overageRate),
+    overageTreatment:
+      row.overageTreatment as ProjectBillingConfigItem["overageTreatment"],
+    perConsultantAmount: decimalToNumber(row.perConsultantAmount),
+    reimbursableExpenses: row.reimbursableExpenses,
+    reimbursableMarkupPct: decimalToNumber(row.reimbursableMarkupPct),
+    discountPct: decimalToNumber(row.discountPct),
+    penaltyPct: decimalToNumber(row.penaltyPct),
+    adjustmentIndex:
+      row.adjustmentIndex as ProjectBillingConfigItem["adjustmentIndex"],
+    adjustmentPct: decimalToNumber(row.adjustmentPct),
+    withholdIss: row.withholdIss,
+    withholdingPct: decimalToNumber(row.withholdingPct),
+    closingDay: row.closingDay ?? undefined,
+    dueDay: row.dueDay ?? undefined,
+    requireApproval: row.requireApproval,
+    notes: row.notes ?? undefined,
+  };
 }
 
 type ProjectSaleRateWithNames = {
@@ -94,7 +146,8 @@ export async function listProjects(options?: {
   const rows = await prisma.project.findMany({
     include: {
       client: { select: { id: true, name: true } },
-      billingType: { select: { name: true } },
+      billingType: { select: { name: true, chargeType: true } },
+      billingConfig: includeFinancials,
       allocations: {
         include: {
           consultant: { select: { name: true } },
@@ -200,6 +253,15 @@ export async function listProjects(options?: {
       billingTypeId: includeFinancials ? (row.billingTypeId ?? undefined) : undefined,
       billingTypeName: includeFinancials
         ? (row.billingType?.name ?? undefined)
+        : undefined,
+      billingChargeType: includeFinancials
+        ? (row.billingType?.chargeType ?? undefined)
+        : undefined,
+      billingConfig: includeFinancials
+        ? mapBillingConfig(
+            (row as { billingConfig?: ProjectBillingConfigRow | null })
+              .billingConfig,
+          )
         : undefined,
       billingHourlyRate: includeFinancials
         ? decimalToNumber(row.billingHourlyRate)

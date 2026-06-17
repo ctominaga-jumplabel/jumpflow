@@ -204,6 +204,140 @@ async function seedBootstrapAdmin() {
   );
 }
 
+// --- Billing types catalog (motor de regras de faturamento) ----------------
+//
+// The 16 charge models are the actual catalog the Financeiro screen manages:
+// they are pre-registered here (idempotent upsert by stable `seed-billing-*`
+// id) but stay fully editable in the UI. `chargeType` is the engine behavior
+// key; `name`/`howItWorks`/`example` are the table the user provided. Rounding
+// defaults to NONE ("Sem arredondamento"). Not gated by AUTH_DEV_MODE — the
+// catalog is reference data, useful in every environment.
+
+const BILLING_TYPES = [
+  {
+    id: "seed-billing-hourly",
+    name: "Hora trabalhada",
+    chargeType: "HOURLY",
+    howItWorks: "Cobra pelas horas aprovadas",
+    example: "160h × R$ 180/h",
+  },
+  {
+    id: "seed-billing-monthly",
+    name: "Mensalidade fixa",
+    chargeType: "MONTHLY",
+    howItWorks: "Valor fixo independente das horas",
+    example: "R$ 25.000/mês",
+  },
+  {
+    id: "seed-billing-hourly-plus-fixed",
+    name: "Hora + Fixo",
+    chargeType: "HOURLY_PLUS_FIXED",
+    howItWorks: "Valor mensal + horas excedentes",
+    example: "R$ 15.000 + horas extras",
+  },
+  {
+    id: "seed-billing-hour-package",
+    name: "Pacote de horas (Franquia)",
+    chargeType: "HOUR_PACKAGE",
+    howItWorks: "Cliente compra um banco de horas",
+    example: "200h/mês, excedente cobrado à parte",
+  },
+  {
+    id: "seed-billing-per-allocated-consultant",
+    name: "Preço por consultor alocado",
+    chargeType: "PER_ALLOCATED_CONSULTANT",
+    howItWorks: "Valor por profissional",
+    example: "5 consultores × R$ 18.000",
+  },
+  {
+    id: "seed-billing-per-project",
+    name: "Preço por projeto",
+    chargeType: "PER_PROJECT",
+    howItWorks: "Valor fechado pelo projeto",
+    example: "Projeto ABC = R$ 300.000",
+  },
+  {
+    id: "seed-billing-milestone",
+    name: "Por entrega (Milestone)",
+    chargeType: "MILESTONE",
+    howItWorks: "Cobrança quando uma etapa é concluída",
+    example: "Entrega da fase 1 = R$ 50.000",
+  },
+  {
+    id: "seed-billing-per-sprint",
+    name: "Por sprint",
+    chargeType: "PER_SPRINT",
+    howItWorks: "Muito usado em times ágeis",
+    example: "R$ 40.000 por sprint",
+  },
+  {
+    id: "seed-billing-time-and-material",
+    name: "T&M (Time & Material)",
+    chargeType: "TIME_AND_MATERIAL",
+    howItWorks: "Horas + despesas",
+    example: "Horas + viagens + hospedagem",
+  },
+  {
+    id: "seed-billing-on-demand",
+    name: "Sob demanda",
+    chargeType: "ON_DEMAND",
+    howItWorks: "Cada solicitação gera cobrança",
+    example: "Chamado ou serviço avulso",
+  },
+  {
+    id: "seed-billing-subscription",
+    name: "Assinatura (Subscription)",
+    chargeType: "SUBSCRIPTION",
+    howItWorks: "Cobrança recorrente",
+    example: "SaaS de R$ 5.000/mês",
+  },
+  {
+    id: "seed-billing-pay-as-you-go",
+    name: "Consumo (Pay as you go)",
+    chargeType: "PAY_AS_YOU_GO",
+    howItWorks: "Cobra pelo uso",
+    example: "APIs, processamento, GB, usuários",
+  },
+  {
+    id: "seed-billing-success-fee",
+    name: "Sucesso (Success Fee)",
+    chargeType: "SUCCESS_FEE",
+    howItWorks: "Percentual sobre resultado",
+    example: "10% da economia gerada",
+  },
+  {
+    id: "seed-billing-mixed",
+    name: "Misto",
+    chargeType: "MIXED",
+    howItWorks: "Combina vários modelos",
+    example: "Fixo + hora + bônus",
+  },
+];
+
+async function seedBillingTypes() {
+  for (const billingType of BILLING_TYPES) {
+    await prisma.billingType.upsert({
+      where: { id: billingType.id },
+      update: {
+        name: billingType.name,
+        chargeType: billingType.chargeType,
+        howItWorks: billingType.howItWorks,
+        example: billingType.example,
+      },
+      create: {
+        id: billingType.id,
+        name: billingType.name,
+        chargeType: billingType.chargeType,
+        roundingRule: "NONE",
+        howItWorks: billingType.howItWorks,
+        example: billingType.example,
+        active: true,
+      },
+    });
+  }
+  console.log(`Seeded ${BILLING_TYPES.length} billing types (catalog).`);
+}
+
 // --- Round 2 demo workspace (fictional validation data) -------------------
 //
 // Deterministic ids with the `seed-` prefix keep every upsert idempotent and
@@ -878,6 +1012,7 @@ async function seedSecondConsultant() {
 async function main() {
   await seedRoles();
   await seedBootstrapAdmin();
+  await seedBillingTypes();
   await seedDevUser();
   await seedDemoWorkspace();
   await seedDemoExpenses();

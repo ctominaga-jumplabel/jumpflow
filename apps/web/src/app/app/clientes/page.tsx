@@ -36,7 +36,7 @@ export default async function ClientesPage() {
       <PageHeader
         eyebrow="Comercial e financeiro"
         title="Clientes"
-        description="Cadastro de clientes, CNPJ, regras fiscais e tipos de cobranca."
+        description="Cadastro de clientes, CNPJ, regras fiscais e tipos de cobrança."
       />
       <ClientsView
         mode={databaseReady ? "db" : "demo"}

@@ -3,7 +3,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { ProjectSummaryPanel } from "@/components/projects/ProjectSummaryPanel";
 import { ProjectsView } from "@/components/projects/ProjectsView";
 import { getCurrentUser } from "@/lib/auth/current-user";
-import { hasRole } from "@/lib/auth/route-permissions";
+import { FINANCIAL_ROLES, hasRole } from "@/lib/auth/route-permissions";
 import type { RoleName } from "@/lib/auth/types";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { listBillingTypes } from "@/lib/db/clients";
@@ -44,6 +44,8 @@ export default async function ProjetosPage() {
   const canManageProjects = hasRole(user, PROJECT_WRITE_ROLES);
   const canViewCommercials = hasRole(user, SALE_RATE_ROLES);
   const canManageSaleRates = hasRole(user, SALE_RATE_ROLES);
+  // A configuracao de cobranca (motor de regras) e editada pelo Financeiro.
+  const canEditBillingConfig = hasRole(user, FINANCIAL_ROLES);
   const [projects, clients, consultants, managers, skills, billingTypeItems] =
     databaseReady
       ? await Promise.all([
@@ -90,6 +92,7 @@ export default async function ProjetosPage() {
         canManageProjects={canManageProjects}
         canViewCommercials={canViewCommercials}
         canManageSaleRates={canManageSaleRates}
+        canEditBillingConfig={canEditBillingConfig}
       />
     </div>
   );

@@ -39,6 +39,7 @@ function renderDemo(canViewCommercials = true) {
       canManageProjects
       canViewCommercials={canViewCommercials}
       canManageSaleRates={canViewCommercials}
+      canEditBillingConfig={canViewCommercials}
     />,
   );
 }
@@ -125,6 +126,7 @@ describe("ProjectsView", () => {
         canManageProjects
         canViewCommercials
         canManageSaleRates
+        canEditBillingConfig
       />,
     );
     expect(screen.getByText("Ana Martins")).toBeInTheDocument();
@@ -137,6 +139,7 @@ describe("ProjectsView", () => {
         canManageProjects
         canViewCommercials
         canManageSaleRates
+        canEditBillingConfig
       />,
     );
     expect(screen.getByText("Christopher Tominaga")).toBeInTheDocument();

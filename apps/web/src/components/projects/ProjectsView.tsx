@@ -27,11 +27,13 @@ import {
   removeAllocationSkill,
   updateAllocation,
   updateProject,
+  upsertProjectBillingConfig,
 } from "@/app/app/projetos/actions";
 import type {
   AllocationInput,
   AllocationSkillInput,
   AllocationSkillRemoveInput,
+  ProjectBillingConfigInput,
   ProjectInput,
   SaleRateInput,
 } from "@/lib/projects/schemas";
@@ -43,8 +45,13 @@ import {
   demoProjectSkills,
 } from "@/lib/projects/mock-data";
 import type {
+  AdjustmentIndex,
   AllocationStatus,
+  BillingPeriodicity,
+  BillingRoundingRule,
+  OverageTreatment,
   ProjectAllocationItem,
+  ProjectBillingConfigItem,
   ProjectBillingTypeOption,
   ProjectClientOption,
   ProjectConsultantOption,
@@ -65,7 +72,39 @@ import { cn } from "@/lib/utils";
 import { ProjectStatusBadge, projectStatusLabels } from "./ProjectStatusBadge";
 
 type Mode = "demo" | "db";
-type DetailTab = "ALLOCATIONS" | "SKILLS" | "RATES";
+type DetailTab = "ALLOCATIONS" | "SKILLS" | "RATES" | "BILLING";
+
+const periodicityLabels: Record<BillingPeriodicity, string> = {
+  MONTHLY: "Mensal",
+  BIWEEKLY: "Quinzenal",
+  WEEKLY: "Semanal",
+  PER_EVENT: "Por evento",
+};
+
+const overageLabels: Record<OverageTreatment, string> = {
+  BILL_EXTRA: "Cobrar excedente",
+  BLOCK_AT_LIMIT: "Bloquear no limite",
+  INCLUDE_FREE: "Incluir sem custo",
+  CARRY_OVER: "Acumular p/ próximo período",
+};
+
+const adjustmentLabels: Record<AdjustmentIndex, string> = {
+  NONE: "Sem reajuste",
+  IPCA: "IPCA",
+  IGPM: "IGP-M",
+  CDI: "CDI",
+  FIXED: "Percentual fixo",
+};
+
+const billingRoundingLabels: Record<BillingRoundingRule, string> = {
+  NONE: "Sem arredondamento",
+  NEAREST_15_MINUTES: "Mais próximo 15min",
+  NEAREST_30_MINUTES: "Mais próximo 30min",
+  NEAREST_HOUR: "Mais próxima hora",
+  CEIL_15_MINUTES: "Teto 15min",
+  CEIL_30_MINUTES: "Teto 30min",
+  CEIL_HOUR: "Teto hora",
+};
 
 const skillLevelLabels: Record<SkillLevel, string> = {
   BASIC: "Básico",
@@ -93,6 +132,7 @@ interface ProjectsViewProps {
   canManageProjects: boolean;
   canViewCommercials: boolean;
   canManageSaleRates: boolean;
+  canEditBillingConfig: boolean;
 }
 
 const statusFilters: (ProjectStatus | "ALL")[] = [
@@ -133,6 +173,58 @@ function projectToInput(project: ProjectItem): ProjectInput {
   };
 }
 
+function billingConfigToForm(project: ProjectItem): ProjectBillingConfigInput {
+  const c = project.billingConfig;
+  return {
+    projectId: project.id,
+    periodicity: c?.periodicity ?? "MONTHLY",
+    roundingRule: c?.roundingRule ?? "NONE",
+    fixedAmount: c?.fixedAmount,
+    includedHours: c?.includedHours,
+    overageRate: c?.overageRate,
+    overageTreatment: c?.overageTreatment ?? "BILL_EXTRA",
+    perConsultantAmount: c?.perConsultantAmount,
+    reimbursableExpenses: c?.reimbursableExpenses ?? false,
+    reimbursableMarkupPct: c?.reimbursableMarkupPct,
+    discountPct: c?.discountPct,
+    penaltyPct: c?.penaltyPct,
+    adjustmentIndex: c?.adjustmentIndex ?? "NONE",
+    adjustmentPct: c?.adjustmentPct,
+    withholdIss: c?.withholdIss ?? false,
+    withholdingPct: c?.withholdingPct,
+    closingDay: c?.closingDay,
+    dueDay: c?.dueDay,
+    requireApproval: c?.requireApproval ?? true,
+    notes: c?.notes ?? "",
+  };
+}
+
+function formToBillingConfigItem(
+  form: ProjectBillingConfigInput,
+): ProjectBillingConfigItem {
+  return {
+    periodicity: form.periodicity,
+    roundingRule: form.roundingRule,
+    fixedAmount: form.fixedAmount,
+    includedHours: form.includedHours,
+    overageRate: form.overageRate,
+    overageTreatment: form.overageTreatment,
+    perConsultantAmount: form.perConsultantAmount,
+    reimbursableExpenses: form.reimbursableExpenses,
+    reimbursableMarkupPct: form.reimbursableMarkupPct,
+    discountPct: form.discountPct,
+    penaltyPct: form.penaltyPct,
+    adjustmentIndex: form.adjustmentIndex,
+    adjustmentPct: form.adjustmentPct,
+    withholdIss: form.withholdIss,
+    withholdingPct: form.withholdingPct,
+    closingDay: form.closingDay,
+    dueDay: form.dueDay,
+    requireApproval: form.requireApproval,
+    notes: form.notes,
+  };
+}
+
 function fieldClass() {
   return cn("h-10 rounded-md border border-border bg-surface px-3 text-sm", focusRingInput);
 }
@@ -153,6 +245,7 @@ export function ProjectsView({
   canManageProjects,
   canViewCommercials,
   canManageSaleRates,
+  canEditBillingConfig,
 }: ProjectsViewProps) {
   // In db mode `items` derives straight from props, so data revalidated by a
   // server action (e.g. trocar o gestor) shows up immediately without a reload.
@@ -171,6 +264,8 @@ export function ProjectsView({
   // instead of showing a stale snapshot captured when the dialog was opened.
   const [detailProjectId, setDetailProjectId] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState<DetailTab>("ALLOCATIONS");
+  const [billingForm, setBillingForm] =
+    useState<ProjectBillingConfigInput | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -353,6 +448,36 @@ export function ProjectsView({
       } else {
         setFeedback(result.message);
       }
+    });
+  }
+
+  // Initialize the billing form lazily when the Cobrança tab is opened (avoids
+  // setState-in-effect; the form holds the user's edits across data refreshes).
+  function handleDetailTabChange(next: DetailTab) {
+    if (next === "BILLING" && detailProject) {
+      setBillingForm(billingConfigToForm(detailProject));
+    }
+    setDetailTab(next);
+  }
+
+  function saveBillingConfig() {
+    if (!billingForm) return;
+    if (mode === "demo") {
+      setLocalItems((current) =>
+        current.map((project) =>
+          project.id === billingForm.projectId
+            ? { ...project, billingConfig: formToBillingConfigItem(billingForm) }
+            : project,
+        ),
+      );
+      setFeedback("Configuração de cobrança salva localmente.");
+      return;
+    }
+    startTransition(async () => {
+      const result = await upsertProjectBillingConfig(billingForm);
+      setFeedback(
+        result.ok ? "Configuração de cobrança salva." : result.message,
+      );
     });
   }
 
@@ -655,8 +780,10 @@ export function ProjectsView({
         canViewCommercials={canViewCommercials}
         canManageProjects={canManageProjects}
         canManageSaleRates={canManageSaleRates}
+        canEditBillingConfig={canEditBillingConfig}
+        billingForm={billingForm}
         isPending={isPending}
-        onTabChange={setDetailTab}
+        onTabChange={handleDetailTabChange}
         onClose={() => setDetailProjectId(null)}
         onAddAllocation={addAllocation}
         onEditAllocation={editAllocation}
@@ -664,6 +791,8 @@ export function ProjectsView({
         onAddSaleRate={addSaleRate}
         onAddSkill={addSkill}
         onRemoveSkill={removeSkill}
+        onBillingChange={setBillingForm}
+        onSaveBillingConfig={saveBillingConfig}
       />
     </div>
   );
@@ -843,6 +972,8 @@ function ProjectDetailModal({
   canViewCommercials,
   canManageProjects,
   canManageSaleRates,
+  canEditBillingConfig,
+  billingForm,
   isPending,
   onTabChange,
   onClose,
@@ -852,6 +983,8 @@ function ProjectDetailModal({
   onAddSaleRate,
   onAddSkill,
   onRemoveSkill,
+  onBillingChange,
+  onSaveBillingConfig,
 }: {
   project: ProjectItem | null;
   tab: DetailTab;
@@ -860,6 +993,8 @@ function ProjectDetailModal({
   canViewCommercials: boolean;
   canManageProjects: boolean;
   canManageSaleRates: boolean;
+  canEditBillingConfig: boolean;
+  billingForm: ProjectBillingConfigInput | null;
   isPending: boolean;
   onTabChange: (tab: DetailTab) => void;
   onClose: () => void;
@@ -869,6 +1004,8 @@ function ProjectDetailModal({
   onAddSaleRate: (value: SaleRateInput) => void;
   onAddSkill: (value: AllocationSkillInput) => void;
   onRemoveSkill: (value: AllocationSkillRemoveInput) => void;
+  onBillingChange: (value: ProjectBillingConfigInput) => void;
+  onSaveBillingConfig: () => void;
 }) {
   const [allocation, setAllocation] = useState<AllocationInput | null>(null);
   // When set, the allocation modal is in edit mode for this allocation id.
@@ -935,6 +1072,14 @@ function ProjectDetailModal({
             >
               Novo valor
             </ActionButton>
+          ) : tab === "BILLING" && canEditBillingConfig ? (
+            <ActionButton
+              icon={ReceiptText}
+              disabled={isPending || !billingForm}
+              onClick={onSaveBillingConfig}
+            >
+              Salvar configuração
+            </ActionButton>
           ) : null}
         </>
       }
@@ -955,6 +1100,13 @@ function ProjectDetailModal({
           active={tab === "RATES"}
           onClick={() => onTabChange("RATES")}
         />
+        {canEditBillingConfig ? (
+          <FilterChip
+            label="Cobrança"
+            active={tab === "BILLING"}
+            onClick={() => onTabChange("BILLING")}
+          />
+        ) : null}
       </div>
       {tab === "ALLOCATIONS" ? (
         <DataTable
@@ -1050,7 +1202,8 @@ function ProjectDetailModal({
           onAddSkill={(item) => setSkillFor(item)}
           onRemoveSkill={onRemoveSkill}
         />
-      ) : canViewCommercials ? (
+      ) : tab === "RATES" ? (
+        canViewCommercials ? (
         <DataTable
           columns={[
             {
@@ -1082,9 +1235,20 @@ function ProjectDetailModal({
           rowKey={(item) => item.id}
           empty={<p className="text-center text-sm text-soft">Sem valores.</p>}
         />
+        ) : (
+          <p className="rounded-md border border-border bg-surface-muted px-3 py-2 text-sm text-soft">
+            Valores comerciais restritos por perfil.
+          </p>
+        )
+      ) : canEditBillingConfig && billingForm ? (
+        <BillingConfigPanel
+          chargeType={project.billingChargeType}
+          value={billingForm}
+          onChange={onBillingChange}
+        />
       ) : (
         <p className="rounded-md border border-border bg-surface-muted px-3 py-2 text-sm text-soft">
-          Valores comerciais restritos por perfil.
+          Configuração de cobrança restrita por perfil.
         </p>
       )}
 
@@ -1362,6 +1526,217 @@ function NumberField({
         className={fieldClass()}
       />
     </label>
+  );
+}
+
+function BillingConfigSelect<T extends string>({
+  label,
+  value,
+  options,
+  hint,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: Record<T, string>;
+  hint?: string;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <label className="space-y-1 text-sm font-medium text-medium">
+      {label}
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value as T)}
+        className={fieldClass()}
+      >
+        {(Object.entries(options) as [T, string][]).map(([key, optionLabel]) => (
+          <option key={key} value={key}>
+            {optionLabel}
+          </option>
+        ))}
+      </select>
+      {hint ? <span className="text-xs font-normal text-soft">{hint}</span> : null}
+    </label>
+  );
+}
+
+function BillingConfigCheckbox({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="flex items-center gap-2 text-sm font-medium text-medium">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+      {label}
+    </label>
+  );
+}
+
+/**
+ * Formulario de configuracao de cobranca por projeto (motor parametrizavel).
+ * Editado pelo Financeiro. Todos os campos sao opcionais: cada tipo de cobranca
+ * usa apenas os que fazem sentido — o cabecalho lembra o modelo do projeto.
+ */
+function BillingConfigPanel({
+  chargeType,
+  value,
+  onChange,
+}: {
+  chargeType?: string;
+  value: ProjectBillingConfigInput;
+  onChange: (value: ProjectBillingConfigInput) => void;
+}) {
+  function groupTitle(text: string) {
+    return (
+      <p className="md:col-span-2 text-xs font-semibold uppercase tracking-wide text-soft">
+        {text}
+      </p>
+    );
+  }
+  return (
+    <div className="space-y-4">
+      <p className="rounded-md border border-border bg-surface-muted px-3 py-2 text-sm text-medium">
+        Modelo de cálculo do projeto:{" "}
+        <span className="font-semibold text-strong">{chargeType ?? "não definido"}</span>.
+        Preencha apenas os parâmetros usados por este modelo.
+      </p>
+      <form className="grid gap-4 md:grid-cols-2">
+        {groupTitle("Periodicidade e datas")}
+        <BillingConfigSelect
+          label="Periodicidade"
+          value={value.periodicity}
+          options={periodicityLabels}
+          onChange={(periodicity) => onChange({ ...value, periodicity })}
+        />
+        <NumberField
+          label="Dia de fechamento"
+          value={value.closingDay}
+          onChange={(closingDay) => onChange({ ...value, closingDay })}
+        />
+        <NumberField
+          label="Dia de vencimento"
+          value={value.dueDay}
+          onChange={(dueDay) => onChange({ ...value, dueDay })}
+        />
+
+        {groupTitle("Cálculo e excedentes")}
+        <BillingConfigSelect
+          label="Arredondamento"
+          value={value.roundingRule}
+          options={billingRoundingLabels}
+          onChange={(roundingRule) => onChange({ ...value, roundingRule })}
+        />
+        <NumberField
+          label="Valor fixo / mensalidade (R$)"
+          value={value.fixedAmount}
+          onChange={(fixedAmount) => onChange({ ...value, fixedAmount })}
+        />
+        <NumberField
+          label="Horas inclusas (franquia)"
+          value={value.includedHours}
+          onChange={(includedHours) => onChange({ ...value, includedHours })}
+        />
+        <NumberField
+          label="Valor hora excedente (R$)"
+          value={value.overageRate}
+          onChange={(overageRate) => onChange({ ...value, overageRate })}
+        />
+        <BillingConfigSelect
+          label="Tratamento de excedentes"
+          value={value.overageTreatment}
+          options={overageLabels}
+          onChange={(overageTreatment) =>
+            onChange({ ...value, overageTreatment })
+          }
+        />
+        <NumberField
+          label="Valor por consultor alocado (R$)"
+          value={value.perConsultantAmount}
+          onChange={(perConsultantAmount) =>
+            onChange({ ...value, perConsultantAmount })
+          }
+        />
+
+        {groupTitle("Reembolsos, descontos e multas")}
+        <BillingConfigCheckbox
+          label="Despesas reembolsáveis"
+          checked={value.reimbursableExpenses}
+          onChange={(reimbursableExpenses) =>
+            onChange({ ...value, reimbursableExpenses })
+          }
+        />
+        <NumberField
+          label="Markup sobre reembolso (%)"
+          value={value.reimbursableMarkupPct}
+          onChange={(reimbursableMarkupPct) =>
+            onChange({ ...value, reimbursableMarkupPct })
+          }
+        />
+        <NumberField
+          label="Desconto (%)"
+          value={value.discountPct}
+          onChange={(discountPct) => onChange({ ...value, discountPct })}
+        />
+        <NumberField
+          label="Multa (%)"
+          value={value.penaltyPct}
+          onChange={(penaltyPct) => onChange({ ...value, penaltyPct })}
+        />
+
+        {groupTitle("Reajuste e impostos")}
+        <BillingConfigSelect
+          label="Índice de reajuste"
+          value={value.adjustmentIndex}
+          options={adjustmentLabels}
+          hint="IPCA/IGP-M/CDI ficam registrados; apenas o percentual fixo é aplicado automaticamente."
+          onChange={(adjustmentIndex) => onChange({ ...value, adjustmentIndex })}
+        />
+        <NumberField
+          label="Percentual de reajuste (%)"
+          value={value.adjustmentPct}
+          onChange={(adjustmentPct) => onChange({ ...value, adjustmentPct })}
+        />
+        <BillingConfigCheckbox
+          label="Reter ISS"
+          checked={value.withholdIss}
+          onChange={(withholdIss) => onChange({ ...value, withholdIss })}
+        />
+        <NumberField
+          label="Retenção de impostos (%)"
+          value={value.withholdingPct}
+          onChange={(withholdingPct) => onChange({ ...value, withholdingPct })}
+        />
+
+        {groupTitle("Aprovação e observações")}
+        <div className="md:col-span-2">
+          <BillingConfigCheckbox
+            label="Exigir aprovação antes da emissão da nota"
+            checked={value.requireApproval}
+            onChange={(requireApproval) =>
+              onChange({ ...value, requireApproval })
+            }
+          />
+        </div>
+        <label className="md:col-span-2 space-y-1 text-sm font-medium text-medium">
+          Observações
+          <textarea
+            value={value.notes ?? ""}
+            onChange={(event) => onChange({ ...value, notes: event.target.value })}
+            className={cn(fieldClass(), "min-h-20 py-2")}
+          />
+        </label>
+      </form>
+    </div>
   );
 }
 

@@ -5,7 +5,7 @@ import { Prisma, prisma } from "@jumpflow/database";
 import type { ZodType } from "zod";
 import type { ActionResult, ErrorCode } from "@/lib/actions/result";
 import { requireRole, requireUser } from "@/lib/auth/guards";
-import { hasRole } from "@/lib/auth/route-permissions";
+import { FINANCIAL_ROLES, hasRole } from "@/lib/auth/route-permissions";
 import type { RoleName } from "@/lib/auth/types";
 import { recordAuditEvent } from "@/lib/db/audit";
 import { isDatabaseConfigured } from "@/lib/db/config";
@@ -17,6 +17,7 @@ import {
   allocationSkillRemoveSchema,
   allocationSkillUpdateSchema,
   allocationUpdateSchema,
+  projectBillingConfigSchema,
   projectInputSchema,
   projectUpdateSchema,
   saleRateInputSchema,
@@ -27,6 +28,7 @@ import {
   type AllocationSkillRemoveInput,
   type AllocationSkillUpdateInput,
   type AllocationUpdateInput,
+  type ProjectBillingConfigInput,
   type ProjectInput,
   type ProjectUpdateInput,
   type SaleRateInput,
@@ -307,6 +309,73 @@ export async function updateProject(
     await audit("Project", parsed.id, "PROJECT_UPDATED", previous, data);
     revalidatePath(PROJETOS_PATH);
     return { ok: true, data: { id: parsed.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+function billingConfigData(
+  input: ProjectBillingConfigInput,
+): Prisma.ProjectBillingConfigUncheckedCreateInput {
+  return {
+    projectId: input.projectId,
+    periodicity: input.periodicity,
+    roundingRule: input.roundingRule,
+    fixedAmount: input.fixedAmount ?? null,
+    includedHours: input.includedHours ?? null,
+    overageRate: input.overageRate ?? null,
+    overageTreatment: input.overageTreatment,
+    perConsultantAmount: input.perConsultantAmount ?? null,
+    reimbursableExpenses: input.reimbursableExpenses,
+    reimbursableMarkupPct: input.reimbursableMarkupPct ?? null,
+    discountPct: input.discountPct ?? null,
+    penaltyPct: input.penaltyPct ?? null,
+    adjustmentIndex: input.adjustmentIndex,
+    adjustmentPct: input.adjustmentPct ?? null,
+    withholdIss: input.withholdIss,
+    withholdingPct: input.withholdingPct ?? null,
+    closingDay: input.closingDay ?? null,
+    dueDay: input.dueDay ?? null,
+    requireApproval: input.requireApproval,
+    notes: input.notes ?? null,
+  };
+}
+
+/**
+ * Configuracao de cobranca por projeto (motor de regras parametrizavel).
+ * Editada pelo Financeiro (FINANCIAL_ROLES) — distinta do PROJECT_WRITE_ROLES,
+ * pois define as regras comerciais/financeiras que o motor de faturamento usa.
+ */
+export async function upsertProjectBillingConfig(
+  input: ProjectBillingConfigInput,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(FINANCIAL_ROLES);
+    const parsed = parseInput(projectBillingConfigSchema, input);
+    const project = await prisma.project.findUnique({
+      where: { id: parsed.projectId },
+      select: { id: true },
+    });
+    if (!project) throw new ActionError("NOT_FOUND", "Projeto nao encontrado.");
+    const previous = await prisma.projectBillingConfig.findUnique({
+      where: { projectId: parsed.projectId },
+    });
+    const data = billingConfigData(parsed);
+    const saved = await prisma.projectBillingConfig.upsert({
+      where: { projectId: parsed.projectId },
+      update: data,
+      create: data,
+    });
+    await audit(
+      "ProjectBillingConfig",
+      saved.id,
+      "PROJECT_BILLING_CONFIG_UPDATED",
+      previous,
+      data,
+    );
+    revalidatePath(PROJETOS_PATH);
+    return { ok: true, data: { id: saved.id } };
   } catch (error) {
     return toFailure(error);
   }
