@@ -80,6 +80,8 @@ export const demoProjects: ProjectItem[] = [
         note: "Valor base do contrato.",
       },
     ],
+    hasActiveSaleRate: true,
+    hasBillingConfig: false,
   },
   {
     id: "prj-nova",
@@ -94,6 +96,8 @@ export const demoProjects: ProjectItem[] = [
     allocatedConsultants: 0,
     allocations: [],
     saleRates: [],
+    hasActiveSaleRate: false,
+    hasBillingConfig: false,
   },
 ];
 

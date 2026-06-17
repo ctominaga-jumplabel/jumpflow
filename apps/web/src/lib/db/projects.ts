@@ -190,6 +190,31 @@ export async function listProjects(options?: {
       : [];
   const managerNames = new Map(managers.map((manager) => [manager.id, manager.name]));
 
+  // Presence flags for the per-area pending queues. Derived by query (no
+  // materialized state on Project): a project-level sale rate currently in
+  // effect, and the existence of a billing rule. Two cheap, always-on lookups
+  // so Operação can flag pendências even when commercial values are masked.
+  const today = new Date();
+  const [billingConfigRows, baseSaleRateRows] = await Promise.all([
+    prisma.projectBillingConfig.findMany({ select: { projectId: true } }),
+    prisma.projectSaleRate.findMany({
+      where: {
+        consultantId: null,
+        allocationId: null,
+        startsAt: { lte: today },
+        OR: [{ endsAt: null }, { endsAt: { gte: today } }],
+      },
+      select: { projectId: true },
+      distinct: ["projectId"],
+    }),
+  ]);
+  const billingConfigProjectIds = new Set(
+    billingConfigRows.map((row) => row.projectId),
+  );
+  const activeSaleRateProjectIds = new Set(
+    baseSaleRateRows.map((row) => row.projectId),
+  );
+
   return rows.map((row) => {
     const allocations: ProjectAllocationItem[] = row.allocations.map((item) => {
       const skills: ProjectAllocationSkillItem[] = item.allocationSkills.map(
@@ -267,12 +292,16 @@ export async function listProjects(options?: {
         ? decimalToNumber(row.billingHourlyRate)
         : undefined,
       budgetHours: includeFinancials ? decimalToNumber(row.budgetHours) : undefined,
-      costCenter: includeFinancials ? (row.costCenter ?? undefined) : undefined,
+      // Centro de custo é um dado operacional (não um valor financeiro
+      // sensível), então é retornado a qualquer perfil que veja o projeto.
+      costCenter: row.costCenter ?? undefined,
       consumedHours,
       allocatedConsultants: allocations.filter((item) => item.status === "ACTIVE")
         .length,
       allocations,
       saleRates,
+      hasActiveSaleRate: activeSaleRateProjectIds.has(row.id),
+      hasBillingConfig: billingConfigProjectIds.has(row.id),
     };
   });
 }

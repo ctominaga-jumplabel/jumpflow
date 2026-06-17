@@ -17,6 +17,29 @@ export type RouteAccess = RoleName[] | "ALL";
  */
 export const FINANCIAL_ROLES: RoleName[] = ["ADMIN", "AREA_MANAGER", "FINANCE"];
 
+/**
+ * Roles that own the operational lifecycle of a Project (criar/editar projeto,
+ * status, período, gestor, alocações, skills) on the Operação surface.
+ */
+export const PROJECT_WRITE_ROLES: RoleName[] = [
+  "ADMIN",
+  "AREA_MANAGER",
+  "PROJECT_MANAGER",
+  "SALES",
+];
+
+/**
+ * Roles that own commercial sale values (ProjectSaleRate, tipo de cobrança,
+ * budget) and may access the Comercial surface. Single source of truth shared
+ * by the `/app/comercial` route guard and the sale-rate server actions.
+ */
+export const SALE_RATE_ROLES: RoleName[] = [
+  "ADMIN",
+  "AREA_MANAGER",
+  "FINANCE",
+  "SALES",
+];
+
 interface RouteRule {
   prefix: string;
   access: RouteAccess;
@@ -33,7 +56,11 @@ interface RouteRule {
  */
 export const routePermissions: RouteRule[] = [
   { prefix: "/app/pagamentos", access: FINANCIAL_ROLES },
+  // Cobrança de projetos (motor de regras) é um subdomínio do Financeiro, já
+  // coberto pelo prefixo `/app/financeiro` abaixo.
   { prefix: "/app/financeiro", access: FINANCIAL_ROLES },
+  // Comercial: valores de venda, tipo de cobrança e budget por projeto.
+  { prefix: "/app/comercial", access: SALE_RATE_ROLES },
   // Operational automation (auto-approval admin/observability). Management
   // only — PROJECT_MANAGER read-only access is deferred to a later round.
   { prefix: "/app/automacoes", access: ["ADMIN", "AREA_MANAGER"] },

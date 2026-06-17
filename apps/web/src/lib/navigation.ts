@@ -11,7 +11,9 @@ import {
   Home,
   LayoutDashboard,
   Receipt,
+  ReceiptText,
   ShieldCheck,
+  TrendingUp,
   Users,
   Wallet,
 } from "lucide-react";
@@ -83,6 +85,15 @@ export const primaryNavigation: NavItemDef[] = [
     description: "Clientes, CNPJ, regras fiscais e tipos de cobranca.",
   },
   {
+    // Visível a todos; o acesso é enforced no servidor (requireRole) — segue a
+    // mesma convenção de Financeiro/Pagamentos (discoverability, não a fronteira
+    // de segurança).
+    label: "Comercial",
+    href: "/app/comercial",
+    icon: TrendingUp,
+    description: "Precificação: tipo de cobrança, budget e valores de venda.",
+  },
+  {
     label: "Consultores",
     href: "/app/consultores",
     icon: Users,
@@ -119,6 +130,12 @@ export const primaryNavigation: NavItemDef[] = [
     description: "Horas aprovadas, valor hora e fechamento mensal.",
   },
   {
+    label: "Cobrança de projetos",
+    href: "/app/financeiro/projetos",
+    icon: ReceiptText,
+    description: "Regra de cobrança por projeto (motor parametrizável).",
+  },
+  {
     label: "Pagamentos",
     href: "/app/pagamentos",
     icon: Banknote,
@@ -153,11 +170,16 @@ export function canSeeNavItem(
   );
 }
 
-/** Find the active navigation entry for a given pathname. */
+/**
+ * Find the active navigation entry for a given pathname. When several prefixes
+ * match (e.g. `/app/financeiro` and `/app/financeiro/projetos`), the most
+ * specific — longest href — wins, so a nested route highlights its own item.
+ */
 export function findActiveNav(pathname: string): NavItemDef | undefined {
-  return [...primaryNavigation, ...adminNavigation].find((item) =>
+  const matches = [...primaryNavigation, ...adminNavigation].filter((item) =>
     item.exact
       ? pathname === item.href
       : pathname === item.href || pathname.startsWith(`${item.href}/`),
   );
+  return matches.sort((a, b) => b.href.length - a.href.length)[0];
 }

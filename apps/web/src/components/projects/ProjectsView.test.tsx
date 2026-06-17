@@ -29,6 +29,8 @@ function dbProject(managerName: string): ProjectItem {
     allocatedConsultants: 0,
     allocations: [],
     saleRates: [],
+    hasActiveSaleRate: false,
+    hasBillingConfig: false,
   };
 }
 
@@ -45,11 +47,28 @@ function renderDemo(canViewCommercials = true) {
 }
 
 describe("ProjectsView", () => {
-  it("renders projects and masks commercial fields when unauthorized", () => {
+  it("keeps commercial values off the Operação list and masks the detail when unauthorized", () => {
     renderDemo(false);
+    // Operação não exibe valores comerciais na lista (migraram p/ Comercial).
     expect(screen.getByText("Atlas")).toBeInTheDocument();
-    expect(screen.getAllByText("•••").length).toBeGreaterThan(0);
     expect(screen.queryByText(/320,00/)).not.toBeInTheDocument();
+    // O detalhe 360 protege os valores de venda para quem não pode vê-los.
+    fireEvent.click(
+      screen.getByRole("button", { name: /Vínculos e valores de Atlas/ }),
+    );
+    const detail = screen.getByRole("dialog");
+    fireEvent.click(
+      within(detail).getByRole("button", { name: "Valores de venda" }),
+    );
+    expect(
+      within(detail).getByText("Valores comerciais restritos por perfil."),
+    ).toBeInTheDocument();
+  });
+
+  it("flags active projects missing a billing rule on the Operação list", () => {
+    renderDemo();
+    // Atlas (demo) está ativo, tem valor de venda mas não tem regra de cobrança.
+    expect(screen.getByText("Sem regra de cobrança")).toBeInTheDocument();
   });
 
   it("creates a local project in demo mode", () => {

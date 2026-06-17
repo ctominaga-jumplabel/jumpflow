@@ -3,8 +3,12 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { ProjectSummaryPanel } from "@/components/projects/ProjectSummaryPanel";
 import { ProjectsView } from "@/components/projects/ProjectsView";
 import { getCurrentUser } from "@/lib/auth/current-user";
-import { FINANCIAL_ROLES, hasRole } from "@/lib/auth/route-permissions";
-import type { RoleName } from "@/lib/auth/types";
+import {
+  FINANCIAL_ROLES,
+  hasRole,
+  PROJECT_WRITE_ROLES,
+  SALE_RATE_ROLES,
+} from "@/lib/auth/route-permissions";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { listBillingTypes } from "@/lib/db/clients";
 import {
@@ -24,19 +28,6 @@ import {
 } from "@/lib/projects/mock-data";
 
 export const metadata: Metadata = { title: "Projetos" };
-
-const PROJECT_WRITE_ROLES: RoleName[] = [
-  "ADMIN",
-  "AREA_MANAGER",
-  "PROJECT_MANAGER",
-  "SALES",
-];
-const SALE_RATE_ROLES: RoleName[] = [
-  "ADMIN",
-  "AREA_MANAGER",
-  "FINANCE",
-  "SALES",
-];
 
 export default async function ProjetosPage() {
   const user = await getCurrentUser();
@@ -78,7 +69,7 @@ export default async function ProjetosPage() {
       <PageHeader
         eyebrow="Operação"
         title="Projetos"
-        description="Carteira de projetos com cliente, status, gestor, período, budget, vínculos e valores de venda."
+        description="Ciclo de vida dos projetos: cliente, status, gestor, período, vínculos e skills. Valores de venda e regras de cobrança ficam com Comercial e Financeiro."
       />
       <ProjectSummaryPanel projects={projects} />
       <ProjectsView

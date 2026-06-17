@@ -131,5 +131,16 @@ export interface ProjectItem {
   allocatedConsultants: number;
   allocations: ProjectAllocationItem[];
   saleRates: ProjectSaleRateItem[];
+  /**
+   * Presence flags for the per-area pending queues. These are non-sensitive
+   * booleans (not values), so they are always populated — even when commercial
+   * values are masked for the current role — letting Operação surface "sem
+   * valor de venda" / "sem regra de cobrança" without exposing the amounts.
+   * - `hasActiveSaleRate`: a project-level sale rate (no consultant/allocation)
+   *   is currently in effect.
+   * - `hasBillingConfig`: a billing rule (ProjectBillingConfig) exists.
+   */
+  hasActiveSaleRate: boolean;
+  hasBillingConfig: boolean;
 }
 
