@@ -6,7 +6,10 @@ import { ExpensesView } from "./ExpensesView";
 // Server actions never run in jsdom: mock the module so the db-mode wiring
 // can be asserted without Prisma/auth imports.
 vi.mock("@/app/app/despesas/actions", () => ({
-  createExpense: vi.fn(async () => ({ ok: true, data: { id: "exp-new" } })),
+  createExpenseBatch: vi.fn(async () => ({
+    ok: true,
+    data: { groupId: "grp-1", ids: ["exp-new"] },
+  })),
   updateExpense: vi.fn(async () => ({ ok: true, data: { id: "exp-new" } })),
   deleteExpense: vi.fn(async () => ({ ok: true, data: { id: "exp-new" } })),
   submitExpense: vi.fn(async () => ({ ok: true, data: { id: "exp-new" } })),
@@ -54,7 +57,7 @@ describe("ExpensesView (demo mode)", () => {
     ).toBeInTheDocument();
   });
 
-  it("creates a new draft expense and reports honest local feedback", () => {
+  it("creates a draft launch (one NF, one item) and reports honest local feedback", () => {
     renderDemo();
     fireEvent.click(screen.getByRole("button", { name: /Nova despesa/ }));
 
@@ -62,11 +65,15 @@ describe("ExpensesView (demo mode)", () => {
     fireEvent.change(within(dialog).getByLabelText("Projeto"), {
       target: { value: "prj-atlas" },
     });
-    fireEvent.change(within(dialog).getByLabelText(/Valor/), {
-      target: { value: "150" },
-    });
     fireEvent.change(within(dialog).getByLabelText("Descrição"), {
       target: { value: "Táxi para o cliente" },
+    });
+    // First (and only) item: data, valor, tipo de lançamento.
+    fireEvent.change(within(dialog).getByLabelText("Valor (R$)"), {
+      target: { value: "150" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Tipo de lançamento"), {
+      target: { value: "RIDE_SHARE" },
     });
     fireEvent.click(
       within(dialog).getByRole("button", { name: /Salvar rascunho/ }),
@@ -74,10 +81,10 @@ describe("ExpensesView (demo mode)", () => {
 
     // Scope to the list table: the modal lingers briefly during its exit
     // animation, so query the row explicitly rather than the whole document.
-    expect(
-      within(screen.getByRole("table")).getByText("Táxi para o cliente"),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/salvo localmente/)).toBeInTheDocument();
+    const table = within(screen.getByRole("table"));
+    expect(table.getByText("Táxi para o cliente")).toBeInTheDocument();
+    expect(table.getByText("Transporte/Uber")).toBeInTheDocument();
+    expect(screen.getByText(/rascunho\(s\) salvo\(s\) localmente/)).toBeInTheDocument();
   });
 
   it("blocks submitting an expense without required fields", () => {
@@ -90,24 +97,27 @@ describe("ExpensesView (demo mode)", () => {
     expect(within(dialog).getByText("Selecione um projeto.")).toBeInTheDocument();
   });
 
-  it("requires a receipt before submitting from the form", () => {
+  it("requires a receipt on every item before submitting from the form", () => {
     renderDemo();
     fireEvent.click(screen.getByRole("button", { name: /Nova despesa/ }));
     const dialog = screen.getByRole("dialog");
     fireEvent.change(within(dialog).getByLabelText("Projeto"), {
       target: { value: "prj-atlas" },
     });
-    fireEvent.change(within(dialog).getByLabelText(/Valor/), {
-      target: { value: "150" },
-    });
     fireEvent.change(within(dialog).getByLabelText("Descrição"), {
       target: { value: "Taxi para o cliente" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Valor (R$)"), {
+      target: { value: "150" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Tipo de lançamento"), {
+      target: { value: "RIDE_SHARE" },
     });
     fireEvent.click(
       within(dialog).getByRole("button", { name: /Enviar para aprovação/ }),
     );
     expect(
-      within(dialog).getByText(/Anexe o comprovante para enviar/),
+      within(dialog).getByText(/Anexe o comprovante de cada item/),
     ).toBeInTheDocument();
   });
 

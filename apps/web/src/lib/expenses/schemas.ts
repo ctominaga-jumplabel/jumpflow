@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { parseIsoDateUtc } from "@/lib/timesheet/week";
+import { EXPENSE_CATEGORIES, type ExpenseCategory } from "./types";
 
 /**
  * Shared Zod schemas for the Despesas server actions (and their tests).
@@ -40,6 +41,11 @@ const invoiceNumberSchema = z
   .max(60, "Número da nota fiscal deve ter no máximo 60 caracteres.")
   .optional();
 
+const categorySchema = z.enum(
+  EXPENSE_CATEGORIES as unknown as [ExpenseCategory, ...ExpenseCategory[]],
+  { message: "Selecione o tipo de lançamento." },
+);
+
 export const expenseInputSchema = z.object({
   projectId: idSchema,
   date: isoDateSchema,
@@ -50,6 +56,32 @@ export const expenseInputSchema = z.object({
 
 export type ExpenseInput = z.infer<typeof expenseInputSchema>;
 
+/**
+ * Um lançamento por NF: cabeçalho único (projeto, descrição, nota fiscal) com
+ * vários itens, cada um com data, valor, tipo (e anexo enviado à parte por id).
+ * O servidor cria N linhas Expense numa transação compartilhando o cabeçalho e
+ * um groupId — "uma descrição para várias despesas" sem entidade pai.
+ */
+export const expenseItemSchema = z.object({
+  date: isoDateSchema,
+  amount: amountSchema,
+  category: categorySchema,
+});
+
+export type ExpenseItemInput = z.infer<typeof expenseItemSchema>;
+
+export const createExpenseBatchSchema = z.object({
+  projectId: idSchema,
+  description: descriptionSchema,
+  invoiceNumber: invoiceNumberSchema,
+  items: z
+    .array(expenseItemSchema)
+    .min(1, "Adicione ao menos um item de despesa.")
+    .max(50, "Máximo de 50 itens por lançamento."),
+});
+
+export type CreateExpenseBatchInput = z.infer<typeof createExpenseBatchSchema>;
+
 export const updateExpenseInputSchema = z.object({
   id: idSchema,
   /** Optional move to another project (re-checks allocation). */
@@ -59,6 +91,8 @@ export const updateExpenseInputSchema = z.object({
   amount: amountSchema,
   description: descriptionSchema,
   invoiceNumber: invoiceNumberSchema,
+  /** Optional so legacy rows (sem categoria) can still be edited. */
+  category: categorySchema.optional(),
 });
 
 export type UpdateExpenseInput = z.infer<typeof updateExpenseInputSchema>;

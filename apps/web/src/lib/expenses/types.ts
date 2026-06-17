@@ -26,6 +26,56 @@ export const EXPENSE_STATUSES = [
 
 export type ExpenseStatus = (typeof EXPENSE_STATUSES)[number];
 
+/**
+ * Tipo de lançamento (categoria) de uma despesa. Mirrors `ExpenseCategory` no
+ * schema Prisma. Ordem reflete a lista fornecida pelo negócio (e a do enum).
+ */
+export const EXPENSE_CATEGORIES = [
+  "MILEAGE_REIMBURSEMENT",
+  "AIR_TICKET",
+  "BUS_TICKET",
+  "CERTIFICATION",
+  "ACCOUNTING",
+  "RIDE_SHARE",
+  "COURSES_TRAINING",
+  "LODGING",
+  "POSTAGE",
+  "MEALS",
+  "PERIPHERALS",
+  "TOLL",
+  "PARKING",
+] as const;
+
+export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
+
+export const expenseCategoryLabels: Record<ExpenseCategory, string> = {
+  MILEAGE_REIMBURSEMENT: "Reembolso Quilometragem",
+  AIR_TICKET: "Passagem Aérea",
+  BUS_TICKET: "Passagem Rodoviária",
+  CERTIFICATION: "Certificação",
+  ACCOUNTING: "Accountech/Contabilidade",
+  RIDE_SHARE: "Transporte/Uber",
+  COURSES_TRAINING: "Cursos / Capacitação",
+  LODGING: "Hospedagem",
+  POSTAGE: "Correio",
+  MEALS: "Alimentação",
+  PERIPHERALS: "Periféricos",
+  TOLL: "Pedágio",
+  PARKING: "Estacionamento",
+};
+
+export function isExpenseCategory(value: unknown): value is ExpenseCategory {
+  return (
+    typeof value === "string" &&
+    (EXPENSE_CATEGORIES as readonly string[]).includes(value)
+  );
+}
+
+/** Display label for a category, tolerating legacy rows without one. */
+export function expenseCategoryLabel(category?: ExpenseCategory | null): string {
+  return category ? expenseCategoryLabels[category] : "Sem categoria";
+}
+
 export const expenseStatusLabels: Record<ExpenseStatus, string> = {
   DRAFT: "Rascunho",
   SUBMITTED: "Enviada",
@@ -86,6 +136,10 @@ export interface Expense {
   description: string;
   /** Nota fiscal number (optional). */
   invoiceNumber?: string;
+  /** Tipo de lançamento. Optional for legacy rows created before categories. */
+  category?: ExpenseCategory;
+  /** Grouping key shared by items launched together under one NF/lote. */
+  groupId?: string;
   attachment?: ExpenseAttachmentMeta;
   status: ExpenseStatus;
   /** ISO datetime when submitted for approval, when applicable. */

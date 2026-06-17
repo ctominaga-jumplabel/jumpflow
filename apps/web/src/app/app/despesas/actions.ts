@@ -19,12 +19,14 @@ import { resolveDbUser } from "@/lib/db/users";
 import {
   COMMENT_REQUIRED_MESSAGE,
   REASON_REQUIRED_MESSAGE,
+  createExpenseBatchSchema,
   decideExpenseSchema,
   expenseIdInputSchema,
   expenseInputSchema,
   receiptInputSchema,
   setPaymentSchema,
   updateExpenseInputSchema,
+  type CreateExpenseBatchInput,
   type DecideExpenseInput,
   type ExpenseIdInput,
   type ExpenseInput,
@@ -274,6 +276,73 @@ export async function createExpense(
   }
 }
 
+/**
+ * Cria um lançamento por NF: cabeçalho único (projeto, descrição, nota fiscal)
+ * com vários itens (data, valor, tipo). Gera N linhas Expense numa transação,
+ * compartilhando description + invoiceNumber + groupId. Retorna os ids na mesma
+ * ordem dos itens para o cliente subir o anexo de cada item em seguida.
+ *
+ * Cada item resolve sua própria alocação ativa pela data (mesma regra do
+ * create avulso) — itens com datas fora de alocação falham o lote inteiro.
+ */
+export async function createExpenseBatch(
+  input: CreateExpenseBatchInput,
+): Promise<ActionResult<{ groupId: string; ids: string[] }>> {
+  try {
+    ensureDatabase();
+    const user = await requireUser();
+    const consultant = await requireConsultant(user);
+    const parsed = parseInput(createExpenseBatchSchema, input);
+
+    const project = await ensureOpenProject(parsed.projectId);
+    const invoiceNumber = parsed.invoiceNumber?.trim() || null;
+    const groupId = crypto.randomUUID();
+
+    // Resolve a alocação de cada item (por data) antes de abrir a transação,
+    // para que uma data inválida falhe sem deixar linhas parciais.
+    const prepared = await Promise.all(
+      parsed.items.map(async (item) => {
+        const date = parseIsoDateUtc(item.date)!;
+        const allocation = await ensureActiveAllocation(
+          prisma,
+          consultant.id,
+          project.id,
+          date,
+        );
+        return { date, allocationId: allocation.id, item };
+      }),
+    );
+
+    const ids = await prisma.$transaction(async (tx) => {
+      const created: string[] = [];
+      for (const { date, allocationId, item } of prepared) {
+        const expense = await tx.expense.create({
+          data: {
+            consultantId: consultant.id,
+            projectId: project.id,
+            allocationId,
+            date,
+            amount: item.amount,
+            description: parsed.description,
+            invoiceNumber,
+            category: item.category,
+            groupId,
+            status: "DRAFT",
+            submittedAt: null,
+          },
+        });
+        created.push(expense.id);
+      }
+      return created;
+    });
+
+    revalidatePath(DESPESAS_PATH);
+    return { ok: true, data: { groupId, ids } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
 export async function updateExpense(
   input: UpdateExpenseInput,
 ): Promise<ActionResult<{ id: string }>> {
@@ -316,6 +385,9 @@ export async function updateExpense(
         amount: parsed.amount,
         description: parsed.description,
         invoiceNumber: parsed.invoiceNumber?.trim() || null,
+        // Categoria opcional: só sobrescreve quando enviada (preserva o tipo de
+        // linhas legadas que ainda não têm categoria).
+        ...(parsed.category ? { category: parsed.category } : {}),
         // Editing a rejected expense returns it to DRAFT; resubmission
         // restarts the chain from the manager stage.
         status: "DRAFT",

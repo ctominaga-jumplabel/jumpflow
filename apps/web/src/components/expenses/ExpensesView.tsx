@@ -12,7 +12,7 @@ import { focusRingInput } from "@/lib/styles";
 import { formatCurrency, formatDate } from "@/lib/format";
 import {
   attachReceipt,
-  createExpense as createExpenseAction,
+  createExpenseBatch as createExpenseBatchAction,
   deleteExpense as deleteExpenseAction,
   getReceiptUrl,
   replaceReceipt,
@@ -20,10 +20,7 @@ import {
   updateExpense as updateExpenseAction,
 } from "@/app/app/despesas/actions";
 import { projects as allProjects } from "@/lib/mock-data/projects";
-import {
-  createExpense as createMockExpense,
-  expenses as seedExpenses,
-} from "@/lib/mock-data/expenses";
+import { expenses as seedExpenses } from "@/lib/mock-data/expenses";
 import {
   expenseStatusLabels,
   filterExpenses,
@@ -36,6 +33,7 @@ import { ExpenseSummaryCards } from "./ExpenseSummaryCards";
 import { ExpenseList } from "./ExpenseList";
 import {
   ExpenseForm,
+  type ExpenseBatchValue,
   type ExpenseFormProject,
   type ExpenseFormValue,
   type ExpenseSubmitMode,
@@ -145,28 +143,26 @@ export function ExpensesView(props: ExpensesViewProps) {
     setFormOpen(true);
   }
 
+  /** EDIT submit (single expense). Create goes through handleBatchSubmit. */
   function handleFormSubmit(
     value: ExpenseFormValue,
     mode: ExpenseSubmitMode,
     file: File | null,
   ) {
+    const editingId = editing?.id;
+    if (!editingId) return;
     if (isDemo) {
       handleFormSubmitDemo(value, mode, file);
       return;
     }
-    const editingId = editing?.id ?? null;
     startTransition(async () => {
-      const saved = editingId
-        ? await updateExpenseAction({ id: editingId, ...value })
-        : await createExpenseAction(value);
+      const saved = await updateExpenseAction({ id: editingId, ...value });
       if (!saved.ok) {
         notify("warning", saved.message);
         return;
       }
       const expenseId = saved.data.id;
-      const messages: string[] = [
-        editingId ? "Despesa atualizada" : "Despesa criada",
-      ];
+      const messages: string[] = ["Despesa atualizada"];
 
       if (file && storageAvailable) {
         const formData = new FormData();
@@ -207,57 +203,132 @@ export function ExpensesView(props: ExpensesViewProps) {
     });
   }
 
+  /** CREATE submit: one NF/header with several items (each its own receipt). */
+  function handleBatchSubmit(value: ExpenseBatchValue, mode: ExpenseSubmitMode) {
+    if (isDemo) {
+      handleBatchSubmitDemo(value, mode);
+      return;
+    }
+    startTransition(async () => {
+      const created = await createExpenseBatchAction({
+        projectId: value.projectId,
+        description: value.description,
+        invoiceNumber: value.invoiceNumber,
+        items: value.items.map((it) => ({
+          date: it.date,
+          amount: it.amount,
+          category: it.category,
+        })),
+      });
+      if (!created.ok) {
+        notify("warning", created.message);
+        return;
+      }
+      const { ids } = created.data;
+      let attached = 0;
+      let submitted = 0;
+      for (let i = 0; i < ids.length; i += 1) {
+        const expenseId = ids[i];
+        const file = value.items[i]?.file ?? null;
+        if (file && storageAvailable) {
+          const formData = new FormData();
+          formData.set("expenseId", expenseId);
+          formData.set("file", file);
+          const result = await attachReceipt(formData);
+          if (result.ok) attached += 1;
+        }
+        if (mode === "SUBMITTED") {
+          const result = await submitExpenseAction({ id: expenseId });
+          if (result.ok) submitted += 1;
+        }
+      }
+      setFormOpen(false);
+      setEditing(null);
+      const parts = [`${ids.length} lançamento(s) criado(s)`];
+      if (attached > 0) parts.push(`${attached} comprovante(s) anexado(s)`);
+      if (mode === "SUBMITTED") parts.push(`${submitted} enviado(s) para aprovação`);
+      notify("success", `${parts.join(", ")}.`);
+    });
+  }
+
+  function handleBatchSubmitDemo(
+    value: ExpenseBatchValue,
+    mode: ExpenseSubmitMode,
+  ) {
+    const project = formProjects.find((p) => p.id === value.projectId);
+    if (!project) return;
+    const groupId = `grp-local-${(idCounter.current += 1)}`;
+    const submittedAt =
+      mode === "SUBMITTED" ? `${props.today}T12:00:00Z` : undefined;
+    const created: Expense[] = value.items.map((it, i) => ({
+      id: `exp-local-${idCounter.current}-${i}`,
+      projectId: value.projectId,
+      projectName: project.name,
+      clientName: project.clientName,
+      consultantName: props.consultantName,
+      date: it.date,
+      amount: it.amount,
+      description: value.description,
+      invoiceNumber: value.invoiceNumber,
+      category: it.category,
+      groupId,
+      attachment: it.file
+        ? {
+            fileName: it.file.name,
+            contentType: it.file.type || "application/octet-stream",
+            size: it.file.size,
+          }
+        : undefined,
+      status: mode,
+      submittedAt,
+      source: "mock",
+    }));
+    setLocalItems((prev) => [...created, ...prev]);
+    setFormOpen(false);
+    setEditing(null);
+    notify(
+      "success",
+      mode === "SUBMITTED"
+        ? `${created.length} lançamento(s) enviado(s) para aprovação (local).`
+        : `${created.length} rascunho(s) salvo(s) localmente.`,
+    );
+  }
+
   function handleFormSubmitDemo(
     value: ExpenseFormValue,
     mode: ExpenseSubmitMode,
     file: File | null,
   ) {
     const project = formProjects.find((p) => p.id === value.projectId);
-    if (!project) return;
+    if (!project || !editing) return;
     const attachment = file
       ? {
           fileName: file.name,
           contentType: file.type || "application/octet-stream",
           size: file.size,
         }
-      : (editing?.attachment ?? undefined);
+      : (editing.attachment ?? undefined);
 
-    if (editing) {
-      const editingId = editing.id;
-      setLocalItems((prev) =>
-        prev.map((e) =>
-          e.id === editingId
-            ? {
-                ...e,
-                ...value,
-                projectName: project.name,
-                clientName: project.clientName,
-                invoiceNumber: value.invoiceNumber,
-                attachment,
-                status: mode,
-                submittedAt:
-                  mode === "SUBMITTED" ? `${props.today}T12:00:00Z` : undefined,
-                rejectionReason: undefined,
-              }
-            : e,
-        ),
-      );
-    } else {
-      idCounter.current += 1;
-      const expense = createMockExpense(
-        { ...value, attachment },
-        {
-          id: `exp-local-${idCounter.current}-${value.projectId}`,
-          projectName: project.name,
-          clientName: project.clientName,
-          consultantName: props.consultantName,
-          status: mode,
-          submittedAt:
-            mode === "SUBMITTED" ? `${props.today}T12:00:00Z` : undefined,
-        },
-      );
-      setLocalItems((prev) => [expense, ...prev]);
-    }
+    const editingId = editing.id;
+    setLocalItems((prev) =>
+      prev.map((e) =>
+        e.id === editingId
+          ? {
+              ...e,
+              ...value,
+              projectName: project.name,
+              clientName: project.clientName,
+              invoiceNumber: value.invoiceNumber,
+              category: value.category,
+              attachment,
+              status: mode,
+              submittedAt:
+                mode === "SUBMITTED" ? `${props.today}T12:00:00Z` : undefined,
+              rejectionReason: undefined,
+            }
+          : e,
+      ),
+    );
     setFormOpen(false);
     setEditing(null);
     notify(
@@ -484,6 +555,7 @@ export function ExpensesView(props: ExpensesViewProps) {
         attachmentUnavailable={!isDemo && !storageAvailable}
         busy={isPending}
         onSubmit={handleFormSubmit}
+        onSubmitBatch={handleBatchSubmit}
       />
 
       <Modal

@@ -132,6 +132,26 @@ enum ExpenseStatus {
   PAID
 }
 
+/// Tipo/categoria de um lancamento de despesa. Lista fixa de dominio hoje;
+/// Postgres permite adicionar valores via ALTER TYPE ... ADD VALUE (vide
+/// AutomationEmailType). Vire tabela de referencia apenas se a categoria passar
+/// a ter atributos proprios (ex.: reembolsavel por padrao, conta contabil).
+enum ExpenseCategory {
+  MILEAGE_REIMBURSEMENT
+  AIR_TICKET
+  BUS_TICKET
+  CERTIFICATION
+  ACCOUNTING
+  RIDE_SHARE
+  COURSES_TRAINING
+  LODGING
+  POSTAGE
+  MEALS
+  PERIPHERALS
+  TOLL
+  PARKING
+}
+
 enum MonthlyClosingStatus {
   OPEN
   CLOSED
@@ -1142,6 +1162,14 @@ model Expense {
   amount        Decimal            @db.Decimal(12, 2)
   description   String
   invoiceNumber String?
+  /// Categoria do lancamento. Nullable para back-compat com Expenses
+  /// pre-existentes; novos lancamentos exigem categoria via Zod no servidor.
+  category      ExpenseCategory?
+  /// Chave de agrupamento por NF/lote (cuid gerado no formulario). Permite
+  /// "uma descricao para varias despesas" sem entidade pai: o form cria N
+  /// linhas Expense numa transacao compartilhando description, invoiceNumber e
+  /// groupId. A UI agrupa por groupId; invoiceNumber permanece dado fiscal.
+  groupId       String?
   status        ExpenseStatus      @default(DRAFT)
   submittedAt   DateTime?
   attachment    ExpenseAttachment?
@@ -1153,6 +1181,7 @@ model Expense {
   @@index([allocationId])
   @@index([status, submittedAt])
   @@index([consultantId, date])
+  @@index([consultantId, groupId])
   // Global finance/consolidated report: month range across all consultants and
   // projects (mirrors TimeEntry.date). Leading columns of the other indexes are
   // consultantId/projectId/status, so a pure date-range filter needs this.

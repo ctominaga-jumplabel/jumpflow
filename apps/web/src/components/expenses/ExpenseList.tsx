@@ -7,7 +7,11 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { cn } from "@/lib/utils";
 import { focusRing } from "@/lib/styles";
 import { formatCurrency, formatDate } from "@/lib/format";
-import { isExpenseEditable, type Expense } from "@/lib/expenses/types";
+import {
+  expenseCategoryLabel,
+  isExpenseEditable,
+  type Expense,
+} from "@/lib/expenses/types";
 import { ExpenseStatusBadge } from "./ExpenseStatusBadge";
 
 const thClass =
@@ -100,6 +104,9 @@ export function ExpenseList({
                 <th scope="col" className={thClass}>
                   Descrição
                 </th>
+                <th scope="col" className={thClass}>
+                  Tipo
+                </th>
                 <th scope="col" className={cn(thClass, "text-right")}>
                   Valor
                 </th>
@@ -153,6 +160,15 @@ export function ExpenseList({
                           {expense.rejectionReason}
                         </p>
                       ) : null}
+                    </td>
+                    <td className="px-4 py-3 align-middle text-medium">
+                      {expense.category ? (
+                        <span className="inline-block rounded-full border border-border bg-surface-muted px-2 py-0.5 text-xs">
+                          {expenseCategoryLabel(expense.category)}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-soft">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-right align-middle font-semibold tabular-nums text-strong">
                       {formatCurrency(expense.amount)}
