@@ -131,6 +131,59 @@ describe("AutoApprovalView — status and KPIs", () => {
   });
 });
 
+describe("AutoApprovalView — regras cadastradas", () => {
+  // Minimal ProjectItem shapes: buildRuleRows only reads name + the two rule
+  // fields, so we cast loose fixtures instead of full ProjectItem objects.
+  const projects = [
+    {
+      id: "proj-1",
+      name: "Apollo",
+      clientName: "Acme",
+      autoApprovalRule: {
+        weekendEnabled: true,
+        hoursRangeEnabled: true,
+        minMinutes: 1,
+        maxMinutes: 540,
+      },
+      autoApprovalConsultantRules: [],
+      allocations: [],
+    },
+    {
+      id: "proj-2",
+      name: "Beta",
+      clientName: "Globex",
+      autoApprovalRule: undefined,
+      autoApprovalConsultantRules: [
+        {
+          id: "car-1",
+          consultantId: "c1",
+          consultantName: "Diana Souza",
+          weekendEnabled: false,
+          hoursRangeEnabled: true,
+          minMinutes: 480,
+          maxMinutes: 480,
+        },
+      ],
+      allocations: [],
+    },
+  ] as unknown as Parameters<typeof AutoApprovalView>[0]["projects"];
+
+  it("lists project-level and per-consultant rules with weekend + range summary", () => {
+    render(<AutoApprovalView overview={overview()} projects={projects} />);
+    // Project rule row: scope "Projeto (todos)", range 00:01 – 09:00.
+    expect(screen.getByText("Projeto (todos)")).toBeInTheDocument();
+    expect(screen.getByText("00:01 – 09:00")).toBeInTheDocument();
+    // Per-consultant row: scope is the consultant, min==max → exact 08:00.
+    expect(screen.getByText("Diana Souza")).toBeInTheDocument();
+    expect(screen.getByText("08:00 – 08:00")).toBeInTheDocument();
+  });
+
+  it("shows an empty state when no project has a rule", () => {
+    render(<AutoApprovalView overview={overview()} projects={[]} />);
+    expect(screen.getByText("Nenhuma regra cadastrada")).toBeInTheDocument();
+  });
+});
+
 describe("AutoApprovalView — tables", () => {
   it("lists pending entries with their pt-BR estimated reason", () => {
     render(<AutoApprovalView overview={overview()} />);
