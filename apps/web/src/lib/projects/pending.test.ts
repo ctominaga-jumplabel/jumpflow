@@ -6,6 +6,7 @@ import {
   isMissingBillingConfig,
   isMissingSaleRate,
   isProjectBaseSaleRateActive,
+  projectHasSaleValue,
 } from "./pending";
 
 function project(overrides: Partial<ProjectItem>): ProjectItem {
@@ -74,6 +75,33 @@ describe("project pending queues", () => {
         today,
       ),
     ).toBe(false);
+  });
+
+  it("treats a project as priced when every active allocation has a rate", () => {
+    const allocations = [
+      { id: "a1", consultantId: "c1", status: "ACTIVE" as const },
+      { id: "a2", consultantId: "c2", status: "PLANNED" as const },
+    ];
+    // Nothing priced yet.
+    expect(projectHasSaleValue(allocations, [])).toBe(false);
+    // Only one consultant priced → still missing.
+    expect(projectHasSaleValue(allocations, [{ allocationId: "a1" }])).toBe(
+      false,
+    );
+    // Both priced (one allocation-scoped, one consultant-scoped) → covered.
+    expect(
+      projectHasSaleValue(allocations, [
+        { allocationId: "a1" },
+        { consultantId: "c2" },
+      ]),
+    ).toBe(true);
+    // A project-level base rate covers everyone regardless of allocations.
+    expect(projectHasSaleValue(allocations, [{}])).toBe(true);
+  });
+
+  it("is not priced when there are no allocations and no base rate", () => {
+    expect(projectHasSaleValue([], [])).toBe(false);
+    expect(projectHasSaleValue([], [{}])).toBe(true);
   });
 
   it("counts only the active projects missing each piece", () => {

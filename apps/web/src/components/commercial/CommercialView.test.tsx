@@ -50,13 +50,18 @@ describe("CommercialView", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: /Precificar/ }));
     const dialog = screen.getByRole("dialog");
-    // The consultant linked in Operação shows up automatically...
-    expect(within(dialog).getByText("Ana Tester")).toBeInTheDocument();
+    // The consultant linked in Operação shows up automatically in the single
+    // "Valores de venda" table...
+    expect(within(dialog).getByText(/Ana Tester - QA Senior/)).toBeInTheDocument();
     // ...with no sale value yet, ready for Comercial to define it.
     expect(within(dialog).getByText("Sem valor")).toBeInTheDocument();
     expect(
       within(dialog).getByRole("button", { name: /Definir valor de Ana Tester/ }),
     ).toBeInTheDocument();
+    // No separate redundant section.
+    expect(
+      within(dialog).queryByText("Consultores do projeto"),
+    ).not.toBeInTheDocument();
   });
 
   it("counts active projects without a sale value in the pending queue", () => {

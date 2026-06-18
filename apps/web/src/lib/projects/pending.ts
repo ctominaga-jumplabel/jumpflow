@@ -1,4 +1,4 @@
-import type { ProjectItem } from "./types";
+import type { AllocationStatus, ProjectItem } from "./types";
 
 /**
  * Pure derivations for the per-area pending queues. A `Project` is allowed to
@@ -35,7 +35,64 @@ export function isProjectBaseSaleRateActive(
   );
 }
 
-/** Active project with no project-level sale rate currently in effect. */
+/** Vigência check (scope-agnostic): rate is in effect on `todayIso`. */
+function isSaleRateActiveOn(
+  rate: { startsAt: string; endsAt?: string },
+  todayIso: string,
+): boolean {
+  return rate.startsAt <= todayIso && (!rate.endsAt || rate.endsAt >= todayIso);
+}
+
+type ScopeRate = {
+  consultantId?: string | null;
+  allocationId?: string | null;
+};
+type PriceableAllocation = { id: string; consultantId: string; status: AllocationStatus };
+
+/**
+ * Whether a project is considered priced. A project counts as having a sale
+ * value when EITHER a project-level base rate is in effect (covers everyone),
+ * OR — pricing per consultant, como no Comercial — every active/planned
+ * allocation has its own rate (escopo alocação ou consultor). Sem alocações e
+ * sem base rate, ainda falta precificar. `vigentRates` já vem filtrado por
+ * vigência (a chamada decide a data de referência).
+ */
+export function projectHasSaleValue(
+  allocations: PriceableAllocation[],
+  vigentRates: ScopeRate[],
+): boolean {
+  const hasBase = vigentRates.some((r) => !r.consultantId && !r.allocationId);
+  if (hasBase) return true;
+  const priceable = allocations.filter(
+    (a) => a.status === "ACTIVE" || a.status === "PLANNED",
+  );
+  if (priceable.length === 0) return false;
+  return priceable.every((a) =>
+    vigentRates.some(
+      (r) =>
+        r.allocationId === a.id ||
+        (!r.allocationId && r.consultantId === a.consultantId),
+    ),
+  );
+}
+
+/** `projectHasSaleValue` applied to a UI ProjectItem (filters by vigência). */
+export function projectItemHasSaleValue(
+  project: ProjectItem,
+  todayIso: string,
+): boolean {
+  const vigentRates = project.saleRates.filter((rate) =>
+    isSaleRateActiveOn(rate, todayIso),
+  );
+  return projectHasSaleValue(project.allocations, vigentRates);
+}
+
+/**
+ * Active project still missing a sale value. "Tem valor" agora considera a
+ * precificação por consultor (todos os vínculos ativos/planejados com rate),
+ * não apenas um valor de venda a nível de projeto — por isso a flag some quando
+ * todos os consultores foram precificados.
+ */
 export function isMissingSaleRate(project: ProjectItem): boolean {
   return project.status === "ACTIVE" && !project.hasActiveSaleRate;
 }

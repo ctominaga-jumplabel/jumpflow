@@ -47,7 +47,7 @@ import {
 import {
   isMissingBillingConfig,
   isMissingSaleRate,
-  isProjectBaseSaleRateActive,
+  projectItemHasSaleValue,
 } from "@/lib/projects/pending";
 import type {
   ProjectAllocationItem,
@@ -518,23 +518,21 @@ export function ProjectsView({
         ? `${allocation.consultantName} - ${allocation.role}`
         : undefined,
     };
+    const today = new Date().toISOString().slice(0, 10);
     setItems((current) =>
-      current.map((project) =>
-        project.id === value.projectId
-          ? {
-              ...project,
-              saleRates: [...project.saleRates, nextRate],
-              // Um valor base vigente satisfaz a fila de pendência (mesma
-              // semântica do servidor).
-              hasActiveSaleRate:
-                project.hasActiveSaleRate ||
-                isProjectBaseSaleRateActive(
-                  value,
-                  new Date().toISOString().slice(0, 10),
-                ),
-            }
-          : project,
-      ),
+      current.map((project) => {
+        if (project.id !== value.projectId) return project;
+        const updated = {
+          ...project,
+          saleRates: [...project.saleRates, nextRate],
+        };
+        // Recompute coverage (base rate OU todos os consultores precificados),
+        // mesma semântica do servidor.
+        return {
+          ...updated,
+          hasActiveSaleRate: projectItemHasSaleValue(updated, today),
+        };
+      }),
     );
     if (mode === "demo") {
       setFeedback("Valor de venda salvo localmente.");
