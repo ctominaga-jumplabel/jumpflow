@@ -5,7 +5,6 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { AutoApprovalView } from "@/components/automation/AutoApprovalView";
 import { requireRole } from "@/lib/auth/guards";
 import { isDatabaseConfigured } from "@/lib/db/config";
-import type { AutoApprovalOverview } from "@/lib/db/automation";
 
 export const metadata: Metadata = { title: "Aprovação automática" };
 
@@ -42,12 +41,17 @@ export default async function AprovacaoAutomaticaPage() {
 
   // Lazy import so Prisma is never loaded without a database.
   const { getAutoApprovalOverview } = await import("@/lib/db/automation");
-  const overview: AutoApprovalOverview = await getAutoApprovalOverview();
+  const { listProjects } = await import("@/lib/db/projects");
+  const [overview, projects] = await Promise.all([
+    getAutoApprovalOverview(),
+    // Apenas dados operacionais (regras + alocações), sem valores financeiros.
+    listProjects(),
+  ]);
 
   return (
     <div className="space-y-6">
       {header}
-      <AutoApprovalView overview={overview} />
+      <AutoApprovalView overview={overview} projects={projects} />
     </div>
   );
 }

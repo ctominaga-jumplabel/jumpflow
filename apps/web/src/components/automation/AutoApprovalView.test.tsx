@@ -26,6 +26,12 @@ vi.mock("@/app/app/automacoes/aprovacao-automatica/actions", () => ({
   runAutoApprovalNow: () => runAutoApprovalNow(),
 }));
 
+// Stubbed: the rule panel pulls in server actions (next-auth/Prisma) not needed
+// for the dashboard tests; the central hub is exercised via the project screen.
+vi.mock("@/components/projects/shared/AutoApprovalConfigPanel", () => ({
+  AutoApprovalConfigPanel: () => null,
+}));
+
 function overview(over: Partial<AutoApprovalOverview> = {}): AutoApprovalOverview {
   return {
     config: {

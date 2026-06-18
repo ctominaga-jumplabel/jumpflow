@@ -1,6 +1,6 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import {
   BotMessageSquare,
   CheckCircle2,
@@ -15,8 +15,12 @@ import { MetricCard } from "@/components/ui/MetricCard";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { ActionButton } from "@/components/ui/ActionButton";
 import { FeedbackBanner, useFeedback } from "@/components/ui/Feedback";
+import { focusRingInput } from "@/lib/styles";
+import { cn } from "@/lib/utils";
 import { formatHours } from "@/lib/format";
 import type { AutoApprovalOverview } from "@/lib/db/automation";
+import type { ProjectItem } from "@/lib/projects/types";
+import { AutoApprovalConfigPanel } from "@/components/projects/shared/AutoApprovalConfigPanel";
 import { runAutoApprovalNow } from "@/app/app/automacoes/aprovacao-automatica/actions";
 
 const thClass =
@@ -45,6 +49,8 @@ function formatShortDate(value: Date): string {
 
 export interface AutoApprovalViewProps {
   overview: AutoApprovalOverview;
+  /** Projetos para o hub central de regras (seletor + painel). */
+  projects?: ProjectItem[];
 }
 
 /**
@@ -54,11 +60,19 @@ export interface AutoApprovalViewProps {
  * automáticas e os lançamentos enviados ainda pendentes (com o motivo estimado).
  * Única mutação: "Executar agora" (dispara o job sob demanda).
  */
-export function AutoApprovalView({ overview }: AutoApprovalViewProps) {
+export function AutoApprovalView({
+  overview,
+  projects = [],
+}: AutoApprovalViewProps) {
   const { config, projectRuleCount, consultantRuleCount, recentAutoApprovals, pending } =
     overview;
   const { feedback, notify } = useFeedback();
   const [isRunning, startRun] = useTransition();
+  const [selectedProjectId, setSelectedProjectId] = useState<string>(
+    () => projects[0]?.id ?? "",
+  );
+  const selectedProject =
+    projects.find((p) => p.id === selectedProjectId) ?? null;
 
   function handleRun() {
     startRun(async () => {
@@ -136,6 +150,48 @@ export function AutoApprovalView({ overview }: AutoApprovalViewProps) {
           Aprovação no cadastro do projeto). A automação também roda por
           agendamento (Vercel Cron); use este botão para um disparo manual.
         </p>
+      </SectionPanel>
+
+      <SectionPanel
+        title="Regras por projeto"
+        description="Configure a regra de aprovação automática (fim de semana e/ou range de horas) e vincule consultores. O mesmo cadastro está disponível na aba Aprovação de cada projeto."
+      >
+        {projects.length === 0 ? (
+          <EmptyState
+            icon={Timer}
+            title="Nenhum projeto disponível"
+            description="Cadastre projetos para configurar regras de aprovação automática."
+            className="border-0 shadow-none"
+          />
+        ) : (
+          <div className="space-y-4 px-5 py-4">
+            <label className="block max-w-md space-y-1 text-sm font-medium text-medium">
+              Projeto
+              <select
+                aria-label="Selecionar projeto"
+                value={selectedProjectId}
+                onChange={(event) => setSelectedProjectId(event.target.value)}
+                className={cn(
+                  "h-10 w-full rounded-md border border-border bg-surface px-3 text-sm",
+                  focusRingInput,
+                )}
+              >
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} · {p.clientName}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {selectedProject ? (
+              <AutoApprovalConfigPanel
+                key={selectedProject.id}
+                project={selectedProject}
+                canManageProjects
+              />
+            ) : null}
+          </div>
+        )}
       </SectionPanel>
 
       <SectionPanel
