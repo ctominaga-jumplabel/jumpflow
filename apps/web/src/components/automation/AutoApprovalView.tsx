@@ -47,6 +47,59 @@ function formatShortDate(value: Date): string {
   }).format(value);
 }
 
+/** minutos-do-dia -> "HH:mm". */
+function minutesToHHmm(total: number): string {
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+interface RuleSummaryRow {
+  key: string;
+  projectName: string;
+  scope: string;
+  weekendEnabled: boolean;
+  hoursRangeEnabled: boolean;
+  minMinutes: number;
+  maxMinutes: number;
+}
+
+/**
+ * Lista achatada das regras cadastradas a partir dos projetos: em modo
+ * exclusivo (há regras por consultor) lista uma linha por consultor; senão, uma
+ * linha para a regra do projeto. Projetos sem nenhuma regra não aparecem.
+ */
+function buildRuleRows(projects: ProjectItem[]): RuleSummaryRow[] {
+  const rows: RuleSummaryRow[] = [];
+  for (const project of projects) {
+    const consultantRules = project.autoApprovalConsultantRules ?? [];
+    if (consultantRules.length > 0) {
+      for (const rule of consultantRules) {
+        rows.push({
+          key: rule.id,
+          projectName: project.name,
+          scope: rule.consultantName,
+          weekendEnabled: rule.weekendEnabled,
+          hoursRangeEnabled: rule.hoursRangeEnabled,
+          minMinutes: rule.minMinutes,
+          maxMinutes: rule.maxMinutes,
+        });
+      }
+    } else if (project.autoApprovalRule) {
+      rows.push({
+        key: project.id,
+        projectName: project.name,
+        scope: "Projeto (todos)",
+        weekendEnabled: project.autoApprovalRule.weekendEnabled,
+        hoursRangeEnabled: project.autoApprovalRule.hoursRangeEnabled,
+        minMinutes: project.autoApprovalRule.minMinutes,
+        maxMinutes: project.autoApprovalRule.maxMinutes,
+      });
+    }
+  }
+  return rows;
+}
+
 export interface AutoApprovalViewProps {
   overview: AutoApprovalOverview;
   /** Projetos para o hub central de regras (seletor + painel). */
@@ -73,6 +126,7 @@ export function AutoApprovalView({
   );
   const selectedProject =
     projects.find((p) => p.id === selectedProjectId) ?? null;
+  const ruleRows = buildRuleRows(projects);
 
   function handleRun() {
     startRun(async () => {
@@ -150,6 +204,68 @@ export function AutoApprovalView({
           Aprovação no cadastro do projeto). A automação também roda por
           agendamento (Vercel Cron); use este botão para um disparo manual.
         </p>
+      </SectionPanel>
+
+      <SectionPanel
+        title="Regras cadastradas"
+        description="Regras de aprovação automática por projeto e por consultor (modo exclusivo). Projetos sem regra usam o padrão (total diário)."
+      >
+        {ruleRows.length === 0 ? (
+          <EmptyState
+            icon={CheckCircle2}
+            title="Nenhuma regra cadastrada"
+            description="Configure abaixo (ou na aba Aprovação do projeto) a regra de fim de semana e/ou range de horas."
+            className="border-0 shadow-none"
+          />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse">
+              <thead>
+                <tr className="border-b-2 border-ink">
+                  <th scope="col" className={thClass}>Projeto</th>
+                  <th scope="col" className={thClass}>Escopo</th>
+                  <th scope="col" className={thClass}>Fim de semana</th>
+                  <th scope="col" className={thClass}>Range de horas</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ruleRows.map((row) => (
+                  <tr
+                    key={row.key}
+                    className="border-b border-ink/10 transition-colors hover:bg-surface-muted/60"
+                  >
+                    <td className={tdClass}>
+                      <span className={truncCell} title={row.projectName}>
+                        {row.projectName}
+                      </span>
+                    </td>
+                    <td className={tdClass}>
+                      <span className={truncCell} title={row.scope}>
+                        {row.scope}
+                      </span>
+                    </td>
+                    <td className={tdClass}>
+                      {row.weekendEnabled ? (
+                        <StatusBadge tone="success">Liberado</StatusBadge>
+                      ) : (
+                        <span className="text-soft">—</span>
+                      )}
+                    </td>
+                    <td className={`${tdClass} whitespace-nowrap`}>
+                      {row.hoursRangeEnabled ? (
+                        <span className="tabular-nums text-strong">
+                          {minutesToHHmm(row.minMinutes)} – {minutesToHHmm(row.maxMinutes)}
+                        </span>
+                      ) : (
+                        <span className="text-soft">—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </SectionPanel>
 
       <SectionPanel
