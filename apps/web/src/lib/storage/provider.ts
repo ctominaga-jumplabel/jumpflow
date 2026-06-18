@@ -26,6 +26,9 @@ export const EXPENSE_RECEIPTS_BUCKET = "expense-receipts";
 /** Private bucket for client logos (created via devops, never public). */
 export const CLIENT_LOGOS_BUCKET = "client-logos";
 
+/** Private bucket for consultant documents (created via devops, never public). */
+export const CONSULTANT_DOCUMENTS_BUCKET = "consultant-documents";
+
 /**
  * Storage is configured only when BOTH envs are present. These envs do not
  * exist yet in any environment — callers must degrade honestly (NO_STORAGE),
@@ -62,4 +65,9 @@ export function getStorageProvider(
 /** Convenience resolver for the client-logos bucket. */
 export function getClientLogoStorageProvider(): StorageProvider | null {
   return getStorageProvider(CLIENT_LOGOS_BUCKET);
+}
+
+/** Convenience resolver for the consultant-documents bucket. */
+export function getConsultantDocumentStorageProvider(): StorageProvider | null {
+  return getStorageProvider(CONSULTANT_DOCUMENTS_BUCKET);
 }

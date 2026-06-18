@@ -9,27 +9,63 @@ import { FINANCIAL_ROLES } from "@/lib/auth/route-permissions";
 import type { RoleName } from "@/lib/auth/types";
 import { recordAuditEvent } from "@/lib/db/audit";
 import { isDatabaseConfigured } from "@/lib/db/config";
+import {
+  getConsultantProfile,
+  type ConsultantProfile,
+} from "@/lib/db/consultants";
 import { resolveDbUser } from "@/lib/db/users";
 import { getCnpjProvider } from "@/lib/cnpj/provider";
 import { getCepProvider } from "@/lib/cep/provider";
+import { signedHourBankHours } from "@/lib/consultants/hour-bank";
+import {
+  CONSULTANT_DOCUMENTS_BUCKET,
+  getConsultantDocumentStorageProvider,
+  isStorageConfigured,
+} from "@/lib/storage/provider";
+import {
+  buildConsultantDocumentKey,
+  validatePhotoFile,
+  validateReceiptFile,
+} from "@/lib/storage/file-validation";
 import {
   addressSchema,
   bankAccountSchema,
   benefitSchema,
   companyInfoSchema,
   compensationSchema,
+  consultantDocumentDeleteSchema,
+  consultantDocumentUploadSchema,
   consultantIdentitySchema,
+  consultantPhotoDeleteSchema,
+  cltInfoSchema,
+  deleteEducationSchema,
+  deleteHourBankEntrySchema,
+  deleteLanguageSchema,
+  deleteVacationSchema,
+  educationSchema,
+  hourBankEntrySchema,
+  languageSchema,
+  legalRepresentativeSchema,
   lookupInputSchema,
   personalInfoSchema,
+  pjInfoSchema,
+  vacationSchema,
   voucherBenefitsSchema,
   VOUCHER_TYPE_BY_KEY,
   type AddressInput,
   type BankAccountInput,
   type BenefitInput,
+  type CltInfoInput,
   type CompanyInfoInput,
   type CompensationInput,
   type ConsultantIdentityInput,
+  type EducationInput,
+  type HourBankEntryInput,
+  type LanguageInput,
+  type LegalRepresentativeInput,
   type PersonalInfoInput,
+  type PjInfoInput,
+  type VacationInput,
   type VoucherBenefitsInput,
   type VoucherKey,
 } from "@/lib/consultants/schemas";
@@ -150,6 +186,27 @@ async function ensureFlexBankAccounts(consultantId: string) {
   }
 }
 
+/**
+ * Carrega o perfil completo do consultor para o modal de edicao (dados
+ * pessoais, empresa, endereco e documentos com URLs assinadas). Leitura
+ * protegida por papel; chamada sob demanda ao abrir o modal.
+ */
+export async function loadConsultantProfile(
+  consultantId: string,
+): Promise<ActionResult<ConsultantProfile>> {
+  try {
+    ensureDatabase();
+    await requireRole(PEOPLE_ROLES);
+    const profile = await getConsultantProfile(consultantId);
+    if (!profile) {
+      throw new ActionError("NOT_FOUND", "Consultor nao encontrado.");
+    }
+    return { ok: true, data: profile };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
 export async function saveConsultantIdentity(
   input: ConsultantIdentityInput,
 ): Promise<ActionResult<{ id: string }>> {
@@ -164,6 +221,7 @@ export async function saveConsultantIdentity(
       seniority: parsed.seniority,
       area: parsed.area,
       status: parsed.status,
+      contractType: parsed.contractType,
     };
     const previous = parsed.id
       ? await prisma.consultant.findUnique({ where: { id: parsed.id } })
@@ -199,6 +257,16 @@ export async function savePersonalInfo(
       cpf: parsed.cpf,
       birthDate: toDate(parsed.birthDate),
       phone: parsed.phone,
+      socialName: parsed.socialName,
+      rg: parsed.rg,
+      gender: parsed.gender,
+      maritalStatus: parsed.maritalStatus,
+      nationality: parsed.nationality,
+      personalEmail: parsed.personalEmail,
+      corporateEmail: parsed.corporateEmail,
+      mobilePhone: parsed.mobilePhone,
+      emergencyPhone: parsed.emergencyPhone,
+      emergencyContact: parsed.emergencyContact,
     };
     await prisma.consultantPersonalInfo.upsert({
       where: { consultantId: parsed.consultantId },
@@ -234,6 +302,8 @@ export async function saveCompanyInfo(
       legalName: parsed.legalName,
       tradeName: parsed.tradeName,
       municipalRegistration: parsed.municipalRegistration,
+      stateRegistration: parsed.stateRegistration,
+      cnaePrimary: parsed.cnaePrimary,
       taxRegime: parsed.taxRegime,
     };
     await prisma.consultantCompanyInfo.upsert({
@@ -527,7 +597,12 @@ export async function saveVoucherBenefits(
 
 export async function lookupConsultantCnpj(
   input: { consultantId: string; value: string },
-): Promise<ActionResult<{ applied: boolean }>> {
+): Promise<
+  ActionResult<{
+    applied: boolean;
+    company: { cnpj: string; legalName: string | null; tradeName: string | null };
+  }>
+> {
   try {
     ensureDatabase();
     await requireRole(PEOPLE_ROLES);
@@ -554,7 +629,17 @@ export async function lookupConsultantCnpj(
       provider: result.provider,
     });
     revalidatePath(CONSULTORES_PATH);
-    return { ok: true, data: { applied: true } };
+    return {
+      ok: true,
+      data: {
+        applied: true,
+        company: {
+          cnpj: result.document,
+          legalName: result.legalName ?? null,
+          tradeName: result.tradeName ?? null,
+        },
+      },
+    };
   } catch (error) {
     return toFailure(error);
   }
@@ -562,7 +647,18 @@ export async function lookupConsultantCnpj(
 
 export async function lookupConsultantCep(
   input: { consultantId: string; value: string },
-): Promise<ActionResult<{ applied: boolean }>> {
+): Promise<
+  ActionResult<{
+    applied: boolean;
+    address: {
+      postalCode: string;
+      street: string | null;
+      district: string | null;
+      city: string | null;
+      state: string | null;
+    };
+  }>
+> {
   try {
     ensureDatabase();
     await requireRole(PEOPLE_ROLES);
@@ -593,7 +689,612 @@ export async function lookupConsultantCep(
       provider: result.provider,
     });
     revalidatePath(CONSULTORES_PATH);
-    return { ok: true, data: { applied: true } };
+    return {
+      ok: true,
+      data: {
+        applied: true,
+        address: {
+          postalCode: result.postalCode,
+          street: result.street ?? null,
+          district: result.district ?? null,
+          city: result.city ?? null,
+          state: result.state ?? null,
+        },
+      },
+    };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/**
+ * Anexa um documento ao consultor (bucket consultant-documents). Regra "um
+ * anexo por tipo": para tipos != OTHER, um novo upload substitui o documento
+ * do mesmo tipo (o objeto antigo so e removido apos persistir o novo). OTHER
+ * pode repetir. Degrada honestamente quando storage nao esta configurado;
+ * nunca finge um upload.
+ */
+export async function uploadConsultantDocument(
+  formData: FormData,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(PEOPLE_ROLES);
+    if (!isStorageConfigured()) {
+      throw new ActionError(
+        "NO_STORAGE",
+        "Anexos indisponiveis: storage nao configurado.",
+      );
+    }
+    const parsed = parseInput(consultantDocumentUploadSchema, {
+      consultantId: formData.get("consultantId"),
+      type: formData.get("type"),
+    });
+    const file = formData.get("file");
+    if (!(file instanceof File)) {
+      throw new ActionError("INVALID_FILE", "Nenhum arquivo enviado.");
+    }
+    const invalid = validateReceiptFile({
+      name: file.name,
+      type: file.type,
+      size: file.size,
+    });
+    if (invalid) {
+      throw new ActionError(invalid.code, invalid.message);
+    }
+
+    const consultant = await prisma.consultant.findUnique({
+      where: { id: parsed.consultantId },
+      select: { id: true },
+    });
+    if (!consultant) {
+      throw new ActionError("NOT_FOUND", "Consultor nao encontrado.");
+    }
+
+    const user = await requireUser();
+    const dbUser = await resolveDbUser(user);
+
+    const provider = getConsultantDocumentStorageProvider()!;
+    const storageKey = buildConsultantDocumentKey(
+      parsed.consultantId,
+      parsed.type,
+      file.name,
+    );
+    await provider.upload(storageKey, await file.arrayBuffer(), file.type);
+
+    // "Um anexo por tipo": reaproveita a linha do mesmo tipo (exceto OTHER).
+    const existing =
+      parsed.type === "OTHER"
+        ? null
+        : await prisma.consultantDocument.findFirst({
+            where: { consultantId: parsed.consultantId, type: parsed.type },
+            orderBy: { createdAt: "desc" },
+          });
+    const previousKey = existing?.storageKey ?? null;
+    const data = {
+      type: parsed.type,
+      fileName: file.name,
+      contentType: file.type,
+      size: file.size,
+      storageBucket: CONSULTANT_DOCUMENTS_BUCKET,
+      storageKey,
+      uploadedByUserId: dbUser?.id ?? null,
+    };
+
+    let documentId: string;
+    try {
+      const row = existing
+        ? await prisma.consultantDocument.update({
+            where: { id: existing.id },
+            data,
+          })
+        : await prisma.consultantDocument.create({
+            data: { consultantId: parsed.consultantId, ...data },
+          });
+      documentId = row.id;
+      await audit(
+        "ConsultantDocument",
+        row.id,
+        existing ? "CONSULTANT_DOCUMENT_REPLACED" : "CONSULTANT_DOCUMENT_ADDED",
+        existing,
+        { type: parsed.type, fileName: file.name, size: file.size },
+      );
+    } catch (error) {
+      // O objeto novo ja foi enviado; remove-o best-effort para nao acumular
+      // arquivos orfaos no bucket.
+      try {
+        await provider.delete(storageKey);
+      } catch (cleanupError) {
+        console.error(
+          "[consultores] falha ao limpar documento orfao",
+          cleanupError,
+        );
+      }
+      throw error;
+    }
+
+    // Objeto antigo removido somente APOS persistir o novo metadado.
+    if (previousKey && previousKey !== storageKey) {
+      try {
+        await provider.delete(previousKey);
+      } catch (error) {
+        console.error(
+          "[consultores] falha ao remover documento substituido",
+          error,
+        );
+      }
+    }
+
+    revalidatePath(CONSULTORES_PATH);
+    return { ok: true, data: { id: documentId } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/** Remove um documento do consultor (metadado + objeto no storage). */
+export async function deleteConsultantDocument(
+  input: { documentId: string },
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(PEOPLE_ROLES);
+    const parsed = parseInput(consultantDocumentDeleteSchema, input);
+    const doc = await prisma.consultantDocument.findUnique({
+      where: { id: parsed.documentId },
+    });
+    if (!doc) {
+      throw new ActionError("NOT_FOUND", "Documento nao encontrado.");
+    }
+    await prisma.consultantDocument.delete({ where: { id: doc.id } });
+    await audit("ConsultantDocument", doc.id, "CONSULTANT_DOCUMENT_DELETED", doc, null);
+
+    if (isStorageConfigured()) {
+      try {
+        await getConsultantDocumentStorageProvider()?.delete(doc.storageKey);
+      } catch (error) {
+        console.error("[consultores] falha ao remover objeto do storage", error);
+      }
+    }
+
+    revalidatePath(CONSULTORES_PATH);
+    return { ok: true, data: { id: doc.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/**
+ * Define a foto do consultor (imagem, bucket consultant-documents). Guarda a
+ * chave de storage em ConsultantPersonalInfo.photoStorageKey e remove a foto
+ * anterior apos persistir a nova. Degrada honestamente sem storage.
+ */
+export async function uploadConsultantPhoto(
+  formData: FormData,
+): Promise<ActionResult<{ consultantId: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(PEOPLE_ROLES);
+    if (!isStorageConfigured()) {
+      throw new ActionError(
+        "NO_STORAGE",
+        "Foto indisponivel: storage nao configurado.",
+      );
+    }
+    const parsed = parseInput(consultantPhotoDeleteSchema, {
+      consultantId: formData.get("consultantId"),
+    });
+    const file = formData.get("file");
+    if (!(file instanceof File)) {
+      throw new ActionError("INVALID_FILE", "Nenhum arquivo enviado.");
+    }
+    const invalid = validatePhotoFile({
+      name: file.name,
+      type: file.type,
+      size: file.size,
+    });
+    if (invalid) {
+      throw new ActionError(invalid.code, invalid.message);
+    }
+
+    const previous = await prisma.consultantPersonalInfo.findUnique({
+      where: { consultantId: parsed.consultantId },
+      select: { photoStorageKey: true },
+    });
+    const previousKey = previous?.photoStorageKey ?? null;
+
+    const provider = getConsultantDocumentStorageProvider()!;
+    const storageKey = buildConsultantDocumentKey(
+      parsed.consultantId,
+      "photo",
+      file.name,
+    );
+    await provider.upload(storageKey, await file.arrayBuffer(), file.type);
+
+    try {
+      await prisma.consultantPersonalInfo.upsert({
+        where: { consultantId: parsed.consultantId },
+        update: { photoStorageKey: storageKey },
+        create: { consultantId: parsed.consultantId, photoStorageKey: storageKey },
+      });
+      await audit(
+        "ConsultantPersonalInfo",
+        parsed.consultantId,
+        "CONSULTANT_PHOTO_SAVED",
+        { photoStorageKey: previousKey },
+        { photoStorageKey: storageKey },
+      );
+    } catch (error) {
+      try {
+        await provider.delete(storageKey);
+      } catch (cleanupError) {
+        console.error("[consultores] falha ao limpar foto orfa", cleanupError);
+      }
+      throw error;
+    }
+
+    if (previousKey && previousKey !== storageKey) {
+      try {
+        await provider.delete(previousKey);
+      } catch (error) {
+        console.error("[consultores] falha ao remover foto anterior", error);
+      }
+    }
+
+    revalidatePath(CONSULTORES_PATH);
+    return { ok: true, data: { consultantId: parsed.consultantId } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/** Cria ou atualiza um idioma do consultor (Competencias). */
+export async function saveConsultantLanguage(
+  input: LanguageInput,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(PEOPLE_ROLES);
+    const parsed = parseInput(languageSchema, input);
+    const data = {
+      consultantId: parsed.consultantId,
+      name: parsed.name,
+      level: parsed.level,
+    };
+    const previous = parsed.id
+      ? await prisma.consultantLanguage.findUnique({ where: { id: parsed.id } })
+      : null;
+    const row = parsed.id
+      ? await prisma.consultantLanguage.update({ where: { id: parsed.id }, data })
+      : await prisma.consultantLanguage.create({ data });
+    await audit(
+      "ConsultantLanguage",
+      row.id,
+      previous ? "CONSULTANT_LANGUAGE_UPDATED" : "CONSULTANT_LANGUAGE_CREATED",
+      previous,
+      data,
+    );
+    revalidatePath(CONSULTORES_PATH);
+    return { ok: true, data: { id: row.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/** Remove um idioma do consultor. */
+export async function deleteConsultantLanguage(
+  input: { id: string },
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(PEOPLE_ROLES);
+    const parsed = parseInput(deleteLanguageSchema, input);
+    const previous = await prisma.consultantLanguage.findUnique({
+      where: { id: parsed.id },
+    });
+    if (!previous) throw new ActionError("NOT_FOUND", "Idioma nao encontrado.");
+    await prisma.consultantLanguage.delete({ where: { id: parsed.id } });
+    await audit("ConsultantLanguage", parsed.id, "CONSULTANT_LANGUAGE_DELETED", previous, null);
+    revalidatePath(CONSULTORES_PATH);
+    return { ok: true, data: { id: parsed.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/** Cria ou atualiza uma formacao academica do consultor (Competencias). */
+export async function saveConsultantEducation(
+  input: EducationInput,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(PEOPLE_ROLES);
+    const parsed = parseInput(educationSchema, input);
+    const data = {
+      consultantId: parsed.consultantId,
+      institution: parsed.institution,
+      course: parsed.course,
+      degree: parsed.degree,
+      startYear: parsed.startYear ?? null,
+      endYear: parsed.endYear ?? null,
+      completed: parsed.completed,
+    };
+    const previous = parsed.id
+      ? await prisma.consultantEducation.findUnique({ where: { id: parsed.id } })
+      : null;
+    const row = parsed.id
+      ? await prisma.consultantEducation.update({ where: { id: parsed.id }, data })
+      : await prisma.consultantEducation.create({ data });
+    await audit(
+      "ConsultantEducation",
+      row.id,
+      previous ? "CONSULTANT_EDUCATION_UPDATED" : "CONSULTANT_EDUCATION_CREATED",
+      previous,
+      data,
+    );
+    revalidatePath(CONSULTORES_PATH);
+    return { ok: true, data: { id: row.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/** Remove uma formacao academica do consultor. */
+export async function deleteConsultantEducation(
+  input: { id: string },
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(PEOPLE_ROLES);
+    const parsed = parseInput(deleteEducationSchema, input);
+    const previous = await prisma.consultantEducation.findUnique({
+      where: { id: parsed.id },
+    });
+    if (!previous) throw new ActionError("NOT_FOUND", "Formacao nao encontrada.");
+    await prisma.consultantEducation.delete({ where: { id: parsed.id } });
+    await audit("ConsultantEducation", parsed.id, "CONSULTANT_EDUCATION_DELETED", previous, null);
+    revalidatePath(CONSULTORES_PATH);
+    return { ok: true, data: { id: parsed.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/** Cria/atualiza os dados CLT (contratacao + dados trabalhistas) — upsert 1:1. */
+export async function saveCltInfo(
+  input: CltInfoInput,
+): Promise<ActionResult<{ consultantId: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(PEOPLE_ROLES);
+    const parsed = parseInput(cltInfoSchema, input);
+    const previous = await prisma.consultantCltInfo.findUnique({
+      where: { consultantId: parsed.consultantId },
+    });
+    const data = {
+      registrationNumber: parsed.registrationNumber,
+      pisPasep: parsed.pisPasep,
+      ctpsNumber: parsed.ctpsNumber,
+      ctpsSeries: parsed.ctpsSeries,
+      admissionDate: toDate(parsed.admissionDate),
+      dismissalDate: toDate(parsed.dismissalDate),
+      contractKind: parsed.contractKind,
+      workSchedule: parsed.workSchedule,
+      workShift: parsed.workShift,
+      union: parsed.union,
+      registeredRole: parsed.registeredRole,
+    };
+    await prisma.consultantCltInfo.upsert({
+      where: { consultantId: parsed.consultantId },
+      update: data,
+      create: { consultantId: parsed.consultantId, ...data },
+    });
+    await audit(
+      "ConsultantCltInfo",
+      parsed.consultantId,
+      "CONSULTANT_CLT_INFO_SAVED",
+      previous,
+      data,
+    );
+    revalidatePath(CONSULTORES_PATH);
+    return { ok: true, data: { consultantId: parsed.consultantId } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/** Cria/atualiza um periodo de ferias. balanceDays = entitled - taken. */
+export async function saveVacation(
+  input: VacationInput,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(PEOPLE_ROLES);
+    const parsed = parseInput(vacationSchema, input);
+    const entitledDays = parsed.entitledDays ?? 30;
+    const takenDays = parsed.takenDays ?? 0;
+    const data = {
+      consultantId: parsed.consultantId,
+      accrualPeriodStart: new Date(`${parsed.accrualPeriodStart}T00:00:00.000Z`),
+      accrualPeriodEnd: new Date(`${parsed.accrualPeriodEnd}T00:00:00.000Z`),
+      entitledDays,
+      takenDays,
+      balanceDays: entitledDays - takenDays,
+      note: parsed.note,
+    };
+    const previous = parsed.id
+      ? await prisma.consultantVacation.findUnique({ where: { id: parsed.id } })
+      : null;
+    const row = parsed.id
+      ? await prisma.consultantVacation.update({ where: { id: parsed.id }, data })
+      : await prisma.consultantVacation.create({ data });
+    await audit(
+      "ConsultantVacation",
+      row.id,
+      previous ? "CONSULTANT_VACATION_UPDATED" : "CONSULTANT_VACATION_CREATED",
+      previous,
+      data,
+    );
+    revalidatePath(CONSULTORES_PATH);
+    return { ok: true, data: { id: row.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/** Remove um periodo de ferias. */
+export async function deleteVacation(
+  input: { id: string },
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(PEOPLE_ROLES);
+    const parsed = parseInput(deleteVacationSchema, input);
+    const previous = await prisma.consultantVacation.findUnique({
+      where: { id: parsed.id },
+    });
+    if (!previous) throw new ActionError("NOT_FOUND", "Periodo nao encontrado.");
+    await prisma.consultantVacation.delete({ where: { id: parsed.id } });
+    await audit("ConsultantVacation", parsed.id, "CONSULTANT_VACATION_DELETED", previous, null);
+    revalidatePath(CONSULTORES_PATH);
+    return { ok: true, data: { id: parsed.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/**
+ * Lanca uma entrada no banco de horas. A magnitude vem positiva do formulario;
+ * o sinal e definido pelo tipo: COMPENSATION debita (negativo), OVERTIME e
+ * ADJUSTMENT creditam (positivo). Saldo = SUM(hours).
+ */
+export async function addHourBankEntry(
+  input: HourBankEntryInput,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(PEOPLE_ROLES);
+    const parsed = parseInput(hourBankEntrySchema, input);
+    const signedHours = signedHourBankHours(parsed.kind, parsed.hours);
+    const data = {
+      consultantId: parsed.consultantId,
+      occurredAt: new Date(`${parsed.occurredAt}T00:00:00.000Z`),
+      kind: parsed.kind,
+      hours: signedHours,
+      note: parsed.note,
+    };
+    const previous = parsed.id
+      ? await prisma.consultantHourBankEntry.findUnique({ where: { id: parsed.id } })
+      : null;
+    const row = parsed.id
+      ? await prisma.consultantHourBankEntry.update({ where: { id: parsed.id }, data })
+      : await prisma.consultantHourBankEntry.create({ data });
+    await audit(
+      "ConsultantHourBankEntry",
+      row.id,
+      previous ? "CONSULTANT_HOUR_BANK_UPDATED" : "CONSULTANT_HOUR_BANK_CREATED",
+      previous,
+      { ...data, hours: signedHours },
+    );
+    revalidatePath(CONSULTORES_PATH);
+    return { ok: true, data: { id: row.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/** Remove uma entrada do banco de horas. */
+export async function deleteHourBankEntry(
+  input: { id: string },
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(PEOPLE_ROLES);
+    const parsed = parseInput(deleteHourBankEntrySchema, input);
+    const previous = await prisma.consultantHourBankEntry.findUnique({
+      where: { id: parsed.id },
+    });
+    if (!previous) throw new ActionError("NOT_FOUND", "Lancamento nao encontrado.");
+    await prisma.consultantHourBankEntry.delete({ where: { id: parsed.id } });
+    await audit("ConsultantHourBankEntry", parsed.id, "CONSULTANT_HOUR_BANK_DELETED", previous, null);
+    revalidatePath(CONSULTORES_PATH);
+    return { ok: true, data: { id: parsed.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/** Cria/atualiza os dados PJ (contratacao + faturamento) — upsert 1:1. */
+export async function savePjInfo(
+  input: PjInfoInput,
+): Promise<ActionResult<{ consultantId: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(PEOPLE_ROLES);
+    const parsed = parseInput(pjInfoSchema, input);
+    const previous = await prisma.consultantPjInfo.findUnique({
+      where: { consultantId: parsed.consultantId },
+    });
+    const data = {
+      contractStart: toDate(parsed.contractStart),
+      contractEnd: toDate(parsed.contractEnd),
+      contractTermMonths: parsed.contractTermMonths ?? null,
+      autoRenew: parsed.autoRenew,
+      issuesInvoice: parsed.issuesInvoice,
+      invoiceType: parsed.invoiceType,
+      issuingMunicipality: parsed.issuingMunicipality,
+      issRate: parsed.issRate ?? null,
+    };
+    await prisma.consultantPjInfo.upsert({
+      where: { consultantId: parsed.consultantId },
+      update: data,
+      create: { consultantId: parsed.consultantId, ...data },
+    });
+    await audit(
+      "ConsultantPjInfo",
+      parsed.consultantId,
+      "CONSULTANT_PJ_INFO_SAVED",
+      previous,
+      data,
+    );
+    revalidatePath(CONSULTORES_PATH);
+    return { ok: true, data: { consultantId: parsed.consultantId } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/** Cria/atualiza o responsavel legal da empresa PJ — upsert 1:1. */
+export async function saveLegalRepresentative(
+  input: LegalRepresentativeInput,
+): Promise<ActionResult<{ consultantId: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(PEOPLE_ROLES);
+    const parsed = parseInput(legalRepresentativeSchema, input);
+    const previous = await prisma.consultantLegalRepresentative.findUnique({
+      where: { consultantId: parsed.consultantId },
+    });
+    const data = {
+      name: parsed.name,
+      cpf: parsed.cpf,
+      email: parsed.email,
+      phone: parsed.phone,
+    };
+    await prisma.consultantLegalRepresentative.upsert({
+      where: { consultantId: parsed.consultantId },
+      update: data,
+      create: { consultantId: parsed.consultantId, ...data },
+    });
+    await audit(
+      "ConsultantLegalRepresentative",
+      parsed.consultantId,
+      "CONSULTANT_LEGAL_REP_SAVED",
+      previous,
+      data,
+    );
+    revalidatePath(CONSULTORES_PATH);
+    return { ok: true, data: { consultantId: parsed.consultantId } };
   } catch (error) {
     return toFailure(error);
   }
