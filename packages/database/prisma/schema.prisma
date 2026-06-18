@@ -270,6 +270,86 @@ enum BenefitType {
   OTHER
 }
 
+enum Gender {
+  FEMALE
+  MALE
+  NON_BINARY
+  OTHER
+  UNDISCLOSED
+}
+
+enum MaritalStatus {
+  SINGLE
+  MARRIED
+  STABLE_UNION
+  DIVORCED
+  WIDOWED
+  SEPARATED
+  OTHER
+}
+
+/// Tipos de documento anexavel ao consultor. Cobre documentos CLT e PJ alem do
+/// comprovante de residencia comum. A regra "um anexo por tipo" e aplicada na
+/// Server Action (upsert por consultantId+type); OTHER pode repetir.
+enum ConsultantDocumentType {
+  PROOF_OF_ADDRESS
+  RG
+  CPF
+  CTPS
+  CERTIFICATE
+  EMPLOYMENT_CONTRACT
+  ASO_ADMISSIONAL
+  SERVICE_CONTRACT
+  CNPJ_CARD
+  ARTICLES_OF_ASSOCIATION
+  NEGATIVE_CERTIFICATE
+  BANK_PROOF
+  OTHER
+}
+
+enum LanguageLevel {
+  BASIC
+  INTERMEDIATE
+  ADVANCED
+  FLUENT
+  NATIVE
+}
+
+enum EducationDegree {
+  HIGH_SCHOOL
+  TECHNICAL
+  UNDERGRADUATE
+  POSTGRADUATE
+  MASTERS
+  DOCTORATE
+  OTHER
+}
+
+/// Modalidade do contrato CLT (obrigacoes trabalhistas), distinta do
+/// ConsultantContractType financeiro (CLT/PJ/CLT_FLEX).
+enum CltContractKind {
+  INDEFINITE
+  FIXED_TERM
+  INTERNSHIP
+  APPRENTICESHIP
+}
+
+/// Tipo de lancamento no banco de horas: credito (extra), debito (compensacao)
+/// ou ajuste manual. O saldo e a soma de `hours` (positivo = credito).
+enum HourBankEntryKind {
+  OVERTIME
+  COMPENSATION
+  ADJUSTMENT
+}
+
+/// Tipo de nota emitida pelo prestador PJ.
+enum InvoiceType {
+  NFSE
+  NFE
+  RPA
+  OTHER
+}
+
 enum ConsultantPaymentStatus {
   OPEN
   WAITING_FOR_INVOICE
@@ -331,6 +411,7 @@ model User {
   auditEvents                AuditEvent[]                @relation("AuditActor")
   approvals                  Approval[]                  @relation("ApprovalApprover")
   uploadedExpenseAttachments ExpenseAttachment[]         @relation("ExpenseAttachmentUploader")
+  uploadedConsultantDocuments ConsultantDocument[]       @relation("ConsultantDocumentUploader")
   closedRevenueClosings      RevenueClosing[]            @relation("RevenueClosingCloser")
   validatedFiscalDocuments   FiscalDocument[]            @relation("FiscalDocumentValidator")
   paymentForecastsCreated    ConsultantPaymentForecast[] @relation("PaymentForecastCreator")
@@ -406,6 +487,11 @@ model Consultant {
   seniority              Seniority
   area                   String?
   status                 ConsultantStatus               @default(ACTIVE)
+  /// Tipo de contratacao que orienta quais secoes do cadastro aparecem.
+  /// Distinto de ConsultantCompensation.contractType, que e a modalidade
+  /// financeira por vigencia. Nullable para backfill; nao tornar obrigatorio
+  /// sem antes preencher os registros existentes.
+  contractType           ConsultantContractType?
   hourlyCost             Decimal?                       @db.Decimal(12, 2)
   allocations            Allocation[]
   periods                TimesheetPeriod[]
@@ -421,6 +507,14 @@ model Consultant {
   bankAccounts           ConsultantBankAccount[]
   compensations          ConsultantCompensation[]
   benefits               ConsultantBenefit[]
+  documents              ConsultantDocument[]
+  languages              ConsultantLanguage[]
+  educations             ConsultantEducation[]
+  cltInfo                ConsultantCltInfo?
+  vacations              ConsultantVacation[]
+  hourBankEntries        ConsultantHourBankEntry[]
+  pjInfo                 ConsultantPjInfo?
+  legalRepresentative    ConsultantLegalRepresentative?
   paymentForecasts       ConsultantPaymentForecast[]
   payments               ConsultantPayment[]
   saleRates              ProjectSaleRate[]
@@ -430,14 +524,26 @@ model Consultant {
 }
 
 model ConsultantPersonalInfo {
-  id           String     @id @default(cuid())
-  consultantId String     @unique
-  consultant   Consultant @relation(fields: [consultantId], references: [id], onDelete: Restrict)
-  cpf          String?
-  birthDate    DateTime?
-  phone        String?
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  id               String         @id @default(cuid())
+  consultantId     String         @unique
+  consultant       Consultant     @relation(fields: [consultantId], references: [id], onDelete: Restrict)
+  cpf              String?
+  birthDate        DateTime?
+  phone            String?
+  socialName       String?
+  /// Chave de storage da foto (bucket consultant-documents). Nunca uma URL.
+  photoStorageKey  String?
+  rg               String?
+  gender           Gender?
+  maritalStatus    MaritalStatus?
+  nationality      String?
+  personalEmail    String?
+  corporateEmail   String?
+  mobilePhone      String?
+  emergencyPhone   String?
+  emergencyContact String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
 }
 
 model ConsultantCompanyInfo {
@@ -448,6 +554,8 @@ model ConsultantCompanyInfo {
   legalName             String?
   tradeName             String?
   municipalRegistration String?
+  stateRegistration     String?
+  cnaePrimary           String?
   taxRegime             String?
   providerSnapshot      Json?
   createdAt             DateTime   @default(now())
@@ -521,6 +629,147 @@ model ConsultantBenefit {
   updatedAt    DateTime    @updatedAt
 
   @@index([consultantId, startsAt])
+}
+
+/// Documento anexavel do consultor (o arquivo vive em object storage, bucket
+/// `consultant-documents`). Espelha ExpenseAttachment, mas com `type` e
+/// cardinalidade 1:N. A regra "um anexo por tipo" e aplicada na Server Action
+/// (upsert por consultantId+type), nao no banco, para permitir multiplos OTHER.
+model ConsultantDocument {
+  id               String                 @id @default(cuid())
+  consultantId     String
+  consultant       Consultant             @relation(fields: [consultantId], references: [id], onDelete: Restrict)
+  type             ConsultantDocumentType
+  fileName         String
+  contentType      String
+  size             Int
+  storageBucket    String
+  storageKey       String
+  uploadedByUserId String?
+  uploadedBy       User?                  @relation("ConsultantDocumentUploader", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  @@index([consultantId, type])
+  @@index([uploadedByUserId])
+}
+
+/// Idioma do consultor (Competencias). 1:N simples, gerenciado por People.
+model ConsultantLanguage {
+  id           String        @id @default(cuid())
+  consultantId String
+  consultant   Consultant    @relation(fields: [consultantId], references: [id], onDelete: Restrict)
+  name         String
+  level        LanguageLevel
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@index([consultantId])
+}
+
+/// Formacao academica do consultor (Competencias). 1:N, gerenciado por People.
+model ConsultantEducation {
+  id           String          @id @default(cuid())
+  consultantId String
+  consultant   Consultant      @relation(fields: [consultantId], references: [id], onDelete: Restrict)
+  institution  String
+  course       String
+  degree       EducationDegree
+  startYear    Int?
+  endYear      Int?
+  completed    Boolean         @default(false)
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@index([consultantId])
+}
+
+/// Dados especificos CLT: contratacao + dados trabalhistas (1:1). Visivel
+/// quando Consultant.contractType e CLT ou CLT_FLEX.
+model ConsultantCltInfo {
+  id                 String           @id @default(cuid())
+  consultantId       String           @unique
+  consultant         Consultant       @relation(fields: [consultantId], references: [id], onDelete: Restrict)
+  registrationNumber String?
+  pisPasep           String?
+  ctpsNumber         String?
+  ctpsSeries         String?
+  admissionDate      DateTime?
+  dismissalDate      DateTime?
+  contractKind       CltContractKind?
+  workSchedule       String?
+  workShift          String?
+  union              String?
+  registeredRole     String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+}
+
+/// Ferias do consultor CLT (1:N). Cada linha e um periodo aquisitivo; o
+/// historico sao as linhas anteriores. balanceDays e persistido para o
+/// historico mas pode ser derivado de entitledDays - takenDays.
+model ConsultantVacation {
+  id                 String     @id @default(cuid())
+  consultantId       String
+  consultant         Consultant @relation(fields: [consultantId], references: [id], onDelete: Restrict)
+  accrualPeriodStart DateTime
+  accrualPeriodEnd   DateTime
+  entitledDays       Int        @default(30)
+  takenDays          Int        @default(0)
+  balanceDays        Int        @default(30)
+  note               String?
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+
+  @@index([consultantId, accrualPeriodStart])
+}
+
+/// Banco de horas (1:N, ledger). Saldo atual = SUM(hours). Positivo = credito
+/// (hora extra), negativo = debito (compensacao).
+model ConsultantHourBankEntry {
+  id           String            @id @default(cuid())
+  consultantId String
+  consultant   Consultant        @relation(fields: [consultantId], references: [id], onDelete: Restrict)
+  occurredAt   DateTime
+  kind         HourBankEntryKind
+  hours        Decimal           @db.Decimal(6, 2)
+  note         String?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  @@index([consultantId, occurredAt])
+}
+
+/// Dados especificos PJ: contratacao + faturamento (1:1). A identidade da
+/// empresa (CNPJ, razao social, inscricoes, CNAE, regime) vive em
+/// ConsultantCompanyInfo. Visivel quando contractType e PJ ou CLT_FLEX.
+model ConsultantPjInfo {
+  id                  String       @id @default(cuid())
+  consultantId        String       @unique
+  consultant          Consultant   @relation(fields: [consultantId], references: [id], onDelete: Restrict)
+  contractStart       DateTime?
+  contractEnd         DateTime?
+  contractTermMonths  Int?
+  autoRenew           Boolean      @default(false)
+  issuesInvoice       Boolean      @default(true)
+  invoiceType         InvoiceType?
+  issuingMunicipality String?
+  issRate             Decimal?     @db.Decimal(5, 2)
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+}
+
+/// Responsavel legal da empresa PJ (1:1).
+model ConsultantLegalRepresentative {
+  id           String     @id @default(cuid())
+  consultantId String     @unique
+  consultant   Consultant @relation(fields: [consultantId], references: [id], onDelete: Restrict)
+  name         String?
+  cpf          String?
+  email        String?
+  phone        String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
 }
 
 model Client {

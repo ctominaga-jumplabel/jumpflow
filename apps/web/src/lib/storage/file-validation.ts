@@ -30,6 +30,15 @@ export const ACCEPTED_LOGO_MIME_TYPES = Object.keys(LOGO_MIME_EXTENSIONS);
 
 export const MAX_LOGO_SIZE_BYTES = 2 * 1024 * 1024; // 2 MB
 
+/** Raster-only whitelist for a person's photo (no SVG — scripts). 2 MB cap. */
+const PHOTO_MIME_EXTENSIONS: Record<string, readonly string[]> = {
+  "image/jpeg": [".jpg", ".jpeg"],
+  "image/png": [".png"],
+  "image/webp": [".webp"],
+};
+
+export const ACCEPTED_PHOTO_MIME_TYPES = Object.keys(PHOTO_MIME_EXTENSIONS);
+
 export interface ReceiptFileMeta {
   name: string;
   type: string;
@@ -109,6 +118,36 @@ export function validateLogoFile(
 }
 
 /**
+ * Validate a consultant photo's metadata. Raster images only (JPG, PNG, WEBP —
+ * no SVG), max 2 MB. Same INVALID_FILE/FILE_TOO_LARGE typed-failure contract.
+ */
+export function validatePhotoFile(
+  file: ReceiptFileMeta,
+): FileValidationFailure | null {
+  const allowedExtensions = PHOTO_MIME_EXTENSIONS[file.type];
+  if (!allowedExtensions) {
+    return {
+      code: "INVALID_FILE",
+      message: "Formato não aceito. Use JPG, PNG ou WEBP.",
+    };
+  }
+  const extension = extensionOf(file.name);
+  if (!allowedExtensions.includes(extension)) {
+    return {
+      code: "INVALID_FILE",
+      message: "Extensão do arquivo não corresponde ao tipo enviado.",
+    };
+  }
+  if (file.size <= 0) {
+    return { code: "FILE_TOO_LARGE", message: "Arquivo vazio." };
+  }
+  if (file.size > MAX_LOGO_SIZE_BYTES) {
+    return { code: "FILE_TOO_LARGE", message: "Arquivo acima de 2 MB." };
+  }
+  return null;
+}
+
+/**
  * Sanitize a file name for storage keys: lowercase, pure ASCII (accents
  * stripped), spaces -> "-", only [a-z0-9._-], no ".."/path separators
  * (anti path traversal), max 100 chars, fallback "comprovante".
@@ -145,6 +184,21 @@ export function buildStorageKey(
   now: Date = new Date(),
 ): string {
   return `expenses/${expenseId}/${compactUtcTimestamp(now)}-${safeFileName(fileName)}`;
+}
+
+/**
+ * Storage key for a consultant document:
+ * `consultants/{consultantId}/{type}/{timestamp}-{name}`. The path NEVER
+ * contains CPF, name or any sensitive data — only the consultant cuid, the
+ * document type and the sanitized file name.
+ */
+export function buildConsultantDocumentKey(
+  consultantId: string,
+  type: string,
+  fileName: string,
+  now: Date = new Date(),
+): string {
+  return `consultants/${consultantId}/${type.toLowerCase()}/${compactUtcTimestamp(now)}-${safeFileName(fileName)}`;
 }
 
 /**

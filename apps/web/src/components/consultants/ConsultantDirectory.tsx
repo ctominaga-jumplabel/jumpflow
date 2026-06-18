@@ -19,19 +19,24 @@ import {
   type Seniority,
 } from "@/lib/mock-data/consultants";
 import {
+  loadConsultantProfile,
   saveBankAccount,
   saveCompensation,
   saveConsultantIdentity,
   saveVoucherBenefits,
 } from "@/app/app/consultores/actions";
-import type {
-  BankAccountInput,
-  CompensationInput,
-  ConsultantIdentityInput,
-  VoucherBenefitsInput,
+import {
+  CONTRACT_TYPES,
+  type BankAccountInput,
+  type CompensationInput,
+  type ConsultantIdentityInput,
+  type VoucherBenefitsInput,
 } from "@/lib/consultants/schemas";
+import { contractTypeLabels } from "@/lib/consultants/labels";
+import type { ConsultantProfile } from "@/lib/db/consultants";
 import { computeCompensation } from "@/lib/consultants/compensation";
 import { ConsultantAvailabilityBadge } from "./ConsultantAvailabilityBadge";
+import { ConsultantProfileSections } from "./ConsultantProfileSections";
 import { ConsultantSkillChips } from "./ConsultantSkillChips";
 
 const SENIORITY_FILTERS: (Seniority | "ALL")[] = [
@@ -61,7 +66,36 @@ export function ConsultantDirectory({
   const [seniority, setSeniority] = useState<Seniority | "ALL">("ALL");
   const [skillId, setSkillId] = useState<string>("ALL");
   const [selected, setSelected] = useState<Consultant | null>(null);
+  const [profile, setProfile] = useState<ConsultantProfile | null>(null);
+  const [loadingProfile, setLoadingProfile] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+
+  // Carrega o perfil completo sob demanda (evita puxar todos os perfis na
+  // listagem). Disparado no clique de "Detalhes", nunca em useEffect.
+  async function openDetails(consultant: Consultant) {
+    setSelected(consultant);
+    setProfile(null);
+    setMessage(null);
+    // O perfil (dados pessoais/documentos) so e visivel/gerenciavel por People.
+    // Usuarios apenas-financeiro ainda editam compensacao/VA-VR-VT abaixo.
+    if (!canManagePeople) return;
+    setLoadingProfile(true);
+    const result = await loadConsultantProfile(consultant.id);
+    setLoadingProfile(false);
+    if (result.ok) setProfile(result.data);
+    else setMessage(result.message);
+  }
+
+  async function reloadProfile() {
+    if (!selected || !canManagePeople) return;
+    const result = await loadConsultantProfile(selected.id);
+    if (result.ok) setProfile(result.data);
+  }
+
+  function closeDetails() {
+    setSelected(null);
+    setProfile(null);
+  }
 
   const skillOptions = useMemo(
     () => distinctSkills(consultants),
@@ -164,7 +198,7 @@ export function ConsultantDirectory({
                   variant="secondary"
                   size="sm"
                   icon={Edit}
-                  onClick={() => setSelected(consultant)}
+                  onClick={() => void openDetails(consultant)}
                 >
                   Detalhes
                 </ActionButton>
@@ -175,11 +209,14 @@ export function ConsultantDirectory({
       )}
       <ConsultantDetailModal
         consultant={selected}
+        profile={profile}
+        loadingProfile={loadingProfile}
         canManagePeople={canManagePeople}
         canManageFinancials={canManageFinancials}
         message={message}
         onMessage={setMessage}
-        onClose={() => setSelected(null)}
+        onReload={reloadProfile}
+        onClose={closeDetails}
       />
     </div>
   );
@@ -187,17 +224,23 @@ export function ConsultantDirectory({
 
 function ConsultantDetailModal({
   consultant,
+  profile,
+  loadingProfile,
   canManagePeople,
   canManageFinancials,
   message,
   onMessage,
+  onReload,
   onClose,
 }: {
   consultant: Consultant | null;
+  profile: ConsultantProfile | null;
+  loadingProfile: boolean;
   canManagePeople: boolean;
   canManageFinancials: boolean;
   message: string | null;
   onMessage: (message: string | null) => void;
+  onReload: () => void;
   onClose: () => void;
 }) {
   const [identity, setIdentity] = useState<ConsultantIdentityInput | null>(null);
@@ -229,6 +272,9 @@ function ConsultantDetailModal({
             : consultant.seniority,
       area: consultant.area,
       status: consultant.status === "ACTIVE" ? "ACTIVE" : "INACTIVE",
+      contractType:
+        (profile?.contractType as ConsultantIdentityInput["contractType"]) ??
+        undefined,
     } satisfies ConsultantIdentityInput);
   const currentCompensation =
     compensation ??
@@ -361,6 +407,29 @@ function ConsultantDetailModal({
               }
               className={fieldClass()}
             />
+            <label className="space-y-1 text-sm font-medium text-medium">
+              Tipo de contratacao
+              <select
+                aria-label="Tipo de contratacao"
+                value={currentIdentity.contractType ?? ""}
+                onChange={(event) =>
+                  setIdentity({
+                    ...currentIdentity,
+                    contractType:
+                      (event.target.value ||
+                        undefined) as ConsultantIdentityInput["contractType"],
+                  })
+                }
+                className={fieldClass()}
+              >
+                <option value="">Nao definido</option>
+                {CONTRACT_TYPES.map((type) => (
+                  <option key={type} value={type}>
+                    {contractTypeLabels[type]}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
           <ActionButton
             size="sm"
@@ -371,6 +440,21 @@ function ConsultantDetailModal({
             Salvar identidade
           </ActionButton>
         </section>
+
+        {loadingProfile ? (
+          <p className="rounded-md border border-border bg-surface-muted px-3 py-2 text-sm text-medium">
+            Carregando cadastro...
+          </p>
+        ) : profile ? (
+          <ConsultantProfileSections
+            consultantId={consultantId}
+            profile={profile}
+            contractType={currentIdentity.contractType}
+            canManagePeople={canManagePeople}
+            onMessage={onMessage}
+            onReload={onReload}
+          />
+        ) : null}
 
         <section className="space-y-3 rounded-md border border-border p-3">
           <div className="flex items-center gap-2 text-sm font-semibold text-strong">
