@@ -137,12 +137,14 @@ export async function collectAutoApprovalDecisions(
   const duplicateIds = findDuplicateEntryIds(dayEntries);
 
   // Regras de aprovacao automatica por projeto e por consultor.
+  // Apenas regras ATIVAS entram no motor; uma regra inativa e ignorada (como se
+  // nao existisse), entao tambem nao ativa o modo exclusivo.
   const [projectRuleRows, consultantRuleRows] = await Promise.all([
     prisma.projectAutoApprovalRule.findMany({
-      where: { projectId: { in: projectIds } },
+      where: { projectId: { in: projectIds }, active: true },
     }),
     prisma.consultantAutoApprovalRule.findMany({
-      where: { projectId: { in: projectIds } },
+      where: { projectId: { in: projectIds }, active: true },
     }),
   ]);
   const ruleShape = (r: {

@@ -30,6 +30,8 @@ import {
   projectInputSchema,
   projectUpdateSchema,
   removeConsultantAutoApprovalRuleSchema,
+  setConsultantAutoApprovalActiveSchema,
+  setProjectAutoApprovalActiveSchema,
   saleRateInputSchema,
   saleRateUpdateSchema,
   type AllocationInput,
@@ -41,6 +43,8 @@ import {
   type ConsultantAutoApprovalRuleInput,
   type LinkAutoApprovalConsultantsInput,
   type ProjectAutoApprovalRuleInput,
+  type SetConsultantAutoApprovalActiveInput,
+  type SetProjectAutoApprovalActiveInput,
   type ProjectBillingConfigInput,
   type ProjectBillingTypeInput,
   type ProjectCommercialInput,
@@ -650,6 +654,78 @@ export async function deleteConsultantAutoApprovalRule(
     );
     revalidateProjectViews();
     return { ok: true, data: { id: parsed.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/** Inativa/reativa a regra de aprovação automática do projeto. */
+export async function setProjectAutoApprovalActive(
+  input: SetProjectAutoApprovalActiveInput,
+): Promise<ActionResult<{ active: boolean }>> {
+  try {
+    ensureDatabase();
+    await requireRole(PROJECT_WRITE_ROLES);
+    const parsed = parseInput(setProjectAutoApprovalActiveSchema, input);
+    const previous = await prisma.projectAutoApprovalRule.findUnique({
+      where: { projectId: parsed.projectId },
+      select: { id: true, active: true },
+    });
+    if (!previous) throw new ActionError("NOT_FOUND", "Regra nao encontrada.");
+    if (previous.active === parsed.active) {
+      return { ok: true, data: { active: previous.active } };
+    }
+    await prisma.projectAutoApprovalRule.update({
+      where: { projectId: parsed.projectId },
+      data: { active: parsed.active },
+    });
+    await audit(
+      "ProjectAutoApprovalRule",
+      previous.id,
+      parsed.active
+        ? "PROJECT_AUTO_APPROVAL_RULE_ACTIVATED"
+        : "PROJECT_AUTO_APPROVAL_RULE_DEACTIVATED",
+      { active: previous.active },
+      { active: parsed.active },
+    );
+    revalidateProjectViews();
+    return { ok: true, data: { active: parsed.active } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/** Inativa/reativa a regra de aprovação automática de um consultor. */
+export async function setConsultantAutoApprovalActive(
+  input: SetConsultantAutoApprovalActiveInput,
+): Promise<ActionResult<{ active: boolean }>> {
+  try {
+    ensureDatabase();
+    await requireRole(PROJECT_WRITE_ROLES);
+    const parsed = parseInput(setConsultantAutoApprovalActiveSchema, input);
+    const previous = await prisma.consultantAutoApprovalRule.findUnique({
+      where: { id: parsed.id },
+      select: { id: true, active: true },
+    });
+    if (!previous) throw new ActionError("NOT_FOUND", "Regra nao encontrada.");
+    if (previous.active === parsed.active) {
+      return { ok: true, data: { active: previous.active } };
+    }
+    await prisma.consultantAutoApprovalRule.update({
+      where: { id: parsed.id },
+      data: { active: parsed.active },
+    });
+    await audit(
+      "ConsultantAutoApprovalRule",
+      previous.id,
+      parsed.active
+        ? "CONSULTANT_AUTO_APPROVAL_RULE_ACTIVATED"
+        : "CONSULTANT_AUTO_APPROVAL_RULE_DEACTIVATED",
+      { active: previous.active },
+      { active: parsed.active },
+    );
+    revalidateProjectViews();
+    return { ok: true, data: { active: parsed.active } };
   } catch (error) {
     return toFailure(error);
   }

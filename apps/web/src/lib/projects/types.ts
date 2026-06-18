@@ -153,6 +153,7 @@ export interface ProjectItem {
 }
 
 export interface ProjectAutoApprovalRuleItem {
+  active: boolean;
   weekendEnabled: boolean;
   hoursRangeEnabled: boolean;
   minMinutes: number;

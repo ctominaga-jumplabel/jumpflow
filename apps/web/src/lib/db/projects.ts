@@ -324,6 +324,7 @@ export async function listProjects(options?: {
       hasBillingConfig: billingConfigProjectIds.has(row.id),
       autoApprovalRule: row.autoApprovalRule
         ? {
+            active: row.autoApprovalRule.active,
             weekendEnabled: row.autoApprovalRule.weekendEnabled,
             hoursRangeEnabled: row.autoApprovalRule.hoursRangeEnabled,
             minMinutes: row.autoApprovalRule.minMinutes,
@@ -334,6 +335,7 @@ export async function listProjects(options?: {
         id: r.id,
         consultantId: r.consultantId,
         consultantName: r.consultant.name,
+        active: r.active,
         weekendEnabled: r.weekendEnabled,
         hoursRangeEnabled: r.hoursRangeEnabled,
         minMinutes: r.minMinutes,
