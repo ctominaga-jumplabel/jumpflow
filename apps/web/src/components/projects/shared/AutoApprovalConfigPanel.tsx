@@ -134,9 +134,10 @@ export function AutoApprovalConfigPanel({
 
       {exclusiveMode ? (
         <div className="rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm text-warning">
-          Modo por consultor ativo: a regra do projeto está suspensa. Apenas os
+          Modo por consultor ativo: a regra do projeto foi inativada. Apenas os
           consultores vinculados abaixo têm aprovação automática; os demais ficam
-          manuais. Remova todos os vínculos para voltar à regra do projeto.
+          manuais. Inative/remova as regras por consultor e reative a regra do
+          projeto para voltar.
         </div>
       ) : null}
 
@@ -164,7 +165,9 @@ export function AutoApprovalConfigPanel({
               size="sm"
               variant={project.autoApprovalRule.active ? "secondary" : "success"}
               icon={project.autoApprovalRule.active ? Pause : Play}
-              disabled={!canManageProjects || isPending}
+              // Em modo exclusivo a regra do projeto fica suspensa: não dá para
+              // reativá-la enquanto houver regra por consultor ativa.
+              disabled={!canManageProjects || isPending || exclusiveMode}
               onClick={() =>
                 run(
                   () =>

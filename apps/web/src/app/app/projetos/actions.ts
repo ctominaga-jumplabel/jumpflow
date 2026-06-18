@@ -477,6 +477,37 @@ const autoApprovalRuleData = (input: {
   maxMinutes: input.maxMinutes,
 });
 
+/**
+ * Invariante: se o projeto tem QUALQUER regra por consultor ATIVA, a regra do
+ * projeto fica inativa (suspensa explicitamente — o motor já a ignora no modo
+ * exclusivo, mas aqui refletimos isso no dado/UI). Chamado após qualquer ação
+ * que ative uma regra de consultor. Audita quando inativa.
+ */
+async function deactivateProjectRuleForExclusiveMode(
+  projectId: string,
+): Promise<void> {
+  const activeConsultantRules = await prisma.consultantAutoApprovalRule.count({
+    where: { projectId, active: true },
+  });
+  if (activeConsultantRules === 0) return;
+  const projectRule = await prisma.projectAutoApprovalRule.findUnique({
+    where: { projectId },
+    select: { id: true, active: true },
+  });
+  if (!projectRule || !projectRule.active) return;
+  await prisma.projectAutoApprovalRule.update({
+    where: { projectId },
+    data: { active: false },
+  });
+  await audit(
+    "ProjectAutoApprovalRule",
+    projectRule.id,
+    "PROJECT_AUTO_APPROVAL_RULE_DEACTIVATED",
+    { active: true },
+    { active: false, reason: "consultant_rule_registered" },
+  );
+}
+
 /** Cria/atualiza a regra de aprovação automática do projeto (upsert 1:1). */
 export async function upsertProjectAutoApprovalRule(
   input: ProjectAutoApprovalRuleInput,
@@ -569,6 +600,8 @@ export async function linkConsultantsToAutoApproval(
         null,
         { consultantIds: toCreate, seed },
       );
+      // Cadastrar regra(s) por consultor inativa a regra do projeto.
+      await deactivateProjectRuleForExclusiveMode(parsed.projectId);
     }
     revalidateProjectViews();
     return { ok: true, data: { created: toCreate.length } };
@@ -625,6 +658,8 @@ export async function upsertConsultantAutoApprovalRule(
       previous,
       data,
     );
+    // Cadastrar/ativar uma regra por consultor inativa a regra do projeto.
+    await deactivateProjectRuleForExclusiveMode(parsed.projectId);
     revalidateProjectViews();
     return { ok: true, data: { id: saved.id } };
   } catch (error) {
@@ -675,6 +710,19 @@ export async function setProjectAutoApprovalActive(
     if (previous.active === parsed.active) {
       return { ok: true, data: { active: previous.active } };
     }
+    // Não reativa a regra do projeto enquanto houver regra por consultor ativa
+    // (modo exclusivo): inative as regras por consultor primeiro.
+    if (parsed.active) {
+      const activeConsultantRules = await prisma.consultantAutoApprovalRule.count({
+        where: { projectId: parsed.projectId, active: true },
+      });
+      if (activeConsultantRules > 0) {
+        throw new ActionError(
+          "INVALID_INPUT",
+          "Inative as regras por consultor antes de reativar a regra do projeto.",
+        );
+      }
+    }
     await prisma.projectAutoApprovalRule.update({
       where: { projectId: parsed.projectId },
       data: { active: parsed.active },
@@ -705,7 +753,7 @@ export async function setConsultantAutoApprovalActive(
     const parsed = parseInput(setConsultantAutoApprovalActiveSchema, input);
     const previous = await prisma.consultantAutoApprovalRule.findUnique({
       where: { id: parsed.id },
-      select: { id: true, active: true },
+      select: { id: true, active: true, projectId: true },
     });
     if (!previous) throw new ActionError("NOT_FOUND", "Regra nao encontrada.");
     if (previous.active === parsed.active) {
@@ -724,6 +772,11 @@ export async function setConsultantAutoApprovalActive(
       { active: previous.active },
       { active: parsed.active },
     );
+    // Reativar uma regra por consultor reativa o modo exclusivo → inativa a
+    // regra do projeto.
+    if (parsed.active) {
+      await deactivateProjectRuleForExclusiveMode(previous.projectId);
+    }
     revalidateProjectViews();
     return { ok: true, data: { active: parsed.active } };
   } catch (error) {
