@@ -284,6 +284,7 @@ vi.mock("@/lib/auth/guards", () => ({
 import {
   attachReceipt,
   createExpense,
+  createExpenseBatch,
   decideAsFinance,
   decideAsManager,
   deleteExpense,
@@ -414,6 +415,46 @@ describe("createExpense — allocation rule", () => {
     expect(expense.consultantId).toBe("con-1");
     expect(expense.date.toISOString()).toBe("2026-06-10T00:00:00.000Z");
     expect(expense.amount).toBe(184.9);
+  });
+});
+
+describe("createExpenseBatch — one NF, several items", () => {
+  it("creates one Expense per item sharing description and invoiceNumber", async () => {
+    const result = await createExpenseBatch({
+      projectId: "proj-1",
+      description: "Viagem ao cliente",
+      invoiceNumber: "NF-123",
+      items: [
+        { date: "2026-06-10", amount: 50, category: "RIDE_SHARE" },
+        { date: "2026-06-11", amount: 320, category: "AIR_TICKET" },
+      ],
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.ids).toHaveLength(2);
+      expect(result.data.groupId).toBeTruthy();
+    }
+    expect(h.store.expenses).toHaveLength(2);
+    expect(
+      h.store.expenses.every((e) => e.description === "Viagem ao cliente"),
+    ).toBe(true);
+    expect(h.store.expenses.every((e) => e.invoiceNumber === "NF-123")).toBe(
+      true,
+    );
+  });
+
+  it("fails the whole batch (no partial rows) when an item date has no allocation", async () => {
+    const result = await createExpenseBatch({
+      projectId: "proj-1",
+      description: "Viagem",
+      items: [
+        { date: "2026-06-10", amount: 50, category: "RIDE_SHARE" },
+        // Before the allocation start date (2026-01-05): no active allocation.
+        { date: "2020-01-01", amount: 10, category: "MEALS" },
+      ],
+    });
+    expect(result).toMatchObject({ ok: false, error: "NO_ACTIVE_ALLOCATION" });
+    expect(h.store.expenses).toHaveLength(0);
   });
 });
 

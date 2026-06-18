@@ -406,6 +406,38 @@ function PricingModal({
     };
   }
 
+  // Consultores vinculados na Operação aparecem aqui automaticamente para o
+  // Comercial precificar. Casa cada alocação com seu valor de venda (escopo
+  // alocação) — quando ainda não há, exibe "Sem valor" e abre o modal zerado.
+  const rateByAllocation = new Map(
+    project.saleRates
+      .filter((rate) => rate.allocationId)
+      .map((rate) => [rate.allocationId as string, rate]),
+  );
+  const priceableAllocations = project.allocations.filter(
+    (alloc) => alloc.status === "ACTIVE" || alloc.status === "PLANNED",
+  );
+
+  function priceAllocation(alloc: (typeof priceableAllocations)[number]) {
+    const existing = rateByAllocation.get(alloc.id);
+    if (existing) {
+      setEditingRateId(existing.id);
+      setRate(rateToInput(existing));
+      return;
+    }
+    setEditingRateId(null);
+    setRate({
+      projectId: project.id,
+      consultantId: undefined,
+      allocationId: alloc.id,
+      startsAt: project.startDate,
+      endsAt: undefined,
+      hourlyRate: 0,
+      currency: "BRL",
+      note: "",
+    });
+  }
+
   return (
     <Modal
       open
@@ -461,6 +493,72 @@ function PricingModal({
               Salvar cobrança e budget
             </ActionButton>
           </div>
+        </section>
+
+        <section className="space-y-3">
+          <h3 className="text-sm font-semibold text-strong">
+            Consultores do projeto
+          </h3>
+          <p className="text-xs text-soft">
+            Consultores vinculados na Operação aparecem aqui automaticamente.
+            Defina o valor de venda de cada um.
+          </p>
+          <DataTable
+            columns={[
+              {
+                key: "consultant",
+                header: "Consultor",
+                cell: (alloc) => (
+                  <div>
+                    <p className="font-medium text-strong">
+                      {alloc.consultantName}
+                    </p>
+                    <p className="text-xs text-soft">{alloc.role}</p>
+                  </div>
+                ),
+              },
+              {
+                key: "value",
+                header: "Valor de venda",
+                align: "right",
+                cell: (alloc) => {
+                  const rate = rateByAllocation.get(alloc.id);
+                  return rate && rate.hourlyRate !== undefined ? (
+                    <span className="tabular-nums">
+                      {formatCurrencyPrecise(rate.hourlyRate)}
+                    </span>
+                  ) : (
+                    <span className="text-xs font-medium text-warning">
+                      Sem valor
+                    </span>
+                  );
+                },
+              },
+              {
+                key: "actions",
+                header: "",
+                align: "right",
+                cell: (alloc) => (
+                  <ActionButton
+                    size="sm"
+                    variant="secondary"
+                    icon={rateByAllocation.has(alloc.id) ? Edit : ReceiptText}
+                    aria-label={`${rateByAllocation.has(alloc.id) ? "Editar" : "Definir"} valor de ${alloc.consultantName}`}
+                    onClick={() => priceAllocation(alloc)}
+                  >
+                    {rateByAllocation.has(alloc.id) ? "Editar" : "Definir valor"}
+                  </ActionButton>
+                ),
+              },
+            ]}
+            rows={priceableAllocations}
+            rowKey={(alloc) => alloc.id}
+            empty={
+              <p className="text-center text-sm text-soft">
+                Nenhum consultor vinculado. Vincule na tela Projetos (Operação).
+              </p>
+            }
+          />
         </section>
 
         <section className="space-y-3">

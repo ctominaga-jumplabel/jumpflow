@@ -50,6 +50,8 @@ interface ExpenseRow {
   amount: unknown;
   description: string;
   invoiceNumber: string | null;
+  category: string | null;
+  groupId: string | null;
   status: string;
   submittedAt: Date | null;
   consultant: { name: string };
@@ -64,6 +66,8 @@ const expenseSelect = {
   amount: true,
   description: true,
   invoiceNumber: true,
+  category: true,
+  groupId: true,
   status: true,
   submittedAt: true,
   consultant: { select: { name: true } },
@@ -82,6 +86,8 @@ function toUiExpense(row: ExpenseRow, rejectionReason?: string): Expense {
     amount: Number(row.amount),
     description: row.description,
     invoiceNumber: row.invoiceNumber ?? undefined,
+    category: (row.category as Expense["category"]) ?? undefined,
+    groupId: row.groupId ?? undefined,
     attachment: row.attachment ?? undefined,
     status: row.status as ExpenseStatus,
     submittedAt: row.submittedAt?.toISOString(),

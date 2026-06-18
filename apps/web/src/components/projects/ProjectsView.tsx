@@ -170,11 +170,17 @@ export function ProjectsView({
   canManageSaleRates,
   canEditBillingConfig,
 }: ProjectsViewProps) {
-  // In db mode `items` derives straight from props, so data revalidated by a
-  // server action (e.g. trocar o gestor) shows up immediately without a reload.
-  // Demo mode keeps local optimistic state since there is no server to refetch.
-  const [localItems, setLocalItems] = useState(projects);
-  const items = mode === "db" ? projects : localItems;
+  // Single optimistic copy of the list, seeded from server props. It re-seeds
+  // whenever the server sends fresh data (e.g. after a revalidatePath from a
+  // server action), so optimistic edits — like vincular um consultor — show
+  // instantly and are then reconciled with the canonical server state. Without
+  // this, db mode waited for the round-trip before the modal reflected the add.
+  const [items, setItems] = useState(projects);
+  const [syncedProjects, setSyncedProjects] = useState(projects);
+  if (projects !== syncedProjects) {
+    setSyncedProjects(projects);
+    setItems(projects);
+  }
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<ProjectStatus | "ALL">("ALL");
   const [clientId, setClientId] = useState("ALL");
@@ -313,31 +319,31 @@ export function ProjectsView({
       setFeedback("Informe cliente e nome do projeto.");
       return;
     }
+    const client = clients.find((item) => item.id === projectForm.clientId);
+    const manager = managers.find((item) => item.id === projectForm.managerUserId);
+    const next: ProjectItem = {
+      ...(editing ?? {
+        id: `prj-local-${Date.now()}`,
+        allocations: [],
+        saleRates: [],
+        consumedHours: 0,
+        allocatedConsultants: 0,
+        hasActiveSaleRate: false,
+        hasBillingConfig: false,
+      }),
+      ...projectForm,
+      clientId: projectForm.clientId,
+      clientName: client?.name ?? "Cliente",
+      managerName: manager?.name,
+      endDate: projectForm.endDate,
+    };
+    setItems((current) =>
+      editing
+        ? current.map((item) => (item.id === editing.id ? next : item))
+        : [next, ...current],
+    );
+    setProjectOpen(false);
     if (mode === "demo") {
-      const client = clients.find((item) => item.id === projectForm.clientId);
-      const manager = managers.find((item) => item.id === projectForm.managerUserId);
-      const next: ProjectItem = {
-        ...(editing ?? {
-          id: `prj-local-${Date.now()}`,
-          allocations: [],
-          saleRates: [],
-          consumedHours: 0,
-          allocatedConsultants: 0,
-          hasActiveSaleRate: false,
-          hasBillingConfig: false,
-        }),
-        ...projectForm,
-        clientId: projectForm.clientId,
-        clientName: client?.name ?? "Cliente",
-        managerName: manager?.name,
-        endDate: projectForm.endDate,
-      };
-      setLocalItems((current) =>
-        editing
-          ? current.map((item) => (item.id === editing.id ? next : item))
-          : [next, ...current],
-      );
-      setProjectOpen(false);
       setFeedback("Projeto salvo localmente.");
       return;
     }
@@ -345,11 +351,10 @@ export function ProjectsView({
       const result = editing
         ? await updateProject({ id: editing.id, ...projectForm })
         : await createProject(projectForm);
-      if (result.ok) {
-        setProjectOpen(false);
-        setFeedback("Projeto salvo.");
-      } else {
+      if (result.ok) setFeedback("Projeto salvo.");
+      else {
         setFeedback(result.message);
+        setItems(projects); // rollback optimistic edit on failure
       }
     });
   }
@@ -365,106 +370,121 @@ export function ProjectsView({
 
   function saveBillingConfig() {
     if (!billingForm) return;
+    const form = billingForm;
+    setItems((current) =>
+      current.map((project) =>
+        project.id === form.projectId
+          ? {
+              ...project,
+              billingConfig: formToBillingConfigItem(form),
+              hasBillingConfig: true,
+            }
+          : project,
+      ),
+    );
     if (mode === "demo") {
-      setLocalItems((current) =>
-        current.map((project) =>
-          project.id === billingForm.projectId
-            ? {
-                ...project,
-                billingConfig: formToBillingConfigItem(billingForm),
-                hasBillingConfig: true,
-              }
-            : project,
-        ),
-      );
       setFeedback("Configuração de cobrança salva localmente.");
       return;
     }
     startTransition(async () => {
-      const result = await upsertProjectBillingConfig(billingForm);
-      setFeedback(
-        result.ok ? "Configuração de cobrança salva." : result.message,
-      );
+      const result = await upsertProjectBillingConfig(form);
+      if (result.ok) setFeedback("Configuração de cobrança salva.");
+      else {
+        setFeedback(result.message);
+        setItems(projects);
+      }
     });
   }
 
   function addAllocation(value: AllocationInput) {
+    const consultant = consultants.find((item) => item.id === value.consultantId);
+    const nextAllocation: ProjectAllocationItem = {
+      ...value,
+      id: `alloc-local-${Date.now()}`,
+      consultantName: consultant?.name ?? "Consultor",
+      skills: [],
+    };
+    // Optimistic insert in BOTH modes so the consultant shows in the table the
+    // moment Salvar is clicked; the server revalidation reconciles it (db mode).
+    setItems((current) =>
+      current.map((project) =>
+        project.id === value.projectId
+          ? {
+              ...project,
+              allocatedConsultants:
+                project.allocatedConsultants +
+                (value.status === "ACTIVE" ? 1 : 0),
+              allocations: [...project.allocations, nextAllocation],
+            }
+          : project,
+      ),
+    );
     if (mode === "demo") {
-      const consultant = consultants.find((item) => item.id === value.consultantId);
-      const nextAllocation: ProjectAllocationItem = {
-        ...value,
-        id: `alloc-local-${Date.now()}`,
-        consultantName: consultant?.name ?? "Consultor",
-        skills: [],
-      };
-      setLocalItems((current) =>
-        current.map((project) =>
-          project.id === value.projectId
-            ? {
-                ...project,
-                allocatedConsultants: project.allocatedConsultants + 1,
-                allocations: [...project.allocations, nextAllocation],
-              }
-            : project,
-        ),
-      );
       setFeedback("Vínculo salvo localmente.");
       return;
     }
     startTransition(async () => {
       const result = await createAllocation(value);
-      setFeedback(result.ok ? "Vínculo salvo." : result.message);
+      if (result.ok) setFeedback("Vínculo salvo.");
+      else {
+        setFeedback(result.message);
+        setItems(projects); // rollback the optimistic insert
+      }
     });
   }
 
   function editAllocation(id: string, value: AllocationInput) {
+    const consultant = consultants.find((item) => item.id === value.consultantId);
+    setItems((current) =>
+      current.map((project) =>
+        project.id === value.projectId
+          ? {
+              ...project,
+              allocations: project.allocations.map((item) =>
+                item.id === id
+                  ? {
+                      ...item,
+                      ...value,
+                      consultantName: consultant?.name ?? item.consultantName,
+                    }
+                  : item,
+              ),
+            }
+          : project,
+      ),
+    );
     if (mode === "demo") {
-      const consultant = consultants.find((item) => item.id === value.consultantId);
-      setLocalItems((current) =>
-        current.map((project) =>
-          project.id === value.projectId
-            ? {
-                ...project,
-                allocations: project.allocations.map((item) =>
-                  item.id === id
-                    ? {
-                        ...item,
-                        ...value,
-                        consultantName: consultant?.name ?? item.consultantName,
-                      }
-                    : item,
-                ),
-              }
-            : project,
-        ),
-      );
       setFeedback("Vínculo atualizado localmente.");
       return;
     }
     startTransition(async () => {
       const result = await updateAllocation({ id, ...value });
-      setFeedback(result.ok ? "Vínculo atualizado." : result.message);
+      if (result.ok) setFeedback("Vínculo atualizado.");
+      else {
+        setFeedback(result.message);
+        setItems(projects);
+      }
     });
   }
 
   function deleteAllocation(allocation: ProjectAllocationItem) {
+    setItems((current) =>
+      current.map((project) =>
+        project.id === allocation.projectId
+          ? {
+              ...project,
+              allocations: project.allocations.filter(
+                (item) => item.id !== allocation.id,
+              ),
+              allocatedConsultants: project.allocations.filter(
+                (item) =>
+                  item.id !== allocation.id && item.status === "ACTIVE",
+              ).length,
+            }
+          : project,
+      ),
+    );
     if (mode === "demo") {
-      setLocalItems((current) =>
-        current.map((project) =>
-          project.id === allocation.projectId
-            ? {
-                ...project,
-                allocations: project.allocations.filter(
-                  (item) => item.id !== allocation.id,
-                ),
-                allocatedConsultants: project.allocations.filter(
-                  (item) =>
-                    item.id !== allocation.id && item.status === "ACTIVE",
-                ).length,
-              }
-            : project,
-        ),
-      );
       setFeedback("Vínculo removido localmente.");
       return;
     }
@@ -472,8 +492,11 @@ export function ProjectsView({
       const result = await removeAllocation({ id: allocation.id });
       if (!result.ok) {
         setFeedback(result.message);
+        setItems(projects); // restore on failure
         return;
       }
+      // On success the revalidation reconciles: a link with logged hours
+      // reappears flagged INACTIVE (kept for history), a clean one stays gone.
       setFeedback(
         result.data.outcome === "deactivated"
           ? "Consultor tinha horas lançadas: vínculo marcado como Inativo."
@@ -483,43 +506,47 @@ export function ProjectsView({
   }
 
   function addSaleRate(value: SaleRateInput) {
+    const consultant = consultants.find((item) => item.id === value.consultantId);
+    const allocation = detailProject?.allocations.find(
+      (item) => item.id === value.allocationId,
+    );
+    const nextRate = {
+      ...value,
+      id: `rate-local-${Date.now()}`,
+      consultantName: consultant?.name,
+      allocationLabel: allocation
+        ? `${allocation.consultantName} - ${allocation.role}`
+        : undefined,
+    };
+    setItems((current) =>
+      current.map((project) =>
+        project.id === value.projectId
+          ? {
+              ...project,
+              saleRates: [...project.saleRates, nextRate],
+              // Um valor base vigente satisfaz a fila de pendência (mesma
+              // semântica do servidor).
+              hasActiveSaleRate:
+                project.hasActiveSaleRate ||
+                isProjectBaseSaleRateActive(
+                  value,
+                  new Date().toISOString().slice(0, 10),
+                ),
+            }
+          : project,
+      ),
+    );
     if (mode === "demo") {
-      const consultant = consultants.find((item) => item.id === value.consultantId);
-      const allocation = detailProject?.allocations.find(
-        (item) => item.id === value.allocationId,
-      );
-      const nextRate = {
-        ...value,
-        id: `rate-local-${Date.now()}`,
-        consultantName: consultant?.name,
-        allocationLabel: allocation
-          ? `${allocation.consultantName} - ${allocation.role}`
-          : undefined,
-      };
-      setLocalItems((current) =>
-        current.map((project) =>
-          project.id === value.projectId
-            ? {
-                ...project,
-                saleRates: [...project.saleRates, nextRate],
-                // Um valor base vigente satisfaz a fila de pendência (mesma
-                // semântica do servidor).
-                hasActiveSaleRate:
-                  project.hasActiveSaleRate ||
-                  isProjectBaseSaleRateActive(
-                    value,
-                    new Date().toISOString().slice(0, 10),
-                  ),
-              }
-            : project,
-        ),
-      );
       setFeedback("Valor de venda salvo localmente.");
       return;
     }
     startTransition(async () => {
       const result = await createSaleRate(value);
-      setFeedback(result.ok ? "Valor de venda salvo." : result.message);
+      if (result.ok) setFeedback("Valor de venda salvo.");
+      else {
+        setFeedback(result.message);
+        setItems(projects);
+      }
     });
   }
 
@@ -539,35 +566,39 @@ export function ProjectsView({
                 : allocation,
             ),
           };
-    setLocalItems((current) => current.map(updater));
+    setItems((current) => current.map(updater));
   }
 
   function addSkill(value: AllocationSkillInput) {
     const project = items.find((item) =>
       item.allocations.some((allocation) => allocation.id === value.allocationId),
     );
+    const skill = skills.find((item) => item.id === value.skillId);
+    if (project) {
+      applyAllocationSkills(project.id, value.allocationId, (current) => [
+        ...current,
+        {
+          id: `alloc-skill-local-${Date.now()}`,
+          allocationId: value.allocationId,
+          skillId: value.skillId,
+          skillName: skill?.name ?? "Skill",
+          skillCategory: skill?.category,
+          level: value.level,
+          note: value.note,
+        },
+      ]);
+    }
     if (mode === "demo") {
-      const skill = skills.find((item) => item.id === value.skillId);
-      if (project) {
-        applyAllocationSkills(project.id, value.allocationId, (current) => [
-          ...current,
-          {
-            id: `alloc-skill-local-${Date.now()}`,
-            allocationId: value.allocationId,
-            skillId: value.skillId,
-            skillName: skill?.name ?? "Skill",
-            skillCategory: skill?.category,
-            level: value.level,
-            note: value.note,
-          },
-        ]);
-      }
       setFeedback("Skill da alocação salva localmente.");
       return;
     }
     startTransition(async () => {
       const result = await addAllocationSkill(value);
-      setFeedback(result.ok ? "Skill adicionada a alocação." : result.message);
+      if (result.ok) setFeedback("Skill adicionada a alocação.");
+      else {
+        setFeedback(result.message);
+        setItems(projects);
+      }
     });
   }
 
@@ -579,20 +610,24 @@ export function ProjectsView({
       .find(({ allocation }) =>
         allocation.skills.some((skill) => skill.id === input.id),
       );
+    if (located) {
+      applyAllocationSkills(
+        located.project.id,
+        located.allocation.id,
+        (current) => current.filter((skill) => skill.id !== input.id),
+      );
+    }
     if (mode === "demo") {
-      if (located) {
-        applyAllocationSkills(
-          located.project.id,
-          located.allocation.id,
-          (current) => current.filter((skill) => skill.id !== input.id),
-        );
-      }
       setFeedback("Skill removida da alocação localmente.");
       return;
     }
     startTransition(async () => {
       const result = await removeAllocationSkill(input);
-      setFeedback(result.ok ? "Skill removida da alocação." : result.message);
+      if (result.ok) setFeedback("Skill removida da alocação.");
+      else {
+        setFeedback(result.message);
+        setItems(projects);
+      }
     });
   }
 
