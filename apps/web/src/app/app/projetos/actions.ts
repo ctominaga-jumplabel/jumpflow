@@ -21,11 +21,15 @@ import {
   allocationSkillRemoveSchema,
   allocationSkillUpdateSchema,
   allocationUpdateSchema,
+  consultantAutoApprovalRuleSchema,
+  linkAutoApprovalConsultantsSchema,
+  projectAutoApprovalRuleSchema,
   projectBillingConfigSchema,
   projectBillingTypeSchema,
   projectCommercialSchema,
   projectInputSchema,
   projectUpdateSchema,
+  removeConsultantAutoApprovalRuleSchema,
   saleRateInputSchema,
   saleRateUpdateSchema,
   type AllocationInput,
@@ -34,6 +38,9 @@ import {
   type AllocationSkillRemoveInput,
   type AllocationSkillUpdateInput,
   type AllocationUpdateInput,
+  type ConsultantAutoApprovalRuleInput,
+  type LinkAutoApprovalConsultantsInput,
+  type ProjectAutoApprovalRuleInput,
   type ProjectBillingConfigInput,
   type ProjectBillingTypeInput,
   type ProjectCommercialInput,
@@ -444,6 +451,205 @@ export async function upsertProjectBillingConfig(
     );
     revalidateProjectViews();
     return { ok: true, data: { id: saved.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+// ── Aprovação automática (Operação) ──────────────────────────────────────
+// Regra por projeto e regras por consultor. A existência de QUALQUER regra por
+// consultor no projeto ativa o modo exclusivo no motor (a regra do projeto
+// deixa de valer; consultores não vinculados ficam manuais).
+
+const autoApprovalRuleData = (input: {
+  weekendEnabled: boolean;
+  hoursRangeEnabled: boolean;
+  minMinutes: number;
+  maxMinutes: number;
+}) => ({
+  weekendEnabled: input.weekendEnabled,
+  hoursRangeEnabled: input.hoursRangeEnabled,
+  minMinutes: input.minMinutes,
+  maxMinutes: input.maxMinutes,
+});
+
+/** Cria/atualiza a regra de aprovação automática do projeto (upsert 1:1). */
+export async function upsertProjectAutoApprovalRule(
+  input: ProjectAutoApprovalRuleInput,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(PROJECT_WRITE_ROLES);
+    const parsed = parseInput(projectAutoApprovalRuleSchema, input);
+    const project = await prisma.project.findUnique({
+      where: { id: parsed.projectId },
+      select: { id: true },
+    });
+    if (!project) throw new ActionError("NOT_FOUND", "Projeto nao encontrado.");
+    const previous = await prisma.projectAutoApprovalRule.findUnique({
+      where: { projectId: parsed.projectId },
+    });
+    const data = autoApprovalRuleData(parsed);
+    const saved = await prisma.projectAutoApprovalRule.upsert({
+      where: { projectId: parsed.projectId },
+      update: data,
+      create: { projectId: parsed.projectId, ...data },
+    });
+    await audit(
+      "ProjectAutoApprovalRule",
+      saved.id,
+      "PROJECT_AUTO_APPROVAL_RULE_SAVED",
+      previous,
+      data,
+    );
+    revalidateProjectViews();
+    return { ok: true, data: { id: saved.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/**
+ * Vincula consultores à aprovação automática do projeto (modo exclusivo): cria
+ * uma ConsultantAutoApprovalRule por consultor, semeada a partir da regra do
+ * projeto (ou defaults). Idempotente: ignora consultores que já têm regra.
+ */
+export async function linkConsultantsToAutoApproval(
+  input: LinkAutoApprovalConsultantsInput,
+): Promise<ActionResult<{ created: number }>> {
+  try {
+    ensureDatabase();
+    await requireRole(PROJECT_WRITE_ROLES);
+    const parsed = parseInput(linkAutoApprovalConsultantsSchema, input);
+    const projectRule = await prisma.projectAutoApprovalRule.findUnique({
+      where: { projectId: parsed.projectId },
+    });
+    const seed = autoApprovalRuleData(
+      projectRule ?? {
+        weekendEnabled: false,
+        hoursRangeEnabled: false,
+        minMinutes: 1,
+        maxMinutes: 1439,
+      },
+    );
+    // Só vincula consultores efetivamente alocados ao projeto (a regra vale para
+    // "consultores cadastrados no projeto"). A UI já filtra, mas a action valida.
+    const [allocated, existing] = await Promise.all([
+      prisma.allocation.findMany({
+        where: { projectId: parsed.projectId, consultantId: { in: parsed.consultantIds } },
+        select: { consultantId: true },
+        distinct: ["consultantId"],
+      }),
+      prisma.consultantAutoApprovalRule.findMany({
+        where: { projectId: parsed.projectId, consultantId: { in: parsed.consultantIds } },
+        select: { consultantId: true },
+      }),
+    ]);
+    const allocatedIds = new Set(allocated.map((a) => a.consultantId));
+    const existingIds = new Set(existing.map((r) => r.consultantId));
+    const toCreate = parsed.consultantIds.filter(
+      (id) => allocatedIds.has(id) && !existingIds.has(id),
+    );
+    if (toCreate.length > 0) {
+      await prisma.consultantAutoApprovalRule.createMany({
+        data: toCreate.map((consultantId) => ({
+          consultantId,
+          projectId: parsed.projectId,
+          ...seed,
+        })),
+      });
+      await audit(
+        "Project",
+        parsed.projectId,
+        "AUTO_APPROVAL_CONSULTANTS_LINKED",
+        null,
+        { consultantIds: toCreate, seed },
+      );
+    }
+    revalidateProjectViews();
+    return { ok: true, data: { created: toCreate.length } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/** Atualiza a regra de aprovação automática de um consultor (por id implícito). */
+export async function upsertConsultantAutoApprovalRule(
+  input: ConsultantAutoApprovalRuleInput,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(PROJECT_WRITE_ROLES);
+    const parsed = parseInput(consultantAutoApprovalRuleSchema, input);
+    const allocation = await prisma.allocation.findFirst({
+      where: { projectId: parsed.projectId, consultantId: parsed.consultantId },
+      select: { id: true },
+    });
+    if (!allocation) {
+      throw new ActionError(
+        "INVALID_INPUT",
+        "Consultor nao esta alocado neste projeto.",
+      );
+    }
+    const previous = await prisma.consultantAutoApprovalRule.findUnique({
+      where: {
+        consultantId_projectId: {
+          consultantId: parsed.consultantId,
+          projectId: parsed.projectId,
+        },
+      },
+    });
+    const data = autoApprovalRuleData(parsed);
+    const saved = await prisma.consultantAutoApprovalRule.upsert({
+      where: {
+        consultantId_projectId: {
+          consultantId: parsed.consultantId,
+          projectId: parsed.projectId,
+        },
+      },
+      update: data,
+      create: {
+        consultantId: parsed.consultantId,
+        projectId: parsed.projectId,
+        ...data,
+      },
+    });
+    await audit(
+      "ConsultantAutoApprovalRule",
+      saved.id,
+      "CONSULTANT_AUTO_APPROVAL_RULE_SAVED",
+      previous,
+      data,
+    );
+    revalidateProjectViews();
+    return { ok: true, data: { id: saved.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/** Remove a regra de aprovação automática de um consultor. */
+export async function deleteConsultantAutoApprovalRule(
+  input: { id: string },
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(PROJECT_WRITE_ROLES);
+    const parsed = parseInput(removeConsultantAutoApprovalRuleSchema, input);
+    const previous = await prisma.consultantAutoApprovalRule.findUnique({
+      where: { id: parsed.id },
+    });
+    if (!previous) throw new ActionError("NOT_FOUND", "Regra nao encontrada.");
+    await prisma.consultantAutoApprovalRule.delete({ where: { id: parsed.id } });
+    await audit(
+      "ConsultantAutoApprovalRule",
+      parsed.id,
+      "CONSULTANT_AUTO_APPROVAL_RULE_DELETED",
+      previous,
+      null,
+    );
+    revalidateProjectViews();
+    return { ok: true, data: { id: parsed.id } };
   } catch (error) {
     return toFailure(error);
   }

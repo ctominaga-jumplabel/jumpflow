@@ -1,13 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { prisma } from "@jumpflow/database";
-import { z } from "zod";
 import type { ActionResult } from "@/lib/actions/result";
 import { requireRole } from "@/lib/auth/guards";
-import { recordAuditEvent } from "@/lib/db/audit";
 import { isDatabaseConfigured } from "@/lib/db/config";
-import { resolveDbUser } from "@/lib/db/users";
 import { runAutoApproval } from "@/lib/automation/auto-approval";
 
 /**
@@ -70,128 +66,4 @@ export async function runAutoApprovalNow(): Promise<ActionResult<RunSummary>> {
   } finally {
     revalidatePath(ROUTE);
   }
-}
-
-const toggleExceptionSchema = z.object({
-  exceptionId: z.string().min(1),
-  active: z.boolean(),
-});
-
-export type ToggleExceptionInput = z.infer<typeof toggleExceptionSchema>;
-
-const createExceptionSchema = z.object({
-  consultantId: z.string().min(1, "Selecione um consultor."),
-  projectId: z.string().min(1, "Selecione um projeto."),
-  type: z.enum(["ANY_HOURS", "WEEKEND"]),
-  note: z.string().trim().max(300, "Nota muito longa.").optional(),
-});
-
-export type CreateExceptionInput = z.infer<typeof createExceptionSchema>;
-
-/**
- * Register a new {@link AutoApprovalException} (consultant × project × type).
- * Upserts on the unique (consultantId, projectId, type) key so re-registering a
- * previously deactivated exception simply reactivates it. Audited, since it
- * widens what the engine auto-approves.
- */
-export async function createAutoApprovalException(
-  input: CreateExceptionInput,
-): Promise<ActionResult<{ id: string }>> {
-  const user = await requireRole([...ADMIN_ROLES]);
-
-  if (!isDatabaseConfigured()) {
-    return {
-      ok: false,
-      error: "NO_DATABASE",
-      message: "Banco de dados não configurado.",
-    };
-  }
-
-  const parsed = createExceptionSchema.safeParse(input);
-  if (!parsed.success) {
-    const message = parsed.error.issues[0]?.message ?? "Dados inválidos.";
-    return { ok: false, error: "INVALID_INPUT", message };
-  }
-  const { consultantId, projectId, type, note } = parsed.data;
-
-  // The unique (consultant, project, type) key means re-creating an existing
-  // exception reactivates it instead of failing — the intent is the same.
-  const exception = await prisma.autoApprovalException.upsert({
-    where: {
-      consultantId_projectId_type: { consultantId, projectId, type },
-    },
-    update: { active: true, note: note || null },
-    create: { consultantId, projectId, type, note: note || null, active: true },
-    select: { id: true },
-  });
-
-  const dbUser = await resolveDbUser(user);
-  await recordAuditEvent({
-    actorUserId: dbUser?.id ?? null,
-    entityType: "AutoApprovalException",
-    entityId: exception.id,
-    action: "AUTO_APPROVAL_EXCEPTION_CREATED",
-    after: { consultantId, projectId, type, active: true },
-  });
-
-  revalidatePath(ROUTE);
-  return { ok: true, data: { id: exception.id } };
-}
-
-/**
- * Activate or deactivate a single {@link AutoApprovalException}. A flipped
- * `active` flag changes which entries the engine auto-approves, so the change
- * is audited (AuditEvent) with the before/after state.
- */
-export async function setExceptionActive(
-  input: ToggleExceptionInput,
-): Promise<ActionResult<{ id: string; active: boolean }>> {
-  const user = await requireRole([...ADMIN_ROLES]);
-
-  if (!isDatabaseConfigured()) {
-    return {
-      ok: false,
-      error: "NO_DATABASE",
-      message: "Banco de dados não configurado.",
-    };
-  }
-
-  const parsed = toggleExceptionSchema.safeParse(input);
-  if (!parsed.success) {
-    return { ok: false, error: "INVALID_INPUT", message: "Dados inválidos." };
-  }
-
-  const current = await prisma.autoApprovalException.findUnique({
-    where: { id: parsed.data.exceptionId },
-    select: { id: true, active: true, type: true, consultantId: true, projectId: true },
-  });
-  if (!current) {
-    return { ok: false, error: "NOT_FOUND", message: "Exceção não encontrada." };
-  }
-
-  // No-op: nothing changed, so no write and no audit noise.
-  if (current.active === parsed.data.active) {
-    return { ok: true, data: { id: current.id, active: current.active } };
-  }
-
-  const updated = await prisma.autoApprovalException.update({
-    where: { id: current.id },
-    data: { active: parsed.data.active },
-    select: { id: true, active: true },
-  });
-
-  const dbUser = await resolveDbUser(user);
-  await recordAuditEvent({
-    actorUserId: dbUser?.id ?? null,
-    entityType: "AutoApprovalException",
-    entityId: current.id,
-    action: parsed.data.active
-      ? "AUTO_APPROVAL_EXCEPTION_ACTIVATED"
-      : "AUTO_APPROVAL_EXCEPTION_DEACTIVATED",
-    before: { active: current.active },
-    after: { active: updated.active },
-  });
-
-  revalidatePath(ROUTE);
-  return { ok: true, data: updated };
 }

@@ -158,11 +158,6 @@ enum MonthlyClosingStatus {
   CANCELLED
 }
 
-enum AutoApprovalExceptionType {
-  ANY_HOURS
-  WEEKEND
-}
-
 enum AutomationEmailType {
   MISSING_TIMESHEET_REPORT
   // Fase G: pre-fatura enviada ao cliente (uma por RevenueClosing + competencia).
@@ -499,7 +494,7 @@ model Consultant {
   skills                 ConsultantSkill[]
   skillSuggestions       SkillSuggestion[]
   certificates           Certificate[]
-  autoApprovalExceptions AutoApprovalException[]
+  autoApprovalRules      ConsultantAutoApprovalRule[]
   expenses               Expense[]
   personalInfo           ConsultantPersonalInfo?
   companyInfo            ConsultantCompanyInfo?
@@ -839,7 +834,8 @@ model Project {
   revenueClosings        RevenueClosing[]
   revenueClosingLines    RevenueClosingLine[]
   consultantPaymentLines ConsultantPaymentLine[]
-  autoApprovalExceptions AutoApprovalException[]
+  autoApprovalRule       ProjectAutoApprovalRule?
+  autoApprovalConsultantRules ConsultantAutoApprovalRule[]
   expenses               Expense[]
   createdAt              DateTime                @default(now())
   updatedAt              DateTime                @updatedAt
@@ -1325,22 +1321,41 @@ model AuditEvent {
   @@index([createdAt])
 }
 
-/// Configurable list of (consultant, project) exceptions to the default
-/// auto-approval rule. ANY_HOURS skips the daily 8h total; WEEKEND allows
-/// Saturday/Sunday entries. Rules live in the DB so they change without deploy.
-model AutoApprovalException {
-  id           String                    @id @default(cuid())
-  consultantId String
-  consultant   Consultant                @relation(fields: [consultantId], references: [id])
-  projectId    String
-  project      Project                   @relation(fields: [projectId], references: [id])
-  type         AutoApprovalExceptionType
-  active       Boolean                   @default(true)
-  note         String?
-  createdAt    DateTime                  @default(now())
-  updatedAt    DateTime                  @updatedAt
+/// Regra de aprovacao automatica por PROJETO. Duas excecoes nao excludentes
+/// (combinadas por OU): fim de semana e range de horas POR LANCAMENTO. O range
+/// usa minutos (00:01 = 1, 23:59 = 1439); min/max nunca 0 e max >= min. Vale
+/// para todos os consultores do projeto, EXCETO quando existem regras por
+/// consultor (modo exclusivo: ver ConsultantAutoApprovalRule).
+model ProjectAutoApprovalRule {
+  id                String   @id @default(cuid())
+  projectId         String   @unique
+  project           Project  @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  weekendEnabled    Boolean  @default(false)
+  hoursRangeEnabled Boolean  @default(false)
+  minMinutes        Int      @default(1)
+  maxMinutes        Int      @default(1439)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
 
-  @@unique([consultantId, projectId, type])
+/// Regra de aprovacao automatica por CONSULTOR dentro de um projeto. A
+/// existencia de QUALQUER regra por consultor no projeto suspende a regra do
+/// projeto (modo exclusivo): so os consultores com regra propria tem aprovacao
+/// automatica; os demais ficam manuais. Mesma semantica de FDS/range.
+model ConsultantAutoApprovalRule {
+  id                String     @id @default(cuid())
+  consultantId      String
+  consultant        Consultant @relation(fields: [consultantId], references: [id], onDelete: Restrict)
+  projectId         String
+  project           Project    @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  weekendEnabled    Boolean    @default(false)
+  hoursRangeEnabled Boolean    @default(false)
+  minMinutes        Int        @default(1)
+  maxMinutes        Int        @default(1439)
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  @@unique([consultantId, projectId])
   @@index([projectId])
 }
 

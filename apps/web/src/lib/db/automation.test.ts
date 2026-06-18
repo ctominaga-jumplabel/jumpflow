@@ -12,14 +12,8 @@ const NOW = new Date("2026-06-10T12:00:00Z");
 
 const h = vi.hoisted(() => {
   const store = {
-    activeExceptionCount: 0,
-    exceptions: [] as {
-      id: string;
-      type: string;
-      active: boolean;
-      consultant: { name: string };
-      project: { name: string };
-    }[],
+    projectRuleCount: 0,
+    consultantRuleCount: 0,
     approvals: [] as {
       entityId: string;
       ruleKey: string | null;
@@ -37,9 +31,11 @@ const h = vi.hoisted(() => {
   };
 
   const prismaMock = {
-    autoApprovalException: {
-      count: async () => store.activeExceptionCount,
-      findMany: async () => store.exceptions.map((e) => ({ ...e })),
+    projectAutoApprovalRule: {
+      count: async () => store.projectRuleCount,
+    },
+    consultantAutoApprovalRule: {
+      count: async () => store.consultantRuleCount,
     },
     approval: {
       findMany: async () => store.approvals.map((a) => ({ ...a })),
@@ -49,14 +45,6 @@ const h = vi.hoisted(() => {
         store.timeEntries
           .filter((e) => where.id.in.includes(e.id))
           .map((e) => ({ ...e })),
-    },
-    consultant: {
-      findMany: async () => [{ id: "c1", name: "Ana" }],
-    },
-    project: {
-      findMany: async () => [
-        { id: "p1", name: "Apollo", client: { name: "Acme" } },
-      ],
     },
   };
 
@@ -85,8 +73,8 @@ import { getAutoApprovalOverview } from "@/lib/db/automation";
 
 beforeEach(() => {
   vi.stubEnv("DATABASE_URL", "postgresql://u:p@localhost:5432/db");
-  h.store.activeExceptionCount = 0;
-  h.store.exceptions = [];
+  h.store.projectRuleCount = 0;
+  h.store.consultantRuleCount = 0;
   h.store.approvals = [];
   h.store.timeEntries = [];
   h.store.collection = { skipped: false, evaluations: [] };
@@ -104,42 +92,12 @@ describe("getAutoApprovalOverview", () => {
     });
   });
 
-  it("reports the active exception count and maps exception rows", async () => {
-    h.store.activeExceptionCount = 2;
-    h.store.exceptions = [
-      {
-        id: "x1",
-        type: "ANY_HOURS",
-        active: true,
-        consultant: { name: "Ana" },
-        project: { name: "Apollo" },
-      },
-      {
-        id: "x2",
-        type: "WEEKEND",
-        active: false,
-        consultant: { name: "Bia" },
-        project: { name: "Beta" },
-      },
-    ];
+  it("reports the project and consultant rule counts", async () => {
+    h.store.projectRuleCount = 3;
+    h.store.consultantRuleCount = 5;
     const overview = await getAutoApprovalOverview(NOW);
-    expect(overview.activeExceptionsCount).toBe(2);
-    expect(overview.exceptions).toEqual([
-      {
-        id: "x1",
-        consultantName: "Ana",
-        projectName: "Apollo",
-        type: "ANY_HOURS",
-        active: true,
-      },
-      {
-        id: "x2",
-        consultantName: "Bia",
-        projectName: "Beta",
-        type: "WEEKEND",
-        active: false,
-      },
-    ]);
+    expect(overview.projectRuleCount).toBe(3);
+    expect(overview.consultantRuleCount).toBe(5);
   });
 
   it("joins recent automatic approvals back to consultant/project", async () => {

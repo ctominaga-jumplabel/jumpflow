@@ -176,6 +176,12 @@ export async function listProjects(options?: {
           }
         : false,
       timeEntries: { select: { hours: true, status: true } },
+      // Aprovação automática é dado operacional (não financeiro): sempre carregado.
+      autoApprovalRule: true,
+      autoApprovalConsultantRules: {
+        include: { consultant: { select: { name: true } } },
+        orderBy: { createdAt: "asc" },
+      },
     },
     orderBy: [{ status: "asc" }, { name: "asc" }],
   });
@@ -316,6 +322,23 @@ export async function listProjects(options?: {
         vigentRatesByProject.get(row.id) ?? [],
       ),
       hasBillingConfig: billingConfigProjectIds.has(row.id),
+      autoApprovalRule: row.autoApprovalRule
+        ? {
+            weekendEnabled: row.autoApprovalRule.weekendEnabled,
+            hoursRangeEnabled: row.autoApprovalRule.hoursRangeEnabled,
+            minMinutes: row.autoApprovalRule.minMinutes,
+            maxMinutes: row.autoApprovalRule.maxMinutes,
+          }
+        : undefined,
+      autoApprovalConsultantRules: row.autoApprovalConsultantRules.map((r) => ({
+        id: r.id,
+        consultantId: r.consultantId,
+        consultantName: r.consultant.name,
+        weekendEnabled: r.weekendEnabled,
+        hoursRangeEnabled: r.hoursRangeEnabled,
+        minMinutes: r.minMinutes,
+        maxMinutes: r.maxMinutes,
+      })),
     };
   });
 }

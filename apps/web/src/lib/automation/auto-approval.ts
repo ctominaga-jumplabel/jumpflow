@@ -2,12 +2,22 @@ import { prisma } from "@jumpflow/database";
 import {
   dailyTotalKey,
   evaluateAutoApproval,
+  evaluateRuleAutoApproval,
   findDuplicateEntryIds,
   hoursToMinutes,
   withManualDecisionHistory,
   type AutoApprovalDecision,
-  type AutoApprovalFlags,
+  type AutoApprovalRule,
 } from "@jumpflow/shared";
+
+/** Regra "tudo desligado": usada no fallback 8h e no modo exclusivo para
+ * consultores nao vinculados (gera NO_RULE_MATCH ⇒ PENDING). */
+const OFF_RULE: AutoApprovalRule = {
+  weekendEnabled: false,
+  hoursRangeEnabled: false,
+  minMinutes: 1,
+  maxMinutes: 1439,
+};
 import { buildAuditEventData } from "@/lib/db/audit";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { loadAutomationConfig } from "./config";
@@ -126,25 +136,36 @@ export async function collectAutoApprovalDecisions(
   }
   const duplicateIds = findDuplicateEntryIds(dayEntries);
 
-  // Active exception flags per (consultant, project).
-  const exceptions = await prisma.autoApprovalException.findMany({
-    where: {
-      active: true,
-      consultantId: { in: consultantIds },
-      projectId: { in: projectIds },
-    },
-    select: { consultantId: true, projectId: true, type: true },
+  // Regras de aprovacao automatica por projeto e por consultor.
+  const [projectRuleRows, consultantRuleRows] = await Promise.all([
+    prisma.projectAutoApprovalRule.findMany({
+      where: { projectId: { in: projectIds } },
+    }),
+    prisma.consultantAutoApprovalRule.findMany({
+      where: { projectId: { in: projectIds } },
+    }),
+  ]);
+  const ruleShape = (r: {
+    weekendEnabled: boolean;
+    hoursRangeEnabled: boolean;
+    minMinutes: number;
+    maxMinutes: number;
+  }): AutoApprovalRule => ({
+    weekendEnabled: r.weekendEnabled,
+    hoursRangeEnabled: r.hoursRangeEnabled,
+    minMinutes: r.minMinutes,
+    maxMinutes: r.maxMinutes,
   });
-  const flagsByPair = new Map<string, AutoApprovalFlags>();
-  for (const ex of exceptions) {
-    const key = `${ex.consultantId}|${ex.projectId}`;
-    const current = flagsByPair.get(key) ?? {
-      allowAnyHours: false,
-      allowWeekend: false,
-    };
-    if (ex.type === "ANY_HOURS") current.allowAnyHours = true;
-    if (ex.type === "WEEKEND") current.allowWeekend = true;
-    flagsByPair.set(key, current);
+  const projectRuleByProject = new Map(
+    projectRuleRows.map((r) => [r.projectId, ruleShape(r)]),
+  );
+  // A existencia de QUALQUER regra por consultor no projeto ativa o modo
+  // exclusivo (a regra do projeto deixa de valer).
+  const consultantRuleByPair = new Map<string, AutoApprovalRule>();
+  const perConsultantModeProjects = new Set<string>();
+  for (const r of consultantRuleRows) {
+    consultantRuleByPair.set(`${r.consultantId}|${r.projectId}`, ruleShape(r));
+    perConsultantModeProjects.add(r.projectId);
   }
 
   // Manual-decision history: any entry that already received a MANUAL approval
@@ -163,26 +184,41 @@ export async function collectAutoApprovalDecisions(
   const manualDecisionIds = new Set(manualApprovals.map((a) => a.entityId));
 
   const evaluations: EvaluatedEntry[] = submitted.map((entry) => {
-    const flags =
-      flagsByPair.get(`${entry.consultantId}|${entry.projectId}`) ?? {
-        allowAnyHours: false,
-        allowWeekend: false,
-      };
+    const entryContext = {
+      status: entry.status,
+      hours: Number(entry.hours),
+      date: entry.date,
+      submittedAt: entry.submittedAt,
+      dailyTotalMinutes:
+        dailyTotals.get(dailyTotalKey(entry.consultantId, entry.date)) ?? 0,
+      hasDuplicate: duplicateIds.has(entry.id),
+    };
 
-    const baseDecision = evaluateAutoApproval(
-      {
-        status: entry.status,
-        hours: Number(entry.hours),
-        date: entry.date,
-        submittedAt: entry.submittedAt,
-        dailyTotalMinutes:
-          dailyTotals.get(dailyTotalKey(entry.consultantId, entry.date)) ?? 0,
-        hasDuplicate: duplicateIds.has(entry.id),
-      },
-      flags,
-      config.settings,
-      now,
-    );
+    // Hierarquia: (1) modo exclusivo por consultor → regra do consultor, ou
+    // PENDING se nao vinculado; (2) regra do projeto; (3) fallback 8h/dia
+    // quando o projeto nao tem nenhuma configuracao.
+    let baseDecision: AutoApprovalDecision;
+    if (perConsultantModeProjects.has(entry.projectId)) {
+      const rule =
+        consultantRuleByPair.get(`${entry.consultantId}|${entry.projectId}`) ??
+        OFF_RULE;
+      baseDecision = evaluateRuleAutoApproval(
+        entryContext,
+        rule,
+        config.settings,
+        now,
+      );
+    } else {
+      const projectRule = projectRuleByProject.get(entry.projectId);
+      baseDecision = projectRule
+        ? evaluateRuleAutoApproval(entryContext, projectRule, config.settings, now)
+        : evaluateAutoApproval(
+            entryContext,
+            { allowAnyHours: false, allowWeekend: false },
+            config.settings,
+            now,
+          );
+    }
 
     // A human already decided this entry once; force PENDING with a clear,
     // structured reason that surfaces in the admin read-only view.

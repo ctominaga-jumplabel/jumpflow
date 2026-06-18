@@ -3,9 +3,84 @@ import {
   allocationInputSchema,
   allocationSkillInputSchema,
   allocationSkillRemoveSchema,
+  consultantAutoApprovalRuleSchema,
+  linkAutoApprovalConsultantsSchema,
+  projectAutoApprovalRuleSchema,
   projectUpdateSchema,
   saleRateUpdateSchema,
 } from "./schemas";
+
+describe("auto-approval rule schemas", () => {
+  const base = {
+    projectId: "seed-project-portal",
+    weekendEnabled: true,
+    hoursRangeEnabled: true,
+    minMinutes: 1,
+    maxMinutes: 1439,
+  };
+
+  it("accepts the default 00:01–23:59 range", () => {
+    expect(projectAutoApprovalRuleSchema.safeParse(base).success).toBe(true);
+  });
+
+  it("rejects 00:00 (minute 0) on either bound", () => {
+    expect(
+      projectAutoApprovalRuleSchema.safeParse({ ...base, minMinutes: 0 }).success,
+    ).toBe(false);
+    expect(
+      projectAutoApprovalRuleSchema.safeParse({ ...base, maxMinutes: 0 }).success,
+    ).toBe(false);
+  });
+
+  it("rejects max < min and allows max == min (exact match)", () => {
+    expect(
+      projectAutoApprovalRuleSchema.safeParse({
+        ...base,
+        minMinutes: 540,
+        maxMinutes: 480,
+      }).success,
+    ).toBe(false);
+    expect(
+      projectAutoApprovalRuleSchema.safeParse({
+        ...base,
+        minMinutes: 480,
+        maxMinutes: 480,
+      }).success,
+    ).toBe(true);
+  });
+
+  it("rejects minutes above 23:59 (1439)", () => {
+    expect(
+      projectAutoApprovalRuleSchema.safeParse({ ...base, maxMinutes: 1440 })
+        .success,
+    ).toBe(false);
+  });
+
+  it("consultant rule requires consultantId", () => {
+    expect(
+      consultantAutoApprovalRuleSchema.safeParse({
+        ...base,
+        consultantId: "seed-consultant-1",
+      }).success,
+    ).toBe(true);
+    expect(consultantAutoApprovalRuleSchema.safeParse(base).success).toBe(false);
+  });
+
+  it("link schema requires at least one consultant", () => {
+    expect(
+      linkAutoApprovalConsultantsSchema.safeParse({
+        projectId: "seed-project-portal",
+        consultantIds: [],
+      }).success,
+    ).toBe(false);
+    expect(
+      linkAutoApprovalConsultantsSchema.safeParse({
+        projectId: "seed-project-portal",
+        consultantIds: ["seed-consultant-1"],
+      }).success,
+    ).toBe(true);
+  });
+});
 
 // Regression: seeded/imported rows use readable ids (e.g. "seed-project-portal")
 // rather than cuids. The schema used to reject them via `.cuid()`, so every
