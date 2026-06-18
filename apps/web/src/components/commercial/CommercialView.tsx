@@ -17,9 +17,10 @@ import {
 import type { SaleRateInput } from "@/lib/projects/schemas";
 import {
   isMissingSaleRate,
-  isProjectBaseSaleRateActive,
+  projectItemHasSaleValue,
 } from "@/lib/projects/pending";
 import type {
+  ProjectAllocationItem,
   ProjectBillingTypeOption,
   ProjectConsultantOption,
   ProjectItem,
@@ -130,27 +131,30 @@ export function CommercialView({
   function addSaleRate(value: SaleRateInput) {
     if (mode === "demo") {
       const consultant = consultants.find((item) => item.id === value.consultantId);
-      const nextRate = {
-        ...value,
-        id: `rate-local-${Date.now()}`,
-        consultantName: consultant?.name,
-        allocationLabel: undefined,
-      };
+      const today = new Date().toISOString().slice(0, 10);
       setLocalItems((current) =>
-        current.map((project) =>
-          project.id === value.projectId
-            ? {
-                ...project,
-                saleRates: [...project.saleRates, nextRate],
-                hasActiveSaleRate:
-                  project.hasActiveSaleRate ||
-                  isProjectBaseSaleRateActive(
-                    value,
-                    new Date().toISOString().slice(0, 10),
-                  ),
-              }
-            : project,
-        ),
+        current.map((project) => {
+          if (project.id !== value.projectId) return project;
+          const allocation = project.allocations.find(
+            (a) => a.id === value.allocationId,
+          );
+          const nextRate = {
+            ...value,
+            id: `rate-local-${Date.now()}`,
+            consultantName: consultant?.name ?? allocation?.consultantName,
+            allocationLabel: allocation
+              ? `${allocation.consultantName} - ${allocation.role}`
+              : undefined,
+          };
+          const updated = {
+            ...project,
+            saleRates: [...project.saleRates, nextRate],
+          };
+          return {
+            ...updated,
+            hasActiveSaleRate: projectItemHasSaleValue(updated, today),
+          };
+        }),
       );
       setFeedback("Valor de venda salvo localmente.");
       return;
@@ -182,13 +186,11 @@ export function CommercialView({
                 }
               : rate,
           );
+          const updated = { ...project, saleRates };
           return {
-            ...project,
-            saleRates,
-            // Reavalia a presença de valor base vigente após a edição.
-            hasActiveSaleRate: saleRates.some((rate) =>
-              isProjectBaseSaleRateActive(rate, today),
-            ),
+            ...updated,
+            // Recompute coverage (base rate OU todos os consultores) após editar.
+            hasActiveSaleRate: projectItemHasSaleValue(updated, today),
           };
         }),
       );
@@ -418,7 +420,7 @@ function PricingModal({
     (alloc) => alloc.status === "ACTIVE" || alloc.status === "PLANNED",
   );
 
-  function priceAllocation(alloc: (typeof priceableAllocations)[number]) {
+  function priceAllocation(alloc: ProjectAllocationItem) {
     const existing = rateByAllocation.get(alloc.id);
     if (existing) {
       setEditingRateId(existing.id);
@@ -437,6 +439,35 @@ function PricingModal({
       note: "",
     });
   }
+
+  // Tabela única de Valores de venda: os valores já cadastrados + uma linha
+  // "Sem valor" para cada consultor vinculado ainda sem rate (a menos que um
+  // valor base do projeto já cubra todos). Assim o consultor aparece
+  // automaticamente para precificar, sem duplicar uma seção separada.
+  const hasBaseRate = project.saleRates.some(
+    (rate) => !rate.consultantId && !rate.allocationId,
+  );
+  const uncoveredAllocations = hasBaseRate
+    ? []
+    : priceableAllocations.filter(
+        (alloc) =>
+          !project.saleRates.some(
+            (rate) =>
+              rate.allocationId === alloc.id ||
+              (!rate.allocationId && rate.consultantId === alloc.consultantId),
+          ),
+      );
+  type PricingRow =
+    | { kind: "rate"; key: string; rate: ProjectSaleRateItem }
+    | { kind: "alloc"; key: string; alloc: ProjectAllocationItem };
+  const pricingRows: PricingRow[] = [
+    ...project.saleRates.map(
+      (rate): PricingRow => ({ kind: "rate", key: `rate:${rate.id}`, rate }),
+    ),
+    ...uncoveredAllocations.map(
+      (alloc): PricingRow => ({ kind: "alloc", key: `alloc:${alloc.id}`, alloc }),
+    ),
+  ];
 
   return (
     <Modal
@@ -496,72 +527,6 @@ function PricingModal({
         </section>
 
         <section className="space-y-3">
-          <h3 className="text-sm font-semibold text-strong">
-            Consultores do projeto
-          </h3>
-          <p className="text-xs text-soft">
-            Consultores vinculados na Operação aparecem aqui automaticamente.
-            Defina o valor de venda de cada um.
-          </p>
-          <DataTable
-            columns={[
-              {
-                key: "consultant",
-                header: "Consultor",
-                cell: (alloc) => (
-                  <div>
-                    <p className="font-medium text-strong">
-                      {alloc.consultantName}
-                    </p>
-                    <p className="text-xs text-soft">{alloc.role}</p>
-                  </div>
-                ),
-              },
-              {
-                key: "value",
-                header: "Valor de venda",
-                align: "right",
-                cell: (alloc) => {
-                  const rate = rateByAllocation.get(alloc.id);
-                  return rate && rate.hourlyRate !== undefined ? (
-                    <span className="tabular-nums">
-                      {formatCurrencyPrecise(rate.hourlyRate)}
-                    </span>
-                  ) : (
-                    <span className="text-xs font-medium text-warning">
-                      Sem valor
-                    </span>
-                  );
-                },
-              },
-              {
-                key: "actions",
-                header: "",
-                align: "right",
-                cell: (alloc) => (
-                  <ActionButton
-                    size="sm"
-                    variant="secondary"
-                    icon={rateByAllocation.has(alloc.id) ? Edit : ReceiptText}
-                    aria-label={`${rateByAllocation.has(alloc.id) ? "Editar" : "Definir"} valor de ${alloc.consultantName}`}
-                    onClick={() => priceAllocation(alloc)}
-                  >
-                    {rateByAllocation.has(alloc.id) ? "Editar" : "Definir valor"}
-                  </ActionButton>
-                ),
-              },
-            ]}
-            rows={priceableAllocations}
-            rowKey={(alloc) => alloc.id}
-            empty={
-              <p className="text-center text-sm text-soft">
-                Nenhum consultor vinculado. Vincule na tela Projetos (Operação).
-              </p>
-            }
-          />
-        </section>
-
-        <section className="space-y-3">
           <div className="flex items-center justify-between gap-3">
             <h3 className="text-sm font-semibold text-strong">
               Valores de venda
@@ -587,58 +552,94 @@ function PricingModal({
               Novo valor
             </ActionButton>
           </div>
+          <p className="text-xs text-soft">
+            Consultores vinculados na Operação aparecem aqui automaticamente como
+            &quot;Sem valor&quot; até serem precificados.
+          </p>
           <DataTable
             columns={[
               {
                 key: "scope",
                 header: "Escopo",
-                cell: (item) =>
-                  item.allocationLabel ?? item.consultantName ?? "Projeto",
+                cell: (row) =>
+                  row.kind === "rate"
+                    ? (row.rate.allocationLabel ??
+                      row.rate.consultantName ??
+                      "Projeto")
+                    : `${row.alloc.consultantName} - ${row.alloc.role}`,
               },
               {
                 key: "period",
                 header: "Vigência",
-                cell: (item) =>
-                  `${formatDate(item.startsAt)} - ${
-                    item.endsAt ? formatDate(item.endsAt) : "em aberto"
-                  }`,
+                cell: (row) =>
+                  row.kind === "rate"
+                    ? `${formatDate(row.rate.startsAt)} - ${
+                        row.rate.endsAt ? formatDate(row.rate.endsAt) : "em aberto"
+                      }`
+                    : "-",
               },
               {
                 key: "rate",
                 header: "Valor",
                 align: "right",
-                cell: (item) =>
-                  item.hourlyRate === undefined
-                    ? "-"
-                    : formatCurrencyPrecise(item.hourlyRate),
+                cell: (row) =>
+                  row.kind === "rate" ? (
+                    row.rate.hourlyRate === undefined ? (
+                      "-"
+                    ) : (
+                      <span className="tabular-nums">
+                        {formatCurrencyPrecise(row.rate.hourlyRate)}
+                      </span>
+                    )
+                  ) : (
+                    <span className="text-xs font-medium text-warning">
+                      Sem valor
+                    </span>
+                  ),
               },
-              { key: "note", header: "Nota", cell: (item) => item.note ?? "-" },
+              {
+                key: "note",
+                header: "Nota",
+                cell: (row) =>
+                  row.kind === "rate" ? (row.rate.note ?? "-") : "-",
+              },
               {
                 key: "actions",
                 header: "",
                 align: "right",
-                cell: (item) => (
-                  <ActionButton
-                    size="sm"
-                    variant="secondary"
-                    icon={Edit}
-                    aria-label={`Editar valor de ${item.allocationLabel ?? item.consultantName ?? "projeto"}`}
-                    onClick={() => {
-                      setEditingRateId(item.id);
-                      setRate(rateToInput(item));
-                    }}
-                  >
-                    Editar
-                  </ActionButton>
-                ),
+                cell: (row) =>
+                  row.kind === "rate" ? (
+                    <ActionButton
+                      size="sm"
+                      variant="secondary"
+                      icon={Edit}
+                      aria-label={`Editar valor de ${row.rate.allocationLabel ?? row.rate.consultantName ?? "projeto"}`}
+                      onClick={() => {
+                        setEditingRateId(row.rate.id);
+                        setRate(rateToInput(row.rate));
+                      }}
+                    >
+                      Editar
+                    </ActionButton>
+                  ) : (
+                    <ActionButton
+                      size="sm"
+                      variant="secondary"
+                      icon={ReceiptText}
+                      aria-label={`Definir valor de ${row.alloc.consultantName}`}
+                      onClick={() => priceAllocation(row.alloc)}
+                    >
+                      Definir valor
+                    </ActionButton>
+                  ),
               },
             ]}
-            rows={project.saleRates}
-            rowKey={(item) => item.id}
+            rows={pricingRows}
+            rowKey={(row) => row.key}
             empty={
               <p className="text-center text-sm text-soft">
-                Sem valores de venda. Cadastre ao menos um valor a nível de
-                projeto para sair da fila de pendência.
+                Sem valores e sem consultores vinculados. Vincule na tela
+                Projetos (Operação) ou cadastre um valor a nível de projeto.
               </p>
             }
           />

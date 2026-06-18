@@ -12,6 +12,7 @@ import type {
   ProjectSkillOption,
   SkillLevel,
 } from "@/lib/projects/types";
+import { projectHasSaleValue } from "@/lib/projects/pending";
 import { isDatabaseConfigured } from "./config";
 
 function decimalToNumber(value: Prisma.Decimal | null): number | undefined {
@@ -191,29 +192,39 @@ export async function listProjects(options?: {
   const managerNames = new Map(managers.map((manager) => [manager.id, manager.name]));
 
   // Presence flags for the per-area pending queues. Derived by query (no
-  // materialized state on Project): a project-level sale rate currently in
-  // effect, and the existence of a billing rule. Two cheap, always-on lookups
-  // so Operação can flag pendências even when commercial values are masked.
+  // materialized state on Project): a sale value (cobertura por consultor OU
+  // valor base do projeto) e a existência de uma regra de cobrança. Always-on
+  // lookups (independentes de includeFinancials) para a Operação sinalizar
+  // pendências mesmo com os valores mascarados por papel.
   const today = new Date();
-  const [billingConfigRows, baseSaleRateRows] = await Promise.all([
+  const [billingConfigRows, vigentRateRows] = await Promise.all([
     prisma.projectBillingConfig.findMany({ select: { projectId: true } }),
     prisma.projectSaleRate.findMany({
       where: {
-        consultantId: null,
-        allocationId: null,
         startsAt: { lte: today },
         OR: [{ endsAt: null }, { endsAt: { gte: today } }],
       },
-      select: { projectId: true },
-      distinct: ["projectId"],
+      select: { projectId: true, consultantId: true, allocationId: true },
     }),
   ]);
   const billingConfigProjectIds = new Set(
     billingConfigRows.map((row) => row.projectId),
   );
-  const activeSaleRateProjectIds = new Set(
-    baseSaleRateRows.map((row) => row.projectId),
-  );
+  // Vigent sale rates grouped by project, used to decide whether every active/
+  // planned allocation is priced (or a project-level base rate covers all).
+  const vigentRatesByProject = new Map<
+    string,
+    { consultantId: string | null; allocationId: string | null }[]
+  >();
+  for (const rate of vigentRateRows) {
+    const list = vigentRatesByProject.get(rate.projectId);
+    const entry = {
+      consultantId: rate.consultantId,
+      allocationId: rate.allocationId,
+    };
+    if (list) list.push(entry);
+    else vigentRatesByProject.set(rate.projectId, [entry]);
+  }
 
   return rows.map((row) => {
     const allocations: ProjectAllocationItem[] = row.allocations.map((item) => {
@@ -300,7 +311,10 @@ export async function listProjects(options?: {
         .length,
       allocations,
       saleRates,
-      hasActiveSaleRate: activeSaleRateProjectIds.has(row.id),
+      hasActiveSaleRate: projectHasSaleValue(
+        allocations,
+        vigentRatesByProject.get(row.id) ?? [],
+      ),
       hasBillingConfig: billingConfigProjectIds.has(row.id),
     };
   });
