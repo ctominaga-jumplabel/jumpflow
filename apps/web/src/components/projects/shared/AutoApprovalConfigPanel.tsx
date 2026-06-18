@@ -2,15 +2,18 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarClock, Clock, Link2, Trash2, Users } from "lucide-react";
+import { CalendarClock, Clock, Link2, Pause, Play, Trash2, Users } from "lucide-react";
 import { ActionButton } from "@/components/ui/ActionButton";
 import { Modal } from "@/components/ui/Modal";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 import { FeedbackBanner, useFeedback } from "@/components/ui/Feedback";
 import { focusRing, focusRingInput } from "@/lib/styles";
 import { cn } from "@/lib/utils";
 import {
   deleteConsultantAutoApprovalRule,
   linkConsultantsToAutoApproval,
+  setConsultantAutoApprovalActive,
+  setProjectAutoApprovalActive,
   upsertConsultantAutoApprovalRule,
   upsertProjectAutoApprovalRule,
 } from "@/app/app/projetos/actions";
@@ -73,7 +76,9 @@ export function AutoApprovalConfigPanel({
   const [linkOpen, setLinkOpen] = useState(false);
 
   const consultantRules = project.autoApprovalConsultantRules ?? [];
-  const exclusiveMode = consultantRules.length > 0;
+  // O modo exclusivo (que suspende a regra do projeto) é determinado por regras
+  // ATIVAS — igual ao motor. Regras inativas continuam listadas para reativação.
+  const exclusiveMode = consultantRules.some((r) => r.active);
 
   const [projectForm, setProjectForm] = useState<RuleForm>(() =>
     toForm(project.autoApprovalRule),
@@ -154,6 +159,28 @@ export function AutoApprovalConfigPanel({
           >
             Salvar regra do projeto
           </ActionButton>
+          {project.autoApprovalRule ? (
+            <ActionButton
+              size="sm"
+              variant={project.autoApprovalRule.active ? "secondary" : "success"}
+              icon={project.autoApprovalRule.active ? Pause : Play}
+              disabled={!canManageProjects || isPending}
+              onClick={() =>
+                run(
+                  () =>
+                    setProjectAutoApprovalActive({
+                      projectId: project.id,
+                      active: !project.autoApprovalRule!.active,
+                    }),
+                  project.autoApprovalRule!.active
+                    ? "Regra do projeto inativada."
+                    : "Regra do projeto reativada.",
+                )
+              }
+            >
+              {project.autoApprovalRule.active ? "Inativar regra" : "Reativar regra"}
+            </ActionButton>
+          ) : null}
           <ActionButton
             size="sm"
             variant="secondary"
@@ -166,12 +193,19 @@ export function AutoApprovalConfigPanel({
         </div>
       </section>
 
-      {exclusiveMode ? (
+      {consultantRules.length > 0 ? (
         <section className="space-y-3 rounded-md border border-border p-3">
           <div className="flex items-center gap-2 text-sm font-semibold text-strong">
             <Users aria-hidden="true" className="size-4" />
             Regras por consultor
           </div>
+          {!exclusiveMode ? (
+            <p className="text-xs text-soft">
+              Todas as regras por consultor estão inativas — a regra do projeto
+              acima volta a valer. Reative uma regra para retornar ao modo
+              exclusivo.
+            </p>
+          ) : null}
           <ul className="space-y-3">
             {consultantRules.map((rule) => (
               <ConsultantRuleRow
@@ -183,6 +217,18 @@ export function AutoApprovalConfigPanel({
                   run(
                     () => upsertConsultantAutoApprovalRule(input),
                     `Regra de ${rule.consultantName} salva.`,
+                  )
+                }
+                onToggle={() =>
+                  run(
+                    () =>
+                      setConsultantAutoApprovalActive({
+                        id: rule.id,
+                        active: !rule.active,
+                      }),
+                    rule.active
+                      ? `Regra de ${rule.consultantName} inativada.`
+                      : `Regra de ${rule.consultantName} reativada.`,
                   )
                 }
                 onRemove={() =>
@@ -289,6 +335,7 @@ function ConsultantRuleRow({
   rule,
   disabled,
   onSave,
+  onToggle,
   onRemove,
 }: {
   projectId: string;
@@ -302,28 +349,53 @@ function ConsultantRuleRow({
     minMinutes: number;
     maxMinutes: number;
   }) => void;
+  onToggle: () => void;
   onRemove: () => void;
 }) {
   const [form, setForm] = useState<RuleForm>(() => toForm(rule));
 
   return (
-    <li className="space-y-2 rounded-md border border-border bg-surface-muted/40 p-3">
+    <li
+      className={cn(
+        "space-y-2 rounded-md border border-border bg-surface-muted/40 p-3",
+        !rule.active && "opacity-70",
+      )}
+    >
       <div className="flex items-center justify-between gap-2">
-        <span className="text-sm font-semibold text-strong">
+        <span className="flex items-center gap-2 text-sm font-semibold text-strong">
           {rule.consultantName}
+          <StatusBadge tone={rule.active ? "success" : "neutral"}>
+            {rule.active ? "Ativa" : "Inativa"}
+          </StatusBadge>
         </span>
-        <button
-          type="button"
-          onClick={onRemove}
-          disabled={disabled}
-          aria-label={`Remover vínculo de ${rule.consultantName}`}
-          className={cn(
-            "grid size-7 place-items-center rounded-md text-medium transition-colors hover:bg-surface hover:text-danger disabled:opacity-50",
-            focusRing,
-          )}
-        >
-          <Trash2 aria-hidden="true" className="size-4" />
-        </button>
+        <div className="flex items-center gap-1">
+          <ActionButton
+            size="sm"
+            variant={rule.active ? "secondary" : "success"}
+            icon={rule.active ? Pause : Play}
+            disabled={disabled}
+            onClick={onToggle}
+            aria-label={
+              rule.active
+                ? `Inativar regra de ${rule.consultantName}`
+                : `Reativar regra de ${rule.consultantName}`
+            }
+          >
+            {rule.active ? "Inativar" : "Reativar"}
+          </ActionButton>
+          <button
+            type="button"
+            onClick={onRemove}
+            disabled={disabled}
+            aria-label={`Remover vínculo de ${rule.consultantName}`}
+            className={cn(
+              "grid size-7 place-items-center rounded-md text-medium transition-colors hover:bg-surface hover:text-danger disabled:opacity-50",
+              focusRing,
+            )}
+          >
+            <Trash2 aria-hidden="true" className="size-4" />
+          </button>
+        </div>
       </div>
       <RuleFields value={form} disabled={disabled} onChange={setForm} />
       <ActionButton

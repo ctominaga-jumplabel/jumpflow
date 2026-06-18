@@ -22,6 +22,7 @@ type Entry = {
 type Rule = {
   consultantId?: string;
   projectId: string;
+  active?: boolean;
   weekendEnabled: boolean;
   hoursRangeEnabled: boolean;
   minMinutes: number;
@@ -80,15 +81,31 @@ const h = vi.hoisted(() => {
       },
     },
     projectAutoApprovalRule: {
-      findMany: async ({ where }: { where: { projectId: { in: string[] } } }) =>
+      findMany: async ({
+        where,
+      }: {
+        where: { projectId: { in: string[] }; active?: boolean };
+      }) =>
         store.projectRules
-          .filter((r) => where.projectId.in.includes(r.projectId))
+          .filter(
+            (r) =>
+              where.projectId.in.includes(r.projectId) &&
+              (where.active === undefined || r.active !== false),
+          )
           .map((r) => ({ ...r })),
     },
     consultantAutoApprovalRule: {
-      findMany: async ({ where }: { where: { projectId: { in: string[] } } }) =>
+      findMany: async ({
+        where,
+      }: {
+        where: { projectId: { in: string[] }; active?: boolean };
+      }) =>
         store.consultantRules
-          .filter((r) => where.projectId.in.includes(r.projectId))
+          .filter(
+            (r) =>
+              where.projectId.in.includes(r.projectId) &&
+              (where.active === undefined || r.active !== false),
+          )
           .map((r) => ({ ...r })),
     },
     approval: {
@@ -436,6 +453,36 @@ describe("runAutoApproval — project/consultant rule hierarchy", () => {
 
   it("falls back to the 8h rule only when the project has no configuration", async () => {
     h.store.entries = [entry({ hours: 8 })]; // 480 min total, no rules
+    const result = await runAutoApproval(NOW);
+    expect(result.approved).toBe(1);
+    expect(result.ruleCounts).toEqual({ DEFAULT: 1 });
+  });
+
+  it("ignores an INACTIVE project rule (falls back to 8h)", async () => {
+    // 6h entry: would NOT pass the 8h fallback. The range rule would cover it,
+    // but it's inactive → ignored → fallback applies → stays pending.
+    h.store.entries = [entry({ hours: 6 })];
+    h.store.projectRules = [
+      rule({ active: false, hoursRangeEnabled: true, minMinutes: 1, maxMinutes: 540 }),
+    ];
+    const result = await runAutoApproval(NOW);
+    expect(result.approved).toBe(0);
+    expect(result.pending).toBe(1);
+  });
+
+  it("an INACTIVE consultant rule does not trigger exclusive mode", async () => {
+    // Only an inactive consultant rule exists → project is NOT in exclusive
+    // mode → the 8h fallback approves the standard 8h entry.
+    h.store.entries = [entry({ id: "c2-entry", consultantId: "c2", hours: 8 })];
+    h.store.consultantRules = [
+      rule({
+        consultantId: "c1",
+        active: false,
+        hoursRangeEnabled: true,
+        minMinutes: 1,
+        maxMinutes: 540,
+      }),
+    ];
     const result = await runAutoApproval(NOW);
     expect(result.approved).toBe(1);
     expect(result.ruleCounts).toEqual({ DEFAULT: 1 });

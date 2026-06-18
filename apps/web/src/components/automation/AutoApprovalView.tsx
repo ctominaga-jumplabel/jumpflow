@@ -1,10 +1,14 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import {
   BotMessageSquare,
   CheckCircle2,
   Hourglass,
+  Pause,
+  Pencil,
+  Play,
   Power,
   Timer,
   Users,
@@ -21,6 +25,10 @@ import { formatHours } from "@/lib/format";
 import type { AutoApprovalOverview } from "@/lib/db/automation";
 import type { ProjectItem } from "@/lib/projects/types";
 import { AutoApprovalConfigPanel } from "@/components/projects/shared/AutoApprovalConfigPanel";
+import {
+  setConsultantAutoApprovalActive,
+  setProjectAutoApprovalActive,
+} from "@/app/app/projetos/actions";
 import { runAutoApprovalNow } from "@/app/app/automacoes/aprovacao-automatica/actions";
 
 const thClass =
@@ -56,8 +64,13 @@ function minutesToHHmm(total: number): string {
 
 interface RuleSummaryRow {
   key: string;
+  kind: "project" | "consultant";
+  projectId: string;
+  /** id da ConsultantAutoApprovalRule (apenas em kind="consultant"). */
+  ruleId?: string;
   projectName: string;
   scope: string;
+  active: boolean;
   weekendEnabled: boolean;
   hoursRangeEnabled: boolean;
   minMinutes: number;
@@ -65,35 +78,42 @@ interface RuleSummaryRow {
 }
 
 /**
- * Lista achatada das regras cadastradas a partir dos projetos: em modo
- * exclusivo (há regras por consultor) lista uma linha por consultor; senão, uma
- * linha para a regra do projeto. Projetos sem nenhuma regra não aparecem.
+ * Inventário achatado de TODAS as regras cadastradas: a regra do projeto (se
+ * houver) e uma linha por regra de consultor, cada uma com seu próprio status
+ * (Ativa/Inativa). Mostra ambas para nada ficar escondido — a suspensão pelo
+ * modo exclusivo é estado derivado do motor, não some o cadastro. Projetos sem
+ * nenhuma regra não aparecem.
  */
 function buildRuleRows(projects: ProjectItem[]): RuleSummaryRow[] {
   const rows: RuleSummaryRow[] = [];
   for (const project of projects) {
-    const consultantRules = project.autoApprovalConsultantRules ?? [];
-    if (consultantRules.length > 0) {
-      for (const rule of consultantRules) {
-        rows.push({
-          key: rule.id,
-          projectName: project.name,
-          scope: rule.consultantName,
-          weekendEnabled: rule.weekendEnabled,
-          hoursRangeEnabled: rule.hoursRangeEnabled,
-          minMinutes: rule.minMinutes,
-          maxMinutes: rule.maxMinutes,
-        });
-      }
-    } else if (project.autoApprovalRule) {
+    if (project.autoApprovalRule) {
       rows.push({
-        key: project.id,
+        key: `${project.id}:project`,
+        kind: "project",
+        projectId: project.id,
         projectName: project.name,
         scope: "Projeto (todos)",
+        active: project.autoApprovalRule.active,
         weekendEnabled: project.autoApprovalRule.weekendEnabled,
         hoursRangeEnabled: project.autoApprovalRule.hoursRangeEnabled,
         minMinutes: project.autoApprovalRule.minMinutes,
         maxMinutes: project.autoApprovalRule.maxMinutes,
+      });
+    }
+    for (const rule of project.autoApprovalConsultantRules ?? []) {
+      rows.push({
+        key: rule.id,
+        kind: "consultant",
+        projectId: project.id,
+        ruleId: rule.id,
+        projectName: project.name,
+        scope: rule.consultantName,
+        active: rule.active,
+        weekendEnabled: rule.weekendEnabled,
+        hoursRangeEnabled: rule.hoursRangeEnabled,
+        minMinutes: rule.minMinutes,
+        maxMinutes: rule.maxMinutes,
       });
     }
   }
@@ -119,14 +139,45 @@ export function AutoApprovalView({
 }: AutoApprovalViewProps) {
   const { config, projectRuleCount, consultantRuleCount, recentAutoApprovals, pending } =
     overview;
+  const router = useRouter();
   const { feedback, notify } = useFeedback();
   const [isRunning, startRun] = useTransition();
+  const [isToggling, startToggle] = useTransition();
+  const editorRef = useRef<HTMLDivElement>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string>(
     () => projects[0]?.id ?? "",
   );
   const selectedProject =
     projects.find((p) => p.id === selectedProjectId) ?? null;
   const ruleRows = buildRuleRows(projects);
+
+  /** "Editar": seleciona o projeto da regra e leva ao editor abaixo. */
+  function editRule(row: RuleSummaryRow) {
+    setSelectedProjectId(row.projectId);
+    editorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  /** "Inativar/Reativar": alterna o active da regra (projeto ou consultor). */
+  function toggleRule(row: RuleSummaryRow) {
+    startToggle(async () => {
+      const result =
+        row.kind === "consultant"
+          ? await setConsultantAutoApprovalActive({
+              id: row.ruleId as string,
+              active: !row.active,
+            })
+          : await setProjectAutoApprovalActive({
+              projectId: row.projectId,
+              active: !row.active,
+            });
+      if (!result.ok) {
+        notify("warning", result.message);
+        return;
+      }
+      notify("success", row.active ? "Regra inativada." : "Regra reativada.");
+      router.refresh();
+    });
+  }
 
   function handleRun() {
     startRun(async () => {
@@ -226,6 +277,8 @@ export function AutoApprovalView({
                   <th scope="col" className={thClass}>Escopo</th>
                   <th scope="col" className={thClass}>Fim de semana</th>
                   <th scope="col" className={thClass}>Range de horas</th>
+                  <th scope="col" className={thClass}>Status</th>
+                  <th scope="col" className={`${thClass} text-right`}>Ações</th>
                 </tr>
               </thead>
               <tbody>
@@ -260,6 +313,38 @@ export function AutoApprovalView({
                         <span className="text-soft">—</span>
                       )}
                     </td>
+                    <td className={tdClass}>
+                      <StatusBadge tone={row.active ? "success" : "neutral"}>
+                        {row.active ? "Ativa" : "Inativa"}
+                      </StatusBadge>
+                    </td>
+                    <td className={`${tdClass} text-right`}>
+                      <div className="flex justify-end gap-1">
+                        <ActionButton
+                          size="sm"
+                          variant="secondary"
+                          icon={Pencil}
+                          onClick={() => editRule(row)}
+                          aria-label={`Editar regra de ${row.scope} em ${row.projectName}`}
+                        >
+                          Editar
+                        </ActionButton>
+                        <ActionButton
+                          size="sm"
+                          variant={row.active ? "secondary" : "success"}
+                          icon={row.active ? Pause : Play}
+                          disabled={isToggling}
+                          onClick={() => toggleRule(row)}
+                          aria-label={
+                            row.active
+                              ? `Inativar regra de ${row.scope} em ${row.projectName}`
+                              : `Reativar regra de ${row.scope} em ${row.projectName}`
+                          }
+                        >
+                          {row.active ? "Inativar" : "Reativar"}
+                        </ActionButton>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -268,6 +353,7 @@ export function AutoApprovalView({
         )}
       </SectionPanel>
 
+      <div ref={editorRef} className="scroll-mt-4">
       <SectionPanel
         title="Regras por projeto"
         description="Configure a regra de aprovação automática (fim de semana e/ou range de horas) e vincule consultores. O mesmo cadastro está disponível na aba Aprovação de cada projeto."
@@ -309,6 +395,7 @@ export function AutoApprovalView({
           </div>
         )}
       </SectionPanel>
+      </div>
 
       <SectionPanel
         title="Lançamentos pendentes"

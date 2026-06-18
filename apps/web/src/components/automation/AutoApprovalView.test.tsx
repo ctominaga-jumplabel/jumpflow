@@ -32,6 +32,25 @@ vi.mock("@/components/projects/shared/AutoApprovalConfigPanel", () => ({
   AutoApprovalConfigPanel: () => null,
 }));
 
+// AutoApprovalView importa as actions de toggle (projetos) e useRouter; ambos
+// são stubados para o teste ficar livre de dependências server-only.
+const setProjectAutoApprovalActive = vi.fn(async (input: unknown) => {
+  void input;
+  return { ok: true as const, data: { active: false } };
+});
+const setConsultantAutoApprovalActive = vi.fn(async (input: unknown) => {
+  void input;
+  return { ok: true as const, data: { active: false } };
+});
+vi.mock("@/app/app/projetos/actions", () => ({
+  setProjectAutoApprovalActive: (input: unknown) =>
+    setProjectAutoApprovalActive(input),
+  setConsultantAutoApprovalActive: (input: unknown) =>
+    setConsultantAutoApprovalActive(input),
+}));
+const routerRefresh = vi.fn();
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: routerRefresh }) }));
+
 function overview(over: Partial<AutoApprovalOverview> = {}): AutoApprovalOverview {
   return {
     config: {
@@ -140,6 +159,7 @@ describe("AutoApprovalView — regras cadastradas", () => {
       name: "Apollo",
       clientName: "Acme",
       autoApprovalRule: {
+        active: true,
         weekendEnabled: true,
         hoursRangeEnabled: true,
         minMinutes: 1,
@@ -158,6 +178,7 @@ describe("AutoApprovalView — regras cadastradas", () => {
           id: "car-1",
           consultantId: "c1",
           consultantName: "Diana Souza",
+          active: false,
           weekendEnabled: false,
           hoursRangeEnabled: true,
           minMinutes: 480,
@@ -168,14 +189,88 @@ describe("AutoApprovalView — regras cadastradas", () => {
     },
   ] as unknown as Parameters<typeof AutoApprovalView>[0]["projects"];
 
-  it("lists project-level and per-consultant rules with weekend + range summary", () => {
+  beforeEach(() => {
+    setProjectAutoApprovalActive.mockClear();
+    setConsultantAutoApprovalActive.mockClear();
+    routerRefresh.mockClear();
+  });
+
+  it("lists project-level and per-consultant rules with weekend + range + status", () => {
     render(<AutoApprovalView overview={overview()} projects={projects} />);
-    // Project rule row: scope "Projeto (todos)", range 00:01 – 09:00.
+    // Project rule row: scope "Projeto (todos)", range 00:01 – 09:00, ativa.
     expect(screen.getByText("Projeto (todos)")).toBeInTheDocument();
     expect(screen.getByText("00:01 – 09:00")).toBeInTheDocument();
-    // Per-consultant row: scope is the consultant, min==max → exact 08:00.
+    // Per-consultant row: scope is the consultant, min==max → exact 08:00, inativa.
     expect(screen.getByText("Diana Souza")).toBeInTheDocument();
     expect(screen.getByText("08:00 – 08:00")).toBeInTheDocument();
+    // "Ativa" também aparece no KPI de status; "Inativa" só existe na lista.
+    expect(screen.getAllByText("Ativa").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("Inativa")).toBeInTheDocument();
+  });
+
+  it("inactivates an active project rule via the action", async () => {
+    render(<AutoApprovalView overview={overview()} projects={projects} />);
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: /Inativar regra de Projeto \(todos\) em Apollo/,
+      }),
+    );
+    await waitFor(() =>
+      expect(setProjectAutoApprovalActive).toHaveBeenCalledWith({
+        projectId: "proj-1",
+        active: false,
+      }),
+    );
+    await waitFor(() => expect(routerRefresh).toHaveBeenCalled());
+  });
+
+  it("reactivates an inactive consultant rule via the action", async () => {
+    render(<AutoApprovalView overview={overview()} projects={projects} />);
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: /Reativar regra de Diana Souza em Beta/,
+      }),
+    );
+    await waitFor(() =>
+      expect(setConsultantAutoApprovalActive).toHaveBeenCalledWith({
+        id: "car-1",
+        active: true,
+      }),
+    );
+  });
+
+  it("shows BOTH the project rule and consultant rules of the same project (nothing hidden)", () => {
+    const mixed = [
+      {
+        id: "proj-3",
+        name: "Cosmos",
+        clientName: "Initech",
+        autoApprovalRule: {
+          active: true,
+          weekendEnabled: true,
+          hoursRangeEnabled: false,
+          minMinutes: 1,
+          maxMinutes: 1439,
+        },
+        autoApprovalConsultantRules: [
+          {
+            id: "car-9",
+            consultantId: "c9",
+            consultantName: "Eva Lima",
+            active: false,
+            weekendEnabled: false,
+            hoursRangeEnabled: true,
+            minMinutes: 60,
+            maxMinutes: 120,
+          },
+        ],
+        allocations: [],
+      },
+    ] as unknown as Parameters<typeof AutoApprovalView>[0]["projects"];
+    render(<AutoApprovalView overview={overview()} projects={mixed} />);
+    expect(screen.getByText("Projeto (todos)")).toBeInTheDocument();
+    expect(screen.getByText("Eva Lima")).toBeInTheDocument();
+    expect(screen.getByText("01:00 – 02:00")).toBeInTheDocument();
   });
 
   it("shows an empty state when no project has a rule", () => {

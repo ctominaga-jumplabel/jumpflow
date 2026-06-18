@@ -1330,6 +1330,9 @@ model ProjectAutoApprovalRule {
   id                String   @id @default(cuid())
   projectId         String   @unique
   project           Project  @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  /// Regra inativa e ignorada pelo motor (como se nao existisse), mas mantida
+  /// para reativacao. Inativar a regra do projeto faz o motor cair no fallback.
+  active            Boolean  @default(true)
   weekendEnabled    Boolean  @default(false)
   hoursRangeEnabled Boolean  @default(false)
   minMinutes        Int      @default(1)
@@ -1348,6 +1351,9 @@ model ConsultantAutoApprovalRule {
   consultant        Consultant @relation(fields: [consultantId], references: [id], onDelete: Restrict)
   projectId         String
   project           Project    @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  /// Regra inativa e ignorada pelo motor (nao conta para o modo exclusivo);
+  /// mantida para reativacao.
+  active            Boolean    @default(true)
   weekendEnabled    Boolean    @default(false)
   hoursRangeEnabled Boolean    @default(false)
   minMinutes        Int        @default(1)

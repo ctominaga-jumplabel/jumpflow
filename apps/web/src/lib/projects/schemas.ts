@@ -168,6 +168,16 @@ export const linkAutoApprovalConsultantsSchema = z.object({
 
 export const removeConsultantAutoApprovalRuleSchema = z.object({ id: entityId });
 
+export const setProjectAutoApprovalActiveSchema = z.object({
+  projectId: entityId,
+  active: z.boolean(),
+});
+
+export const setConsultantAutoApprovalActiveSchema = z.object({
+  id: entityId,
+  active: z.boolean(),
+});
+
 export const allocationInputSchema = z
   .object({
     projectId: entityId,
@@ -257,6 +267,12 @@ export type ConsultantAutoApprovalRuleInput = z.infer<
 >;
 export type LinkAutoApprovalConsultantsInput = z.infer<
   typeof linkAutoApprovalConsultantsSchema
+>;
+export type SetProjectAutoApprovalActiveInput = z.infer<
+  typeof setProjectAutoApprovalActiveSchema
+>;
+export type SetConsultantAutoApprovalActiveInput = z.infer<
+  typeof setConsultantAutoApprovalActiveSchema
 >;
 export type AllocationInput = z.infer<typeof allocationInputSchema>;
 export type AllocationUpdateInput = z.infer<typeof allocationUpdateSchema>;
