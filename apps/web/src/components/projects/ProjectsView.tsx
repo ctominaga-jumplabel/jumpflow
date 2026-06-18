@@ -74,12 +74,13 @@ import {
   formToBillingConfigItem,
 } from "./shared/billing-form";
 import { BillingConfigPanel } from "./shared/BillingConfigPanel";
+import { AutoApprovalConfigPanel } from "./shared/AutoApprovalConfigPanel";
 import { DateField, NumberField, fieldClass } from "./shared/fields";
 import { allocationStatusLabels, skillLevelLabels } from "./shared/labels";
 import { SaleRateModal } from "./shared/SaleRateModal";
 
 type Mode = "demo" | "db";
-type DetailTab = "ALLOCATIONS" | "SKILLS" | "RATES" | "BILLING";
+type DetailTab = "ALLOCATIONS" | "SKILLS" | "RATES" | "BILLING" | "APPROVAL";
 
 interface ProjectsViewProps {
   mode: Mode;
@@ -1017,6 +1018,11 @@ function ProjectDetailModal({
           onClick={() => onTabChange("SKILLS")}
         />
         <FilterChip
+          label="Aprovação"
+          active={tab === "APPROVAL"}
+          onClick={() => onTabChange("APPROVAL")}
+        />
+        <FilterChip
           label="Valores de venda"
           active={tab === "RATES"}
           onClick={() => onTabChange("RATES")}
@@ -1161,6 +1167,11 @@ function ProjectDetailModal({
             Valores comerciais restritos por perfil.
           </p>
         )
+      ) : tab === "APPROVAL" ? (
+        <AutoApprovalConfigPanel
+          project={project}
+          canManageProjects={canManageProjects}
+        />
       ) : canEditBillingConfig && billingForm ? (
         <BillingConfigPanel
           chargeType={project.billingChargeType}

@@ -142,5 +142,27 @@ export interface ProjectItem {
    */
   hasActiveSaleRate: boolean;
   hasBillingConfig: boolean;
+  /** Regra de aprovação automática do projeto (undefined = não configurada). */
+  autoApprovalRule?: ProjectAutoApprovalRuleItem;
+  /**
+   * Regras de aprovação automática por consultor. Se houver QUALQUER uma, o
+   * projeto entra em modo exclusivo (a regra do projeto deixa de valer).
+   * Opcional na borda (mock/otimista); o loader sempre popula com um array.
+   */
+  autoApprovalConsultantRules?: ProjectConsultantAutoApprovalRuleItem[];
+}
+
+export interface ProjectAutoApprovalRuleItem {
+  weekendEnabled: boolean;
+  hoursRangeEnabled: boolean;
+  minMinutes: number;
+  maxMinutes: number;
+}
+
+export interface ProjectConsultantAutoApprovalRuleItem
+  extends ProjectAutoApprovalRuleItem {
+  id: string;
+  consultantId: string;
+  consultantName: string;
 }
 

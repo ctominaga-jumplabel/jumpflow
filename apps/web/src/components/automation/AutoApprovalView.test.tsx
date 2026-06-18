@@ -1,20 +1,14 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import {
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-  within,
-} from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { AutoApprovalOverview } from "@/lib/db/automation";
 import type { RunSummary } from "@/app/app/automacoes/aprovacao-automatica/actions";
 import { AutoApprovalView } from "./AutoApprovalView";
 
 /**
- * jsdom tests for the auto-approval admin screen. The server actions are mocked
- * so the component tree stays free of server-only imports; we assert what the
- * admin actually sees (status, KPIs, the three tables) and how "Executar agora"
- * + the exception toggle report through the polite live region.
+ * jsdom tests for the auto-approval admin screen. The rule configuration moved
+ * to the project screen, so this screen is observability-only: status/KPIs, the
+ * pending + recent tables, and the single "Executar agora" mutation. The action
+ * is mocked so the tree stays free of server-only imports.
  *
  * Project gotcha: post-action assertions are scoped to the FeedbackBanner live
  * region, never the whole document.
@@ -24,29 +18,12 @@ const h = vi.hoisted(() => ({
   runResult: { ok: true, data: {} as RunSummary } as
     | { ok: true; data: RunSummary }
     | { ok: false; error: string; message: string },
-  toggleResult: { ok: true, data: { id: "x1", active: false } } as
-    | { ok: true; data: { id: string; active: boolean } }
-    | { ok: false; error: string; message: string },
 }));
 
 const runAutoApprovalNow = vi.fn(async () => h.runResult);
-const setExceptionActive = vi.fn(
-  async (input: { exceptionId: string; active: boolean }) => {
-    void input;
-    return h.toggleResult;
-  },
-);
-const createAutoApprovalException = vi.fn(async (input: unknown) => {
-  void input;
-  return { ok: true as const, data: { id: "new-exc" } };
-});
 
 vi.mock("@/app/app/automacoes/aprovacao-automatica/actions", () => ({
   runAutoApprovalNow: () => runAutoApprovalNow(),
-  setExceptionActive: (input: { exceptionId: string; active: boolean }) =>
-    setExceptionActive(input),
-  createAutoApprovalException: (input: unknown) =>
-    createAutoApprovalException(input),
 }));
 
 function overview(over: Partial<AutoApprovalOverview> = {}): AutoApprovalOverview {
@@ -56,20 +33,12 @@ function overview(over: Partial<AutoApprovalOverview> = {}): AutoApprovalOvervie
       requiredDailyMinutes: 480,
       approvalDelayMinutes: 5,
     },
-    activeExceptionsCount: 1,
-    exceptions: [
-      {
-        id: "x1",
-        consultantName: "Ana Martins",
-        projectName: "Apollo",
-        type: "ANY_HOURS",
-        active: true,
-      },
-    ],
+    projectRuleCount: 2,
+    consultantRuleCount: 3,
     recentAutoApprovals: [
       {
         entityId: "e1",
-        ruleKey: "DEFAULT",
+        ruleKey: "RULE_RANGE",
         createdAt: new Date("2026-06-10T12:00:00Z"),
         consultantName: "Bruno Costa",
         projectName: "Beta",
@@ -86,8 +55,6 @@ function overview(over: Partial<AutoApprovalOverview> = {}): AutoApprovalOvervie
         reasons: ["Aguardando intervalo mínimo após o envio"],
       },
     ],
-    consultantOptions: [{ id: "con-1", name: "Ana Martins" }],
-    projectOptions: [{ id: "proj-1", name: "Apollo", clientName: "Acme" }],
     ...over,
   };
 }
@@ -101,8 +68,6 @@ function liveRegion(): HTMLElement {
 
 beforeEach(() => {
   runAutoApprovalNow.mockClear();
-  setExceptionActive.mockClear();
-  createAutoApprovalException.mockClear();
   h.runResult = {
     ok: true,
     data: {
@@ -113,13 +78,11 @@ beforeEach(() => {
       skipped: false,
     },
   };
-  h.toggleResult = { ok: true, data: { id: "x1", active: false } };
 });
 
 describe("AutoApprovalView — status and KPIs", () => {
   it("shows the enabled status with the success color", () => {
     render(<AutoApprovalView overview={overview()} />);
-    // Scope to the status KPI card: the exceptions table also renders "Ativa".
     const kpi = screen
       .getByText("Aprovação automática")
       .closest("div") as HTMLElement;
@@ -148,16 +111,17 @@ describe("AutoApprovalView — status and KPIs", () => {
     expect(screen.getByText("Motor pausado")).toBeInTheDocument();
   });
 
-  it("renders the config KPIs (required hours, delay, exceptions)", () => {
+  it("renders the config KPIs (delay + rule counts)", () => {
     render(<AutoApprovalView overview={overview()} />);
-    // 480 min -> 8h required daily total.
-    expect(screen.getByText("8h")).toBeInTheDocument();
     expect(screen.getByText("5 min")).toBeInTheDocument();
-    // Active exceptions count.
-    const exceptionsKpi = screen
-      .getByText("Exceções ativas")
+    const projectKpi = screen
+      .getByText("Projetos com regra")
       .closest("div") as HTMLElement;
-    expect(within(exceptionsKpi).getByText("1")).toBeInTheDocument();
+    expect(within(projectKpi).getByText("2")).toBeInTheDocument();
+    const consultantKpi = screen
+      .getByText("Regras por consultor")
+      .closest("div") as HTMLElement;
+    expect(within(consultantKpi).getByText("3")).toBeInTheDocument();
   });
 });
 
@@ -175,32 +139,16 @@ describe("AutoApprovalView — tables", () => {
     render(<AutoApprovalView overview={overview()} />);
     expect(screen.getByText("Bruno Costa")).toBeInTheDocument();
     expect(screen.getByText("Beta")).toBeInTheDocument();
-    expect(screen.getByText("DEFAULT")).toBeInTheDocument();
-  });
-
-  it("lists exceptions with the readable type label and a toggle", () => {
-    render(<AutoApprovalView overview={overview()} />);
-    expect(screen.getByText("Qualquer carga horária")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /Desativar exceção de Ana Martins/ }),
-    ).toBeInTheDocument();
+    expect(screen.getByText("RULE_RANGE")).toBeInTheDocument();
   });
 
   it("renders empty states when there is nothing to show", () => {
     render(
       <AutoApprovalView
-        overview={overview({
-          activeExceptionsCount: 0,
-          exceptions: [],
-          recentAutoApprovals: [],
-          pending: [],
-        })}
+        overview={overview({ recentAutoApprovals: [], pending: [] })}
       />,
     );
-    expect(
-      screen.getByText("Nenhum lançamento pendente"),
-    ).toBeInTheDocument();
-    expect(screen.getByText("Nenhuma exceção cadastrada")).toBeInTheDocument();
+    expect(screen.getByText("Nenhum lançamento pendente")).toBeInTheDocument();
     expect(
       screen.getByText("Nenhuma aprovação automática ainda"),
     ).toBeInTheDocument();
@@ -213,7 +161,6 @@ describe("AutoApprovalView — Executar agora", () => {
     fireEvent.click(screen.getByRole("button", { name: /Executar agora/ }));
 
     await waitFor(() => expect(runAutoApprovalNow).toHaveBeenCalledTimes(1));
-    // Scope the assertion to the live region (project gotcha).
     await waitFor(() =>
       expect(liveRegion()).toHaveTextContent(
         "4 processados, 3 aprovados, 1 pendentes.",
@@ -254,7 +201,6 @@ describe("AutoApprovalView — Executar agora", () => {
         "Automação desativada — nada foi processado.",
       ),
     );
-    // It must NOT pretend anything was approved.
     expect(liveRegion()).not.toHaveTextContent("aprovados");
   });
 
@@ -271,89 +217,6 @@ describe("AutoApprovalView — Executar agora", () => {
       expect(liveRegion()).toHaveTextContent(
         "Falha ao executar a aprovação automática.",
       ),
-    );
-  });
-});
-
-describe("AutoApprovalView — exception toggle", () => {
-  it("calls setExceptionActive with the flipped flag and confirms", async () => {
-    render(<AutoApprovalView overview={overview()} />);
-    fireEvent.click(
-      screen.getByRole("button", { name: /Desativar exceção de Ana Martins/ }),
-    );
-
-    await waitFor(() =>
-      expect(setExceptionActive).toHaveBeenCalledWith({
-        exceptionId: "x1",
-        active: false,
-      }),
-    );
-    await waitFor(() =>
-      expect(liveRegion()).toHaveTextContent("Exceção desativada."),
-    );
-  });
-
-  it("confirms reactivation for an inactive exception", async () => {
-    h.toggleResult = { ok: true, data: { id: "x9", active: true } };
-    render(
-      <AutoApprovalView
-        overview={overview({
-          activeExceptionsCount: 0,
-          exceptions: [
-            {
-              id: "x9",
-              consultantName: "Ana Martins",
-              projectName: "Apollo",
-              type: "WEEKEND",
-              active: false,
-            },
-          ],
-        })}
-      />,
-    );
-    fireEvent.click(
-      screen.getByRole("button", { name: /Reativar exceção de Ana Martins/ }),
-    );
-
-    await waitFor(() =>
-      expect(setExceptionActive).toHaveBeenCalledWith({
-        exceptionId: "x9",
-        active: true,
-      }),
-    );
-    await waitFor(() =>
-      expect(liveRegion()).toHaveTextContent("Exceção reativada."),
-    );
-  });
-});
-
-describe("AutoApprovalView — create exception", () => {
-  it("registers a new exception through the modal", async () => {
-    render(<AutoApprovalView overview={overview()} />);
-    fireEvent.click(screen.getByRole("button", { name: /Nova exceção/ }));
-
-    const dialog = screen.getByRole("dialog");
-    fireEvent.change(within(dialog).getByLabelText("Consultor"), {
-      target: { value: "con-1" },
-    });
-    fireEvent.change(within(dialog).getByLabelText("Projeto"), {
-      target: { value: "proj-1" },
-    });
-    fireEvent.change(within(dialog).getByLabelText("Tipo de exceção"), {
-      target: { value: "WEEKEND" },
-    });
-    fireEvent.click(within(dialog).getByRole("button", { name: /Cadastrar/ }));
-
-    await waitFor(() =>
-      expect(createAutoApprovalException).toHaveBeenCalledWith({
-        consultantId: "con-1",
-        projectId: "proj-1",
-        type: "WEEKEND",
-        note: undefined,
-      }),
-    );
-    await waitFor(() =>
-      expect(liveRegion()).toHaveTextContent("Exceção cadastrada."),
     );
   });
 });

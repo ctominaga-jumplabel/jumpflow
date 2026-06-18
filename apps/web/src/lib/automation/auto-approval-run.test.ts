@@ -19,13 +19,31 @@ type Entry = {
 // Stateful in-memory Prisma mock. The findMany honors the status filter (string
 // or { in } and the SUBMITTED/APPROVED distinction) so cross-status cases are
 // exercised for real, not faked.
+type Rule = {
+  consultantId?: string;
+  projectId: string;
+  weekendEnabled: boolean;
+  hoursRangeEnabled: boolean;
+  minMinutes: number;
+  maxMinutes: number;
+};
+
 const h = vi.hoisted(() => {
   const store: {
     entries: Entry[];
     approvals: Record<string, unknown>[];
     audits: Record<string, unknown>[];
+    projectRules: Rule[];
+    consultantRules: Rule[];
     forceUpdateZero: boolean;
-  } = { entries: [], approvals: [], audits: [], forceUpdateZero: false };
+  } = {
+    entries: [],
+    approvals: [],
+    audits: [],
+    projectRules: [],
+    consultantRules: [],
+    forceUpdateZero: false,
+  };
 
   const prismaMock = {
     automationConfig: {
@@ -61,7 +79,18 @@ const h = vi.hoisted(() => {
         return { count: 1 };
       },
     },
-    autoApprovalException: { findMany: async () => [] },
+    projectAutoApprovalRule: {
+      findMany: async ({ where }: { where: { projectId: { in: string[] } } }) =>
+        store.projectRules
+          .filter((r) => where.projectId.in.includes(r.projectId))
+          .map((r) => ({ ...r })),
+    },
+    consultantAutoApprovalRule: {
+      findMany: async ({ where }: { where: { projectId: { in: string[] } } }) =>
+        store.consultantRules
+          .filter((r) => where.projectId.in.includes(r.projectId))
+          .map((r) => ({ ...r })),
+    },
     approval: {
       // Honors the manual-history query: entityType TIME_ENTRY, entityId in [..],
       // isAutomatic: false. Reads from the same `approvals` store, so manual
@@ -142,6 +171,8 @@ beforeEach(() => {
   h.store.entries = [entry()];
   h.store.approvals = [];
   h.store.audits = [];
+  h.store.projectRules = [];
+  h.store.consultantRules = [];
   h.store.forceUpdateZero = false;
 });
 
@@ -342,6 +373,72 @@ describe("runAutoApproval — manual decision history guard", () => {
     const second = await runAutoApproval(NOW);
     expect(second.approved).toBe(0);
     expect(second.processed).toBe(0);
+  });
+});
+
+describe("runAutoApproval — project/consultant rule hierarchy", () => {
+  const rule = (over: Partial<Rule>): Rule => ({
+    projectId: "p1",
+    weekendEnabled: false,
+    hoursRangeEnabled: false,
+    minMinutes: 1,
+    maxMinutes: 1439,
+    ...over,
+  });
+
+  it("project rule (range) approves an in-range entry regardless of the 8h total", () => {
+    // 6h entry would fail the 8h fallback, but the project range covers it.
+    h.store.entries = [entry({ hours: 6 })];
+    h.store.projectRules = [
+      rule({ hoursRangeEnabled: true, minMinutes: 1, maxMinutes: 540 }),
+    ];
+    return runAutoApproval(NOW).then((result) => {
+      expect(result.approved).toBe(1);
+      expect(result.ruleCounts).toEqual({ RULE_RANGE: 1 });
+      expect(h.store.entries[0].status).toBe("APPROVED");
+    });
+  });
+
+  it("project rule leaves an out-of-range entry pending", async () => {
+    h.store.entries = [entry({ hours: 10 })];
+    h.store.projectRules = [
+      rule({ hoursRangeEnabled: true, minMinutes: 1, maxMinutes: 540 }),
+    ];
+    const result = await runAutoApproval(NOW);
+    expect(result.approved).toBe(0);
+    expect(result.pending).toBe(1);
+  });
+
+  it("exclusive mode: a consultant rule in the project suspends the project rule for unlinked consultants", async () => {
+    // Two consultants on p1; only c1 is linked. c2 (8h, would pass the fallback)
+    // gets NO auto-approval because the project is now in per-consultant mode.
+    h.store.entries = [
+      entry({ id: "linked", consultantId: "c1", hours: 6 }),
+      entry({ id: "unlinked", consultantId: "c2", hours: 8 }),
+    ];
+    h.store.consultantRules = [
+      rule({
+        consultantId: "c1",
+        hoursRangeEnabled: true,
+        minMinutes: 1,
+        maxMinutes: 540,
+      }),
+    ];
+    const result = await runAutoApproval(NOW);
+    expect(result.approved).toBe(1);
+    expect(h.store.entries.find((e) => e.id === "linked")?.status).toBe(
+      "APPROVED",
+    );
+    expect(h.store.entries.find((e) => e.id === "unlinked")?.status).toBe(
+      "SUBMITTED",
+    );
+  });
+
+  it("falls back to the 8h rule only when the project has no configuration", async () => {
+    h.store.entries = [entry({ hours: 8 })]; // 480 min total, no rules
+    const result = await runAutoApproval(NOW);
+    expect(result.approved).toBe(1);
+    expect(result.ruleCounts).toEqual({ DEFAULT: 1 });
   });
 });
 

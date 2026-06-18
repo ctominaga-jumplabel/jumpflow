@@ -128,6 +128,46 @@ export const projectBillingConfigSchema = z.object({
   notes: optionalText(500),
 });
 
+// Aprovacao automatica por projeto / consultor. As duas excecoes (fim de
+// semana e range de horas) combinam por OU. O range usa minutos (00:01 = 1,
+// 23:59 = 1439); nunca 00:00 e max >= min. A UI converte de/para HH:mm.
+const minuteOfDay = z.coerce
+  .number()
+  .int()
+  .min(1, "Não use 00:00.")
+  .max(1439, "Máximo 23:59.");
+
+const autoApprovalRuleFields = {
+  weekendEnabled: z.boolean(),
+  hoursRangeEnabled: z.boolean(),
+  minMinutes: minuteOfDay,
+  maxMinutes: minuteOfDay,
+};
+
+const refineMaxGteMin = (value: { minMinutes: number; maxMinutes: number }) =>
+  value.maxMinutes >= value.minMinutes;
+
+export const projectAutoApprovalRuleSchema = z
+  .object({ projectId: entityId, ...autoApprovalRuleFields })
+  .refine(refineMaxGteMin, {
+    message: "Máximo deve ser maior ou igual ao mínimo.",
+    path: ["maxMinutes"],
+  });
+
+export const consultantAutoApprovalRuleSchema = z
+  .object({ consultantId: entityId, projectId: entityId, ...autoApprovalRuleFields })
+  .refine(refineMaxGteMin, {
+    message: "Máximo deve ser maior ou igual ao mínimo.",
+    path: ["maxMinutes"],
+  });
+
+export const linkAutoApprovalConsultantsSchema = z.object({
+  projectId: entityId,
+  consultantIds: z.array(entityId).min(1, "Selecione ao menos um consultor."),
+});
+
+export const removeConsultantAutoApprovalRuleSchema = z.object({ id: entityId });
+
 export const allocationInputSchema = z
   .object({
     projectId: entityId,
@@ -208,6 +248,15 @@ export type ProjectCommercialInput = z.infer<typeof projectCommercialSchema>;
 export type ProjectBillingTypeInput = z.infer<typeof projectBillingTypeSchema>;
 export type ProjectBillingConfigInput = z.infer<
   typeof projectBillingConfigSchema
+>;
+export type ProjectAutoApprovalRuleInput = z.infer<
+  typeof projectAutoApprovalRuleSchema
+>;
+export type ConsultantAutoApprovalRuleInput = z.infer<
+  typeof consultantAutoApprovalRuleSchema
+>;
+export type LinkAutoApprovalConsultantsInput = z.infer<
+  typeof linkAutoApprovalConsultantsSchema
 >;
 export type AllocationInput = z.infer<typeof allocationInputSchema>;
 export type AllocationUpdateInput = z.infer<typeof allocationUpdateSchema>;

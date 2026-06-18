@@ -63,6 +63,12 @@ export type AutoApprovalReason =
   | "WEEKEND_NOT_ALLOWED"
   | "DAILY_TOTAL_MISMATCH"
   /**
+   * Rule-based path only: the entry matched none of the rule's enabled
+   * conditions (not a permitted weekend entry, and hours outside the range —
+   * or both conditions disabled). Stays pending for manual handling.
+   */
+  | "NO_RULE_MATCH"
+  /**
    * The entry already had a MANUAL approval decision (an Approval with
    * isAutomatic = false). It was reopened/changed by a human, so the engine
    * must never auto-approve it again — it stays for manual handling. Detected
@@ -80,6 +86,7 @@ const REASON_ORDER: AutoApprovalReason[] = [
   "DUPLICATE",
   "WEEKEND_NOT_ALLOWED",
   "DAILY_TOTAL_MISMATCH",
+  "NO_RULE_MATCH",
   "MANUAL_DECISION_HISTORY",
 ];
 
@@ -157,6 +164,80 @@ export function evaluateAutoApproval(
   if (flags.allowAnyHours) appliedRules.push("EXCEPTION_ANY_HOURS");
   if (weekend && flags.allowWeekend) appliedRules.push("EXCEPTION_WEEKEND");
   if (appliedRules.length === 0) appliedRules.push("DEFAULT");
+
+  const ordered = REASON_ORDER.filter((r) => reasons.has(r));
+
+  return {
+    outcome: ordered.length === 0 ? "APPROVE" : "PENDING",
+    reasons: ordered,
+    appliedRules,
+    ruleKey: appliedRules.join("+"),
+  };
+}
+
+/**
+ * Per-project (or per-consultant) auto-approval rule. The two exceptions are
+ * NOT mutually exclusive and combine by OR: an entry is auto-approved when it
+ * is a permitted weekend entry OR its hours fall within the range. The range is
+ * evaluated PER ENTRY, in minutes (00:01 = 1, 23:59 = 1439). min == max ⇒ exact
+ * match. When both flags are off the rule never auto-approves.
+ */
+export interface AutoApprovalRule {
+  weekendEnabled: boolean;
+  hoursRangeEnabled: boolean;
+  minMinutes: number;
+  maxMinutes: number;
+}
+
+/**
+ * Evaluate one entry against an explicit project/consultant rule (new model).
+ * Shares the common gates with {@link evaluateAutoApproval} (status, submission,
+ * valid hours, delay, duplicate) but replaces the daily-total rule with the
+ * OR of the rule's enabled conditions. Fail-closed: any reason ⇒ PENDING.
+ */
+export function evaluateRuleAutoApproval(
+  entry: AutoApprovalEntryContext,
+  rule: AutoApprovalRule,
+  settings: AutoApprovalSettings,
+  now: Date,
+): AutoApprovalDecision {
+  const reasons = new Set<AutoApprovalReason>();
+  const minutes = hoursToMinutes(entry.hours);
+
+  // Common gates (identical to the default rule).
+  if (entry.status !== "SUBMITTED") reasons.add("ENTRY_NOT_SUBMITTED");
+  if (entry.submittedAt === null) reasons.add("NOT_SUBMITTED_YET");
+  if (minutes <= 0 || entry.hours > settings.maxEntryHours) {
+    reasons.add("INVALID_HOURS");
+  }
+  if (entry.submittedAt !== null) {
+    const minutesSince =
+      (now.getTime() - entry.submittedAt.getTime()) / MS_PER_MINUTE;
+    if (minutesSince < settings.approvalDelayMinutes) {
+      reasons.add("DELAY_NOT_ELAPSED");
+    }
+  }
+  if (entry.hasDuplicate) reasons.add("DUPLICATE");
+
+  // O toggle de fim de semana é um PORTÃO: um lançamento de sabado/domingo só
+  // pode ser auto-aprovado se weekendEnabled. Assim a regra de range vale para
+  // dias uteis e o fim de semana é governado exclusivamente pelo seu toggle
+  // (range nao "fura" um fim de semana desligado).
+  const weekend = isWeekend(entry.date);
+  if (weekend && !rule.weekendEnabled) reasons.add("WEEKEND_NOT_ALLOWED");
+
+  // Disparo (OU): fim de semana liberado OU horas dentro do intervalo.
+  const matchesWeekend = rule.weekendEnabled && weekend;
+  const matchesRange =
+    rule.hoursRangeEnabled &&
+    minutes >= rule.minMinutes &&
+    minutes <= rule.maxMinutes;
+  if (!matchesWeekend && !matchesRange) reasons.add("NO_RULE_MATCH");
+
+  const appliedRules: string[] = [];
+  if (matchesWeekend) appliedRules.push("RULE_WEEKEND");
+  if (matchesRange) appliedRules.push("RULE_RANGE");
+  if (appliedRules.length === 0) appliedRules.push("RULE_NONE");
 
   const ordered = REASON_ORDER.filter((r) => reasons.has(r));
 

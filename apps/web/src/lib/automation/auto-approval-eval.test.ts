@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_AUTO_APPROVAL_SETTINGS,
   evaluateAutoApproval,
+  evaluateRuleAutoApproval,
   findDuplicateEntryIds,
   type AutoApprovalEntryContext,
   type AutoApprovalFlags,
+  type AutoApprovalRule,
 } from "@jumpflow/shared";
 
 const WEEKDAY = new Date("2026-06-10T00:00:00Z"); // Wednesday
@@ -150,6 +152,80 @@ describe("evaluateAutoApproval — WEEKEND (FDS) exception", () => {
     expect(d.outcome).toBe("APPROVE");
     expect(d.appliedRules).toEqual(["EXCEPTION_ANY_HOURS", "EXCEPTION_WEEKEND"]);
     expect(d.ruleKey).toBe("EXCEPTION_ANY_HOURS+EXCEPTION_WEEKEND");
+  });
+});
+
+describe("evaluateRuleAutoApproval — weekend OR range", () => {
+  const rule = (over: Partial<AutoApprovalRule> = {}): AutoApprovalRule => ({
+    weekendEnabled: false,
+    hoursRangeEnabled: false,
+    minMinutes: 1,
+    maxMinutes: 1439,
+    ...over,
+  });
+  const evalRule = (
+    over: Partial<AutoApprovalEntryContext>,
+    r: AutoApprovalRule,
+  ) => evaluateRuleAutoApproval(ctx(over), r, DEFAULT_AUTO_APPROVAL_SETTINGS, NOW);
+
+  it("weekend-only rule: approves a weekend entry, leaves weekdays pending", () => {
+    const weekend = evalRule({ date: SATURDAY, hours: 5 }, rule({ weekendEnabled: true }));
+    expect(weekend.outcome).toBe("APPROVE");
+    expect(weekend.appliedRules).toEqual(["RULE_WEEKEND"]);
+
+    const weekday = evalRule({ date: WEEKDAY, hours: 5 }, rule({ weekendEnabled: true }));
+    expect(weekday.outcome).toBe("PENDING");
+    expect(weekday.reasons).toEqual(["NO_RULE_MATCH"]);
+  });
+
+  it("range-only rule: approves in-range hours, rejects out-of-range", () => {
+    const r = rule({ hoursRangeEnabled: true, minMinutes: 1, maxMinutes: 540 }); // up to 9h
+    expect(evalRule({ hours: 8 }, r).outcome).toBe("APPROVE"); // 480 min
+    expect(evalRule({ hours: 8 }, r).appliedRules).toEqual(["RULE_RANGE"]);
+    const out = evalRule({ hours: 10 }, r); // 600 min > 540
+    expect(out.outcome).toBe("PENDING");
+    expect(out.reasons).toEqual(["NO_RULE_MATCH"]);
+  });
+
+  it("weekend toggle gates the weekend: range-only rule does NOT approve a weekend entry", () => {
+    const r = rule({ hoursRangeEnabled: true, minMinutes: 1, maxMinutes: 1439 });
+    const d = evalRule({ date: SATURDAY, hours: 5 }, r); // in range, but weekend off
+    expect(d.outcome).toBe("PENDING");
+    expect(d.reasons).toContain("WEEKEND_NOT_ALLOWED");
+  });
+
+  it("min == max requires the exact total", () => {
+    const r = rule({ hoursRangeEnabled: true, minMinutes: 480, maxMinutes: 480 });
+    expect(evalRule({ hours: 8 }, r).outcome).toBe("APPROVE");
+    expect(evalRule({ hours: 7 }, r).outcome).toBe("PENDING");
+  });
+
+  it("OR: weekend entry out of range still approves via the weekend leg", () => {
+    const r = rule({ weekendEnabled: true, hoursRangeEnabled: true, minMinutes: 1, maxMinutes: 60 });
+    const d = evalRule({ date: SATURDAY, hours: 10 }, r); // out of range but weekend
+    expect(d.outcome).toBe("APPROVE");
+    expect(d.appliedRules).toEqual(["RULE_WEEKEND"]);
+  });
+
+  it("both legs match → both applied rules", () => {
+    const r = rule({ weekendEnabled: true, hoursRangeEnabled: true, minMinutes: 1, maxMinutes: 1439 });
+    const d = evalRule({ date: SATURDAY, hours: 5 }, r);
+    expect(d.appliedRules).toEqual(["RULE_WEEKEND", "RULE_RANGE"]);
+    expect(d.ruleKey).toBe("RULE_WEEKEND+RULE_RANGE");
+  });
+
+  it("rule with both legs off never auto-approves", () => {
+    const d = evalRule({ hours: 8 }, rule());
+    expect(d.outcome).toBe("PENDING");
+    expect(d.reasons).toEqual(["NO_RULE_MATCH"]);
+  });
+
+  it("still enforces the common gates (delay, duplicate)", () => {
+    const r = rule({ hoursRangeEnabled: true, minMinutes: 1, maxMinutes: 1439 });
+    expect(evalRule({ submittedAt: TWO_MIN_AGO }, r).reasons).toContain(
+      "DELAY_NOT_ELAPSED",
+    );
+    expect(evalRule({ hasDuplicate: true }, r).reasons).toContain("DUPLICATE");
   });
 });
 

@@ -25,6 +25,7 @@ export const reasonLabels: Record<AutoApprovalReason, string> = {
   DUPLICATE: "Lançamento duplicado",
   WEEKEND_NOT_ALLOWED: "Fim de semana não liberado",
   DAILY_TOTAL_MISMATCH: "Total diário diferente do esperado",
+  NO_RULE_MATCH: "Fora da regra de aprovação automática do projeto/consultor",
   MANUAL_DECISION_HISTORY: "Já teve decisão manual (aprovação reservada ao gestor)",
 };
 
@@ -33,28 +34,10 @@ export function reasonLabelOf(reason: string): string {
   return (reasonLabels as Record<string, string>)[reason] ?? reason;
 }
 
-const exceptionTypeLabels: Record<string, string> = {
-  ANY_HOURS: "Qualquer carga horária",
-  WEEKEND: "Fim de semana",
-};
-
-/** Readable pt-BR label for an exception type (falls back to the raw value). */
-export function exceptionTypeLabelOf(type: string): string {
-  return exceptionTypeLabels[type] ?? type;
-}
-
 export interface AutoApprovalConfigView {
   autoApprovalEnabled: boolean;
   requiredDailyMinutes: number;
   approvalDelayMinutes: number;
-}
-
-export interface AutoApprovalExceptionView {
-  id: string;
-  consultantName: string;
-  projectName: string;
-  type: string;
-  active: boolean;
 }
 
 export interface RecentAutoApprovalView {
@@ -75,26 +58,14 @@ export interface PendingEntryView {
   reasons: string[];
 }
 
-export interface ExceptionConsultantOption {
-  id: string;
-  name: string;
-}
-
-export interface ExceptionProjectOption {
-  id: string;
-  name: string;
-  clientName: string;
-}
-
 export interface AutoApprovalOverview {
   config: AutoApprovalConfigView;
-  activeExceptionsCount: number;
-  exceptions: AutoApprovalExceptionView[];
+  /** Projetos com regra de aprovação automática configurada. */
+  projectRuleCount: number;
+  /** Regras por consultor (modo exclusivo) cadastradas. */
+  consultantRuleCount: number;
   recentAutoApprovals: RecentAutoApprovalView[];
   pending: PendingEntryView[];
-  /** Options for the "Nova exceção" form. */
-  consultantOptions: ExceptionConsultantOption[];
-  projectOptions: ExceptionProjectOption[];
 }
 
 const RECENT_LIMIT = 20;
@@ -107,39 +78,11 @@ const RECENT_LIMIT = 20;
 export async function getAutoApprovalOverview(
   now: Date = new Date(),
 ): Promise<AutoApprovalOverview> {
-  const [config, activeExceptionsCount, exceptionRows, consultantRows, projectRows] =
-    await Promise.all([
-      loadAutomationConfig(),
-      prisma.autoApprovalException.count({ where: { active: true } }),
-      prisma.autoApprovalException.findMany({
-        orderBy: { updatedAt: "desc" },
-        take: 50,
-        select: {
-          id: true,
-          type: true,
-          active: true,
-          consultant: { select: { name: true } },
-          project: { select: { name: true } },
-        },
-      }),
-      prisma.consultant.findMany({
-        orderBy: { name: "asc" },
-        select: { id: true, name: true },
-      }),
-      prisma.project.findMany({
-        where: { status: { not: "CLOSED" } },
-        orderBy: { name: "asc" },
-        select: { id: true, name: true, client: { select: { name: true } } },
-      }),
-    ]);
-
-  const exceptions: AutoApprovalExceptionView[] = exceptionRows.map((e) => ({
-    id: e.id,
-    consultantName: e.consultant.name,
-    projectName: e.project.name,
-    type: e.type,
-    active: e.active,
-  }));
+  const [config, projectRuleCount, consultantRuleCount] = await Promise.all([
+    loadAutomationConfig(),
+    prisma.projectAutoApprovalRule.count(),
+    prisma.consultantAutoApprovalRule.count(),
+  ]);
 
   // Latest automatic approvals for time entries. Join back to the entry to
   // surface consultant/project for context (the Approval row only stores ids).
@@ -213,15 +156,9 @@ export async function getAutoApprovalOverview(
       requiredDailyMinutes: config.settings.requiredDailyMinutes,
       approvalDelayMinutes: config.settings.approvalDelayMinutes,
     },
-    activeExceptionsCount,
-    exceptions,
+    projectRuleCount,
+    consultantRuleCount,
     recentAutoApprovals,
     pending,
-    consultantOptions: consultantRows.map((c) => ({ id: c.id, name: c.name })),
-    projectOptions: projectRows.map((p) => ({
-      id: p.id,
-      name: p.name,
-      clientName: p.client.name,
-    })),
   };
 }
