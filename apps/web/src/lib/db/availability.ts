@@ -3,7 +3,7 @@ import type { AppUser } from "@/lib/auth/types";
 import { hasRole } from "@/lib/auth/route-permissions";
 import { getConsultantForUser } from "@/lib/db/timesheet";
 import { resolveDbUser } from "@/lib/db/users";
-import { toIsoDate } from "@/lib/timesheet/week";
+import { parseIsoDateUtc, toIsoDate } from "@/lib/timesheet/week";
 import {
   buildAvailabilityMap,
   buildWeeklyPeriods,
@@ -19,7 +19,7 @@ import { isDatabaseConfigured } from "./config";
  * Prisma read for the Mapa de Disponibilidade (EP11). RBAC scope is applied
  * HERE — never trust client hints. The read is split from the pure read-model
  * (lib/availability/map.ts): this module only fetches and shapes rows. Derived
- * from existing data (Allocation + ConsultantVacation + Consultant.status) —
+ * from existing data (Allocation + ConsultantTimeOff + Consultant.status) —
  * no new schema.
  */
 
@@ -96,10 +96,11 @@ export interface AvailabilityReadOptions {
 
 /**
  * Lê e monta o read-model do heatmap para o escopo RBAC do usuário. As somas de
- * percentual consideram apenas alocações ACTIVE (US11.01); férias derivam de
- * ConsultantVacation com dias gozados (takenDays > 0) cujo período aquisitivo
- * cruza a janela — melhor esforço dado que o schema atual é um ledger de
- * período aquisitivo, não um agendamento de dias (documentado em EP11).
+ * percentual consideram apenas alocações ACTIVE (US11.01); férias e
+ * afastamentos derivam de ConsultantTimeOff com status em (PLANNED, CONFIRMED)
+ * — CANCELLED é descartado — cujo intervalo [startDate, endDate] cruza a janela.
+ * São datas concretas de gozo (não mais o período aquisitivo de
+ * ConsultantVacation): VACATION → estado VACATION; LEAVE/OTHER → ON_LEAVE.
  */
 export async function getAvailabilityMap(
   user: AppUser,
@@ -114,6 +115,13 @@ export async function getAvailabilityMap(
   const scope = await resolveAvailabilityScope(user);
   const where = consultantWhereForScope(scope);
   if (where === null) return { periods, rows: [] };
+
+  // Limites da janela exibida, para só trazer ausências que possam cruzá-la:
+  // intervalos com fim antes do início da janela ou início após o fim não
+  // interessam. [windowStart, windowEnd] são as datas extremas dos períodos.
+  const windowStart = parseIsoDateUtc(periods[0].start) ?? from;
+  const windowEnd =
+    parseIsoDateUtc(periods[periods.length - 1].end) ?? from;
 
   const rows = await prisma.consultant.findMany({
     where: where === "broad" ? {} : where,
@@ -132,9 +140,13 @@ export async function getAvailabilityMap(
           endDate: true,
         },
       },
-      vacations: {
-        where: { takenDays: { gt: 0 } },
-        select: { accrualPeriodStart: true, accrualPeriodEnd: true },
+      timeOffs: {
+        where: {
+          status: { in: ["PLANNED", "CONFIRMED"] },
+          startDate: { lte: windowEnd },
+          endDate: { gte: windowStart },
+        },
+        select: { kind: true, startDate: true, endDate: true },
       },
     },
     orderBy: { name: "asc" },
@@ -152,9 +164,10 @@ export async function getAvailabilityMap(
       startDate: toIsoDate(a.startDate),
       endDate: a.endDate ? toIsoDate(a.endDate) : null,
     })),
-    vacations: row.vacations.map((v) => ({
-      start: toIsoDate(v.accrualPeriodStart),
-      end: toIsoDate(v.accrualPeriodEnd),
+    absences: row.timeOffs.map((t) => ({
+      kind: t.kind,
+      start: toIsoDate(t.startDate),
+      end: toIsoDate(t.endDate),
     })),
   }));
 

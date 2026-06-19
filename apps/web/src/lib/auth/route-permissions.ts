@@ -1,5 +1,8 @@
 import type { AppUser } from "./types";
 import type { RoleName } from "./roles";
+import { FEEDBACK_READ_ROLES } from "@/lib/feedback/visibility";
+import { EVALUATION_READ_ROLES } from "@/lib/evaluations/visibility";
+import { DEVELOPMENT_READ_ROLES } from "@/lib/development/visibility";
 
 /**
  * Pure RBAC primitives and the central route → roles map.
@@ -110,6 +113,28 @@ export const routePermissions: RouteRule[] = [
   // alocação + férias + status. Visível a todos os papéis exceto FINANCE; o
   // escopo por linha (área/projeto/próprio) é aplicado pela função de read.
   { prefix: "/app/disponibilidade", access: AVAILABILITY_READ_ROLES },
+  // Feedback Contínuo (Talentos, Prioridade 1 — EP15): timeline + registro de
+  // feedback ancorado a projeto/cliente real. Leitura para gestão + CONSULTANT
+  // (este último só vê os próprios feedbacks SHARED + os que autorou — escopo
+  // por linha aplicado pela função de read, LGPD §3); a escrita é action-gated
+  // por FEEDBACK_WRITE_ROLES (gestores).
+  { prefix: "/app/feedback", access: FEEDBACK_READ_ROLES },
+  // Avaliação de Desempenho (Talentos, Prioridade 1 — EP16): ciclos 90/180/360,
+  // responder avaliação, resultado (radar/gap) e evolução histórica. Leitura
+  // para gestão + CONSULTANT (este último só vê o PRÓPRIO resultado, após o
+  // fechamento, e responde só as próprias avaliações — escopo por linha e a
+  // regra de anonimato de peer aplicados pelas funções de read/action, LGPD §3 /
+  // DP-05). A config de ciclo é action-gated por EVALUATION_MANAGE_ROLES
+  // (ADMIN/PEOPLE). Regra específica antes da `/app` ampla.
+  { prefix: "/app/avaliacoes", access: EVALUATION_READ_ROLES },
+  // PDI — Plano de Desenvolvimento Individual (Talentos, Prioridade 1 — EP17):
+  // criar/gerenciar planos, gerar ações a partir do gap, acompanhar progresso.
+  // Leitura para gestão + CONSULTANT (este último só vê o PRÓPRIO PDI e só
+  // atualiza status/evidência das próprias ações — escopo por linha e a
+  // fronteira de gestão aplicados pelas funções de read/action, LGPD §3). A
+  // criação/edição de estrutura é action-gated por DEVELOPMENT_MANAGE_ROLES
+  // (ADMIN/PEOPLE/AREA_MANAGER/PROJECT_MANAGER). Regra específica antes da `/app`.
+  { prefix: "/app/pdi", access: DEVELOPMENT_READ_ROLES },
   // Operational automation (auto-approval admin/observability). Management
   // only — PROJECT_MANAGER read-only access is deferred to a later round.
   { prefix: "/app/automacoes", access: ["ADMIN", "AREA_MANAGER"] },

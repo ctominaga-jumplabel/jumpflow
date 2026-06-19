@@ -3,7 +3,7 @@
  *
  * No server-only imports so these are safe to import from client components and
  * tests. The read-model is DERIVED from existing data (`Allocation`,
- * `ConsultantVacation`, `Consultant.status`) — no new schema (docs/backlog-
+ * `ConsultantTimeOff`, `Consultant.status`) — no new schema (docs/backlog-
  * talentos.md EP11, docs/roadmap-talentos-gcpec.md §8.1).
  */
 
@@ -17,8 +17,11 @@
  *   o schema não tem um marcador explícito de bench (documentado em EP11).
  * - PARTIAL: soma das alocações ativas no período entre 1% e 99%.
  * - FULL: soma das alocações ativas no período >= 100%.
- * - VACATION: ConsultantVacation cobrindo o período (prevalece sobre alocação).
- * - ON_LEAVE: consultor afastado (Consultant.status = ON_LEAVE).
+ * - VACATION: ausência agendada de férias (ConsultantTimeOff kind=VACATION)
+ *   cobrindo o período (prevalece sobre alocação).
+ * - ON_LEAVE: consultor afastado — por Consultant.status = ON_LEAVE OU por uma
+ *   ausência agendada de afastamento (ConsultantTimeOff kind=LEAVE/OTHER)
+ *   cobrindo o período.
  * - INACTIVE: consultor inativo (não conta como capacidade disponível).
  */
 export type AvailabilityState =
@@ -71,14 +74,22 @@ export interface AvailabilityAllocationInput {
 }
 
 /**
- * Uma janela de férias reduzida. O schema atual (`ConsultantVacation`) é um
- * ledger de período aquisitivo (accrual), não um agendamento de dias gozados.
- * O chamador mapeia `accrualPeriodStart/End` para `start/end` e só inclui linhas
- * com `takenDays > 0` (férias efetivamente registradas no período). Tratado como
- * melhor esforço dado o schema — documentado em EP11.
+ * Tipo de uma ausência agendada (espelha TimeOffKind). VACATION → estado
+ * VACATION/Férias; LEAVE/OTHER → tratado como afastamento (ON_LEAVE) na célula.
  */
-export interface AvailabilityVacationInput {
+export type AvailabilityAbsenceKind = "VACATION" | "LEAVE" | "OTHER";
+
+/**
+ * Uma ausência agendada reduzida ao necessário para o cálculo (deriva de
+ * `ConsultantTimeOff`). Datas concretas de gozo como ISO `yyyy-mm-dd` (date-only,
+ * UTC). O chamador só inclui ausências com `status` em (PLANNED, CONFIRMED) —
+ * CANCELLED é descartado na query.
+ */
+export interface AvailabilityAbsenceInput {
+  kind: AvailabilityAbsenceKind;
+  /** Início inclusivo da ausência (ISO date-only). */
   start: string;
+  /** Fim inclusivo da ausência (ISO date-only). */
   end: string;
 }
 
@@ -90,7 +101,8 @@ export interface AvailabilityConsultantInput {
   jobTitle: string | null;
   status: ConsultantStatusForAvailability;
   allocations: AvailabilityAllocationInput[];
-  vacations: AvailabilityVacationInput[];
+  /** Ausências agendadas (férias e afastamentos) com datas concretas de gozo. */
+  absences: AvailabilityAbsenceInput[];
 }
 
 /** Um período (coluna) da janela do heatmap. */

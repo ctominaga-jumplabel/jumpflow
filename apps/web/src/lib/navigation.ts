@@ -8,12 +8,15 @@ import {
   ClipboardCheck,
   Clock,
   FolderKanban,
+  Gauge,
   GraduationCap,
   Home,
   LayoutDashboard,
+  MessageSquareHeart,
   Receipt,
   ReceiptText,
   ShieldCheck,
+  Sprout,
   Target,
   TrendingUp,
   Users,
@@ -131,6 +134,59 @@ export const primaryNavigation: NavItemDef[] = [
       "AREA_MANAGER",
       "PROJECT_MANAGER",
       "SALES",
+      "CONSULTANT",
+    ],
+  },
+  {
+    // Feedback Contínuo (Talentos, Prioridade 1 — EP15): timeline + registro de
+    // feedback ancorado a projeto/cliente real. Visível a gestão + CONSULTANT
+    // (que só vê os próprios SHARED); a escrita é enforced no servidor
+    // (FEEDBACK_WRITE_ROLES). Discoverability, não a fronteira de segurança.
+    label: "Feedback",
+    href: "/app/feedback",
+    icon: MessageSquareHeart,
+    description: "Feedback contínuo por consultor, ancorado em projetos e clientes.",
+    requiredRoles: [
+      "ADMIN",
+      "PEOPLE",
+      "AREA_MANAGER",
+      "PROJECT_MANAGER",
+      "CONSULTANT",
+    ],
+  },
+  {
+    // Avaliação de Desempenho (Talentos, Prioridade 1 — EP16): ciclos 90/180/360,
+    // resposta por competência, resultado (radar/gap) e evolução histórica.
+    // CONSULTANT vê o PRÓPRIO resultado (após fechamento) e responde só as
+    // próprias avaliações; a config de ciclo é enforced no servidor
+    // (EVALUATION_MANAGE_ROLES). Discoverability, não a fronteira de segurança.
+    label: "Avaliações",
+    href: "/app/avaliacoes",
+    icon: Gauge,
+    description: "Ciclos 90/180/360, radar de competências, gap e evolução.",
+    requiredRoles: [
+      "ADMIN",
+      "PEOPLE",
+      "AREA_MANAGER",
+      "PROJECT_MANAGER",
+      "CONSULTANT",
+    ],
+  },
+  {
+    // PDI — Plano de Desenvolvimento Individual (Talentos, Prioridade 1 — EP17):
+    // gera ações a partir do gap, acompanha progresso. Visível a gestão +
+    // CONSULTANT (que só vê o próprio PDI e atualiza status/evidência das
+    // próprias ações); a criação/edição de estrutura é enforced no servidor
+    // (DEVELOPMENT_MANAGE_ROLES). Discoverability, não a fronteira de segurança.
+    label: "PDI",
+    href: "/app/pdi",
+    icon: Sprout,
+    description: "Plano de desenvolvimento individual a partir do gap de competências.",
+    requiredRoles: [
+      "ADMIN",
+      "PEOPLE",
+      "AREA_MANAGER",
+      "PROJECT_MANAGER",
       "CONSULTANT",
     ],
   },

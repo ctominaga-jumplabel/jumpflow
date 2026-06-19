@@ -6,6 +6,7 @@ import {
   weekStartOf,
 } from "@/lib/timesheet/week";
 import {
+  type AvailabilityAbsenceInput,
   type AvailabilityAllocationInput,
   type AvailabilityCell,
   type AvailabilityConsultantInput,
@@ -13,13 +14,13 @@ import {
   type AvailabilityPeriod,
   type AvailabilityRow,
   type AvailabilityState,
-  type AvailabilityVacationInput,
 } from "./types";
 
 /**
  * Pure domain logic for the Mapa de Disponibilidade (EP11). No I/O: the caller
  * (Prisma read or mock) passes plain rows and gets back the heatmap read-model.
- * Reusable and testable. Derived only from existing data — no new schema.
+ * Reusable and testable. Derived from existing data (allocations, scheduled
+ * time off and status) — no new schema.
  *
  * Date convention mirrors the Horas module: weeks run Monday→Sunday, every date
  * is an ISO `yyyy-mm-dd` at midnight UTC (see lib/timesheet/week.ts).
@@ -99,33 +100,45 @@ function allocationPercentInPeriod(
   return total;
 }
 
-/** Alguma férias cobre (cruza) o período? */
-function hasVacationInPeriod(
-  vacations: ReadonlyArray<AvailabilityVacationInput>,
+/**
+ * Estado de ausência aplicável a uma célula, considerando as ausências
+ * agendadas que cruzam o período. `null` quando não há ausência no período.
+ * Férias prevalecem sobre afastamento se ambos coincidirem (estado mais
+ * específico para a leitura de capacidade).
+ */
+function absenceStateInPeriod(
+  absences: ReadonlyArray<AvailabilityAbsenceInput>,
   period: AvailabilityPeriod,
-): boolean {
-  return vacations.some((v) =>
-    rangesOverlap(v.start, v.end, period.start, period.end),
-  );
+): "VACATION" | "ON_LEAVE" | null {
+  let onLeave = false;
+  for (const a of absences) {
+    if (!rangesOverlap(a.start, a.end, period.start, period.end)) continue;
+    if (a.kind === "VACATION") return "VACATION";
+    onLeave = true;
+  }
+  return onLeave ? "ON_LEAVE" : null;
 }
 
 /**
  * Classifica o estado de uma célula. Precedência (EP11): consultor inativo →
- * INACTIVE; afastado → ON_LEAVE; férias prevalecem sobre alocação → VACATION;
- * caso contrário a soma de % classifica FULL/PARTIAL e, no 0%, FREE vs BENCH.
+ * INACTIVE; afastado (status) → ON_LEAVE; ausência agendada cobrindo o período
+ * prevalece sobre alocação (férias → VACATION, afastamento → ON_LEAVE); caso
+ * contrário a soma de % classifica FULL/PARTIAL e, no 0%, FREE vs BENCH.
  *
- * `hasAnyActiveAllocationInWindow` distingue BENCH (sem alocação ativa em toda a
- * janela = ociosidade real) de FREE (livre só neste período, alocado em outro).
+ * `absenceState` é o estado derivado de ConsultantTimeOff (PLANNED/CONFIRMED)
+ * que cruza o período, ou `null` se não houver. `hasAnyActiveAllocationInWindow`
+ * distingue BENCH (sem alocação ativa em toda a janela = ociosidade real) de
+ * FREE (livre só neste período, alocado em outro).
  */
 export function classifyCell(
   status: AvailabilityConsultantInput["status"],
   allocationPercent: number,
-  onVacation: boolean,
+  absenceState: "VACATION" | "ON_LEAVE" | null,
   hasAnyActiveAllocationInWindow: boolean,
 ): AvailabilityState {
   if (status === "INACTIVE") return "INACTIVE";
   if (status === "ON_LEAVE") return "ON_LEAVE";
-  if (onVacation) return "VACATION";
+  if (absenceState) return absenceState;
   if (allocationPercent >= FULL_THRESHOLD) return "FULL";
   if (allocationPercent > 0) return "PARTIAL";
   // 0% e ACTIVE: bench se nunca tem alocação ativa na janela; senão livre.
@@ -141,12 +154,12 @@ function buildRow(
     (p) => allocationPercentInPeriod(consultant.allocations, p) > 0,
   );
   const cells: AvailabilityCell[] = periods.map((period) => {
-    const onVacation = hasVacationInPeriod(consultant.vacations, period);
+    const absenceState = absenceStateInPeriod(consultant.absences, period);
     const percent = allocationPercentInPeriod(consultant.allocations, period);
     const state = classifyCell(
       consultant.status,
       percent,
-      onVacation,
+      absenceState,
       hasAnyActiveAllocationInWindow,
     );
     // Férias/afastado/inativo não reportam capacidade alocada na célula.

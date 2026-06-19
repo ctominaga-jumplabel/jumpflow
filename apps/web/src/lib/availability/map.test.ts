@@ -25,7 +25,7 @@ const consultant = (
   jobTitle: "Dev",
   status: "ACTIVE",
   allocations: [],
-  vacations: [],
+  absences: [],
   ...over,
 });
 
@@ -80,34 +80,38 @@ describe("rangesOverlap", () => {
 });
 
 describe("classifyCell (EP11 estados + precedência)", () => {
-  it("INACTIVE wins regardless of allocation/vacation", () => {
-    expect(classifyCell("INACTIVE", 50, true, true)).toBe("INACTIVE");
+  it("INACTIVE wins regardless of allocation/absence", () => {
+    expect(classifyCell("INACTIVE", 50, "VACATION", true)).toBe("INACTIVE");
   });
 
-  it("ON_LEAVE for afastado", () => {
-    expect(classifyCell("ON_LEAVE", 0, false, false)).toBe("ON_LEAVE");
+  it("status ON_LEAVE for afastado", () => {
+    expect(classifyCell("ON_LEAVE", 0, null, false)).toBe("ON_LEAVE");
   });
 
-  it("VACATION prevails over allocation", () => {
-    expect(classifyCell("ACTIVE", 100, true, true)).toBe("VACATION");
+  it("scheduled VACATION absence prevails over allocation", () => {
+    expect(classifyCell("ACTIVE", 100, "VACATION", true)).toBe("VACATION");
+  });
+
+  it("scheduled LEAVE/OTHER absence maps to ON_LEAVE over allocation", () => {
+    expect(classifyCell("ACTIVE", 100, "ON_LEAVE", true)).toBe("ON_LEAVE");
   });
 
   it(">=100% is FULL", () => {
-    expect(classifyCell("ACTIVE", 100, false, true)).toBe("FULL");
-    expect(classifyCell("ACTIVE", 130, false, true)).toBe("FULL");
+    expect(classifyCell("ACTIVE", 100, null, true)).toBe("FULL");
+    expect(classifyCell("ACTIVE", 130, null, true)).toBe("FULL");
   });
 
   it("1..99% is PARTIAL", () => {
-    expect(classifyCell("ACTIVE", 1, false, true)).toBe("PARTIAL");
-    expect(classifyCell("ACTIVE", 60, false, true)).toBe("PARTIAL");
+    expect(classifyCell("ACTIVE", 1, null, true)).toBe("PARTIAL");
+    expect(classifyCell("ACTIVE", 60, null, true)).toBe("PARTIAL");
   });
 
   it("0% with allocation elsewhere in window is FREE", () => {
-    expect(classifyCell("ACTIVE", 0, false, true)).toBe("FREE");
+    expect(classifyCell("ACTIVE", 0, null, true)).toBe("FREE");
   });
 
   it("0% with no active allocation in the whole window is BENCH", () => {
-    expect(classifyCell("ACTIVE", 0, false, false)).toBe("BENCH");
+    expect(classifyCell("ACTIVE", 0, null, false)).toBe("BENCH");
   });
 });
 
@@ -130,7 +134,7 @@ describe("buildAvailabilityMap", () => {
     expect(map.rows[0].cells[0].allocationPercent).toBe(100);
   });
 
-  it("vacation prevails over allocation only on the covered period", () => {
+  it("scheduled vacation covers only the overlapping period (parte da janela)", () => {
     const map = buildAvailabilityMap(
       [
         consultant({
@@ -138,7 +142,9 @@ describe("buildAvailabilityMap", () => {
             { allocationPercent: 100, startDate: "2026-06-01", endDate: null },
           ],
           // Férias só na 2ª semana (22–28/06).
-          vacations: [{ start: "2026-06-23", end: "2026-06-25" }],
+          absences: [
+            { kind: "VACATION", start: "2026-06-23", end: "2026-06-25" },
+          ],
         }),
       ],
       PERIODS,
@@ -148,6 +154,63 @@ describe("buildAvailabilityMap", () => {
     expect(w2.state).toBe("VACATION");
     expect(w2.allocationPercent).toBe(0); // férias não reporta capacidade
     expect(w3.state).toBe("FULL");
+  });
+
+  it("scheduled LEAVE/OTHER absence shows ON_LEAVE over allocation, só no período coberto", () => {
+    const map = buildAvailabilityMap(
+      [
+        consultant({
+          allocations: [
+            { allocationPercent: 100, startDate: "2026-06-01", endDate: null },
+          ],
+          // Afastamento na 3ª semana (29/06–05/07).
+          absences: [{ kind: "LEAVE", start: "2026-06-30", end: "2026-07-02" }],
+        }),
+      ],
+      PERIODS,
+    );
+    const [w1, w2, w3] = map.rows[0].cells;
+    expect(w1.state).toBe("FULL");
+    expect(w2.state).toBe("FULL");
+    expect(w3.state).toBe("ON_LEAVE");
+    expect(w3.allocationPercent).toBe(0); // afastado não reporta capacidade
+  });
+
+  it("vacation prevails over a concurrent leave on the same period", () => {
+    const map = buildAvailabilityMap(
+      [
+        consultant({
+          allocations: [
+            { allocationPercent: 80, startDate: "2026-06-01", endDate: null },
+          ],
+          absences: [
+            { kind: "LEAVE", start: "2026-06-15", end: "2026-06-21" },
+            { kind: "VACATION", start: "2026-06-15", end: "2026-06-21" },
+          ],
+        }),
+      ],
+      PERIODS,
+    );
+    expect(map.rows[0].cells[0].state).toBe("VACATION");
+  });
+
+  it("ignores absences that do not overlap the window (ex.: CANCELLED já filtrado na query)", () => {
+    // O read-model só recebe ausências PLANNED/CONFIRMED (CANCELLED é descartado
+    // na query). Aqui validamos que uma ausência fora da janela não pinta nada.
+    const map = buildAvailabilityMap(
+      [
+        consultant({
+          allocations: [
+            { allocationPercent: 100, startDate: "2026-06-01", endDate: null },
+          ],
+          absences: [
+            { kind: "VACATION", start: "2026-01-01", end: "2026-01-31" },
+          ],
+        }),
+      ],
+      PERIODS,
+    );
+    expect(map.rows[0].cells.every((c) => c.state === "FULL")).toBe(true);
   });
 
   it("inactive consultant never reports capacity", () => {

@@ -41,17 +41,24 @@ export function buildMockAvailabilityMap(
               },
             ]
           : [];
-      // A cada poucos consultores, simula uma semana de férias para ilustrar o
-      // estado VACATION no mock (apenas demonstração visual).
-      const vacations =
-        index % 4 === 1
-          ? [
-              {
-                start: toIsoDate(addDays(monday, 7)),
-                end: toIsoDate(addDays(monday, 13)),
-              },
-            ]
-          : [];
+      // Ausências agendadas de demonstração (datas concretas de gozo, como em
+      // ConsultantTimeOff). A cada 4º consultor: uma semana de férias; e a cada
+      // 4º deslocado: uma semana de afastamento — para ilustrar VACATION e
+      // ON_LEAVE no mock (apenas demonstração visual).
+      const absences: AvailabilityConsultantInput["absences"] = [];
+      if (index % 4 === 1) {
+        absences.push({
+          kind: "VACATION",
+          start: toIsoDate(addDays(monday, 7)),
+          end: toIsoDate(addDays(monday, 13)),
+        });
+      } else if (index % 4 === 3) {
+        absences.push({
+          kind: "LEAVE",
+          start: toIsoDate(addDays(monday, 14)),
+          end: toIsoDate(addDays(monday, 20)),
+        });
+      }
       return {
         id: c.id,
         name: c.name,
@@ -60,7 +67,7 @@ export function buildMockAvailabilityMap(
         jobTitle: c.jobTitle,
         status: c.status === "ACTIVE" ? "ACTIVE" : "INACTIVE",
         allocations,
-        vacations,
+        absences,
       };
     },
   );
