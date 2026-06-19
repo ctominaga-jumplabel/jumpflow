@@ -198,6 +198,11 @@ export interface TimesheetWeekViewProps {
   weeks?: TimesheetWeek[];
   /** demo mode: index of the week shown first. */
   initialIndex?: number;
+  /**
+   * db mode: whether to offer the "Exportar CSV" action. Hidden for
+   * consultant-only users (no role beyond CONSULTANT).
+   */
+  canExportCsv?: boolean;
 }
 
 export interface TimesheetDefaultOption extends TimeEntryFormProject {
@@ -1173,6 +1178,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
         projects={filterProjects}
         onChange={isDemo ? setDemoFilter : undefined}
         onClear={isDemo ? () => setDemoFilter({}) : undefined}
+        canExportCsv={props.canExportCsv}
       />
 
       {hasActiveTimesheetFilter(activeFilter) ? (

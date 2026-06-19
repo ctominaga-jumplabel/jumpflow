@@ -26,13 +26,18 @@ const projects = [
   },
 ];
 
-function renderDb(filter: TimesheetFilter, weekStart = "2026-06-08") {
+function renderDb(
+  filter: TimesheetFilter,
+  weekStart = "2026-06-08",
+  canExportCsv = true,
+) {
   return render(
     <TimesheetFilters
       mode="db"
       weekStart={weekStart}
       filter={filter}
       projects={projects}
+      canExportCsv={canExportCsv}
     />,
   );
 }
@@ -135,6 +140,17 @@ describe("TimesheetFilters (db mode) — query string reflection", () => {
     // Export-all: no pagination params leak into the link.
     expect(url.searchParams.get("page")).toBeNull();
     expect(url.searchParams.get("pageSize")).toBeNull();
+  });
+
+  it("hides the CSV export link for consultant-only users", () => {
+    renderDb({ clientId: "cli-vix" }, "2026-06-08", false);
+    expect(
+      screen.queryByRole("link", { name: "Exportar CSV" }),
+    ).not.toBeInTheDocument();
+    // The other actions stay available.
+    expect(
+      screen.getByRole("button", { name: "Aplicar filtros" }),
+    ).toBeInTheDocument();
   });
 });
 
