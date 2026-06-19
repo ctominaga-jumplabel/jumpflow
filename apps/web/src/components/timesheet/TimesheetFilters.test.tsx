@@ -12,8 +12,18 @@ import type { TimesheetFilter } from "@/lib/timesheet/filters";
  */
 
 const projects = [
-  { id: "proj-atlas", name: "Atlas", clientName: "Vix Energia" },
-  { id: "proj-orion", name: "Órion", clientName: "Banco Sul" },
+  {
+    id: "proj-atlas",
+    name: "Atlas",
+    clientId: "cli-vix",
+    clientName: "Vix Energia",
+  },
+  {
+    id: "proj-orion",
+    name: "Órion",
+    clientId: "cli-banco",
+    clientName: "Banco Sul",
+  },
 ];
 
 function renderDb(filter: TimesheetFilter, weekStart = "2026-06-08") {
@@ -88,6 +98,43 @@ describe("TimesheetFilters (db mode) — query string reflection", () => {
     expect(
       (screen.getByLabelText("Cobrança") as HTMLSelectElement).value,
     ).toBe("true");
+  });
+
+  it("lists the distinct clients of the project scope and reflects the value", () => {
+    renderDb({ clientId: "cli-banco" });
+    const select = screen.getByLabelText("Cliente") as HTMLSelectElement;
+    expect(select.value).toBe("cli-banco");
+    const options = Array.from(select.options).map((o) => o.textContent);
+    // "Todos" + the two distinct clients, sorted pt-BR.
+    expect(options).toEqual(["Todos", "Banco Sul", "Vix Energia"]);
+  });
+
+  it("builds the CSV export link from the active filters (Relatorios params)", () => {
+    renderDb({
+      clientId: "cli-vix",
+      projectId: "proj-atlas",
+      status: "APPROVED",
+      activity: "ON_CALL",
+      billable: false,
+      startDate: "2026-06-01",
+      endDate: "2026-06-30",
+    });
+    const link = screen.getByRole("link", { name: "Exportar CSV" });
+    const url = new URL(
+      (link as HTMLAnchorElement).getAttribute("href")!,
+      "http://x",
+    );
+    expect(url.pathname).toBe("/api/relatorios/horas");
+    expect(url.searchParams.get("clientId")).toBe("cli-vix");
+    expect(url.searchParams.get("projectId")).toBe("proj-atlas");
+    expect(url.searchParams.get("status")).toBe("APPROVED");
+    expect(url.searchParams.get("activityType")).toBe("ON_CALL");
+    expect(url.searchParams.get("billable")).toBe("false");
+    expect(url.searchParams.get("from")).toBe("2026-06-01");
+    expect(url.searchParams.get("to")).toBe("2026-06-30");
+    // Export-all: no pagination params leak into the link.
+    expect(url.searchParams.get("page")).toBeNull();
+    expect(url.searchParams.get("pageSize")).toBeNull();
   });
 });
 

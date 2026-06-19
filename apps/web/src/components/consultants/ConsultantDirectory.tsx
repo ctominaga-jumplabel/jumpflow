@@ -33,7 +33,10 @@ import {
   type VoucherBenefitsInput,
 } from "@/lib/consultants/schemas";
 import { contractTypeLabels } from "@/lib/consultants/labels";
-import type { ConsultantProfile } from "@/lib/db/consultants";
+import type {
+  ConsultantBankAccountView,
+  ConsultantProfile,
+} from "@/lib/db/consultants";
 import { computeCompensation } from "@/lib/consultants/compensation";
 import { ConsultantAvailabilityBadge } from "./ConsultantAvailabilityBadge";
 import { ConsultantProfileSections } from "./ConsultantProfileSections";
@@ -244,8 +247,6 @@ function ConsultantDetailModal({
   onClose: () => void;
 }) {
   const [identity, setIdentity] = useState<ConsultantIdentityInput | null>(null);
-  const [bankKind, setBankKind] = useState<"CLT" | "PJ">("CLT");
-  const [pixKey, setPixKey] = useState("");
   const [compensation, setCompensation] = useState<CompensationInput | null>(null);
   const [vouchers, setVouchers] = useState<{
     vr?: number;
@@ -294,24 +295,6 @@ function ConsultantDetailModal({
   async function saveIdentity() {
     const result = await saveConsultantIdentity(currentIdentity);
     onMessage(result.ok ? "Identidade salva." : result.message);
-  }
-
-  async function saveBank(kind: "CLT" | "PJ") {
-    const input: BankAccountInput = {
-      id: undefined,
-      consultantId,
-      kind,
-      bankCode: undefined,
-      bankName: undefined,
-      agency: undefined,
-      accountNumber: undefined,
-      accountDigit: undefined,
-      pixKey: pixKey || undefined,
-      holderDocument: undefined,
-      active: true,
-    };
-    const result = await saveBankAccount(input);
-    onMessage(result.ok ? `Conta ${kind} criada.` : result.message);
   }
 
   async function saveFlex() {
@@ -459,34 +442,16 @@ function ConsultantDetailModal({
         <section className="space-y-3 rounded-md border border-border p-3">
           <div className="flex items-center gap-2 text-sm font-semibold text-strong">
             <CreditCard aria-hidden="true" className="size-4" />
-            Contas bancarias por contrato
+            Contas bancárias
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <select
-              aria-label="Tipo de conta"
-              value={bankKind}
-              onChange={(event) => setBankKind(event.target.value as "CLT" | "PJ")}
-              className={fieldClass()}
-            >
-              <option value="CLT">CLT</option>
-              <option value="PJ">PJ</option>
-            </select>
-            <input
-              aria-label="Chave Pix"
-              value={pixKey}
-              onChange={(event) => setPixKey(event.target.value)}
-              placeholder="Chave Pix"
-              className={fieldClass()}
-            />
-            <ActionButton
-              size="sm"
-              disabled={!canManagePeople || pixKey.trim().length === 0}
-              onClick={() => saveBank(bankKind)}
-              icon={CreditCard}
-            >
-              Criar conta
-            </ActionButton>
-          </div>
+          <BankAccountsSection
+            consultantId={consultantId}
+            contractType={currentIdentity.contractType}
+            accounts={profile?.bankAccounts ?? []}
+            canManagePeople={canManagePeople}
+            onMessage={onMessage}
+            onReload={onReload}
+          />
         </section>
 
         <section className="space-y-3 rounded-md border border-border p-3">
@@ -646,6 +611,180 @@ function NumberInput({
           onChange(event.target.value === "" ? undefined : Number(event.target.value))
         }
         className={fieldClass()}
+      />
+    </label>
+  );
+}
+
+/**
+ * Bank accounts driven by the contract type: CLT or PJ get a single account;
+ * CLT FLEX gets two clearly labelled accounts (one CLT, one PJ). Each account
+ * exposes Banco, Agência, Conta Corrente and PIX, prefilled from existing data.
+ */
+function BankAccountsSection({
+  consultantId,
+  contractType,
+  accounts,
+  canManagePeople,
+  onMessage,
+  onReload,
+}: {
+  consultantId: string;
+  contractType: ConsultantIdentityInput["contractType"];
+  accounts: ConsultantBankAccountView[];
+  canManagePeople: boolean;
+  onMessage: (message: string | null) => void;
+  onReload: () => void;
+}) {
+  if (!contractType) {
+    return (
+      <p className="rounded-md border border-border bg-surface-muted px-3 py-2 text-sm text-medium">
+        Defina o tipo de contratação na identidade para cadastrar as contas
+        bancárias.
+      </p>
+    );
+  }
+
+  const cards =
+    contractType === "CLT_FLEX"
+      ? ([
+          { kind: "CLT", label: "Conta CLT" },
+          { kind: "PJ", label: "Conta PJ" },
+        ] as const)
+      : ([{ kind: contractType, label: `Conta ${contractType}` }] as const);
+
+  // Exact kind match; for single-account contracts, fall back to a legacy
+  // PRIMARY account so previously saved data keeps showing.
+  const findAccount = (
+    kind: "CLT" | "PJ",
+  ): ConsultantBankAccountView | null => {
+    const exact = accounts.find((account) => account.kind === kind);
+    if (exact) return exact;
+    if (contractType !== "CLT_FLEX") {
+      return accounts.find((account) => account.kind === "PRIMARY") ?? null;
+    }
+    return null;
+  };
+
+  return (
+    <div className={cn("grid gap-3", cards.length > 1 && "md:grid-cols-2")}>
+      {cards.map((card) => (
+        <BankAccountFormCard
+          key={card.kind}
+          consultantId={consultantId}
+          kind={card.kind}
+          label={card.label}
+          existing={findAccount(card.kind)}
+          canManagePeople={canManagePeople}
+          onMessage={onMessage}
+          onReload={onReload}
+        />
+      ))}
+    </div>
+  );
+}
+
+function BankAccountFormCard({
+  consultantId,
+  kind,
+  label,
+  existing,
+  canManagePeople,
+  onMessage,
+  onReload,
+}: {
+  consultantId: string;
+  kind: "CLT" | "PJ";
+  label: string;
+  existing: ConsultantBankAccountView | null;
+  canManagePeople: boolean;
+  onMessage: (message: string | null) => void;
+  onReload: () => void;
+}) {
+  const [bankName, setBankName] = useState(existing?.bankName ?? "");
+  const [agency, setAgency] = useState(existing?.agency ?? "");
+  const [accountNumber, setAccountNumber] = useState(
+    existing?.accountNumber ?? "",
+  );
+  const [pixKey, setPixKey] = useState(existing?.pixKey ?? "");
+  const [saving, setSaving] = useState(false);
+
+  const empty =
+    bankName.trim() === "" &&
+    agency.trim() === "" &&
+    accountNumber.trim() === "" &&
+    pixKey.trim() === "";
+
+  async function save() {
+    setSaving(true);
+    const input: BankAccountInput = {
+      id: existing?.id,
+      consultantId,
+      kind,
+      bankCode: undefined,
+      bankName: bankName.trim() || undefined,
+      agency: agency.trim() || undefined,
+      accountNumber: accountNumber.trim() || undefined,
+      accountDigit: undefined,
+      pixKey: pixKey.trim() || undefined,
+      holderDocument: undefined,
+      active: true,
+    };
+    const result = await saveBankAccount(input);
+    setSaving(false);
+    onMessage(result.ok ? `Conta ${kind} salva.` : result.message);
+    if (result.ok) onReload();
+  }
+
+  return (
+    <div className="space-y-3 rounded-md border border-border bg-surface-muted/40 p-3">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold uppercase tracking-wide text-medium">
+          {label}
+        </span>
+        <StatusBadge tone={kind === "CLT" ? "info" : "neutral"}>
+          {kind}
+        </StatusBadge>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <BankField label="Banco" value={bankName} onChange={setBankName} />
+        <BankField label="Agência" value={agency} onChange={setAgency} />
+        <BankField
+          label="Conta Corrente"
+          value={accountNumber}
+          onChange={setAccountNumber}
+        />
+        <BankField label="PIX" value={pixKey} onChange={setPixKey} />
+      </div>
+      <ActionButton
+        size="sm"
+        icon={CreditCard}
+        disabled={!canManagePeople || empty || saving}
+        onClick={save}
+      >
+        {existing ? "Salvar conta" : "Criar conta"}
+      </ActionButton>
+    </div>
+  );
+}
+
+function BankField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="space-y-1 text-sm font-medium text-medium">
+      {label}
+      <input
+        aria-label={label}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className={cn(fieldClass(), "w-full")}
       />
     </label>
   );

@@ -142,6 +142,9 @@ function entryFilterWhere(filter: TimesheetFilter): Record<string, any> {
   if (filter.activity) where.activityType = filter.activity;
   if (filter.billable !== undefined) where.billable = filter.billable;
   if (filter.projectId) where.projectId = filter.projectId;
+  if (filter.clientId) {
+    where.project = { ...(where.project ?? {}), clientId: filter.clientId };
+  }
   if (filter.projectStatus) {
     where.project = { ...(where.project ?? {}), status: filter.projectStatus };
   }
@@ -396,6 +399,7 @@ export async function getPeriodForConsultant(
 export interface AllowedProject {
   id: string;
   name: string;
+  clientId: string;
   clientName: string;
 }
 
@@ -442,7 +446,9 @@ export async function listAllowedProjects(
     // Narrow select: only the label fields, never project financials.
     select: {
       projectId: true,
-      project: { select: { name: true, client: { select: { name: true } } } },
+      project: {
+        select: { name: true, client: { select: { id: true, name: true } } },
+      },
     },
   });
 
@@ -451,6 +457,7 @@ export async function listAllowedProjects(
     byProject.set(allocation.projectId, {
       id: allocation.projectId,
       name: allocation.project.name,
+      clientId: allocation.project.client.id,
       clientName: allocation.project.client.name,
     });
   }
@@ -482,7 +489,9 @@ export async function listTimesheetDefaultOptions(
     select: {
       id: true,
       projectId: true,
-      project: { select: { name: true, client: { select: { name: true } } } },
+      project: {
+        select: { name: true, client: { select: { id: true, name: true } } },
+      },
       timesheetDefault: {
         select: {
           activityType: true,
@@ -504,6 +513,7 @@ export async function listTimesheetDefaultOptions(
     id: allocation.projectId,
     allocationId: allocation.id,
     name: allocation.project.name,
+    clientId: allocation.project.client.id,
     clientName: allocation.project.client.name,
     defaultConfig: allocation.timesheetDefault
       ? {

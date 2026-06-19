@@ -135,9 +135,10 @@ const directionSchema = z.preprocess(
 
 /**
  * Allowed page sizes. Anything outside the set is rejected (the UI only offers
- * these values), keeping the page bounded and predictable.
+ * these values), keeping the page bounded and predictable. Shared by the
+ * Relatorios screen and the Horas consultation panel.
  */
-export const PAGE_SIZES = [25, 50, 100] as const;
+export const PAGE_SIZES = [5, 10, 25, 50, 100, 250, 500] as const;
 export const DEFAULT_PAGE_SIZE = 50;
 
 const pageSchema = z.preprocess((value) => {
@@ -149,7 +150,10 @@ const pageSizeSchema = z.preprocess((value) => {
   const v = blankToUndefined(value);
   return v === undefined ? undefined : Number(v);
 }, z
-  .union([z.literal(25), z.literal(50), z.literal(100)])
+  .number()
+  .refine((n): n is (typeof PAGE_SIZES)[number] =>
+    (PAGE_SIZES as readonly number[]).includes(n),
+  )
   .optional());
 
 /**

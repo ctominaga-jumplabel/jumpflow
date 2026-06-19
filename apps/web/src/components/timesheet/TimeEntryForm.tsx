@@ -40,6 +40,7 @@ export interface TimeEntryFormValue {
 export interface TimeEntryFormProject {
   id: string;
   name: string;
+  clientId: string;
   clientName: string;
 }
 

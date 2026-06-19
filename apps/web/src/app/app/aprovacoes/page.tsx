@@ -26,6 +26,12 @@ export default async function AprovacoesPage() {
   ]);
 
   let items: ApprovalItem[] = approvalItems;
+  let reportFilterOptions:
+    | {
+        clients: { id: string; name: string }[];
+        consultants: { id: string; name: string }[];
+      }
+    | undefined;
   const databaseConfigured = isDatabaseConfigured();
 
   if (databaseConfigured) {
@@ -33,6 +39,7 @@ export default async function AprovacoesPage() {
     const { listHoursApprovalItems } = await import("@/lib/db/timesheet");
     const { listExpenseApprovalItems } = await import("@/lib/db/expenses");
     const { resolveDbUser } = await import("@/lib/db/users");
+    const { getReportFilterOptions } = await import("@/lib/db/reports");
 
     const unrestricted = hasRole(user, ["ADMIN", "AREA_MANAGER"]);
     const isProjectManager = hasRole(user, "PROJECT_MANAGER");
@@ -61,6 +68,14 @@ export default async function AprovacoesPage() {
     // Real data only: mock items never mix into a db-backed queue, so the
     // counters always reflect actual pending work.
     items = [...hoursItems, ...expenseItems];
+
+    // Scoped name → id options so the queue can build the CSV export link to
+    // the shared Relatorios endpoint (same RBAC the read above already uses).
+    const options = await getReportFilterOptions(user);
+    reportFilterOptions = {
+      clients: options.clients,
+      consultants: options.consultants,
+    };
   }
 
   return (
@@ -70,7 +85,11 @@ export default async function AprovacoesPage() {
         title="Aprovações"
         description="Triagem de horas e despesas pendentes com aprovação, reprovação justificada e histórico de decisões."
       />
-      <ApprovalQueue items={items} demoBanner={!databaseConfigured} />
+      <ApprovalQueue
+        items={items}
+        demoBanner={!databaseConfigured}
+        reportFilterOptions={reportFilterOptions}
+      />
     </div>
   );
 }

@@ -332,7 +332,7 @@ describe("TimesheetWeekView (db mode)", () => {
       <TimesheetWeekView
         mode="db"
         week={dbWeek}
-        projects={[{ id: "proj-1", name: "Portal do Cliente", clientName: "Acme Corp" }]}
+        projects={[{ id: "proj-1", name: "Portal do Cliente", clientId: "cli-acme", clientName: "Acme Corp" }]}
       />,
     );
     expect(screen.getByText(/Semana 24/)).toBeInTheDocument();
@@ -349,7 +349,7 @@ describe("TimesheetWeekView (db mode)", () => {
       <TimesheetWeekView
         mode="db"
         week={dbWeek}
-        projects={[{ id: "proj-1", name: "Portal do Cliente", clientName: "Acme Corp" }]}
+        projects={[{ id: "proj-1", name: "Portal do Cliente", clientId: "cli-acme", clientName: "Acme Corp" }]}
       />,
     );
     const table = within(screen.getByRole("table"));
@@ -362,7 +362,7 @@ describe("TimesheetWeekView (db mode)", () => {
       <TimesheetWeekView
         mode="db"
         week={dbWeek}
-        projects={[{ id: "proj-1", name: "Portal do Cliente", clientName: "Acme Corp" }]}
+        projects={[{ id: "proj-1", name: "Portal do Cliente", clientId: "cli-acme", clientName: "Acme Corp" }]}
         filter={{ status: "DRAFT", sort: "date", direction: "desc" }}
       />,
     );

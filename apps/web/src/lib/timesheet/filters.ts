@@ -74,6 +74,7 @@ const billableSchema = z.preprocess((value) => {
 
 export const timesheetFilterSchema = z.object({
   projectStatus: z.preprocess(blankToUndefined, projectStatusEnum.optional()),
+  clientId: z.preprocess(blankToUndefined, z.string().min(1).optional()),
   projectId: z.preprocess(blankToUndefined, z.string().min(1).optional()),
   activity: z.preprocess(blankToUndefined, activityEnum.optional()),
   status: z.preprocess(blankToUndefined, statusEnum.optional()),
@@ -101,6 +102,7 @@ export function parseTimesheetFilter(
   };
   const result = timesheetFilterSchema.safeParse({
     projectStatus: pick("projectStatus"),
+    clientId: pick("clientId"),
     projectId: pick("projectId"),
     activity: pick("activity"),
     status: pick("status"),
@@ -117,6 +119,7 @@ export function parseTimesheetFilter(
 export function hasActiveTimesheetFilter(filter: TimesheetFilter): boolean {
   return Boolean(
     filter.projectStatus ||
+      filter.clientId ||
       filter.projectId ||
       filter.activity ||
       filter.status ||

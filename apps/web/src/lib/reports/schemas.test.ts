@@ -141,12 +141,12 @@ describe("hoursReportFilterSchema", () => {
     expect(hoursReportFilterSchema.safeParse({ page: "-1" }).success).toBe(
       false,
     );
-    for (const size of [25, 50, 100]) {
+    for (const size of [5, 10, 25, 50, 100, 250, 500]) {
       expect(
         hoursReportFilterSchema.parse({ pageSize: String(size) }).pageSize,
       ).toBe(size);
     }
-    expect(hoursReportFilterSchema.safeParse({ pageSize: "10" }).success).toBe(
+    expect(hoursReportFilterSchema.safeParse({ pageSize: "7" }).success).toBe(
       false,
     );
     expect(hoursReportFilterSchema.safeParse({ pageSize: "200" }).success).toBe(

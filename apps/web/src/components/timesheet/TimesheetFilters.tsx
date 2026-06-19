@@ -83,6 +83,35 @@ export function TimesheetFilters({
 }: TimesheetFiltersProps) {
   const isDemo = mode === "demo";
 
+  // Distinct clients in the consultant's project scope, for the Cliente filter.
+  const clients = Array.from(
+    new Map(projects.map((p) => [p.clientId, p.clientName])).entries(),
+  )
+    .map(([id, name]) => ({ id, name }))
+    .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+
+  /**
+   * CSV export of the consultant's own entries via the shared Relatorios
+   * endpoint. Maps the active screen filters to the report params; the server
+   * recomputes RBAC scope (own consultant) and financial visibility, so this
+   * link can never widen what the consultant may export. No page/pageSize ⇒
+   * the whole filtered set is exported.
+   */
+  function csvHref(): string {
+    const params = new URLSearchParams();
+    if (filter.clientId) params.set("clientId", filter.clientId);
+    if (filter.projectId) params.set("projectId", filter.projectId);
+    if (filter.status) params.set("status", filter.status);
+    if (filter.activity) params.set("activityType", filter.activity);
+    if (filter.billable !== undefined) {
+      params.set("billable", String(filter.billable));
+    }
+    if (filter.startDate) params.set("from", filter.startDate);
+    if (filter.endDate) params.set("to", filter.endDate);
+    const qs = params.toString();
+    return `/api/relatorios/horas${qs ? `?${qs}` : ""}`;
+  }
+
   function set<K extends keyof TimesheetFilter>(
     key: K,
     value: string,
@@ -137,6 +166,25 @@ export function TimesheetFilters({
             {statusOrder.map((s) => (
               <option key={s} value={s}>
                 {timeEntryStatusLabels[s]}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className={labelClass} htmlFor="hf-client">
+            Cliente
+          </label>
+          <select
+            id="hf-client"
+            name="clientId"
+            className={fieldClass}
+            {...bind("clientId", filter.clientId)}
+          >
+            <option value="">Todos</option>
+            {clients.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
               </option>
             ))}
           </select>
@@ -331,6 +379,15 @@ export function TimesheetFilters({
               )}
             >
               Limpar
+            </a>
+            <a
+              href={csvHref()}
+              className={cn(
+                "inline-flex h-8 items-center rounded-md border border-border bg-surface px-3 text-xs font-semibold text-medium hover:bg-surface-muted",
+                focusRing,
+              )}
+            >
+              Exportar CSV
             </a>
           </>
         )}

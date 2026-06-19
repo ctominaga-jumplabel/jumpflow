@@ -3,24 +3,58 @@ import { UserX } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { TimesheetWeekView } from "@/components/timesheet/TimesheetWeekView";
+import { HorasConsultaPanel } from "@/components/timesheet/HorasConsultaPanel";
 import { requireUser } from "@/lib/auth/guards";
+import { hasRole } from "@/lib/auth/route-permissions";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import {
   monthRangeOf,
   parseWeekParam,
 } from "@/lib/timesheet/week";
 import { parseTimesheetFilter } from "@/lib/timesheet/filters";
+import {
+  DEFAULT_PAGE_SIZE,
+  hoursReportFilterSchema,
+} from "@/lib/reports/schemas";
 
 export const metadata: Metadata = { title: "Horas" };
 
+type RawParams = Record<string, string | string[] | undefined>;
+
 interface HorasPageProps {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
+  searchParams: Promise<RawParams>;
+}
+
+/** Roles that may consult other consultants' hours (read-only) on this screen. */
+const MANAGER_ROLES = [
+  "ADMIN",
+  "AREA_MANAGER",
+  "PROJECT_MANAGER",
+  "FINANCE",
+] as const;
+
+/** Flatten searchParams (first value wins) for Zod parsing. */
+function flatten(params: RawParams): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined) continue;
+    out[key] = Array.isArray(value) ? (value[0] ?? "") : value;
+  }
+  return out;
 }
 
 /**
  * Horas: weekly time entry. With a database, data comes from Prisma and the
  * week is selected via `?semana=` (server-driven). Without one, the original
  * demo (local state) keeps the screen usable, with an explicit banner.
+ *
+ * The screen is role-adaptive:
+ * - a consultant (linked Consultant) gets the personal weekly editor, now with
+ *   a Cliente filter and a CSV export of their own entries;
+ * - a manager/admin/finance also gets a read-only, multi-consultant
+ *   consultation panel (Cliente/Consultor filters, pagination, CSV) backed by
+ *   the shared Relatorios pipeline, which enforces RBAC scope and financial
+ *   masking server-side.
  */
 export default async function HorasPage({ searchParams }: HorasPageProps) {
   const user = await requireUser();
@@ -52,7 +86,10 @@ export default async function HorasPage({ searchParams }: HorasPageProps) {
   } = await import("@/lib/db/timesheet");
 
   const consultant = await getConsultantForUser(user);
-  if (!consultant) {
+  const isManager = hasRole(user, [...MANAGER_ROLES]);
+
+  // A user who is neither a consultant nor a manager has nothing to show here.
+  if (!consultant && !isManager) {
     return (
       <div className="space-y-6">
         {header}
@@ -66,29 +103,28 @@ export default async function HorasPage({ searchParams }: HorasPageProps) {
   }
 
   const params = await searchParams;
-  const weekStart = parseWeekParam(params.semana);
-  // Safe fallback: an invalid filter value is dropped, defaults take over.
-  const filter = parseTimesheetFilter(params);
-  // Default period filter is the current calendar month (1st → last day).
-  // Both bounds are mandatory in the UI, so fill them when absent and reflect
-  // them back into `filter` so the date inputs render the month.
-  const defaultMonth = monthRangeOf();
-  filter.startDate ??= defaultMonth.start;
-  filter.endDate ??= defaultMonth.end;
-  const periodStart = filter.startDate;
-  const periodEnd = filter.endDate;
-  const [week, period, projects, defaultOptions] = await Promise.all([
-    getWeekForConsultant(consultant.id, weekStart, filter),
-    getPeriodForConsultant(consultant.id, periodStart, periodEnd, filter),
-    // The project dropdown lists the consultant's scope, narrowed by the
-    // chosen project status so the options match the active filter.
-    listAllowedProjects(consultant.id, weekStart, filter.projectStatus),
-    listTimesheetDefaultOptions(consultant.id, weekStart),
-  ]);
 
-  return (
-    <div className="space-y-6">
-      {header}
+  // Personal weekly editor — only for users linked to a Consultant.
+  let editor = null;
+  if (consultant) {
+    const weekStart = parseWeekParam(params.semana);
+    // Safe fallback: an invalid filter value is dropped, defaults take over.
+    const filter = parseTimesheetFilter(params);
+    // Default period filter is the current calendar month (1st → last day).
+    const defaultMonth = monthRangeOf();
+    filter.startDate ??= defaultMonth.start;
+    filter.endDate ??= defaultMonth.end;
+    const periodStart = filter.startDate;
+    const periodEnd = filter.endDate;
+    const [week, period, projects, defaultOptions] = await Promise.all([
+      getWeekForConsultant(consultant.id, weekStart, filter),
+      getPeriodForConsultant(consultant.id, periodStart, periodEnd, filter),
+      // The project dropdown lists the consultant's scope, narrowed by the
+      // chosen project status so the options match the active filter.
+      listAllowedProjects(consultant.id, weekStart, filter.projectStatus),
+      listTimesheetDefaultOptions(consultant.id, weekStart),
+    ]);
+    editor = (
       <TimesheetWeekView
         mode="db"
         week={week}
@@ -97,6 +133,42 @@ export default async function HorasPage({ searchParams }: HorasPageProps) {
         defaultOptions={defaultOptions}
         filter={filter}
       />
+    );
+  }
+
+  // Read-only multi-consultant consultation — only for management roles.
+  let panel = null;
+  if (isManager) {
+    const { getReportFilterOptions, getHoursReport } = await import(
+      "@/lib/db/reports"
+    );
+    const flat = flatten(params);
+    // Paginate the on-screen panel by default (without page/pageSize the read
+    // returns the whole set). The CSV link still omits both → export-all.
+    const flatForReport = {
+      ...flat,
+      page: flat.page || "1",
+      pageSize: flat.pageSize || String(DEFAULT_PAGE_SIZE),
+    };
+    const parsed = hoursReportFilterSchema.safeParse(flatForReport);
+    const [filterOptions, report] = await Promise.all([
+      getReportFilterOptions(user),
+      getHoursReport(user, parsed.success ? parsed.data : {}),
+    ]);
+    panel = (
+      <HorasConsultaPanel
+        report={report}
+        options={filterOptions}
+        values={flatForReport}
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {header}
+      {editor}
+      {panel}
     </div>
   );
 }
