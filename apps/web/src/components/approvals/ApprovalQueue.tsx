@@ -4,6 +4,7 @@ import { useMemo, useState, useTransition } from "react";
 import {
   Check,
   ClipboardCheck,
+  Download,
   ListChecks,
   TriangleAlert,
   Undo2,
@@ -56,6 +57,7 @@ const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
 
 interface ApprovalFilters {
   status: StatusFilter;
+  client: string;
   project: string;
   consultant: string;
   activity: string;
@@ -65,6 +67,7 @@ interface ApprovalFilters {
 
 const emptyFilters: ApprovalFilters = {
   status: "ALL",
+  client: "",
   project: "",
   consultant: "",
   activity: "",
@@ -86,6 +89,15 @@ export interface ApprovalQueueProps {
   items?: ApprovalItem[];
   /** Show the "no database" warning banner (demo mode). */
   demoBanner?: boolean;
+  /**
+   * Scoped client/consultant options (name → id) used to build the CSV export
+   * link to the shared Relatorios endpoint. Present only in db mode; when
+   * absent (demo) the export button is hidden.
+   */
+  reportFilterOptions?: {
+    clients: { id: string; name: string }[];
+    consultants: { id: string; name: string }[];
+  };
 }
 
 /**
@@ -104,6 +116,7 @@ export interface ApprovalQueueProps {
 export function ApprovalQueue({
   items: seed = defaultItems,
   demoBanner = false,
+  reportFilterOptions,
 }: ApprovalQueueProps) {
   // Local decisions apply only to mock items; db items refresh via the server.
   // PENDING here is a reopen (a decided item sent back to the pending queue).
@@ -142,6 +155,7 @@ export function ApprovalQueue({
   );
   const filterOptions = useMemo(
     () => ({
+      clients: optionValues(byKind, "clientName"),
       projects: optionValues(byKind, "projectName"),
       consultants: optionValues(byKind, "consultantName"),
       activities: optionValues(byKind, "activitySummary"),
@@ -154,6 +168,7 @@ export function ApprovalQueue({
         if (filters.status !== "ALL" && item.status !== filters.status) {
           return false;
         }
+        if (filters.client && item.clientName !== filters.client) return false;
         if (filters.project && item.projectName !== filters.project) return false;
         if (filters.consultant && item.consultantName !== filters.consultant) {
           return false;
@@ -168,6 +183,31 @@ export function ApprovalQueue({
       }),
     [byKind, filters],
   );
+  // CSV export reuses the shared Relatorios hours endpoint (RBAC + financial
+  // masking recomputed server-side). The queue carries client/consultant NAMES,
+  // so resolve them to ids via the scoped options; date filters map to the
+  // report's period. Null in demo mode (no options ⇒ the button is hidden).
+  const csvHref = useMemo<string | null>(() => {
+    if (!reportFilterOptions) return null;
+    const params = new URLSearchParams();
+    if (filters.startDate) params.set("from", filters.startDate);
+    if (filters.endDate) params.set("to", filters.endDate);
+    if (filters.client) {
+      const id = reportFilterOptions.clients.find(
+        (c) => c.name === filters.client,
+      )?.id;
+      if (id) params.set("clientId", id);
+    }
+    if (filters.consultant) {
+      const id = reportFilterOptions.consultants.find(
+        (c) => c.name === filters.consultant,
+      )?.id;
+      if (id) params.set("consultantId", id);
+    }
+    const qs = params.toString();
+    return `/api/relatorios/horas${qs ? `?${qs}` : ""}`;
+  }, [reportFilterOptions, filters]);
+
   const counts = useMemo(() => summarizeApprovals(filtered), [filtered]);
   const pending = useMemo(() => pendingApprovals(filtered), [filtered]);
   const history = useMemo(() => decidedApprovals(filtered), [filtered]);
@@ -494,6 +534,29 @@ export function ApprovalQueue({
             </select>
           </div>
           <div>
+            <label htmlFor="approval-client" className="mb-1 block text-xs font-semibold text-medium">
+              Cliente
+            </label>
+            <select
+              id="approval-client"
+              value={filters.client}
+              onChange={(event) =>
+                setFilters((current) => ({ ...current, client: event.target.value }))
+              }
+              className={cn(
+                "h-9 w-full rounded-md border border-border bg-surface px-3 text-sm text-strong",
+                focusRing,
+              )}
+            >
+              <option value="">Todos</option>
+              {filterOptions.clients.map((client) => (
+                <option key={client} value={client}>
+                  {client}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
             <label htmlFor="approval-project" className="mb-1 block text-xs font-semibold text-medium">
               Projeto
             </label>
@@ -562,12 +625,13 @@ export function ApprovalQueue({
               ))}
             </select>
           </div>
-          <div className="flex items-end">
+          <div className="flex items-end gap-2">
             <ActionButton
               variant="secondary"
               size="sm"
               disabled={
                 filters.status === "ALL" &&
+                !filters.client &&
                 !filters.project &&
                 !filters.consultant &&
                 !filters.activity &&
@@ -578,6 +642,18 @@ export function ApprovalQueue({
             >
               Limpar
             </ActionButton>
+            {csvHref ? (
+              <a
+                href={csvHref}
+                className={cn(
+                  "inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-xs font-semibold text-medium hover:bg-surface-muted",
+                  focusRing,
+                )}
+              >
+                <Download aria-hidden="true" className="size-3.5" />
+                Exportar CSV
+              </a>
+            ) : null}
           </div>
         </div>
       </SectionPanel>

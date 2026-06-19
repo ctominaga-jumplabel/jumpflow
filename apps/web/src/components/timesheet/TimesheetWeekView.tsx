@@ -96,10 +96,18 @@ const WEEKDAY_OPTIONS = [
 /** Demo-mode projects a consultant may log to (not closed). */
 const demoProjects: TimeEntryFormProject[] = allProjects
   .filter((p) => p.status !== "CLOSED")
-  .map((p) => ({ id: p.id, name: p.name, clientName: p.client.name }));
+  .map((p) => ({
+    id: p.id,
+    name: p.name,
+    clientId: p.client.id,
+    clientName: p.client.name,
+  }));
 
 /** Project id -> status, for the demo project-status filter. */
 const demoProjectStatus = new Map(allProjects.map((p) => [p.id, p.status]));
+
+/** Project id -> client id, for the demo client filter. */
+const demoProjectClient = new Map(allProjects.map((p) => [p.id, p.client.id]));
 
 /**
  * Apply the operational filters to a week's rows in DEMO mode, mirroring the
@@ -117,6 +125,12 @@ function applyDemoFilter(
       return false;
     }
     if (filter.projectId && row.projectId !== filter.projectId) return false;
+    if (
+      filter.clientId &&
+      demoProjectClient.get(row.projectId) !== filter.clientId
+    ) {
+      return false;
+    }
     if (
       filter.projectStatus &&
       demoProjectStatus.get(row.projectId) !== filter.projectStatus

@@ -18,6 +18,7 @@ interface ProjectRec {
   name: string;
   status: string;
   managerUserId: string | null;
+  clientId: string;
   clientName: string;
 }
 interface AllocationRec {
@@ -86,7 +87,7 @@ const h = vi.hoisted(() => {
       name: project.name,
       status: project.status,
       managerUserId: project.managerUserId,
-      client: { name: project.clientName },
+      client: { id: project.clientId, name: project.clientName },
     };
   }
 
@@ -123,6 +124,10 @@ const h = vi.hoisted(() => {
     if (where.project?.status) {
       const project = projectOf(e.projectId);
       if (!project || project.status !== where.project.status) return false;
+    }
+    if (where.project?.clientId) {
+      const project = projectOf(e.projectId);
+      if (!project || project.clientId !== where.project.clientId) return false;
     }
     return true;
   }
@@ -359,6 +364,7 @@ beforeEach(() => {
       name: "Atlas",
       status: "ACTIVE",
       managerUserId: "manager-1",
+      clientId: "cli-vix",
       clientName: "Vix Energia",
     },
     {
@@ -366,6 +372,7 @@ beforeEach(() => {
       name: "Órion",
       status: "ACTIVE",
       managerUserId: "manager-2",
+      clientId: "cli-banco",
       clientName: "Banco Sul",
     },
     {
@@ -373,6 +380,7 @@ beforeEach(() => {
       name: "Zeta",
       status: "CLOSED",
       managerUserId: "manager-1",
+      clientId: "cli-vix",
       clientName: "Vix Energia",
     },
   ];
@@ -783,8 +791,18 @@ describe("listAllowedProjects", () => {
     const projects = await listAllowedProjects("con-1", MONDAY);
 
     expect(projects).toEqual([
-      { id: "proj-atlas", name: "Atlas", clientName: "Vix Energia" },
-      { id: "proj-orion", name: "Órion", clientName: "Banco Sul" },
+      {
+        id: "proj-atlas",
+        name: "Atlas",
+        clientId: "cli-vix",
+        clientName: "Vix Energia",
+      },
+      {
+        id: "proj-orion",
+        name: "Órion",
+        clientId: "cli-banco",
+        clientName: "Banco Sul",
+      },
     ]);
   });
 
