@@ -87,6 +87,8 @@ export default async function HorasPage({ searchParams }: HorasPageProps) {
 
   const consultant = await getConsultantForUser(user);
   const isManager = hasRole(user, [...MANAGER_ROLES]);
+  // CSV export is hidden for consultant-only users (no role beyond CONSULTANT).
+  const canExportCsv = user.roles.some((role) => role !== "CONSULTANT");
 
   // A user who is neither a consultant nor a manager has nothing to show here.
   if (!consultant && !isManager) {
@@ -132,6 +134,7 @@ export default async function HorasPage({ searchParams }: HorasPageProps) {
         projects={projects}
         defaultOptions={defaultOptions}
         filter={filter}
+        canExportCsv={canExportCsv}
       />
     );
   }

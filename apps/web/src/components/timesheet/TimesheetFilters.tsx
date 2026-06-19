@@ -65,6 +65,11 @@ export interface TimesheetFiltersProps {
   onChange?: (next: TimesheetFilter) => void;
   /** demo mode: clear all filters (keeping the week). */
   onClear?: () => void;
+  /**
+   * Whether to show the "Exportar CSV" action. Hidden for consultant-only
+   * users (no role beyond CONSULTANT); decided on the server.
+   */
+  canExportCsv?: boolean;
 }
 
 /**
@@ -80,6 +85,7 @@ export function TimesheetFilters({
   projects,
   onChange,
   onClear,
+  canExportCsv = false,
 }: TimesheetFiltersProps) {
   const isDemo = mode === "demo";
 
@@ -380,15 +386,17 @@ export function TimesheetFilters({
             >
               Limpar
             </a>
-            <a
-              href={csvHref()}
-              className={cn(
-                "inline-flex h-8 items-center rounded-md border border-border bg-surface px-3 text-xs font-semibold text-medium hover:bg-surface-muted",
-                focusRing,
-              )}
-            >
-              Exportar CSV
-            </a>
+            {canExportCsv ? (
+              <a
+                href={csvHref()}
+                className={cn(
+                  "inline-flex h-8 items-center rounded-md border border-border bg-surface px-3 text-xs font-semibold text-medium hover:bg-surface-muted",
+                  focusRing,
+                )}
+              >
+                Exportar CSV
+              </a>
+            ) : null}
           </>
         )}
         {anyActive ? (
