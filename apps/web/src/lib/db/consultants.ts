@@ -130,6 +130,16 @@ export interface ConsultantProfile {
     email: string | null;
     phone: string | null;
   };
+  bankAccounts: ConsultantBankAccountView[];
+}
+
+export interface ConsultantBankAccountView {
+  id: string;
+  kind: "CLT" | "PJ" | "PRIMARY";
+  bankName: string | null;
+  agency: string | null;
+  accountNumber: string | null;
+  pixKey: string | null;
 }
 
 /** Date -> yyyy-mm-dd (UTC), ou null. Consistente com toDate nas actions. */
@@ -171,6 +181,7 @@ export async function getConsultantProfile(
       hourBankEntries: { orderBy: { occurredAt: "desc" } },
       pjInfo: true,
       legalRepresentative: true,
+      bankAccounts: { where: { active: true }, orderBy: { createdAt: "asc" } },
     },
   });
   if (!row) return null;
@@ -296,6 +307,14 @@ export async function getConsultantProfile(
       email: row.legalRepresentative?.email ?? null,
       phone: row.legalRepresentative?.phone ?? null,
     },
+    bankAccounts: row.bankAccounts.map((account) => ({
+      id: account.id,
+      kind: account.kind as "CLT" | "PJ" | "PRIMARY",
+      bankName: account.bankName,
+      agency: account.agency,
+      accountNumber: account.accountNumber,
+      pixKey: account.pixKey,
+    })),
   };
 }
 
