@@ -40,6 +40,47 @@ export const SALE_RATE_ROLES: RoleName[] = [
   "SALES",
 ];
 
+/**
+ * Roles that may WRITE the skill catalog and competency profiles (criar/editar/
+ * inativar skill, perfis e itens). PEOPLE owns talent management; ADMIN is the
+ * platform owner. Single source of truth shared by the `/app/competencias`
+ * server actions (catalog + profiles) and any in-page write gating.
+ * See docs/backlog-talentos.md EP12/EP13.
+ */
+export const COMPETENCY_WRITE_ROLES: RoleName[] = ["ADMIN", "PEOPLE"];
+
+/**
+ * Roles that may READ the competency module (catálogo, perfis, matriz/gap).
+ * Management + talent roles with visibility per docs/backlog-talentos.md §2.
+ * The REAL per-row scope (AREA_MANAGER sees own area, PROJECT_MANAGER own
+ * project, CONSULTANT own data) is applied by the read functions, not the
+ * route. CONSULTANT reaches its own gap through `/app/skills`, so the
+ * management surface stays scoped to the roles below.
+ */
+export const COMPETENCY_READ_ROLES: RoleName[] = [
+  "ADMIN",
+  "PEOPLE",
+  "AREA_MANAGER",
+  "PROJECT_MANAGER",
+  "SALES",
+];
+
+/**
+ * Roles that may READ the Mapa de Disponibilidade (heatmap derivado de alocação
+ * + férias + status). Per docs/backlog-talentos.md §2 (linha "Mapa de
+ * disponibilidade"): ADMIN/PEOPLE/SALES amplo, AREA_MANAGER (sua área),
+ * PROJECT_MANAGER (seu projeto), CONSULTANT (o próprio). FINANCE não participa.
+ * O escopo REAL por linha é aplicado pelas funções de read, não pela rota.
+ */
+export const AVAILABILITY_READ_ROLES: RoleName[] = [
+  "ADMIN",
+  "PEOPLE",
+  "AREA_MANAGER",
+  "PROJECT_MANAGER",
+  "SALES",
+  "CONSULTANT",
+];
+
 interface RouteRule {
   prefix: string;
   access: RouteAccess;
@@ -61,6 +102,14 @@ export const routePermissions: RouteRule[] = [
   { prefix: "/app/financeiro", access: FINANCIAL_ROLES },
   // Comercial: valores de venda, tipo de cobrança e budget por projeto.
   { prefix: "/app/comercial", access: SALE_RATE_ROLES },
+  // Competências (Talentos): catálogo de skills, perfis de competência e matriz
+  // de gap. Leitura para papéis de gestão/talentos; escrita (catálogo/perfis) é
+  // action-gated por COMPETENCY_WRITE_ROLES (ADMIN/PEOPLE).
+  { prefix: "/app/competencias", access: COMPETENCY_READ_ROLES },
+  // Mapa de Disponibilidade (Talentos, Onda 0): heatmap read-only derivado de
+  // alocação + férias + status. Visível a todos os papéis exceto FINANCE; o
+  // escopo por linha (área/projeto/próprio) é aplicado pela função de read.
+  { prefix: "/app/disponibilidade", access: AVAILABILITY_READ_ROLES },
   // Operational automation (auto-approval admin/observability). Management
   // only — PROJECT_MANAGER read-only access is deferred to a later round.
   { prefix: "/app/automacoes", access: ["ADMIN", "AREA_MANAGER"] },

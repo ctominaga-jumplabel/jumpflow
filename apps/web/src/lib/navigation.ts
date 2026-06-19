@@ -4,6 +4,7 @@ import {
   BarChart3,
   Banknote,
   Building2,
+  CalendarRange,
   ClipboardCheck,
   Clock,
   FolderKanban,
@@ -13,6 +14,7 @@ import {
   Receipt,
   ReceiptText,
   ShieldCheck,
+  Target,
   TrendingUp,
   Users,
   Wallet,
@@ -104,6 +106,33 @@ export const primaryNavigation: NavItemDef[] = [
     href: "/app/skills",
     icon: GraduationCap,
     description: "Matriz de competências técnicas e comportamentais.",
+  },
+  {
+    // Talentos (Onda 0): catálogo de skills, perfis de competência e matriz de
+    // gap. Visível a papéis de gestão/talentos; a escrita é enforced no servidor
+    // (COMPETENCY_WRITE_ROLES = ADMIN/PEOPLE). Discoverability, não a fronteira.
+    label: "Competências",
+    href: "/app/competencias",
+    icon: Target,
+    description: "Catálogo de skills, perfis de competência e gap do time.",
+    requiredRoles: ["ADMIN", "PEOPLE", "AREA_MANAGER", "PROJECT_MANAGER", "SALES"],
+  },
+  {
+    // Disponibilidade (Talentos, Onda 0): heatmap read-only derivado de alocação
+    // + férias + status. Visível a todos os papéis exceto FINANCE; o escopo por
+    // linha é enforced no servidor (discoverability, não a fronteira).
+    label: "Disponibilidade",
+    href: "/app/disponibilidade",
+    icon: CalendarRange,
+    description: "Heatmap de capacidade do time por consultor e semana.",
+    requiredRoles: [
+      "ADMIN",
+      "PEOPLE",
+      "AREA_MANAGER",
+      "PROJECT_MANAGER",
+      "SALES",
+      "CONSULTANT",
+    ],
   },
   {
     label: "Certificados",

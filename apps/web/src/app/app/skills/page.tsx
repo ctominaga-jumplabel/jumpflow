@@ -7,7 +7,7 @@ import { SkillSuggestionPanel } from "@/components/skills/SkillSuggestionPanel";
 import { requireUser } from "@/lib/auth/guards";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { parseWeekParam, toIsoDate } from "@/lib/timesheet/week";
-import { skills } from "@/lib/mock-data/skills";
+import { skills as mockSkills, type Skill } from "@/lib/mock-data/skills";
 
 export const metadata: Metadata = { title: "Skills" };
 
@@ -22,10 +22,16 @@ export default async function SkillsPage({ searchParams }: SkillsPageProps) {
   const databaseReady = isDatabaseConfigured();
   let suggestions: ComponentProps<typeof SkillSuggestionPanel>["suggestions"] =
     [];
+  // US12.03: a matriz lê o catálogo persistido (com distribuição de níveis
+  // derivada de ConsultantSkill). Sem DB, usa o mock — apenas em dev/offline,
+  // nunca como fallback silencioso em produção (o page só atinge isto sem DB).
+  let catalogSkills: Skill[] = mockSkills;
 
   if (databaseReady) {
     const { getConsultantForUser } = await import("@/lib/db/timesheet");
+    const { listSkillCoverage } = await import("@/lib/db/competencies");
     const { prisma } = await import("@jumpflow/database");
+    catalogSkills = await listSkillCoverage();
     const consultant = await getConsultantForUser(user);
     if (consultant) {
       const rows = await prisma.skillSuggestion.findMany({
@@ -65,14 +71,14 @@ export default async function SkillsPage({ searchParams }: SkillsPageProps) {
         description="Matriz de competencias por categoria, niveis e gaps de cobertura do time."
       />
       <div className="grid gap-6 lg:grid-cols-[1fr_360px] lg:items-start">
-        <SkillMatrix skills={skills} />
+        <SkillMatrix skills={catalogSkills} />
         <div className="space-y-6">
           <SkillSuggestionPanel
             weekStart={toIsoDate(weekStart)}
             suggestions={suggestions}
             databaseReady={databaseReady}
           />
-          <SkillCoveragePanel skills={skills} />
+          <SkillCoveragePanel skills={catalogSkills} />
         </div>
       </div>
     </div>
