@@ -19,9 +19,12 @@ import {
   ReceiptText,
   ShieldCheck,
   Smile,
+  Sparkles,
+  ShieldAlert,
   Sprout,
   Target,
   TrendingUp,
+  Trophy,
   Users,
   Wallet,
 } from "lucide-react";
@@ -139,6 +142,45 @@ export const primaryNavigation: NavItemDef[] = [
       "SALES",
       "CONSULTANT",
     ],
+  },
+  {
+    // IA de Alocação (Talentos, Prioridade 3 — §8.2): ranking determinístico de
+    // candidatos a uma alocação (aderência de skills, disponibilidade, histórico
+    // com cliente, [margem]). Visível aos papéis que alocam; o fator financeiro
+    // é gateado no servidor (FINANCIAL_ROLES). A IA é sugestão, não aloca.
+    // Discoverability, não a fronteira de segurança.
+    label: "IA de Alocação",
+    href: "/app/alocacao-ia",
+    icon: Sparkles,
+    description: "Ranking de consultores por aderência a uma alocação, com breakdown transparente.",
+    requiredRoles: ["ADMIN", "AREA_MANAGER", "PROJECT_MANAGER", "SALES"],
+  },
+  {
+    // IA de Risco de Projeto (Talentos, Prioridade 3 — §8.3): semáforo
+    // GREEN/YELLOW/RED determinístico por burn rate, prazo, [margem] e feedbacks
+    // CONCERN. Visível aos gestores de projeto + FINANCE (margem); o escopo por
+    // linha (PROJECT_MANAGER vê só seus projetos) e o sinal de margem são gateados
+    // no servidor. O sentimento por LLM é à parte e não altera o nível. A IA é
+    // sugestão, não muda status. Discoverability, não a fronteira de segurança.
+    label: "Risco de Projetos",
+    href: "/app/risco-projetos",
+    icon: ShieldAlert,
+    description: "Semáforo de risco por projeto: burn rate, prazo, margem e feedbacks, com breakdown transparente.",
+    requiredRoles: ["ADMIN", "AREA_MANAGER", "PROJECT_MANAGER", "FINANCE"],
+  },
+  {
+    // Score do Consultor (Talentos, Prioridade 3 — §8.4): score 0–100
+    // determinístico e transparente por avaliações, horas/presença,
+    // certificações, capacitação, saldo de feedback e [realização financeira].
+    // Visível à gestão de pessoas (ADMIN/PEOPLE — todos), AREA_MANAGER (seu time)
+    // e CONSULTANT (o próprio); FINANCE pela ótica de realização. O fator
+    // financeiro e o escopo por linha são gateados no servidor. A narrativa por
+    // LLM não recalcula. Discoverability, não a fronteira de segurança.
+    label: "Score",
+    href: "/app/score",
+    icon: Trophy,
+    description: "Score 0–100 do consultor por avaliações, horas, certificações, feedback e realização, com breakdown transparente.",
+    requiredRoles: ["ADMIN", "PEOPLE", "AREA_MANAGER", "FINANCE", "CONSULTANT"],
   },
   {
     // Feedback Contínuo (Talentos, Prioridade 1 — EP15): timeline + registro de

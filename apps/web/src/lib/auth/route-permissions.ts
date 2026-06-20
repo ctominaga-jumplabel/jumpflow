@@ -5,6 +5,9 @@ import { EVALUATION_READ_ROLES } from "@/lib/evaluations/visibility";
 import { DEVELOPMENT_READ_ROLES } from "@/lib/development/visibility";
 import { SURVEY_READ_ROLES } from "@/lib/surveys/visibility";
 import { OKR_READ_ROLES } from "@/lib/okrs/visibility";
+import { ALLOCATION_AI_READ_ROLES } from "@/lib/allocation-ai/visibility";
+import { PROJECT_RISK_READ_ROLES } from "@/lib/project-risk/visibility";
+import { CONSULTANT_SCORE_READ_ROLES } from "@/lib/consultant-score/visibility";
 
 /**
  * Pure RBAC primitives and the central route → roles map.
@@ -161,6 +164,31 @@ export const routePermissions: RouteRule[] = [
   // PEOPLE/AREA_MANAGER/PROJECT_MANAGER), com a fronteira fina por escopo/linha
   // aplicada por canManageObjective no servidor. Regra específica antes da `/app`.
   { prefix: "/app/metas", access: OKR_READ_ROLES },
+  // IA de Alocação (Talentos, Prioridade 3 — §8.2): ranking determinístico de
+  // candidatos a uma alocação por aderência de skills, disponibilidade, histórico
+  // com o cliente e (só para FINANCIAL_ROLES) encaixe financeiro. Acesso aos
+  // papéis que ALOCAM (ADMIN/AREA_MANAGER/PROJECT_MANAGER/SALES). O fator
+  // financeiro é gateado no servidor (includeFinancialFactor); a IA é SUGESTÃO,
+  // não cria alocação. Regra específica antes da `/app` ampla.
+  { prefix: "/app/alocacao-ia", access: ALLOCATION_AI_READ_ROLES },
+  // IA de Risco de Projeto (Talentos, Prioridade 3 — §8.3): nível semáforo
+  // GREEN/YELLOW/RED determinístico por burn rate, prazo, [margem] e feedbacks
+  // CONCERN. Acesso aos gestores de projeto (ADMIN/AREA_MANAGER/PROJECT_MANAGER)
+  // e FINANCE (ótica de margem). O sinal de margem é gateado no servidor
+  // (includeFinancialSignal) e o escopo por linha (PROJECT_MANAGER vê só os
+  // projetos que gerencia) é aplicado pela função de read. O sentimento por LLM é
+  // um sinal à parte e não altera o nível. Regra específica antes da `/app` ampla.
+  { prefix: "/app/risco-projetos", access: PROJECT_RISK_READ_ROLES },
+  // Score do Consultor (Talentos, Prioridade 3 — §8.4): score 0–100
+  // determinístico e transparente por avaliações, horas/presença, certificações,
+  // capacitação, saldo de feedback e (só para FINANCIAL_ROLES) realização
+  // financeira. Acesso à gestão de pessoas (PEOPLE/ADMIN — todos), AREA_MANAGER
+  // (seu time) e CONSULTANT (o próprio); FINANCE entra pela ótica de realização.
+  // O escopo por linha (quais consultores) e o gate financeiro são aplicados no
+  // servidor (includeFinancialForViewer); o consultor nunca vê o componente
+  // financeiro. A narrativa por LLM não recalcula o número. Regra específica
+  // antes da `/app` ampla.
+  { prefix: "/app/score", access: CONSULTANT_SCORE_READ_ROLES },
   // Operational automation (auto-approval admin/observability). Management
   // only — PROJECT_MANAGER read-only access is deferred to a later round.
   { prefix: "/app/automacoes", access: ["ADMIN", "AREA_MANAGER"] },
