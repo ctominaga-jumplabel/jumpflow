@@ -55,6 +55,226 @@ enum SkillStatus {
   INACTIVE
 }
 
+/// Natureza da competencia: tecnica (hard skill) ou comportamental (soft skill).
+/// Onda 0 (Talentos): habilita o filtro tecnica/comportamental na matriz. Linhas
+/// existentes recebem TECHNICAL no backfill, pois o catalogo atual e tecnico.
+enum SkillType {
+  TECHNICAL
+  BEHAVIORAL
+}
+
+/// Escopo de um perfil de competencias esperado (nivel requerido). O perfil e
+/// associado a uma referencia logica via referenceKey: senioridade (ex.: SENIOR),
+/// cargo/role (ex.: TECH_LEAD) ou area (ex.: DATA). Mantido como chave livre para
+/// nao acoplar a uma tabela de cargos que ainda nao existe no MVP.
+enum CompetencyScope {
+  SENIORITY
+  ROLE
+  AREA
+}
+
+/// Origem de uma evidencia de competencia do consultor. Aponta para o tipo de
+/// registro que sustenta o nivel atual; sourceId guarda o id do registro de
+/// origem (ex.: feedbackId, certificateId) quando aplicavel.
+enum SkillEvidenceSource {
+  FEEDBACK
+  EVALUATION
+  CERTIFICATE
+  PROJECT
+  MANUAL
+}
+
+/// Tipo do feedback continuo (EP15). PRAISE/RECOGNITION sao positivos,
+/// GUIDANCE e orientacao construtiva, CONCERN sinaliza ponto de atencao.
+enum FeedbackType {
+  PRAISE
+  GUIDANCE
+  RECOGNITION
+  CONCERN
+}
+
+/// Origem de quem da o feedback: equipe interna, cliente atendido ou par (peer).
+enum FeedbackSource {
+  INTERNAL
+  CLIENT
+  PEER
+}
+
+/// Visibilidade do feedback (LGPD). SHARED e visivel ao avaliado; PRIVATE fica
+/// restrito a autor + PEOPLE + gestor responsavel (regra aplicada no servidor).
+enum FeedbackVisibility {
+  PRIVATE
+  SHARED
+}
+
+/// Estado da transcricao de audio do feedback por voz (incremento atras de
+/// feature flag). Apenas coluna de apoio; a logica de transcricao vive fora do
+/// banco. NONE = feedback sem audio.
+enum TranscriptionStatus {
+  NONE
+  PENDING
+  DONE
+  FAILED
+}
+
+/// Tipo do ciclo de avaliacao (EP16): autoavaliacao (90), avaliacao do gestor
+/// somada a autoavaliacao (180) ou avaliacao completa multi-fonte (360).
+enum EvaluationType {
+  SELF_90
+  MANAGER_180
+  FULL_360
+}
+
+/// Ciclo de avaliacao. Transicoes validas DRAFT -> OPEN -> CLOSED aplicadas no
+/// servidor; nao retrocede de CLOSED.
+enum EvaluationCycleStatus {
+  DRAFT
+  OPEN
+  CLOSED
+}
+
+/// Progresso de uma avaliacao/resposta (reusado por Evaluation e
+/// EvaluationResponse): PENDING -> IN_PROGRESS -> COMPLETED.
+enum EvaluationStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+}
+
+/// Relacao do avaliador com o avaliado no ciclo 360. SELF e a autoavaliacao;
+/// CLIENT e o avaliador-cliente com acesso restrito ao proprio formulario.
+enum EvaluationRelationship {
+  SELF
+  MANAGER
+  PEER
+  CLIENT
+  SUBORDINATE
+}
+
+/// Estado do Plano de Desenvolvimento Individual (EP17). Soft delete operacional
+/// via CANCELLED; COMPLETED quando todas as acoes sao concluidas.
+enum DevelopmentPlanStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+/// Tipo de acao de desenvolvimento no PDI. Liga-se opcionalmente a uma skill alvo
+/// (targetSkillId) e, no futuro, a cursos da Universidade e Certificate.
+enum DevelopmentActionType {
+  TRAINING
+  MENTORSHIP
+  CERTIFICATION
+  PROJECT
+  READING
+}
+
+/// Estado de uma acao do PDI: PLANNED -> IN_PROGRESS -> DONE (ou CANCELLED).
+enum DevelopmentActionStatus {
+  PLANNED
+  IN_PROGRESS
+  DONE
+  CANCELLED
+}
+
+/// Tipo de ausencia agendada (datas concretas de gozo). VACATION e o gozo de
+/// ferias; complementa ConsultantVacation (ledger de periodo aquisitivo) e e a
+/// fonte real do heatmap de disponibilidade (EP11).
+enum TimeOffKind {
+  VACATION
+  LEAVE
+  OTHER
+}
+
+/// Estado de uma ausencia agendada. PLANNED -> CONFIRMED, ou CANCELLED.
+enum TimeOffStatus {
+  PLANNED
+  CONFIRMED
+  CANCELLED
+}
+
+/// Tipo de pesquisa interna (EP 7.1). CLIMATE = clima organizacional, NPS = eNPS
+/// (recomendacao), SATISFACTION = satisfacao pontual, LEADERSHIP = avaliacao de
+/// lideranca, PULSE = pulso curto recorrente.
+enum SurveyType {
+  CLIMATE
+  NPS
+  SATISFACTION
+  LEADERSHIP
+  PULSE
+}
+
+/// Estado da pesquisa. DRAFT -> OPEN (coletando respostas) -> CLOSED (encerrada).
+/// Nao retrocede de CLOSED; transicoes aplicadas no servidor.
+enum SurveyStatus {
+  DRAFT
+  OPEN
+  CLOSED
+}
+
+/// Tipo de questao da pesquisa. SCALE = escala numerica (ex.: 1-5), NPS = escala
+/// 0-10 de recomendacao, TEXT = resposta aberta, CHOICE = escolha entre options.
+enum SurveyQuestionType {
+  SCALE
+  NPS
+  TEXT
+  CHOICE
+}
+
+/// Estado do convite de resposta. PENDING = ainda nao respondeu, ANSWERED =
+/// respondeu (sem ligar a resposta a identidade), EXPIRED = janela encerrada.
+/// Este enum + SurveyInvitation sao o UNICO mecanismo de "quem respondeu".
+enum SurveyInvitationStatus {
+  PENDING
+  ANSWERED
+  EXPIRED
+}
+
+/// Escopo de um objetivo/OKR (EP 7.2). O alvo logico e identificado por
+/// referenceKey (chave livre) e/ou pelas FKs opcionais consultantId/projectId.
+/// AREA usa referenceKey (ex.: 'DATA'); COMPANY normalmente ignora referenceKey.
+enum ObjectiveScope {
+  CONSULTANT
+  PROJECT
+  AREA
+  COMPANY
+}
+
+/// Estado de um objetivo. DRAFT -> ACTIVE -> COMPLETED, ou CANCELLED (soft
+/// delete operacional). Transicoes aplicadas no servidor.
+enum ObjectiveStatus {
+  DRAFT
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+/// Unidade da metrica de um Key Result. CURRENCY usa Decimal(14,2) em BRL;
+/// PERCENT trabalha em pontos percentuais; BOOLEAN usa 0/1 em current/target.
+enum KeyResultMetric {
+  NUMBER
+  PERCENT
+  CURRENCY
+  BOOLEAN
+}
+
+/// Estado de um item de catalogo da Universidade Jump (trilha/curso). Soft delete
+/// operacional via INACTIVE, padrao das entidades de catalogo.
+enum LearningStatus {
+  ACTIVE
+  INACTIVE
+}
+
+/// Estado da matricula do consultor em um curso (EP 7.3). ENROLLED -> IN_PROGRESS
+/// -> COMPLETED, ou CANCELLED. Pontos/ranking de gamificacao sao DERIVADOS das
+/// matriculas COMPLETED; nao ha tabela de pontos.
+enum EnrollmentStatus {
+  ENROLLED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
 enum ProjectStatus {
   PROPOSAL
   ACTIVE
@@ -389,34 +609,41 @@ enum IntegrationEventStatus {
 }
 
 model User {
-  id                         String                      @id @default(cuid())
-  name                       String
-  email                      String                      @unique
-  status                     UserStatus                  @default(ACTIVE)
+  id                          String                      @id @default(cuid())
+  name                        String
+  email                       String                      @unique
+  status                      UserStatus                  @default(ACTIVE)
   // Local credentials provider (Round 5). Nullable: Entra users and not-yet
   // accepted invitations have no password. Format is the self-describing
   // scrypt string `scrypt$N$r$p$<saltB64url>$<hashB64url>` (see auth-foundation
   // 11.3). Never store or log the plaintext password.
-  passwordHash               String?
-  emailVerifiedAt            DateTime?
-  lastLoginAt                DateTime?
-  mustChangePassword         Boolean                     @default(false)
-  roles                      UserRole[]
-  consultant                 Consultant?
-  auditEvents                AuditEvent[]                @relation("AuditActor")
-  approvals                  Approval[]                  @relation("ApprovalApprover")
-  uploadedExpenseAttachments ExpenseAttachment[]         @relation("ExpenseAttachmentUploader")
-  uploadedConsultantDocuments ConsultantDocument[]       @relation("ConsultantDocumentUploader")
-  closedRevenueClosings      RevenueClosing[]            @relation("RevenueClosingCloser")
-  validatedFiscalDocuments   FiscalDocument[]            @relation("FiscalDocumentValidator")
-  paymentForecastsCreated    ConsultantPaymentForecast[] @relation("PaymentForecastCreator")
-  consultantPaymentsApproved ConsultantPayment[]         @relation("ConsultantPaymentApprover")
+  passwordHash                String?
+  emailVerifiedAt             DateTime?
+  lastLoginAt                 DateTime?
+  mustChangePassword          Boolean                     @default(false)
+  roles                       UserRole[]
+  consultant                  Consultant?
+  auditEvents                 AuditEvent[]                @relation("AuditActor")
+  approvals                   Approval[]                  @relation("ApprovalApprover")
+  uploadedExpenseAttachments  ExpenseAttachment[]         @relation("ExpenseAttachmentUploader")
+  uploadedConsultantDocuments ConsultantDocument[]        @relation("ConsultantDocumentUploader")
+  closedRevenueClosings       RevenueClosing[]            @relation("RevenueClosingCloser")
+  validatedFiscalDocuments    FiscalDocument[]            @relation("FiscalDocumentValidator")
+  paymentForecastsCreated     ConsultantPaymentForecast[] @relation("PaymentForecastCreator")
+  consultantPaymentsApproved  ConsultantPayment[]         @relation("ConsultantPaymentApprover")
+  skillHistoryChanges         ConsultantSkillHistory[]    @relation("SkillHistoryChangedBy")
+  feedbacksAuthored           Feedback[]                  @relation("FeedbackAuthor")
+  evaluationCyclesCreated     EvaluationCycle[]           @relation("EvaluationCycleCreator")
+  evaluationResponsesAsRater  EvaluationResponse[]        @relation("EvaluationResponseRater")
+  developmentPlansOwned       DevelopmentPlan[]           @relation("DevelopmentPlanOwner")
+  surveysCreated              Survey[]                    @relation("SurveyCreator")
+  objectivesOwned             Objective[]                 @relation("ObjectiveOwner")
   // Invitations this user created (actor side) and the invitation that created
   // this user on acceptance (at most one).
-  invitationsSent            UserInvitation[]            @relation("InvitedBy")
-  invitationCreated          UserInvitation?             @relation("CreatedUser")
-  createdAt                  DateTime                    @default(now())
-  updatedAt                  DateTime                    @updatedAt
+  invitationsSent             UserInvitation[]            @relation("InvitedBy")
+  invitationCreated           UserInvitation?             @relation("CreatedUser")
+  createdAt                   DateTime                    @default(now())
+  updatedAt                   DateTime                    @updatedAt
 }
 
 model Role {
@@ -473,49 +700,56 @@ model UserInvitation {
 }
 
 model Consultant {
-  id                     String                         @id @default(cuid())
-  userId                 String?                        @unique
-  user                   User?                          @relation(fields: [userId], references: [id])
-  name                   String
-  email                  String                         @unique
-  jobTitle               String?
-  seniority              Seniority
-  area                   String?
-  status                 ConsultantStatus               @default(ACTIVE)
+  id                  String                         @id @default(cuid())
+  userId              String?                        @unique
+  user                User?                          @relation(fields: [userId], references: [id])
+  name                String
+  email               String                         @unique
+  jobTitle            String?
+  seniority           Seniority
+  area                String?
+  status              ConsultantStatus               @default(ACTIVE)
   /// Tipo de contratacao que orienta quais secoes do cadastro aparecem.
   /// Distinto de ConsultantCompensation.contractType, que e a modalidade
   /// financeira por vigencia. Nullable para backfill; nao tornar obrigatorio
   /// sem antes preencher os registros existentes.
-  contractType           ConsultantContractType?
-  hourlyCost             Decimal?                       @db.Decimal(12, 2)
-  allocations            Allocation[]
-  periods                TimesheetPeriod[]
-  timeEntries            TimeEntry[]
-  skills                 ConsultantSkill[]
-  skillSuggestions       SkillSuggestion[]
-  certificates           Certificate[]
-  autoApprovalRules      ConsultantAutoApprovalRule[]
-  expenses               Expense[]
-  personalInfo           ConsultantPersonalInfo?
-  companyInfo            ConsultantCompanyInfo?
-  address                ConsultantAddress?
-  bankAccounts           ConsultantBankAccount[]
-  compensations          ConsultantCompensation[]
-  benefits               ConsultantBenefit[]
-  documents              ConsultantDocument[]
-  languages              ConsultantLanguage[]
-  educations             ConsultantEducation[]
-  cltInfo                ConsultantCltInfo?
-  vacations              ConsultantVacation[]
-  hourBankEntries        ConsultantHourBankEntry[]
-  pjInfo                 ConsultantPjInfo?
-  legalRepresentative    ConsultantLegalRepresentative?
-  paymentForecasts       ConsultantPaymentForecast[]
-  payments               ConsultantPayment[]
-  saleRates              ProjectSaleRate[]
-  costRates              ConsultantAllocationCostRate[]
-  createdAt              DateTime                       @default(now())
-  updatedAt              DateTime                       @updatedAt
+  contractType        ConsultantContractType?
+  hourlyCost          Decimal?                       @db.Decimal(12, 2)
+  allocations         Allocation[]
+  periods             TimesheetPeriod[]
+  timeEntries         TimeEntry[]
+  skills              ConsultantSkill[]
+  skillSuggestions    SkillSuggestion[]
+  certificates        Certificate[]
+  autoApprovalRules   ConsultantAutoApprovalRule[]
+  expenses            Expense[]
+  personalInfo        ConsultantPersonalInfo?
+  companyInfo         ConsultantCompanyInfo?
+  address             ConsultantAddress?
+  bankAccounts        ConsultantBankAccount[]
+  compensations       ConsultantCompensation[]
+  benefits            ConsultantBenefit[]
+  documents           ConsultantDocument[]
+  languages           ConsultantLanguage[]
+  educations          ConsultantEducation[]
+  cltInfo             ConsultantCltInfo?
+  vacations           ConsultantVacation[]
+  hourBankEntries     ConsultantHourBankEntry[]
+  pjInfo              ConsultantPjInfo?
+  legalRepresentative ConsultantLegalRepresentative?
+  paymentForecasts    ConsultantPaymentForecast[]
+  payments            ConsultantPayment[]
+  saleRates           ProjectSaleRate[]
+  costRates           ConsultantAllocationCostRate[]
+  feedbacks           Feedback[]                     @relation("FeedbackSubject")
+  evaluations         Evaluation[]
+  developmentPlans    DevelopmentPlan[]
+  timeOffs            ConsultantTimeOff[]
+  surveyInvitations   SurveyInvitation[]
+  objectives          Objective[]
+  enrollments         Enrollment[]
+  createdAt           DateTime                       @default(now())
+  updatedAt           DateTime                       @updatedAt
 }
 
 model ConsultantPersonalInfo {
@@ -790,6 +1024,7 @@ model Client {
   closings          MonthlyClosing[]
   revenueClosings   RevenueClosing[]
   fiscalDocuments   FiscalDocument[]
+  feedbacks         Feedback[]
   createdAt         DateTime            @default(now())
   updatedAt         DateTime            @updatedAt
 
@@ -812,33 +1047,35 @@ model BillingType {
 }
 
 model Project {
-  id                     String                  @id @default(cuid())
-  clientId               String
-  client                 Client                  @relation(fields: [clientId], references: [id])
-  name                   String
-  description            String?
-  status                 ProjectStatus           @default(PROPOSAL)
-  startDate              DateTime
-  endDate                DateTime?
-  managerUserId          String?
-  billingTypeId          String?
-  billingType            BillingType?            @relation(fields: [billingTypeId], references: [id], onDelete: SetNull)
-  billingConfig          ProjectBillingConfig?
-  billingHourlyRate      Decimal?                @db.Decimal(12, 2)
-  budgetHours            Decimal?                @db.Decimal(10, 2)
-  costCenter             String?
-  allocations            Allocation[]
-  timeEntries            TimeEntry[]
-  closings               MonthlyClosing[]
-  saleRates              ProjectSaleRate[]
-  revenueClosings        RevenueClosing[]
-  revenueClosingLines    RevenueClosingLine[]
-  consultantPaymentLines ConsultantPaymentLine[]
-  autoApprovalRule       ProjectAutoApprovalRule?
+  id                          String                       @id @default(cuid())
+  clientId                    String
+  client                      Client                       @relation(fields: [clientId], references: [id])
+  name                        String
+  description                 String?
+  status                      ProjectStatus                @default(PROPOSAL)
+  startDate                   DateTime
+  endDate                     DateTime?
+  managerUserId               String?
+  billingTypeId               String?
+  billingType                 BillingType?                 @relation(fields: [billingTypeId], references: [id], onDelete: SetNull)
+  billingConfig               ProjectBillingConfig?
+  billingHourlyRate           Decimal?                     @db.Decimal(12, 2)
+  budgetHours                 Decimal?                     @db.Decimal(10, 2)
+  costCenter                  String?
+  allocations                 Allocation[]
+  timeEntries                 TimeEntry[]
+  closings                    MonthlyClosing[]
+  saleRates                   ProjectSaleRate[]
+  revenueClosings             RevenueClosing[]
+  revenueClosingLines         RevenueClosingLine[]
+  consultantPaymentLines      ConsultantPaymentLine[]
+  autoApprovalRule            ProjectAutoApprovalRule?
   autoApprovalConsultantRules ConsultantAutoApprovalRule[]
-  expenses               Expense[]
-  createdAt              DateTime                @default(now())
-  updatedAt              DateTime                @updatedAt
+  expenses                    Expense[]
+  feedbacks                   Feedback[]
+  objectives                  Objective[]
+  createdAt                   DateTime                     @default(now())
+  updatedAt                   DateTime                     @updatedAt
 
   @@index([clientId])
   @@index([managerUserId])
@@ -1039,15 +1276,22 @@ model Approval {
 }
 
 model Skill {
-  id          String            @id @default(cuid())
-  name        String
-  category    String?
-  status      SkillStatus       @default(ACTIVE)
-  consultants ConsultantSkill[]
-  suggestions SkillSuggestion[]
-  allocations AllocationSkill[]
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
+  id                 String                  @id @default(cuid())
+  name               String
+  category           String?
+  /// Natureza da competencia. Default TECHNICAL para backfill seguro das linhas
+  /// existentes (catalogo atual e majoritariamente tecnico); editavel no admin.
+  type               SkillType               @default(TECHNICAL)
+  status             SkillStatus             @default(ACTIVE)
+  consultants        ConsultantSkill[]
+  suggestions        SkillSuggestion[]
+  allocations        AllocationSkill[]
+  competencyItems    CompetencyProfileItem[]
+  evaluationAnswers  EvaluationAnswer[]
+  developmentActions DevelopmentAction[]
+  courses            Course[]
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
 
   @@unique([name, category])
 }
@@ -1075,17 +1319,19 @@ model AllocationSkill {
 }
 
 model ConsultantSkill {
-  id               String           @id @default(cuid())
+  id               String                   @id @default(cuid())
   consultantId     String
-  consultant       Consultant       @relation(fields: [consultantId], references: [id])
+  consultant       Consultant               @relation(fields: [consultantId], references: [id])
   skillId          String
-  skill            Skill            @relation(fields: [skillId], references: [id])
+  skill            Skill                    @relation(fields: [skillId], references: [id])
   level            SkillLevel
-  yearsExperience  Decimal?         @db.Decimal(4, 1)
+  yearsExperience  Decimal?                 @db.Decimal(4, 1)
   lastUsedAt       DateTime?
-  validationStatus ValidationStatus @default(PENDING)
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
+  validationStatus ValidationStatus         @default(PENDING)
+  evidences        SkillEvidence[]
+  history          ConsultantSkillHistory[]
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
 
   @@unique([consultantId, skillId])
   @@index([skillId])
@@ -1117,6 +1363,453 @@ model SkillSuggestion {
   @@index([consultantId, weekStart])
   @@index([skillId])
   @@index([status])
+}
+
+/// Perfil de competencias esperado (nivel requerido) por senioridade, cargo ou
+/// area. Onda 0 (Talentos): base do gap analysis (requerido x atual). O alvo do
+/// perfil e identificado por scope + referenceKey (chave logica livre, sem FK a
+/// uma tabela de cargos ainda inexistente). Soft delete via status reusando o
+/// enum SkillStatus (ACTIVE/INACTIVE), padrao das entidades operacionais.
+model CompetencyProfile {
+  id           String                  @id @default(cuid())
+  name         String
+  scope        CompetencyScope
+  referenceKey String
+  status       SkillStatus             @default(ACTIVE)
+  items        CompetencyProfileItem[]
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
+
+  @@unique([scope, referenceKey])
+  @@index([status])
+}
+
+/// Item de um perfil de competencias: o nivel requerido (SkillLevel) de uma
+/// skill dentro do perfil. Cascade no perfil (itens morrem com o perfil); a skill
+/// e protegida (Restrict) para nao apagar um item de catalogo ainda referenciado.
+/// Unico por (profileId, skillId): uma skill aparece no maximo uma vez por perfil.
+model CompetencyProfileItem {
+  id            String            @id @default(cuid())
+  profileId     String
+  profile       CompetencyProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  skillId       String
+  skill         Skill             @relation(fields: [skillId], references: [id], onDelete: Restrict)
+  requiredLevel SkillLevel
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  @@unique([profileId, skillId])
+  @@index([profileId])
+  @@index([skillId])
+}
+
+/// Evidencia que sustenta o nivel atual de uma competencia do consultor. Cascade
+/// no ConsultantSkill (a evidencia perde sentido sem a skill do consultor).
+/// sourceId aponta para o registro de origem (ex.: feedbackId, certificateId)
+/// quando aplicavel; e mantido como String solta para nao acoplar a entidades de
+/// ondas futuras (avaliacao, feedback) que ainda nao existem.
+model SkillEvidence {
+  id                String              @id @default(cuid())
+  consultantSkillId String
+  consultantSkill   ConsultantSkill     @relation(fields: [consultantSkillId], references: [id], onDelete: Cascade)
+  sourceType        SkillEvidenceSource
+  sourceId          String?
+  note              String?
+  createdAt         DateTime            @default(now())
+
+  // Idempotencia da evidencia de origem (ex.: conclusao de curso -> sourceId =
+  // enrollmentId). sourceId e nullable: no Postgres um unique com coluna NULL
+  // permite multiplos NULL (cada NULL e distinto), entao a trava so atua quando
+  // sourceId esta preenchido — exatamente o caso da evidencia de curso. Evita
+  // evidencia duplicada sob corrida na conclusao da matricula.
+  @@unique([consultantSkillId, sourceId])
+  @@index([consultantSkillId])
+}
+
+/// Historico de evolucao de nivel de uma competencia do consultor (append-only).
+/// Uma linha por mudanca de nivel, preservando a trilha de auditoria leve da skill.
+/// Cascade no ConsultantSkill; changedByUser opcional (SetNull) para manter o
+/// historico mesmo se o usuario que alterou for removido.
+model ConsultantSkillHistory {
+  id                String          @id @default(cuid())
+  consultantSkillId String
+  consultantSkill   ConsultantSkill @relation(fields: [consultantSkillId], references: [id], onDelete: Cascade)
+  level             SkillLevel
+  changedByUserId   String?
+  changedByUser     User?           @relation("SkillHistoryChangedBy", fields: [changedByUserId], references: [id], onDelete: SetNull)
+  reason            String?
+  createdAt         DateTime        @default(now())
+
+  @@index([consultantSkillId])
+}
+
+/// Feedback continuo sobre um consultor (EP15), ancorado opcionalmente a um
+/// projeto/cliente reais. Forma o historico que alimenta avaliacao e score.
+/// Cascade no consultor (o feedback nao faz sentido sem o avaliado); autor e
+/// SetNull para preservar o registro se o usuario for removido. visibility
+/// (PRIVATE/SHARED) e a regra LGPD aplicada no servidor: PRIVATE so e visto por
+/// autor + PEOPLE + gestor responsavel. Os campos de voz/IA (audioStorageKey,
+/// transcription, transcriptionStatus) sao apoio para o incremento atras de
+/// feature flag; sem logica no banco.
+model Feedback {
+  id                  String              @id @default(cuid())
+  subjectConsultantId String
+  subjectConsultant   Consultant          @relation("FeedbackSubject", fields: [subjectConsultantId], references: [id], onDelete: Cascade)
+  authorUserId        String?
+  author              User?               @relation("FeedbackAuthor", fields: [authorUserId], references: [id], onDelete: SetNull)
+  type                FeedbackType
+  source              FeedbackSource
+  visibility          FeedbackVisibility  @default(PRIVATE)
+  body                String
+  relatedProjectId    String?
+  relatedProject      Project?            @relation(fields: [relatedProjectId], references: [id], onDelete: SetNull)
+  relatedClientId     String?
+  relatedClient       Client?             @relation(fields: [relatedClientId], references: [id], onDelete: SetNull)
+  audioStorageKey     String?
+  transcription       String?
+  transcriptionStatus TranscriptionStatus @default(NONE)
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+
+  @@index([subjectConsultantId])
+  @@index([subjectConsultantId, createdAt])
+}
+
+/// Ciclo de avaliacao 90/180/360 (EP16). createdBy e SetNull para preservar o
+/// ciclo se o criador for removido. As Evaluation morrem com o ciclo (Cascade).
+model EvaluationCycle {
+  id               String                @id @default(cuid())
+  name             String
+  type             EvaluationType
+  periodStart      DateTime
+  periodEnd        DateTime
+  status           EvaluationCycleStatus @default(DRAFT)
+  createdByUserId  String?
+  createdBy        User?                 @relation("EvaluationCycleCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  evaluations      Evaluation[]
+  developmentPlans DevelopmentPlan[]
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+}
+
+/// A avaliacao de um consultor dentro de um ciclo. Unica por (ciclo, consultor).
+/// Cascade no ciclo e no consultor (a avaliacao nao existe sem ambos).
+model Evaluation {
+  id                  String               @id @default(cuid())
+  cycleId             String
+  cycle               EvaluationCycle      @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  subjectConsultantId String
+  subjectConsultant   Consultant           @relation(fields: [subjectConsultantId], references: [id], onDelete: Cascade)
+  status              EvaluationStatus     @default(PENDING)
+  responses           EvaluationResponse[]
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  @@unique([cycleId, subjectConsultantId])
+}
+
+/// Uma resposta de avaliador dentro de uma avaliacao. raterUserId e SetNull e
+/// opcional (avaliador-cliente sem usuario, ou usuario removido preserva a
+/// resposta). relationship distingue SELF/MANAGER/PEER/CLIENT/SUBORDINATE.
+model EvaluationResponse {
+  id           String                 @id @default(cuid())
+  evaluationId String
+  evaluation   Evaluation             @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
+  raterUserId  String?
+  rater        User?                  @relation("EvaluationResponseRater", fields: [raterUserId], references: [id], onDelete: SetNull)
+  relationship EvaluationRelationship
+  status       EvaluationStatus       @default(PENDING)
+  submittedAt  DateTime?
+  answers      EvaluationAnswer[]
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
+
+  @@unique([evaluationId, relationship])
+  @@index([evaluationId])
+}
+
+/// Nota por competencia dentro de uma resposta. Cascade na resposta; a skill e
+/// protegida (Restrict) por ser catalogo referenciado. score 1-5 validado na
+/// app. Unico por (resposta, skill): uma nota por competencia por avaliador.
+model EvaluationAnswer {
+  id         String             @id @default(cuid())
+  responseId String
+  response   EvaluationResponse @relation(fields: [responseId], references: [id], onDelete: Cascade)
+  skillId    String
+  skill      Skill              @relation(fields: [skillId], references: [id], onDelete: Restrict)
+  score      Int
+  comment    String?
+  createdAt  DateTime           @default(now())
+
+  @@unique([responseId, skillId])
+  @@index([responseId])
+}
+
+/// Plano de Desenvolvimento Individual (EP17). Cascade no consultor; cycleId
+/// opcional (SetNull) liga o PDI ao ciclo de avaliacao que o originou; owner e
+/// SetNull. Soft delete operacional via status (CANCELLED).
+model DevelopmentPlan {
+  id           String                @id @default(cuid())
+  consultantId String
+  consultant   Consultant            @relation(fields: [consultantId], references: [id], onDelete: Cascade)
+  cycleId      String?
+  cycle        EvaluationCycle?      @relation(fields: [cycleId], references: [id], onDelete: SetNull)
+  ownerUserId  String?
+  owner        User?                 @relation("DevelopmentPlanOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  status       DevelopmentPlanStatus @default(ACTIVE)
+  periodStart  DateTime
+  periodEnd    DateTime
+  actions      DevelopmentAction[]
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+
+  @@index([consultantId])
+}
+
+/// Acao concreta de um PDI. Cascade no plano; targetSkill opcional (SetNull) e a
+/// skill alvo da acao, derivada do gap. evidenceNote registra a comprovacao da
+/// conclusao (futuro: vinculo com Certificate/Universidade/Expense).
+model DevelopmentAction {
+  id            String                  @id @default(cuid())
+  planId        String
+  plan          DevelopmentPlan         @relation(fields: [planId], references: [id], onDelete: Cascade)
+  type          DevelopmentActionType
+  targetSkillId String?
+  targetSkill   Skill?                  @relation(fields: [targetSkillId], references: [id], onDelete: SetNull)
+  description   String
+  dueAt         DateTime?
+  status        DevelopmentActionStatus @default(PLANNED)
+  evidenceNote  String?
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
+
+  @@index([planId])
+}
+
+/// Ausencia agendada com datas concretas de gozo (ferias/licenca/outros).
+/// Complementa ConsultantVacation (que e o ledger de periodo aquisitivo, NAO
+/// alterado) e e a fonte real do heatmap de disponibilidade (EP11): substitui o
+/// proxy da Onda 0. Cascade no consultor. status permite soft cancel.
+model ConsultantTimeOff {
+  id           String        @id @default(cuid())
+  consultantId String
+  consultant   Consultant    @relation(fields: [consultantId], references: [id], onDelete: Cascade)
+  kind         TimeOffKind
+  startDate    DateTime
+  endDate      DateTime
+  status       TimeOffStatus @default(PLANNED)
+  note         String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@index([consultantId, startDate])
+}
+
+/// Pesquisa interna de clima/NPS (EP 7.1). createdBy e SetNull para preservar a
+/// pesquisa se o criador for removido. anonymous = true por padrao: nesse caso a
+/// aplicacao NAO deve correlacionar resposta e identidade (ver SurveyResponse).
+/// Soft close via status; nao ha exclusao destrutiva de pesquisa com respostas.
+model Survey {
+  id              String             @id @default(cuid())
+  title           String
+  description     String?
+  type            SurveyType
+  anonymous       Boolean            @default(true)
+  status          SurveyStatus       @default(DRAFT)
+  periodStart     DateTime?
+  periodEnd       DateTime?
+  createdByUserId String?
+  createdBy       User?              @relation("SurveyCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  questions       SurveyQuestion[]
+  invitations     SurveyInvitation[]
+  responses       SurveyResponse[]
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+}
+
+/// Questao de uma pesquisa. Cascade na pesquisa (a questao nao existe sem ela).
+/// options (Json) guarda as alternativas quando type = CHOICE; order define a
+/// ordem de exibicao.
+model SurveyQuestion {
+  id        String             @id @default(cuid())
+  surveyId  String
+  survey    Survey             @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+  text      String
+  type      SurveyQuestionType
+  options   Json?
+  order     Int                @default(0)
+  answers   SurveyAnswer[]
+  createdAt DateTime           @default(now())
+
+  @@index([surveyId])
+}
+
+/// Convite de resposta a uma pesquisa. E o UNICO mecanismo de controle de "quem
+/// respondeu", deliberadamente DESACOPLADO do conteudo das respostas: em pesquisa
+/// anonima a aplicacao usa este registro apenas para saber se o consultor ja
+/// respondeu (status) e nao para reconstruir quem disse o que. tokenHash guarda
+/// somente o digest do token de acesso entregue ao convidado; nunca o token cru.
+/// Cascade no survey e no consultor. Unico por (surveyId, consultantId).
+model SurveyInvitation {
+  id           String                 @id @default(cuid())
+  surveyId     String
+  survey       Survey                 @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+  consultantId String
+  consultant   Consultant             @relation(fields: [consultantId], references: [id], onDelete: Cascade)
+  tokenHash    String                 @unique
+  status       SurveyInvitationStatus @default(PENDING)
+  respondedAt  DateTime?
+  responses    SurveyResponse[]
+  createdAt    DateTime               @default(now())
+
+  @@unique([surveyId, consultantId])
+  @@index([surveyId])
+}
+
+/// Resposta submetida a uma pesquisa. ANONIMATO E REGRA DE MODELAGEM: NAO ha
+/// consultantId aqui. O unico vinculo possivel e via invitationId, mantido como
+/// SetNull/opcional para que em pesquisa anonima a aplicacao possa nem gravar o
+/// vinculo (ou desliga-lo), evitando correlacionar resposta x identidade. Cascade
+/// no survey. Quem implementa: em pesquisa anonima, NAO use invitationId para
+/// reidentificar o respondente; use SurveyInvitation.status apenas para "ja
+/// respondeu". Em pesquisa nao anonima, o vinculo via invitation e permitido.
+model SurveyResponse {
+  id           String            @id @default(cuid())
+  surveyId     String
+  survey       Survey            @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+  invitationId String?
+  invitation   SurveyInvitation? @relation(fields: [invitationId], references: [id], onDelete: SetNull)
+  submittedAt  DateTime
+  answers      SurveyAnswer[]
+  createdAt    DateTime          @default(now())
+
+  @@index([surveyId])
+}
+
+/// Resposta a uma questao especifica. Cascade na resposta; a questao e protegida
+/// (Restrict) por ser parte do "catalogo" da pesquisa ja respondida. Um dos
+/// campos de valor e usado conforme o tipo da questao: scoreValue (SCALE/NPS),
+/// choiceValue (CHOICE), textValue (TEXT). Validacao do preenchimento no servidor.
+model SurveyAnswer {
+  id          String         @id @default(cuid())
+  responseId  String
+  response    SurveyResponse @relation(fields: [responseId], references: [id], onDelete: Cascade)
+  questionId  String
+  question    SurveyQuestion @relation(fields: [questionId], references: [id], onDelete: Restrict)
+  scoreValue  Int?
+  choiceValue String?
+  textValue   String?
+  createdAt   DateTime       @default(now())
+
+  @@index([responseId])
+}
+
+/// Objetivo / OKR (EP 7.2). O alvo logico vem de scope + referenceKey (chave
+/// livre, ex.: area 'DATA') e/ou das FKs opcionais consultantId/projectId. owner,
+/// consultant e project sao SetNull para preservar o objetivo se o ator/alvo for
+/// removido. Soft delete operacional via status (CANCELLED).
+model Objective {
+  id           String          @id @default(cuid())
+  scope        ObjectiveScope
+  referenceKey String?
+  title        String
+  description  String?
+  periodStart  DateTime
+  periodEnd    DateTime
+  status       ObjectiveStatus @default(DRAFT)
+  ownerUserId  String?
+  owner        User?           @relation("ObjectiveOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  consultantId String?
+  consultant   Consultant?     @relation(fields: [consultantId], references: [id], onDelete: SetNull)
+  projectId    String?
+  project      Project?        @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  keyResults   KeyResult[]
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@index([scope, referenceKey])
+  @@index([consultantId])
+  @@index([projectId])
+}
+
+/// Resultado-chave de um objetivo (KR). Cascade no objetivo (o KR nao existe sem
+/// ele). startValue/targetValue/currentValue em Decimal(14,2) cobrem metricas
+/// monetarias e numericas; o progresso e DERIVADO no servidor a partir desses
+/// valores conforme metricType (nao ha coluna de progresso). autoSource e uma
+/// chave de fonte operacional para auto-atualizacao futura (ex.: 'margin',
+/// 'hours'); apenas marcacao, sem logica no banco.
+model KeyResult {
+  id           String          @id @default(cuid())
+  objectiveId  String
+  objective    Objective       @relation(fields: [objectiveId], references: [id], onDelete: Cascade)
+  title        String
+  metricType   KeyResultMetric @default(NUMBER)
+  startValue   Decimal         @default(0) @db.Decimal(14, 2)
+  targetValue  Decimal         @db.Decimal(14, 2)
+  currentValue Decimal         @default(0) @db.Decimal(14, 2)
+  unit         String?
+  autoSource   String?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@index([objectiveId])
+}
+
+/// Trilha de capacitacao da Universidade Jump (EP 7.3). Agrupa cursos. Soft
+/// delete via status (INACTIVE), padrao de catalogo.
+model LearningTrack {
+  id          String         @id @default(cuid())
+  title       String
+  description String?
+  category    String?
+  status      LearningStatus @default(ACTIVE)
+  courses     Course[]
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+}
+
+/// Curso da Universidade Jump. track opcional (SetNull) agrupa em trilha; skill
+/// opcional (SetNull) liga o curso a uma competencia do catalogo (conclusao pode
+/// alimentar ConsultantSkill/evidencia no futuro). Soft delete via status.
+model Course {
+  id          String         @id @default(cuid())
+  trackId     String?
+  track       LearningTrack? @relation(fields: [trackId], references: [id], onDelete: SetNull)
+  title       String
+  provider    String?
+  hours       Decimal?       @db.Decimal(6, 2)
+  externalUrl String?
+  skillId     String?
+  skill       Skill?         @relation(fields: [skillId], references: [id], onDelete: SetNull)
+  status      LearningStatus @default(ACTIVE)
+  enrollments Enrollment[]
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([trackId])
+  @@index([skillId])
+}
+
+/// Matricula de um consultor em um curso. Cascade no consultor e no curso (a
+/// matricula nao existe sem ambos). Unica por (consultantId, courseId). progressPct
+/// e hoursCompleted alimentam o painel; pontos/ranking de gamificacao sao DERIVADOS
+/// das matriculas COMPLETED (sem tabela de pontos). Soft cancel via status.
+model Enrollment {
+  id             String           @id @default(cuid())
+  consultantId   String
+  consultant     Consultant       @relation(fields: [consultantId], references: [id], onDelete: Cascade)
+  courseId       String
+  course         Course           @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  status         EnrollmentStatus @default(ENROLLED)
+  progressPct    Int              @default(0)
+  hoursCompleted Decimal          @default(0) @db.Decimal(6, 2)
+  completedAt    DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@unique([consultantId, courseId])
+  @@index([consultantId])
+  @@index([courseId])
 }
 
 model Certificate {
