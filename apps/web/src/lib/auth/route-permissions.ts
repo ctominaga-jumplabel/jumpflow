@@ -3,6 +3,8 @@ import type { RoleName } from "./roles";
 import { FEEDBACK_READ_ROLES } from "@/lib/feedback/visibility";
 import { EVALUATION_READ_ROLES } from "@/lib/evaluations/visibility";
 import { DEVELOPMENT_READ_ROLES } from "@/lib/development/visibility";
+import { SURVEY_READ_ROLES } from "@/lib/surveys/visibility";
+import { OKR_READ_ROLES } from "@/lib/okrs/visibility";
 
 /**
  * Pure RBAC primitives and the central route → roles map.
@@ -135,6 +137,30 @@ export const routePermissions: RouteRule[] = [
   // criação/edição de estrutura é action-gated por DEVELOPMENT_MANAGE_ROLES
   // (ADMIN/PEOPLE/AREA_MANAGER/PROJECT_MANAGER). Regra específica antes da `/app`.
   { prefix: "/app/pdi", access: DEVELOPMENT_READ_ROLES },
+  // Pesquisa de Clima / NPS interno (Talentos, Prioridade 2 — EP 7.1): criar/
+  // abrir/fechar pesquisas, responder convites e dashboards agregados. Leitura
+  // para gestão + AREA_MANAGER (dashboards anônimos) + CONSULTANT (este último
+  // só vê/responde os PRÓPRIOS convites — escopo por linha aplicado pela função
+  // de read). ANONIMATO É REGRA: em pesquisa anônima a resposta nunca é ligada à
+  // identidade (LGPD §3). A gestão é action-gated por SURVEY_MANAGE_ROLES
+  // (ADMIN/PEOPLE). Regra específica antes da `/app` ampla.
+  { prefix: "/app/clima", access: SURVEY_READ_ROLES },
+  // Universidade Jump (Talentos, Prioridade 2 — EP 7.3): trilhas, cursos,
+  // matrícula, progresso e gamificação derivada. O CATÁLOGO é visível a todos os
+  // autenticados (consultor navega e se matricula); a CURADORIA (CRUD de trilha/
+  // curso) é action-gated por UNIVERSITY_CURATE_ROLES (ADMIN/PEOPLE); a matrícula/
+  // progresso é do PRÓPRIO consultor (gate por linha no servidor); o RANKING
+  // agregado com nomes é visível a ADMIN/PEOPLE/AREA_MANAGER (o consultor vê só a
+  // própria posição). Regra específica antes da `/app` ampla.
+  { prefix: "/app/universidade", access: "ALL" },
+  // Metas e OKRs (Talentos, Prioridade 2 — EP 7.2): objetivos por escopo
+  // (consultor/projeto/área/empresa) e Key Results com progresso derivado.
+  // Leitura para gestão + CONSULTANT (este último só vê/atualiza os PRÓPRIOS
+  // OKRs de consultor — escopo por linha aplicado pelas funções de read). A
+  // criação/edição de estrutura é action-gated por OKR_MANAGE_ROLES (ADMIN/
+  // PEOPLE/AREA_MANAGER/PROJECT_MANAGER), com a fronteira fina por escopo/linha
+  // aplicada por canManageObjective no servidor. Regra específica antes da `/app`.
+  { prefix: "/app/metas", access: OKR_READ_ROLES },
   // Operational automation (auto-approval admin/observability). Management
   // only — PROJECT_MANAGER read-only access is deferred to a later round.
   { prefix: "/app/automacoes", access: ["ADMIN", "AREA_MANAGER"] },

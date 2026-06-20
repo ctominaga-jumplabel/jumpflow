@@ -3,10 +3,12 @@ import {
   Award,
   BarChart3,
   Banknote,
+  BookOpen,
   Building2,
   CalendarRange,
   ClipboardCheck,
   Clock,
+  Flag,
   FolderKanban,
   Gauge,
   GraduationCap,
@@ -16,6 +18,7 @@ import {
   Receipt,
   ReceiptText,
   ShieldCheck,
+  Smile,
   Sprout,
   Target,
   TrendingUp,
@@ -189,6 +192,47 @@ export const primaryNavigation: NavItemDef[] = [
       "PROJECT_MANAGER",
       "CONSULTANT",
     ],
+  },
+  {
+    // Clima / NPS interno (Talentos, Prioridade 2 — EP 7.1): pesquisas de clima
+    // e eNPS, respostas anônimas e dashboards agregados. Visível a gestão +
+    // AREA_MANAGER (dashboards) + CONSULTANT (que só vê/responde os próprios
+    // convites); a gestão é enforced no servidor (SURVEY_MANAGE_ROLES).
+    // Discoverability, não a fronteira de segurança.
+    label: "Clima",
+    href: "/app/clima",
+    icon: Smile,
+    description: "Pesquisas de clima e eNPS interno, respostas anônimas e dashboards.",
+    requiredRoles: ["ADMIN", "PEOPLE", "AREA_MANAGER", "CONSULTANT"],
+  },
+  {
+    // Metas e OKRs (Talentos, Prioridade 2 — EP 7.2): objetivos por escopo
+    // (consultor/projeto/área/empresa) com Key Results e progresso derivado.
+    // Visível a gestão + CONSULTANT (que só vê/atualiza os próprios OKRs de
+    // consultor); a criação/edição de estrutura é enforced no servidor
+    // (OKR_MANAGE_ROLES + canManageObjective). Discoverability, não a fronteira.
+    label: "Metas",
+    href: "/app/metas",
+    icon: Flag,
+    description: "Objetivos e Key Results por consultor, projeto, área e empresa.",
+    requiredRoles: [
+      "ADMIN",
+      "PEOPLE",
+      "AREA_MANAGER",
+      "PROJECT_MANAGER",
+      "CONSULTANT",
+    ],
+  },
+  {
+    // Universidade Jump (Talentos, Prioridade 2 — EP 7.3): trilhas, cursos,
+    // matrícula, progresso e gamificação derivada. Visível a TODOS (o consultor
+    // navega o catálogo e se matricula); a curadoria (CRUD) é enforced no
+    // servidor (UNIVERSITY_CURATE_ROLES = ADMIN/PEOPLE); o ranking com nomes é
+    // restrito a ADMIN/PEOPLE/AREA_MANAGER. Discoverability, não a fronteira.
+    label: "Universidade",
+    href: "/app/universidade",
+    icon: BookOpen,
+    description: "Trilhas e cursos da Universidade Jump, matrícula, progresso e ranking.",
   },
   {
     label: "Certificados",
