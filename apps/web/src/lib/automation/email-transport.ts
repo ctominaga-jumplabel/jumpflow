@@ -18,6 +18,11 @@ export interface EmailMessage {
   to: string[];
   subject: string;
   text: string;
+  /**
+   * Optional HTML body. When present it is sent alongside `text` (which stays
+   * the required plain-text fallback). Built via `lib/automation/email`.
+   */
+  html?: string;
   attachments?: EmailAttachment[];
 }
 
@@ -37,6 +42,7 @@ class ConsoleEmailTransport implements EmailTransport {
       id,
       to: message.to,
       subject: message.subject,
+      hasHtml: Boolean(message.html),
       attachments: message.attachments?.map((a) => ({
         filename: a.filename,
         bytes: a.content.length,
@@ -73,6 +79,7 @@ class ResendEmailTransport implements EmailTransport {
         to: message.to,
         subject: message.subject,
         text: message.text,
+        ...(message.html ? { html: message.html } : {}),
         attachments: message.attachments?.map((a) => ({
           filename: a.filename,
           // Resend expects base64 content for inline attachments.

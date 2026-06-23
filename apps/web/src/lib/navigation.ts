@@ -3,6 +3,7 @@ import {
   Award,
   BarChart3,
   Banknote,
+  BellRing,
   BookOpen,
   Building2,
   CalendarRange,
@@ -13,6 +14,7 @@ import {
   Gauge,
   GraduationCap,
   Home,
+  KeyRound,
   LayoutDashboard,
   MessageSquareHeart,
   Receipt,
@@ -49,8 +51,19 @@ export interface NavItemDef {
    * Roles allowed to see this item. Undefined means visible to everyone. The
    * sidebar hides items the current user cannot use; the route still enforces
    * access on the server (this is discoverability, not the security boundary).
+   *
+   * Legacy static gate, kept during the migration to the permission matrix.
+   * When `permissionCode` is also set, the matrix (can_view) is the primary
+   * gate and this acts as a fallback.
    */
   requiredRoles?: RoleName[];
+  /**
+   * Permission code (matrix) that governs visibility AND route access for this
+   * item. When set, the sidebar hides the item unless the user's matrix grants
+   * `view`, and the app layout enforces `requirePermission(code, "view")` for
+   * the route (403 on direct URL access). Undefined means no matrix gate.
+   */
+  permissionCode?: string;
 }
 
 /**
@@ -68,30 +81,35 @@ export const primaryNavigation: NavItemDef[] = [
   {
     label: "Dashboard",
     href: "/app/dashboard",
+    permissionCode: "DASHBOARD",
     icon: LayoutDashboard,
     description: "Visão geral de pendências, alocação e fechamentos.",
   },
   {
     label: "Horas",
     href: "/app/horas",
+    permissionCode: "HORAS",
     icon: Clock,
     description: "Lançamento semanal e acompanhamento de horas.",
   },
   {
     label: "Despesas",
     href: "/app/despesas",
+    permissionCode: "DESPESAS",
     icon: Receipt,
     description: "Lançamento de despesas, comprovantes e reembolsos.",
   },
   {
     label: "Projetos",
     href: "/app/projetos",
+    permissionCode: "PROJETOS",
     icon: FolderKanban,
     description: "Projetos, clientes, budget e responsáveis.",
   },
   {
     label: "Clientes",
     href: "/app/clientes",
+    permissionCode: "CLIENTES",
     icon: Building2,
     description: "Clientes, CNPJ, regras fiscais e tipos de cobranca.",
   },
@@ -101,18 +119,21 @@ export const primaryNavigation: NavItemDef[] = [
     // de segurança).
     label: "Comercial",
     href: "/app/comercial",
+    permissionCode: "COMERCIAL",
     icon: TrendingUp,
     description: "Precificação: tipo de cobrança, budget e valores de venda.",
   },
   {
     label: "Consultores",
     href: "/app/consultores",
+    permissionCode: "CONSULTORES",
     icon: Users,
     description: "Cadastro, senioridade e disponibilidade dos consultores.",
   },
   {
     label: "Skills",
     href: "/app/skills",
+    permissionCode: "SKILLS",
     icon: GraduationCap,
     description: "Matriz de competências técnicas e comportamentais.",
   },
@@ -122,6 +143,7 @@ export const primaryNavigation: NavItemDef[] = [
     // (COMPETENCY_WRITE_ROLES = ADMIN/PEOPLE). Discoverability, não a fronteira.
     label: "Competências",
     href: "/app/competencias",
+    permissionCode: "COMPETENCIAS",
     icon: Target,
     description: "Catálogo de skills, perfis de competência e gap do time.",
     requiredRoles: ["ADMIN", "PEOPLE", "AREA_MANAGER", "PROJECT_MANAGER", "SALES"],
@@ -132,6 +154,7 @@ export const primaryNavigation: NavItemDef[] = [
     // linha é enforced no servidor (discoverability, não a fronteira).
     label: "Disponibilidade",
     href: "/app/disponibilidade",
+    permissionCode: "DISPONIBILIDADE",
     icon: CalendarRange,
     description: "Heatmap de capacidade do time por consultor e semana.",
     requiredRoles: [
@@ -151,6 +174,7 @@ export const primaryNavigation: NavItemDef[] = [
     // Discoverability, não a fronteira de segurança.
     label: "IA de Alocação",
     href: "/app/alocacao-ia",
+    permissionCode: "ALOCACAO_IA",
     icon: Sparkles,
     description: "Ranking de consultores por aderência a uma alocação, com breakdown transparente.",
     requiredRoles: ["ADMIN", "AREA_MANAGER", "PROJECT_MANAGER", "SALES"],
@@ -164,6 +188,7 @@ export const primaryNavigation: NavItemDef[] = [
     // sugestão, não muda status. Discoverability, não a fronteira de segurança.
     label: "Risco de Projetos",
     href: "/app/risco-projetos",
+    permissionCode: "RISCO_PROJETOS",
     icon: ShieldAlert,
     description: "Semáforo de risco por projeto: burn rate, prazo, margem e feedbacks, com breakdown transparente.",
     requiredRoles: ["ADMIN", "AREA_MANAGER", "PROJECT_MANAGER", "FINANCE"],
@@ -178,6 +203,7 @@ export const primaryNavigation: NavItemDef[] = [
     // LLM não recalcula. Discoverability, não a fronteira de segurança.
     label: "Score",
     href: "/app/score",
+    permissionCode: "SCORE_CONSULTOR",
     icon: Trophy,
     description: "Score 0–100 do consultor por avaliações, horas, certificações, feedback e realização, com breakdown transparente.",
     requiredRoles: ["ADMIN", "PEOPLE", "AREA_MANAGER", "FINANCE", "CONSULTANT"],
@@ -189,6 +215,7 @@ export const primaryNavigation: NavItemDef[] = [
     // (FEEDBACK_WRITE_ROLES). Discoverability, não a fronteira de segurança.
     label: "Feedback",
     href: "/app/feedback",
+    permissionCode: "FEEDBACK",
     icon: MessageSquareHeart,
     description: "Feedback contínuo por consultor, ancorado em projetos e clientes.",
     requiredRoles: [
@@ -207,6 +234,7 @@ export const primaryNavigation: NavItemDef[] = [
     // (EVALUATION_MANAGE_ROLES). Discoverability, não a fronteira de segurança.
     label: "Avaliações",
     href: "/app/avaliacoes",
+    permissionCode: "AVALIACOES",
     icon: Gauge,
     description: "Ciclos 90/180/360, radar de competências, gap e evolução.",
     requiredRoles: [
@@ -225,6 +253,7 @@ export const primaryNavigation: NavItemDef[] = [
     // (DEVELOPMENT_MANAGE_ROLES). Discoverability, não a fronteira de segurança.
     label: "PDI",
     href: "/app/pdi",
+    permissionCode: "PDI",
     icon: Sprout,
     description: "Plano de desenvolvimento individual a partir do gap de competências.",
     requiredRoles: [
@@ -243,6 +272,7 @@ export const primaryNavigation: NavItemDef[] = [
     // Discoverability, não a fronteira de segurança.
     label: "Clima",
     href: "/app/clima",
+    permissionCode: "CLIMA",
     icon: Smile,
     description: "Pesquisas de clima e eNPS interno, respostas anônimas e dashboards.",
     requiredRoles: ["ADMIN", "PEOPLE", "AREA_MANAGER", "CONSULTANT"],
@@ -255,6 +285,7 @@ export const primaryNavigation: NavItemDef[] = [
     // (OKR_MANAGE_ROLES + canManageObjective). Discoverability, não a fronteira.
     label: "Metas",
     href: "/app/metas",
+    permissionCode: "METAS",
     icon: Flag,
     description: "Objetivos e Key Results por consultor, projeto, área e empresa.",
     requiredRoles: [
@@ -273,42 +304,49 @@ export const primaryNavigation: NavItemDef[] = [
     // restrito a ADMIN/PEOPLE/AREA_MANAGER. Discoverability, não a fronteira.
     label: "Universidade",
     href: "/app/universidade",
+    permissionCode: "UNIVERSIDADE",
     icon: BookOpen,
     description: "Trilhas e cursos da Universidade Jump, matrícula, progresso e ranking.",
   },
   {
     label: "Certificados",
     href: "/app/certificados",
+    permissionCode: "CERTIFICADOS",
     icon: Award,
     description: "Certificações, validade e alertas de vencimento.",
   },
   {
     label: "Aprovações",
     href: "/app/aprovacoes",
+    permissionCode: "APROVACOES",
     icon: ClipboardCheck,
     description: "Fluxo de aprovação e reprovação de horas.",
   },
   {
     label: "Relatórios",
     href: "/app/relatorios",
+    permissionCode: "RELATORIOS",
     icon: BarChart3,
     description: "Relatórios de horas, despesas e consolidado, com exportação.",
   },
   {
     label: "Financeiro",
     href: "/app/financeiro",
+    permissionCode: "FINANCEIRO",
     icon: Wallet,
     description: "Horas aprovadas, valor hora e fechamento mensal.",
   },
   {
     label: "Cobrança de projetos",
     href: "/app/financeiro/projetos",
+    permissionCode: "FINANCEIRO_COBRANCA",
     icon: ReceiptText,
     description: "Regra de cobrança por projeto (motor parametrizável).",
   },
   {
     label: "Pagamentos",
     href: "/app/pagamentos",
+    permissionCode: "PAGAMENTOS",
     icon: Banknote,
     description: "Pagamentos de consultores, NF e envio ao banco.",
   },
@@ -323,9 +361,28 @@ export const adminNavigation: NavItemDef[] = [
   {
     label: "Acessos",
     href: "/app/admin/acessos",
+    permissionCode: "ADMIN_ACESSOS",
     icon: ShieldCheck,
     description:
       "Convites, grupos de acesso (perfis) e bloqueio de usuários.",
+    requiredRoles: ["ADMIN"],
+  },
+  {
+    label: "Matriz de Permissões",
+    href: "/app/admin/permissoes",
+    permissionCode: "CONFIGURACOES_PERMISSOES",
+    icon: KeyRound,
+    description:
+      "Configura, por grupo de acesso, o que cada funcionalidade permite (ver, criar, editar, excluir).",
+    requiredRoles: ["ADMIN"],
+  },
+  {
+    label: "Regras de Notificação",
+    href: "/app/admin/notificacoes",
+    permissionCode: "CONFIGURACOES_NOTIFICACOES",
+    icon: BellRing,
+    description:
+      "Define, por evento, quem é notificado e por qual canal (e-mail ou Teams).",
     requiredRoles: ["ADMIN"],
   },
 ];
@@ -339,6 +396,29 @@ export function canSeeNavItem(
     !item.requiredRoles ||
     item.requiredRoles.some((role) => roles.includes(role))
   );
+}
+
+/**
+ * Whether a navigation item is visible under the permission matrix. Items
+ * WITHOUT a `permissionCode` are always visible (no matrix gate); items WITH
+ * one are visible only if their code is in the viewable set. Combined with the
+ * legacy `canSeeNavItem` role gate during the migration.
+ */
+export function canSeeNavItemByMatrix(
+  item: NavItemDef,
+  viewableCodes: ReadonlySet<string>,
+): boolean {
+  if (!item.permissionCode) return true;
+  return viewableCodes.has(item.permissionCode);
+}
+
+/** All distinct permission codes referenced by the navigation. */
+export function navPermissionCodes(): string[] {
+  const codes = new Set<string>();
+  for (const item of [...primaryNavigation, ...adminNavigation]) {
+    if (item.permissionCode) codes.add(item.permissionCode);
+  }
+  return [...codes];
 }
 
 /**

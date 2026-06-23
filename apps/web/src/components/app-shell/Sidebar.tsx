@@ -6,6 +6,7 @@ import { appConfig } from "@/config/app";
 import {
   adminNavigation,
   canSeeNavItem,
+  canSeeNavItemByMatrix,
   findActiveNav,
   primaryNavigation,
 } from "@/lib/navigation";
@@ -21,6 +22,12 @@ export interface SidebarProps {
   databaseConfigured?: boolean;
   /** Current user's roles, used to gate role-restricted items. */
   roles?: RoleName[];
+  /**
+   * Permission codes (from the matrix) the user may VIEW. Items with a
+   * `permissionCode` not in this set are hidden. Items without a code are
+   * always shown (subject to the legacy role gate).
+   */
+  viewableNavCodes?: string[];
   className?: string;
 }
 
@@ -29,13 +36,21 @@ export function Sidebar({
   onNavigate,
   databaseConfigured = false,
   roles = [],
+  viewableNavCodes = [],
   className,
 }: SidebarProps) {
   const pathname = usePathname();
   const activeHref = findActiveNav(pathname)?.href;
-  const adminItems = adminNavigation.filter((item) =>
-    canSeeNavItem(item, roles),
-  );
+  const viewable = new Set(viewableNavCodes);
+  // Items WITH a permissionCode are gated solely by the matrix (so admins can
+  // grant/revoke menu visibility from the Matriz de Permissões). Items WITHOUT
+  // one keep the legacy static role gate.
+  const canSee = (item: (typeof primaryNavigation)[number]) =>
+    item.permissionCode
+      ? canSeeNavItemByMatrix(item, viewable)
+      : canSeeNavItem(item, roles);
+  const primaryItems = primaryNavigation.filter(canSee);
+  const adminItems = adminNavigation.filter(canSee);
 
   return (
     <div className={cn("flex h-full flex-col bg-surface", className)}>
@@ -64,7 +79,7 @@ export function Sidebar({
         aria-label="Navegação principal"
         className="flex-1 space-y-1 overflow-y-auto px-3 py-4"
       >
-        {primaryNavigation.map((item) => (
+        {primaryItems.map((item) => (
           <NavItem
             key={item.href}
             item={item}

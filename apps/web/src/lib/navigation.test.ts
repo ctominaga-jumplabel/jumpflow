@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   adminNavigation,
   canSeeNavItem,
+  canSeeNavItemByMatrix,
   findActiveNav,
+  navPermissionCodes,
   primaryNavigation,
 } from "@/lib/navigation";
 
@@ -64,5 +66,35 @@ describe("admin navigation gating", () => {
 
   it("treats items without requiredRoles as visible to everyone", () => {
     expect(canSeeNavItem(primaryNavigation[0], [])).toBe(true);
+  });
+});
+
+describe("permission-matrix nav gating", () => {
+  it("the Matriz de Permissões entry is governed by CONFIGURACOES_PERMISSOES", () => {
+    const matriz = adminNavigation.find(
+      (item) => item.href === "/app/admin/permissoes",
+    );
+    expect(matriz).toBeDefined();
+    expect(matriz?.permissionCode).toBe("CONFIGURACOES_PERMISSOES");
+  });
+
+  it("hides coded items when their code is not viewable; shows when it is", () => {
+    const horas = primaryNavigation.find((i) => i.href === "/app/horas")!;
+    expect(canSeeNavItemByMatrix(horas, new Set())).toBe(false);
+    expect(canSeeNavItemByMatrix(horas, new Set(["HORAS"]))).toBe(true);
+  });
+
+  it("always shows items without a permissionCode", () => {
+    const inicio = primaryNavigation.find((i) => i.href === "/app")!;
+    expect(inicio.permissionCode).toBeUndefined();
+    expect(canSeeNavItemByMatrix(inicio, new Set())).toBe(true);
+  });
+
+  it("navPermissionCodes lists distinct codes including the manage code", () => {
+    const codes = navPermissionCodes();
+    expect(codes).toContain("HORAS");
+    expect(codes).toContain("CONFIGURACOES_PERMISSOES");
+    // No duplicates.
+    expect(new Set(codes).size).toBe(codes.length);
   });
 });

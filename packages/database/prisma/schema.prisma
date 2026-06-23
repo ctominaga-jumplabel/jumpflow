@@ -384,6 +384,9 @@ enum AutomationEmailType {
   PRE_INVOICE
   // Fase H: NFS-e emitida enviada ao cliente (uma por FiscalDocument + competencia).
   NFSE_ISSUED
+  // Motor de notificacoes: envio operacional generico (liberacao, alertas, etc.).
+  // O referenceKey codifica evento + destinatario para idempotencia por pessoa.
+  NOTIFICATION
 }
 
 enum EmailDeliveryStatus {
@@ -599,6 +602,8 @@ enum IntegrationProviderKind {
   STORAGE
   BANK
   ERP
+  /// Canal de notificacao via webhook de saida (Microsoft Teams Incoming Webhook).
+  TEAMS
 }
 
 enum IntegrationEventStatus {
@@ -646,11 +651,75 @@ model User {
   updatedAt                   DateTime                    @updatedAt
 }
 
+/// Grupo de acesso (perfil) do RBAC. Os 7 grupos do sistema têm `name` (enum
+/// RoleName) e `isSystem = true`; grupos criados dinamicamente pela tela de
+/// Matriz de Permissões têm `name = null` e identificam-se pelo `key` (slug).
+/// A resolução de permissões (RolePermission) é sempre por `id`/roleId, nunca
+/// pelo enum, então grupos dinâmicos funcionam sem refatorar a camada de auth.
 model Role {
-  id        String     @id @default(cuid())
-  name      RoleName   @unique
-  users     UserRole[]
-  createdAt DateTime   @default(now())
+  id          String           @id @default(cuid())
+  /// Nullable: só os grupos do sistema mapeiam para o enum RoleName. Grupos
+  /// dinâmicos têm name = null e são identificados por `key`.
+  name        RoleName?        @unique
+  /// Slug estável e único. Para grupos do sistema = string do enum (ex. "ADMIN").
+  key         String           @unique
+  /// Rótulo legível (pt-BR) exibido na UI; para grupos do sistema vem de roleLabels.
+  label       String?
+  description String?
+  active      Boolean          @default(true)
+  /// Grupo nativo da plataforma (não pode ser excluído; ADMIN não pode ser inativado).
+  isSystem    Boolean          @default(true)
+  users       UserRole[]
+  permissions RolePermission[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt @default(now())
+}
+
+/// Funcionalidade do sistema no RBAC configurável (módulo ou submódulo).
+/// Hierarquia via self-relation (parent/children). O `code` é o identificador
+/// estável usado por can()/requirePermission() (ex. "HORAS", "HORAS_APROVACOES").
+/// Cadastro dinâmico: novas funcionalidades podem ser criadas sem alterar código.
+model Permission {
+  id              String           @id @default(cuid())
+  /// Código estável e único usado pelos guards (UPPER_SNAKE_CASE).
+  code            String           @unique
+  name            String
+  /// Rótulo do módulo de topo (ex. "Horas"), usado para agrupar na matriz.
+  module          String
+  description     String?
+  active          Boolean          @default(true)
+  /// Hierarquia módulo → submódulo. SetNull mantém o filho se o pai sumir.
+  parentId        String?
+  parent          Permission?      @relation("PermissionTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children        Permission[]     @relation("PermissionTree")
+  /// Ordem de exibição dentro do módulo.
+  sortOrder       Int              @default(0)
+  rolePermissions RolePermission[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@index([module])
+  @@index([parentId])
+}
+
+/// Célula da matriz de permissões: o que um grupo (Role) pode fazer em uma
+/// funcionalidade (Permission). Quatro ações independentes. A ausência de linha
+/// equivale a tudo negado. Evolução futura (FLS/RLS/escopo por projeto/cliente)
+/// entra de forma aditiva via colunas scopeType/scopeId nullable ou tabela
+/// PermissionScope — sem refatorar esta estrutura.
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  canView      Boolean    @default(false)
+  canCreate    Boolean    @default(false)
+  canEdit      Boolean    @default(false)
+  canDelete    Boolean    @default(false)
+  updatedAt    DateTime   @updatedAt @default(now())
+
+  @@id([roleId, permissionId])
+  @@index([permissionId])
 }
 
 model UserRole {
@@ -2084,6 +2153,74 @@ model AutomationEmailLog {
 
   @@unique([type, referenceKey])
   @@index([createdAt])
+}
+
+enum NotificationChannel {
+  EMAIL
+  TEAMS
+}
+
+/// Eventos operacionais que disparam notificacao. Estender conforme as ondas do
+/// plano de melhorias (docs/plano-melhorias-financeiro-operacional.md).
+enum NotificationEvent {
+  HOURS_RELEASED // 1.1 liberacao de horas
+  CLIENT_BILLING_SUMMARY // 1.2 apuracao ao cliente por consultor
+  OVERTIME_ALERT // 2.5/3.3 alerta de hora extra (PJ/CLT)
+  PROJECT_CREATED // 6.1 cadastro de novo projeto
+  INVOICING_OVERDUE // 4.3/5.2 faturamento nao realizado
+  COMMERCIAL_CONTRACT_MISSING // 6.2 contrato comercial ausente
+}
+
+/// Nivel de agregacao em que a regra dispara.
+enum NotificationScope {
+  GLOBAL
+  PROJECT
+  ALLOCATION
+}
+
+/// Como o endereco do destinatario e resolvido em tempo de envio.
+enum NotificationRecipientType {
+  STATIC // address e um e-mail literal ou URL de webhook (ex.: varios e-mails p/ NF)
+  ROLE // address e um RoleName; expande para usuarios com aquele papel
+  PROJECT_MANAGER // resolve para o gestor do projeto (scope = PROJECT) — remetente/destino 1.4
+  CLIENT_CONTACT // resolve para o contato de cobranca do cliente (1.2)
+}
+
+/// Regra de notificacao: para um evento + escopo, define canal, destinatarios e
+/// se consolida multiplos fragmentos por destinatario (agrupamento por usuario).
+model NotificationRule {
+  id               String                  @id @default(cuid())
+  event            NotificationEvent
+  scope            NotificationScope       @default(GLOBAL)
+  /// projectId/allocationId quando scope != GLOBAL; null no escopo global.
+  scopeId          String?
+  channel          NotificationChannel     @default(EMAIL)
+  /// Consolida varios fragmentos do mesmo destinatario num unico envio.
+  groupByRecipient Boolean                 @default(true)
+  active           Boolean                 @default(true)
+  recipients       NotificationRecipient[]
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  @@index([event, active])
+  @@index([scope, scopeId])
+}
+
+/// Destinatario de uma regra. Varios por regra (ex.: lista de e-mails para
+/// aprovacao de NF). `address` guarda e-mail/URL (STATIC), RoleName (ROLE) ou
+/// fica vazio quando o tipo resolve dinamicamente (PROJECT_MANAGER/CLIENT_CONTACT).
+model NotificationRecipient {
+  id        String                    @id @default(cuid())
+  ruleId    String
+  rule      NotificationRule          @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  type      NotificationRecipientType @default(STATIC)
+  channel   NotificationChannel       @default(EMAIL)
+  /// E-mail/URL do webhook (STATIC) ou RoleName (ROLE). URL e tratada como segredo.
+  address   String?
+  name      String?
+  createdAt DateTime                  @default(now())
+
+  @@index([ruleId])
 }
 
 model IntegrationEvent {

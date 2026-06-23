@@ -1,3 +1,4 @@
+import { NextResponse } from "next/server";
 import type { NextAuthConfig } from "next-auth";
 import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id";
 import { DEV_LOGOUT_COOKIE, isDevAuthEnabled } from "@/lib/auth/dev";
@@ -58,11 +59,19 @@ export const authConfig = {
       const isOnApp = request.nextUrl.pathname.startsWith("/app");
       if (!isOnApp) return true;
 
-      if (isDevAuthEnabled()) {
-        return request.cookies.get(DEV_LOGOUT_COOKIE)?.value !== "1";
-      }
+      const authed = isDevAuthEnabled()
+        ? request.cookies.get(DEV_LOGOUT_COOKIE)?.value !== "1"
+        : Boolean(auth?.user);
 
-      return Boolean(auth?.user);
+      // Unauthenticated on /app → false triggers a redirect to pages.signIn.
+      if (!authed) return false;
+
+      // Authenticated: allow, and annotate the request with the pathname so
+      // server components (the app layout) can resolve the active route and
+      // enforce the permission matrix (route 403). Edge-safe: only headers.
+      const headers = new Headers(request.headers);
+      headers.set("x-pathname", request.nextUrl.pathname);
+      return NextResponse.next({ request: { headers } });
     },
     /**
      * Role provisioning placeholder. Real roles (Entra app roles/groups or a

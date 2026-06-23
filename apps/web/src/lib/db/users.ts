@@ -30,7 +30,7 @@ export interface PersistedUser {
  * and free of Prisma. Duplicates are removed.
  */
 export function mapPersistedRoles(
-  rows: ReadonlyArray<{ role: { name: string } }>,
+  rows: ReadonlyArray<{ role: { name: string | null } }>,
 ): RoleName[] {
   const seen = new Set<RoleName>();
   for (const row of rows) {
