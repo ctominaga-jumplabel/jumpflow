@@ -39,12 +39,26 @@ const DEV_USER = {
   email: "ana.martins@jumplabel.com.br",
 };
 
+// Human labels (pt-BR) for the system groups. Mirrors roleLabels in
+// apps/web/src/lib/auth/roles.ts.
+const ROLE_LABELS = {
+  ADMIN: "Administrador",
+  CONSULTANT: "Consultor",
+  PROJECT_MANAGER: "Gestor de Projeto",
+  AREA_MANAGER: "Gestor de Área",
+  FINANCE: "Financeiro",
+  PEOPLE: "RH / People",
+  SALES: "Comercial",
+};
+
 async function seedRoles() {
   for (const name of ROLE_NAMES) {
+    // System groups: key = enum string, isSystem = true, active = true. Backfill
+    // label every run so renames in ROLE_LABELS propagate.
     await prisma.role.upsert({
       where: { name },
-      update: {},
-      create: { name },
+      update: { key: name, label: ROLE_LABELS[name], isSystem: true },
+      create: { name, key: name, label: ROLE_LABELS[name], isSystem: true },
     });
   }
   console.log(`Seeded ${ROLE_NAMES.length} roles.`);
@@ -316,24 +330,32 @@ const BILLING_TYPES = [
 
 async function seedBillingTypes() {
   for (const billingType of BILLING_TYPES) {
-    await prisma.billingType.upsert({
-      where: { id: billingType.id },
-      update: {
-        name: billingType.name,
-        chargeType: billingType.chargeType,
-        howItWorks: billingType.howItWorks,
-        example: billingType.example,
-      },
-      create: {
-        id: billingType.id,
-        name: billingType.name,
-        chargeType: billingType.chargeType,
-        roundingRule: "NONE",
-        howItWorks: billingType.howItWorks,
-        example: billingType.example,
-        active: true,
-      },
+    // Idempotent reconciliation: `name` is @unique, so a plain upsert keyed on
+    // `id` throws P2002 when a row with the same NAME already exists under a
+    // different id (e.g. created before the deterministic `seed-billing-*` ids).
+    // Match by id OR name, then update in place (keeping the existing PK so FKs
+    // stay valid) or create with the seed id when absent.
+    const existing = await prisma.billingType.findFirst({
+      where: { OR: [{ id: billingType.id }, { name: billingType.name }] },
     });
+    const data = {
+      name: billingType.name,
+      chargeType: billingType.chargeType,
+      howItWorks: billingType.howItWorks,
+      example: billingType.example,
+    };
+    if (existing) {
+      await prisma.billingType.update({ where: { id: existing.id }, data });
+    } else {
+      await prisma.billingType.create({
+        data: {
+          id: billingType.id,
+          roundingRule: "NONE",
+          active: true,
+          ...data,
+        },
+      });
+    }
   }
   console.log(`Seeded ${BILLING_TYPES.length} billing types (catalog).`);
 }
@@ -1009,8 +1031,152 @@ async function seedSecondConsultant() {
   );
 }
 
+// ---------------------------------------------------------------------------
+// RBAC permission matrix (configurable). The catalog and the initial Role ×
+// Permission grants below MIRROR the current static behavior of the app
+// (route-permissions.ts role arrays + navigation requiredRoles). Seeding them
+// makes the matrix the configurable source of truth WITHOUT changing day-1
+// behavior. Idempotent: permissions upsert by `code`, grants by (roleId,
+// permissionId). Re-running is safe; it does NOT reset admin-made edits beyond
+// re-asserting the baseline for codes it owns.
+// ---------------------------------------------------------------------------
+
+const ALL_ROLES = [...ROLE_NAMES];
+const FINANCIAL = ["ADMIN", "AREA_MANAGER", "FINANCE"];
+const PROJECT_WRITE = ["ADMIN", "AREA_MANAGER", "PROJECT_MANAGER", "SALES"];
+const SALE_RATE = ["ADMIN", "AREA_MANAGER", "FINANCE", "SALES"];
+const CLIENT_ACCESS = ["ADMIN", "AREA_MANAGER", "FINANCE", "SALES"];
+const COMPETENCY_READ = ["ADMIN", "PEOPLE", "AREA_MANAGER", "PROJECT_MANAGER", "SALES"];
+const COMPETENCY_WRITE = ["ADMIN", "PEOPLE"];
+const AVAILABILITY_READ = ["ADMIN", "PEOPLE", "AREA_MANAGER", "PROJECT_MANAGER", "SALES", "CONSULTANT"];
+const TALENT_READ = ["ADMIN", "PEOPLE", "AREA_MANAGER", "PROJECT_MANAGER", "CONSULTANT"];
+const TALENT_MANAGE = ["ADMIN", "PEOPLE", "AREA_MANAGER", "PROJECT_MANAGER"];
+const PEOPLE_MANAGE = ["ADMIN", "PEOPLE"];
+const APPROVALS = ["ADMIN", "AREA_MANAGER", "PROJECT_MANAGER", "FINANCE"];
+const AUTOMATION = ["ADMIN", "AREA_MANAGER"];
+const ADMIN_ONLY = ["ADMIN"];
+
+// Each entry: code, name, module (display group), parent code (hierarchy),
+// sortOrder and the role sets per action. ADMIN is added to every action set
+// automatically (platform owner = full control), so it is omitted below.
+const PERMISSION_CATALOG = [
+  { code: "DASHBOARD", name: "Dashboard", module: "Operação", sort: 0, view: ALL_ROLES },
+
+  { code: "HORAS", name: "Horas", module: "Horas", sort: 10, view: ALL_ROLES, create: ALL_ROLES, edit: ALL_ROLES, del: ["AREA_MANAGER", "PROJECT_MANAGER"] },
+  { code: "HORAS_LANCAMENTOS", name: "Lançamentos", module: "Horas", parent: "HORAS", sort: 11, view: ALL_ROLES, create: ALL_ROLES, edit: ALL_ROLES, del: ALL_ROLES },
+  { code: "HORAS_APROVACOES", name: "Aprovações", module: "Horas", parent: "HORAS", sort: 12, view: APPROVALS, edit: APPROVALS },
+  { code: "HORAS_RELATORIOS", name: "Relatórios de horas", module: "Horas", parent: "HORAS", sort: 13, view: ALL_ROLES },
+
+  { code: "DESPESAS", name: "Despesas", module: "Despesas", sort: 20, view: ALL_ROLES, create: ALL_ROLES, edit: ALL_ROLES, del: ["FINANCE"] },
+  { code: "DESPESAS_PAGAMENTO", name: "Status de pagamento", module: "Despesas", parent: "DESPESAS", sort: 21, view: FINANCIAL, edit: FINANCIAL },
+
+  { code: "PROJETOS", name: "Projetos", module: "Projetos", sort: 30, view: ALL_ROLES, create: PROJECT_WRITE, edit: PROJECT_WRITE, del: ["AREA_MANAGER"] },
+  { code: "PROJETOS_CADASTRO", name: "Cadastro", module: "Projetos", parent: "PROJETOS", sort: 31, view: ALL_ROLES, create: PROJECT_WRITE, edit: PROJECT_WRITE, del: ["AREA_MANAGER"] },
+  { code: "PROJETOS_EQUIPES", name: "Equipes / Alocação", module: "Projetos", parent: "PROJETOS", sort: 32, view: ALL_ROLES, create: PROJECT_WRITE, edit: PROJECT_WRITE, del: PROJECT_WRITE },
+  { code: "PROJETOS_FINANCEIRO", name: "Financeiro do projeto", module: "Projetos", parent: "PROJETOS", sort: 33, view: FINANCIAL, edit: FINANCIAL },
+  { code: "PROJETOS_RELATORIOS", name: "Relatórios de projeto", module: "Projetos", parent: "PROJETOS", sort: 34, view: ALL_ROLES },
+
+  { code: "CLIENTES", name: "Clientes", module: "Clientes", sort: 40, view: CLIENT_ACCESS, create: CLIENT_ACCESS, edit: CLIENT_ACCESS, del: ADMIN_ONLY },
+
+  { code: "COMERCIAL", name: "Comercial", module: "Comercial", sort: 50, view: SALE_RATE, create: SALE_RATE, edit: SALE_RATE },
+
+  { code: "CONSULTORES", name: "Consultores", module: "Pessoas", sort: 60, view: ALL_ROLES, create: PEOPLE_MANAGE.concat("AREA_MANAGER"), edit: PEOPLE_MANAGE.concat("AREA_MANAGER"), del: ADMIN_ONLY },
+  { code: "SKILLS", name: "Skills", module: "Pessoas", sort: 61, view: ALL_ROLES, create: ALL_ROLES, edit: ALL_ROLES },
+  { code: "COMPETENCIAS", name: "Competências", module: "Pessoas", sort: 62, view: COMPETENCY_READ, create: COMPETENCY_WRITE, edit: COMPETENCY_WRITE, del: COMPETENCY_WRITE },
+  { code: "DISPONIBILIDADE", name: "Disponibilidade", module: "Pessoas", sort: 63, view: AVAILABILITY_READ },
+  { code: "CERTIFICADOS", name: "Certificados", module: "Pessoas", sort: 64, view: ALL_ROLES, create: ALL_ROLES, edit: ALL_ROLES },
+
+  { code: "FEEDBACK", name: "Feedback contínuo", module: "Desenvolvimento", sort: 70, view: TALENT_READ, create: TALENT_MANAGE, edit: TALENT_MANAGE },
+  { code: "AVALIACOES", name: "Avaliações", module: "Desenvolvimento", sort: 71, view: TALENT_READ, create: PEOPLE_MANAGE, edit: PEOPLE_MANAGE },
+  { code: "PDI", name: "PDI", module: "Desenvolvimento", sort: 72, view: TALENT_READ, create: TALENT_MANAGE, edit: TALENT_MANAGE },
+  { code: "CLIMA", name: "Clima / NPS", module: "Desenvolvimento", sort: 73, view: ["PEOPLE", "AREA_MANAGER", "CONSULTANT"], create: PEOPLE_MANAGE, edit: PEOPLE_MANAGE },
+  { code: "METAS", name: "Metas e OKRs", module: "Desenvolvimento", sort: 74, view: TALENT_READ, create: TALENT_MANAGE, edit: TALENT_MANAGE },
+  { code: "UNIVERSIDADE", name: "Universidade Jump", module: "Desenvolvimento", sort: 75, view: ALL_ROLES, create: PEOPLE_MANAGE, edit: PEOPLE_MANAGE },
+
+  { code: "ALOCACAO_IA", name: "IA de Alocação", module: "Inteligência", sort: 80, view: PROJECT_WRITE },
+  { code: "RISCO_PROJETOS", name: "Risco de Projetos", module: "Inteligência", sort: 81, view: ["AREA_MANAGER", "PROJECT_MANAGER", "FINANCE"] },
+  { code: "SCORE_CONSULTOR", name: "Score do Consultor", module: "Inteligência", sort: 82, view: ["PEOPLE", "AREA_MANAGER", "FINANCE", "CONSULTANT"] },
+
+  { code: "APROVACOES", name: "Aprovações", module: "Aprovações", sort: 90, view: APPROVALS, edit: APPROVALS },
+  { code: "AUTOMACOES", name: "Automações", module: "Aprovações", sort: 91, view: AUTOMATION, edit: AUTOMATION },
+
+  { code: "RELATORIOS", name: "Relatórios", module: "Relatórios", sort: 100, view: ALL_ROLES },
+
+  { code: "FINANCEIRO", name: "Financeiro", module: "Financeiro", sort: 110, view: FINANCIAL, create: FINANCIAL, edit: FINANCIAL },
+  { code: "FINANCEIRO_COBRANCA", name: "Cobrança de projetos", module: "Financeiro", parent: "FINANCEIRO", sort: 111, view: FINANCIAL, edit: FINANCIAL },
+  { code: "FINANCEIRO_FECHAMENTO", name: "Fechamento mensal", module: "Financeiro", parent: "FINANCEIRO", sort: 112, view: FINANCIAL, edit: FINANCIAL },
+  { code: "PAGAMENTOS", name: "Pagamentos", module: "Financeiro", sort: 113, view: FINANCIAL, edit: FINANCIAL },
+
+  { code: "ADMIN_ACESSOS", name: "Acessos (usuários e convites)", module: "Administração", sort: 120, view: ADMIN_ONLY, create: ADMIN_ONLY, edit: ADMIN_ONLY, del: ADMIN_ONLY },
+  { code: "CONFIGURACOES_PERMISSOES", name: "Matriz de Permissões", module: "Administração", sort: 121, view: ADMIN_ONLY, edit: ADMIN_ONLY },
+];
+
+async function seedPermissions() {
+  // Pass 1: upsert every permission without parents (parents resolved next).
+  for (const p of PERMISSION_CATALOG) {
+    await prisma.permission.upsert({
+      where: { code: p.code },
+      update: { name: p.name, module: p.module, sortOrder: p.sort, active: true },
+      create: { code: p.code, name: p.name, module: p.module, sortOrder: p.sort },
+    });
+  }
+  // Pass 2: wire the hierarchy (parentId) now that all rows exist.
+  const byCode = new Map(
+    (await prisma.permission.findMany({ select: { id: true, code: true } })).map(
+      (r) => [r.code, r.id],
+    ),
+  );
+  for (const p of PERMISSION_CATALOG) {
+    if (!p.parent) continue;
+    await prisma.permission.update({
+      where: { code: p.code },
+      data: { parentId: byCode.get(p.parent) ?? null },
+    });
+  }
+  console.log(`Seeded ${PERMISSION_CATALOG.length} permissions.`);
+}
+
+async function seedRolePermissions() {
+  const roles = await prisma.role.findMany({ where: { isSystem: true } });
+  const roleByKey = new Map(roles.map((r) => [r.key, r.id]));
+  const permByCode = new Map(
+    (await prisma.permission.findMany({ select: { id: true, code: true } })).map(
+      (r) => [r.code, r.id],
+    ),
+  );
+
+  let cells = 0;
+  for (const p of PERMISSION_CATALOG) {
+    const permissionId = permByCode.get(p.code);
+    if (!permissionId) continue;
+
+    // ADMIN always has full control; other roles get the action if listed.
+    const has = (set, key) => key === "ADMIN" || (set ?? []).includes(key);
+
+    for (const key of ROLE_NAMES) {
+      const roleId = roleByKey.get(key);
+      if (!roleId) continue;
+      const data = {
+        canView: has(p.view, key),
+        canCreate: has(p.create, key),
+        canEdit: has(p.edit, key),
+        canDelete: has(p.del, key),
+      };
+      await prisma.rolePermission.upsert({
+        where: { roleId_permissionId: { roleId, permissionId } },
+        update: data,
+        create: { roleId, permissionId, ...data },
+      });
+      cells += 1;
+    }
+  }
+  console.log(`Seeded ${cells} role-permission cells.`);
+}
+
 async function main() {
   await seedRoles();
+  await seedPermissions();
+  await seedRolePermissions();
   await seedBootstrapAdmin();
   await seedBillingTypes();
   await seedDevUser();

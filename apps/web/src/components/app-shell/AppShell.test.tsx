@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { AppShell } from "@/components/app-shell/AppShell";
-import { primaryNavigation } from "@/lib/navigation";
+import { adminNavigation, primaryNavigation } from "@/lib/navigation";
 import type { AppUser } from "@/lib/auth/types";
 
 // The shell reads the current route via next/navigation; stub it for jsdom.
@@ -18,9 +18,23 @@ const testUser: AppUser = {
 
 const noopLogout = async () => {};
 
-function renderShell() {
+// Permission codes the layout would compute. Items with a `permissionCode` are
+// gated by the matrix, so the shell needs them passed in (the layout does this
+// from the DB). Primary codes only by default — admin areas stay hidden.
+const PRIMARY_CODES = primaryNavigation
+  .map((i) => i.permissionCode)
+  .filter((c): c is string => Boolean(c));
+const ADMIN_CODES = adminNavigation
+  .map((i) => i.permissionCode)
+  .filter((c): c is string => Boolean(c));
+
+function renderShell(viewableNavCodes: string[] = PRIMARY_CODES) {
   return render(
-    <AppShell user={testUser} logoutAction={noopLogout}>
+    <AppShell
+      user={testUser}
+      logoutAction={noopLogout}
+      viewableNavCodes={viewableNavCodes}
+    >
       conteudo
     </AppShell>,
   );
@@ -42,7 +56,11 @@ describe("AppShell", () => {
   it("shows the admin Acessos link to ADMIN users", () => {
     const admin: AppUser = { ...testUser, roles: ["ADMIN"] };
     render(
-      <AppShell user={admin} logoutAction={noopLogout}>
+      <AppShell
+        user={admin}
+        logoutAction={noopLogout}
+        viewableNavCodes={[...PRIMARY_CODES, ...ADMIN_CODES]}
+      >
         conteudo
       </AppShell>,
     );

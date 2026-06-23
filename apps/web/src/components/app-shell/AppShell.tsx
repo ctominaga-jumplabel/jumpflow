@@ -16,6 +16,11 @@ export interface AppShellProps {
   logoutAction: () => void | Promise<void>;
   /** Whether a real database connection is configured (resolved on the server). */
   databaseConfigured?: boolean;
+  /**
+   * Permission codes (from the matrix) the user may VIEW, scoped to the nav
+   * catalog. Resolved on the server; the sidebar hides items not in this set.
+   */
+  viewableNavCodes?: string[];
   children: React.ReactNode;
 }
 
@@ -27,6 +32,7 @@ export function AppShell({
   user,
   logoutAction,
   databaseConfigured = false,
+  viewableNavCodes = [],
   children,
 }: AppShellProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -63,7 +69,11 @@ export function AppShell({
     <div className="min-h-screen bg-canvas">
       {/* Desktop sidebar */}
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 border-r-2 border-ink lg:block">
-        <Sidebar databaseConfigured={databaseConfigured} roles={user.roles} />
+        <Sidebar
+          databaseConfigured={databaseConfigured}
+          roles={user.roles}
+          viewableNavCodes={viewableNavCodes}
+        />
       </aside>
 
       {/* Mobile drawer */}
@@ -105,6 +115,7 @@ export function AppShell({
                 onNavigate={() => setMobileOpen(false)}
                 databaseConfigured={databaseConfigured}
                 roles={user.roles}
+                viewableNavCodes={viewableNavCodes}
               />
             </motion.aside>
           </div>

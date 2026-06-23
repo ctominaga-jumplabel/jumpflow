@@ -33,6 +33,11 @@ export type ErrorCode =
   | "ALREADY_HAS_ACCESS"
   | "INVITE_INVALID"
   | "WEAK_PASSWORD"
+  // Permission matrix (RBAC configurável): catálogo, grupos e matriz.
+  | "LAST_ADMIN_PERMISSION"
+  | "CONFIRM_REQUIRED"
+  | "SYSTEM_ROLE_PROTECTED"
+  | "DUPLICATE_CODE"
   | "UNEXPECTED";
 
 /** Uniform result of every server action (actions never throw to the client). */
