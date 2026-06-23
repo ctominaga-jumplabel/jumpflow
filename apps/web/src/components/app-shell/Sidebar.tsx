@@ -13,6 +13,7 @@ import {
 import type { RoleName } from "@/lib/auth/roles";
 import { cn } from "@/lib/utils";
 import { focusRing } from "@/lib/styles";
+import { BrandMark } from "@/components/brand/BrandMark";
 import { NavItem } from "./NavItem";
 
 export interface SidebarProps {
@@ -61,9 +62,7 @@ export function Sidebar({
           aria-label={`${appConfig.name} — ir para a tela inicial`}
           className={cn("flex items-center gap-3 rounded-md", focusRing)}
         >
-          <span className="grid size-9 place-items-center rounded-md border-2 border-ink bg-brand text-sm font-bold text-white shadow-[2px_2px_0_0_var(--color-ink)]">
-            {appConfig.monogram}
-          </span>
+          <BrandMark size={36} />
           <span className="flex flex-col leading-tight">
             <span className="text-[11px] font-semibold uppercase tracking-wide text-soft">
               Jump

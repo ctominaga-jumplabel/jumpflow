@@ -4,6 +4,7 @@ import { ShieldAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { focusRing, tactileButton } from "@/lib/styles";
 import { appConfig } from "@/config/app";
+import { BrandMark } from "@/components/brand/BrandMark";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { AcceptInviteForm } from "./AcceptInviteForm";
 
@@ -36,9 +37,7 @@ export default async function ConvitePage({
     <main className="grid min-h-screen place-items-center bg-canvas px-4 py-10">
       <div className="w-full max-w-md rounded-[var(--radius-card)] border-2 border-ink bg-surface p-8 shadow-[6px_6px_0_0_var(--color-ink)]">
         <div className="flex items-center gap-3">
-          <span className="grid size-11 place-items-center rounded-md border-2 border-ink bg-brand text-base font-bold text-white shadow-[2px_2px_0_0_var(--color-ink)]">
-            {appConfig.monogram}
-          </span>
+          <BrandMark size={44} />
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-soft">
               Jump

@@ -4,7 +4,7 @@ import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
 import { motion, useReducedMotion } from "motion/react";
 import { CheckCircle2, LogIn, ShieldCheck, TriangleAlert } from "lucide-react";
-import { appConfig } from "@/config/app";
+import { BrandMark } from "@/components/brand/BrandMark";
 import { cn } from "@/lib/utils";
 import { focusRing, focusRingInput, tactileButton } from "@/lib/styles";
 import type { LoginCredentialsState } from "@/lib/auth/messages";
@@ -83,9 +83,7 @@ export function LoginView({
             />
 
             <div className="relative flex items-center gap-3">
-              <span className="grid size-11 place-items-center rounded-md border-2 border-marker bg-brand text-base font-bold text-white shadow-[2px_2px_0_0_var(--color-marker)]">
-                {appConfig.monogram}
-              </span>
+              <BrandMark size={44} />
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wide text-marker">
                   Jump
@@ -137,9 +135,7 @@ export function LoginView({
           <div className="p-8 sm:p-10">
             {/* Compact brand header (visible on small screens where the pane is hidden). */}
             <div className="flex items-center gap-3 lg:hidden">
-              <span className="grid size-11 place-items-center rounded-md border-2 border-ink bg-brand text-base font-bold text-white shadow-[2px_2px_0_0_var(--color-ink)]">
-                {appConfig.monogram}
-              </span>
+              <BrandMark size={44} />
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wide text-soft">
                   Jump
