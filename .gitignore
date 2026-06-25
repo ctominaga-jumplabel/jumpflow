@@ -36,3 +36,23 @@ __pycache__/
 .vercel/
 
 .vercel
+
+# Nathal.IA 3D binaries — not versioned in this phase (DECISIONS.md D-004 / ADR-010).
+# Keep docs, reports (*.report.md), READMEs, .gitkeep and configs tracked.
+*.glb
+*.gltf
+*.fbx
+*.blend
+*.blend1
+# Heavy textures inside the asset folders only (do not affect app/public images)
+assets/nathalia/**/*.png
+assets/nathalia/**/*.jpg
+assets/nathalia/**/*.jpeg
+assets/nathalia/**/*.webp
+assets/nathalia/**/*.ktx2
+assets/nathalia/**/*.exr
+packages/character-nathalia/assets/**/*.png
+packages/character-nathalia/assets/**/*.jpg
+packages/character-nathalia/assets/**/*.jpeg
+packages/character-nathalia/assets/**/*.webp
+packages/character-nathalia/assets/**/*.ktx2

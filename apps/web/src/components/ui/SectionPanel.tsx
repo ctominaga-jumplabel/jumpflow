@@ -7,6 +7,8 @@ export interface SectionPanelProps {
   action?: ReactNode;
   children: ReactNode;
   className?: string;
+  /** Optional DOM id (e.g. so a guided tour can anchor/highlight this panel). */
+  id?: string;
 }
 
 /**
@@ -20,9 +22,11 @@ export function SectionPanel({
   action,
   children,
   className,
+  id,
 }: SectionPanelProps) {
   return (
     <section
+      id={id}
       className={cn(
         "rounded-[var(--radius-card)] border-2 border-ink bg-surface shadow-[4px_4px_0_0_var(--color-ink)]",
         className,

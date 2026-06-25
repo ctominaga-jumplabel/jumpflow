@@ -444,6 +444,14 @@ enum OverageTreatment {
   CARRY_OVER
 }
 
+/// A quais vinculos a regra de hora extra (% e excedente) se aplica.
+enum OvertimeAppliesTo {
+  NONE
+  CLT
+  PJ
+  BOTH
+}
+
 /// Indice de reajuste contratual. Apenas FIXED multiplica automaticamente neste
 /// ciclo; IPCA/IGPM/CDI ficam marcados para tratamento futuro (sem fonte externa).
 enum AdjustmentIndex {
@@ -466,6 +474,15 @@ enum RevenueClosingStatus {
   CLOSED
   INVOICED
   CANCELLED
+}
+
+/// Fechamento OPERACIONAL para o Departamento Pessoal (DP). Eixo paralelo ao
+/// financeiro (RevenueClosing): sinaliza que todas as horas do mes de um projeto
+/// estao lancadas e aprovadas, liberando o DP para folha/pagamento. So existem
+/// dois estados — reabrir volta para OPEN.
+enum OperationClosingStatus {
+  OPEN
+  CLOSED
 }
 
 enum ConsultantContractType {
@@ -804,6 +821,7 @@ model Consultant {
   cltInfo             ConsultantCltInfo?
   vacations           ConsultantVacation[]
   hourBankEntries     ConsultantHourBankEntry[]
+  onCallEntries       OnCallEntry[]
   pjInfo              ConsultantPjInfo?
   legalRepresentative ConsultantLegalRepresentative?
   paymentForecasts    ConsultantPaymentForecast[]
@@ -1038,6 +1056,55 @@ model ConsultantHourBankEntry {
   @@index([consultantId, occurredAt])
 }
 
+enum OnCallStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/// Sobreaviso (on-call): horas de prontidao de um consultor, com fator de
+/// remuneracao (multiplier) e anexo com o "ok" do responsavel. Aprovacao por
+/// gestor (PENDING -> APPROVED/REJECTED) gravada em status + AuditEvent.
+/// `date` em UTC midnight (date-only, mesma convencao de TimeEntry/Expense).
+model OnCallEntry {
+  id               String            @id @default(cuid())
+  consultantId     String
+  consultant       Consultant        @relation(fields: [consultantId], references: [id], onDelete: Restrict)
+  projectId        String?
+  project          Project?          @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  date             DateTime
+  hours            Decimal           @db.Decimal(6, 2)
+  /// Fator de remuneracao do sobreaviso (ex.: 0.33). Default 1.00.
+  multiplier       Decimal           @db.Decimal(5, 2) @default(1.00)
+  status           OnCallStatus      @default(PENDING)
+  note             String?
+  approvedByUserId String?
+  approvedAt       DateTime?
+  createdByUserId  String?
+  attachment       OnCallAttachment?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@index([consultantId, date])
+  @@index([status])
+  @@index([projectId])
+}
+
+/// Anexo do "ok do responsavel" para um sobreaviso (1:1). Mesmo padrao do
+/// ExpenseAttachment: bucket privado + chave de storage; URL sempre assinada.
+model OnCallAttachment {
+  id               String      @id @default(cuid())
+  onCallEntryId    String      @unique
+  onCallEntry      OnCallEntry @relation(fields: [onCallEntryId], references: [id], onDelete: Cascade)
+  fileName         String
+  contentType      String
+  size             Int
+  storageBucket    String
+  storageKey       String
+  uploadedByUserId String?
+  createdAt        DateTime    @default(now())
+}
+
 /// Dados especificos PJ: contratacao + faturamento (1:1). A identidade da
 /// empresa (CNPJ, razao social, inscricoes, CNAE, regime) vive em
 /// ConsultantCompanyInfo. Visivel quando contractType e PJ ou CLT_FLEX.
@@ -1131,9 +1198,13 @@ model Project {
   billingHourlyRate           Decimal?                     @db.Decimal(12, 2)
   budgetHours                 Decimal?                     @db.Decimal(10, 2)
   costCenter                  String?
+  /// Referencia do contrato comercial (numero/identificador). ADR 0002 Fase 1:
+  /// presenca = contrato vinculado; ausencia dispara alerta COMMERCIAL_CONTRACT_MISSING.
+  commercialContractRef       String?
   allocations                 Allocation[]
   timeEntries                 TimeEntry[]
   closings                    MonthlyClosing[]
+  operationClosings           OperationClosing[]
   saleRates                   ProjectSaleRate[]
   revenueClosings             RevenueClosing[]
   revenueClosingLines         RevenueClosingLine[]
@@ -1141,6 +1212,7 @@ model Project {
   autoApprovalRule            ProjectAutoApprovalRule?
   autoApprovalConsultantRules ConsultantAutoApprovalRule[]
   expenses                    Expense[]
+  onCallEntries               OnCallEntry[]
   feedbacks                   Feedback[]
   objectives                  Objective[]
   createdAt                   DateTime                     @default(now())
@@ -1177,6 +1249,15 @@ model ProjectBillingConfig {
   closingDay            Int?
   dueDay                Int?
   requireApproval       Boolean             @default(true)
+  // Hora extra (Onda 3 item 3.2): % aplicado sobre o valor das horas extras e
+  // cobranca de excedente acima de um limite. `overtimeAppliesTo` define o(s)
+  // vinculo(s) (CLT/PJ/ambos) em que a regra vale.
+  overtimeAppliesTo     OvertimeAppliesTo   @default(NONE)
+  overtimeBillingPct    Decimal?            @db.Decimal(5, 2)
+  overtimeExcessHours   Decimal?            @db.Decimal(10, 2)
+  overtimeExcessRate    Decimal?            @db.Decimal(12, 2)
+  // Cobranca em ferias (Onda 3 item 3.5). E-mail e opcional via NotificationRule.
+  billDuringVacation    Boolean             @default(true)
   parameters            Json?
   notes                 String?
   createdAt             DateTime            @default(now())
@@ -1919,6 +2000,34 @@ model MonthlyClosing {
   @@index([clientId])
 }
 
+/// Fechamento operacional de um projeto num mes, para o Departamento Pessoal.
+/// Independente do RevenueClosing (faturamento): aqui o gestor sinaliza que toda
+/// a equipe alocada lancou e teve as horas APROVADAS no mes, disparando a
+/// notificacao ao DP. `consultantsSnapshot` congela a lista de consultores
+/// (nome/horas) no instante do fechamento, para o e-mail refletir o estado real
+/// mesmo que a alocacao mude depois. closedBy/reopenedBy guardam apenas o id
+/// (sem relacao, como MonthlyClosing); o nome e resolvido na leitura.
+model OperationClosing {
+  id                  String                 @id @default(cuid())
+  projectId           String
+  project             Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  month               Int
+  year                Int
+  status              OperationClosingStatus @default(OPEN)
+  closedByUserId      String?
+  closedAt            DateTime?
+  reopenedByUserId    String?
+  reopenedAt          DateTime?
+  notifiedAt          DateTime?
+  consultantsSnapshot Json?
+  notes               String?
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+
+  @@unique([projectId, month, year])
+  @@index([status, year, month])
+}
+
 model RevenueClosing {
   id               String               @id @default(cuid())
   clientId         String
@@ -2169,6 +2278,7 @@ enum NotificationEvent {
   PROJECT_CREATED // 6.1 cadastro de novo projeto
   INVOICING_OVERDUE // 4.3/5.2 faturamento nao realizado
   COMMERCIAL_CONTRACT_MISSING // 6.2 contrato comercial ausente
+  OPERATION_CLOSED // fechamento operacional do projeto para o DP
 }
 
 /// Nivel de agregacao em que a regra dispara.

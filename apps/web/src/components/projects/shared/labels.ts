@@ -4,6 +4,7 @@ import type {
   BillingPeriodicity,
   BillingRoundingRule,
   OverageTreatment,
+  OvertimeAppliesTo,
   SkillLevel,
 } from "@/lib/projects/types";
 
@@ -24,6 +25,13 @@ export const overageLabels: Record<OverageTreatment, string> = {
   BLOCK_AT_LIMIT: "Bloquear no limite",
   INCLUDE_FREE: "Incluir sem custo",
   CARRY_OVER: "Acumular p/ próximo período",
+};
+
+export const overtimeAppliesToLabels: Record<OvertimeAppliesTo, string> = {
+  NONE: "Não cobrar hora extra",
+  CLT: "Apenas CLT / CLT FLEX",
+  PJ: "Apenas PJ",
+  BOTH: "CLT e PJ",
 };
 
 export const adjustmentLabels: Record<AdjustmentIndex, string> = {

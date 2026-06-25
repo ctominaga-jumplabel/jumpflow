@@ -6,6 +6,7 @@ import {
   BellRing,
   BookOpen,
   Building2,
+  CalendarCheck,
   CalendarRange,
   ClipboardCheck,
   Clock,
@@ -98,6 +99,13 @@ export const primaryNavigation: NavItemDef[] = [
     permissionCode: "DESPESAS",
     icon: Receipt,
     description: "Lançamento de despesas, comprovantes e reembolsos.",
+  },
+  {
+    label: "Sobreaviso",
+    href: "/app/sobreaviso",
+    permissionCode: "SOBREAVISO",
+    icon: BellRing,
+    description: "Horas de sobreaviso com fator de remuneração e ok do responsável.",
   },
   {
     label: "Projetos",
@@ -321,6 +329,19 @@ export const primaryNavigation: NavItemDef[] = [
     permissionCode: "APROVACOES",
     icon: ClipboardCheck,
     description: "Fluxo de aprovação e reprovação de horas.",
+  },
+  {
+    // Fechamento Operacional para o DP: por mês, marca que toda a equipe do
+    // projeto lançou e teve as horas aprovadas, notificando o DP. Visível à
+    // gestão + FINANCE/PEOPLE; a marcação é enforced no servidor
+    // (OPERATION_CLOSING_WRITE_ROLES). Discoverability, não a fronteira.
+    label: "Fechamento Operacional",
+    href: "/app/operacao/fechamento",
+    permissionCode: "OPERACAO_FECHAMENTO",
+    icon: CalendarCheck,
+    description:
+      "Fechamento de horas do mês por projeto para o Departamento Pessoal.",
+    requiredRoles: ["ADMIN", "AREA_MANAGER", "PROJECT_MANAGER", "FINANCE", "PEOPLE"],
   },
   {
     label: "Relatórios",

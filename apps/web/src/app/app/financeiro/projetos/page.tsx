@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ProjectBillingView } from "@/components/financial/ProjectBillingView";
+import { MarginPanel } from "@/components/financial/MarginPanel";
 import { requireRole } from "@/lib/auth/guards";
 import { FINANCIAL_ROLES } from "@/lib/auth/route-permissions";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { listBillingTypes } from "@/lib/db/clients";
 import { listProjects } from "@/lib/db/projects";
+import { listProjectMargins } from "@/lib/db/margin";
 import type { ProjectBillingTypeOption } from "@/lib/projects/types";
 import { demoProjects } from "@/lib/projects/mock-data";
 
@@ -16,12 +18,14 @@ export default async function FinanceiroProjetosPage() {
   await requireRole(FINANCIAL_ROLES);
 
   const databaseReady = isDatabaseConfigured();
-  const [projects, billingTypeItems] = databaseReady
+  const today = new Date().toISOString().slice(0, 10);
+  const [projects, billingTypeItems, margins] = databaseReady
     ? await Promise.all([
         listProjects({ includeFinancials: true }),
         listBillingTypes(),
+        listProjectMargins(),
       ])
-    : [demoProjects, []];
+    : [demoProjects, [], []];
 
   const billingTypes: ProjectBillingTypeOption[] = (
     billingTypeItems as {
@@ -46,6 +50,7 @@ export default async function FinanceiroProjetosPage() {
         projects={projects}
         billingTypes={billingTypes}
       />
+      {databaseReady ? <MarginPanel today={today} projects={margins} /> : null}
     </div>
   );
 }

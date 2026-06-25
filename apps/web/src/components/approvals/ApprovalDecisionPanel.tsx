@@ -81,6 +81,7 @@ export function ApprovalDecisionPanel({
 
   return (
     <SectionPanel
+      id="aprovacoes-acoes"
       title="Decisão"
       description={`${item.consultantName} · ${item.period}`}
       action={<ApprovalStatusBadge status={item.status} />}

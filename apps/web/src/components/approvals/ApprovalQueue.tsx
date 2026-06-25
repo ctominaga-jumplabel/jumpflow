@@ -754,6 +754,7 @@ export function ApprovalQueue({
           ) : null}
 
           <SectionPanel
+            id="aprovacoes-fila"
             title={tab === "PENDING" ? "Fila de aprovação" : "Decisões recentes"}
             description={
               tab === "PENDING"

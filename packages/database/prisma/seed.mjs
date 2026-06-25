@@ -1070,6 +1070,11 @@ const PERMISSION_CATALOG = [
   { code: "DESPESAS", name: "Despesas", module: "Despesas", sort: 20, view: ALL_ROLES, create: ALL_ROLES, edit: ALL_ROLES, del: ["FINANCE"] },
   { code: "DESPESAS_PAGAMENTO", name: "Status de pagamento", module: "Despesas", parent: "DESPESAS", sort: 21, view: FINANCIAL, edit: FINANCIAL },
 
+  { code: "SOBREAVISO", name: "Sobreaviso", module: "Operação", sort: 22, view: ALL_ROLES, create: ALL_ROLES, edit: APPROVALS, del: ALL_ROLES },
+  // Fechamento Operacional para o DP: leitura para gestão + FINANCE/PEOPLE; a
+  // marcação/reabertura (edit) é dos papéis que tocam a operação do projeto.
+  { code: "OPERACAO_FECHAMENTO", name: "Fechamento Operacional", module: "Operação", sort: 24, view: ["AREA_MANAGER", "PROJECT_MANAGER", "FINANCE", "PEOPLE"], edit: ["AREA_MANAGER", "PROJECT_MANAGER"] },
+
   { code: "PROJETOS", name: "Projetos", module: "Projetos", sort: 30, view: ALL_ROLES, create: PROJECT_WRITE, edit: PROJECT_WRITE, del: ["AREA_MANAGER"] },
   { code: "PROJETOS_CADASTRO", name: "Cadastro", module: "Projetos", parent: "PROJETOS", sort: 31, view: ALL_ROLES, create: PROJECT_WRITE, edit: PROJECT_WRITE, del: ["AREA_MANAGER"] },
   { code: "PROJETOS_EQUIPES", name: "Equipes / Alocação", module: "Projetos", parent: "PROJETOS", sort: 32, view: ALL_ROLES, create: PROJECT_WRITE, edit: PROJECT_WRITE, del: PROJECT_WRITE },
@@ -1109,6 +1114,7 @@ const PERMISSION_CATALOG = [
 
   { code: "ADMIN_ACESSOS", name: "Acessos (usuários e convites)", module: "Administração", sort: 120, view: ADMIN_ONLY, create: ADMIN_ONLY, edit: ADMIN_ONLY, del: ADMIN_ONLY },
   { code: "CONFIGURACOES_PERMISSOES", name: "Matriz de Permissões", module: "Administração", sort: 121, view: ADMIN_ONLY, edit: ADMIN_ONLY },
+  { code: "CONFIGURACOES_NOTIFICACOES", name: "Regras de Notificação", module: "Administração", sort: 122, view: ADMIN_ONLY, create: ADMIN_ONLY, edit: ADMIN_ONLY, del: ADMIN_ONLY },
 ];
 
 async function seedPermissions() {
@@ -1173,10 +1179,42 @@ async function seedRolePermissions() {
   console.log(`Seeded ${cells} role-permission cells.`);
 }
 
+// Default notification rules shipped with the platform. Idempotent: only
+// creates a rule for an event when none exists yet, so admin edits in
+// /app/admin/notificacoes are never overwritten. The Teams channel needs a
+// per-environment webhook URL (a secret), so it is NOT seeded — add it via the
+// admin UI as a STATIC recipient on the TEAMS channel.
+async function seedNotificationDefaults() {
+  const existing = await prisma.notificationRule.findFirst({
+    where: { event: "OPERATION_CLOSED" },
+    select: { id: true },
+  });
+  if (existing) {
+    console.log("Notification rule OPERATION_CLOSED already present — skipping.");
+    return;
+  }
+  await prisma.notificationRule.create({
+    data: {
+      event: "OPERATION_CLOSED",
+      scope: "PROJECT",
+      channel: "EMAIL",
+      groupByRecipient: true,
+      active: true,
+      recipients: {
+        create: [
+          { type: "ROLE", channel: "EMAIL", address: "PEOPLE", name: "DP / People" },
+        ],
+      },
+    },
+  });
+  console.log("Seeded default notification rule: OPERATION_CLOSED → ROLE PEOPLE (EMAIL).");
+}
+
 async function main() {
   await seedRoles();
   await seedPermissions();
   await seedRolePermissions();
+  await seedNotificationDefaults();
   await seedBootstrapAdmin();
   await seedBillingTypes();
   await seedDevUser();

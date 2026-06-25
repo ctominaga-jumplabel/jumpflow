@@ -29,6 +29,9 @@ export const CLIENT_LOGOS_BUCKET = "client-logos";
 /** Private bucket for consultant documents (created via devops, never public). */
 export const CONSULTANT_DOCUMENTS_BUCKET = "consultant-documents";
 
+/** Private bucket for on-call ("sobreaviso") approval attachments. */
+export const ONCALL_APPROVALS_BUCKET = "oncall-approvals";
+
 /**
  * Storage is configured only when BOTH envs are present. These envs do not
  * exist yet in any environment — callers must degrade honestly (NO_STORAGE),
@@ -70,4 +73,9 @@ export function getClientLogoStorageProvider(): StorageProvider | null {
 /** Convenience resolver for the consultant-documents bucket. */
 export function getConsultantDocumentStorageProvider(): StorageProvider | null {
   return getStorageProvider(CONSULTANT_DOCUMENTS_BUCKET);
+}
+
+/** Convenience resolver for the on-call approvals bucket. */
+export function getOnCallAttachmentStorageProvider(): StorageProvider | null {
+  return getStorageProvider(ONCALL_APPROVALS_BUCKET);
 }

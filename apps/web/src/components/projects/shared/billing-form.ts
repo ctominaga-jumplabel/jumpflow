@@ -30,6 +30,11 @@ export function billingConfigToForm(
     closingDay: c?.closingDay,
     dueDay: c?.dueDay,
     requireApproval: c?.requireApproval ?? true,
+    overtimeAppliesTo: c?.overtimeAppliesTo ?? "NONE",
+    overtimeBillingPct: c?.overtimeBillingPct,
+    overtimeExcessHours: c?.overtimeExcessHours,
+    overtimeExcessRate: c?.overtimeExcessRate,
+    billDuringVacation: c?.billDuringVacation ?? true,
     notes: c?.notes ?? "",
   };
 }
@@ -57,6 +62,11 @@ export function formToBillingConfigItem(
     closingDay: form.closingDay,
     dueDay: form.dueDay,
     requireApproval: form.requireApproval,
+    overtimeAppliesTo: form.overtimeAppliesTo,
+    overtimeBillingPct: form.overtimeBillingPct,
+    overtimeExcessHours: form.overtimeExcessHours,
+    overtimeExcessRate: form.overtimeExcessRate,
+    billDuringVacation: form.billDuringVacation,
     notes: form.notes,
   };
 }

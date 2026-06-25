@@ -170,6 +170,21 @@ cadastrar as regras pela tela.
 
 Testes: `emit.test.ts` (resolução de ROLE, idempotência, no-rule, sem DB) + `dispatch.test.ts`. 8 verdes.
 
+## 9. Onda 3 — alerta de hora extra (item 3.3, implementado)
+
+`lib/automation/overtime-alert.ts` + job `/api/jobs/overtime-alert` (cron mensal, dia 1 às 13:00 UTC,
+default = mês anterior). Agrega HE de `ConsultantHourBankEntry` (kind OVERTIME) por consultor,
+separa por vínculo (CLT/CLT_FLEX vs PJ) e emite `OVERTIME_ALERT` pelo motor — destinatários/canal
+vêm das regras (`/app/admin/notificacoes`). Idempotente por competência. Template
+`buildAlertaHoraExtraEmail`. Aggregation pura testada (`overtime-alert.test.ts`).
+
+Botão **"Apuração"** (apuração por consultor ao cliente) adicionado na tabela de fechamento mensal
+(status CLOSED/INVOICED) → `sendClientBillingSummary`.
+
+**Restante da Onda 3 (pendente — exige modelagem):** 3.1 Sobreaviso (`OnCallEntry`), 3.2 % de HE por
+vínculo + cobrança de excedente, 3.4 anexo "ok do responsável" + exibir exceções na liberação,
+3.5 cobrança em férias.
+
 ## 7. Gate de deploy
 
 A migration `20260622120000_notification_engine` **ainda não foi aplicada** (esta máquina não tem

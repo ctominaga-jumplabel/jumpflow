@@ -10,6 +10,7 @@ import {
   Lock,
   Mail,
   RotateCw,
+  Users,
 } from "lucide-react";
 import { ActionButton } from "@/components/ui/ActionButton";
 import { DataTable, type DataTableColumn } from "@/components/ui/DataTable";
@@ -30,6 +31,7 @@ import {
   generateMonthlyRevenueClosings,
   generatePreInvoice,
   requestFiscalDocumentIssue,
+  sendClientBillingSummary,
   sendPreInvoiceEmail,
 } from "@/app/app/financeiro/actions";
 
@@ -155,6 +157,18 @@ export function MonthlyClosingTable({
     startTransition(async () => {
       const result = await advanceRevenueClosing({ id, action });
       if (result.ok) notify("success", "Status atualizado.");
+      else notify("warning", result.message);
+    });
+  }
+
+  function handleSendApuracao(id: string) {
+    if (isDemo) {
+      notify("info", "Envio de apuração local simulado.");
+      return;
+    }
+    startTransition(async () => {
+      const result = await sendClientBillingSummary({ closingId: id });
+      if (result.ok) notify("success", "Apuração por consultor enviada ao cliente.");
       else notify("warning", result.message);
     });
   }
@@ -314,6 +328,17 @@ export function MonthlyClosingTable({
               onClick={() => handleSendPreInvoice(r.id)}
             >
               Enviar cliente
+            </ActionButton>
+          ) : null}
+          {r.status === "CLOSED" || r.status === "INVOICED" ? (
+            <ActionButton
+              size="sm"
+              variant="secondary"
+              icon={Users}
+              disabled={isPending}
+              onClick={() => handleSendApuracao(r.id)}
+            >
+              Apuração
             </ActionButton>
           ) : null}
           {r.status === "CLOSED" && !r.fiscalDocument ? (

@@ -91,12 +91,14 @@ describe("updateProjectCommercial", () => {
       id: "prj-1",
       billingTypeId: "billing-monthly",
       budgetHours: 120,
+      commercialContractRef: "CT-2026-001",
     });
     expect(result.ok).toBe(true);
     expect(h.store.updates).toHaveLength(1);
     expect(h.store.updates[0].data).toEqual({
       billingTypeId: "billing-monthly",
       budgetHours: 120,
+      commercialContractRef: "CT-2026-001",
     });
     // Never touches operational fields nor the legacy hourly rate.
     expect(h.store.updates[0].data).not.toHaveProperty("billingHourlyRate");
@@ -110,6 +112,7 @@ describe("updateProjectCommercial", () => {
     expect(h.store.updates[0].data).toEqual({
       billingTypeId: null,
       budgetHours: null,
+      commercialContractRef: null,
     });
   });
 

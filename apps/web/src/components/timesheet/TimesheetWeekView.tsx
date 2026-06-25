@@ -1098,7 +1098,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div id="horas-periodo" className="flex flex-wrap items-center gap-2">
           <ActionButton
             variant="secondary"
             size="sm"
@@ -1136,6 +1136,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
             </ActionButton>
           ) : null}
           <ActionButton
+            id="horas-novo"
             variant="primary"
             size="sm"
             icon={Plus}
@@ -1149,7 +1150,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
 
       <FeedbackBanner message={feedback} />
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div id="horas-status" className="flex flex-wrap items-center gap-2">
         {(["DRAFT", "SUBMITTED", "APPROVED", "REJECTED", "CLOSED"] as const).map(
           (status) =>
             counts[status] > 0 ? (
@@ -1194,6 +1195,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
       />
 
       <SectionPanel
+        id="horas-grade"
         title="Lançamentos da semana"
         description="Cada lançamento salvo entra em aprovação automaticamente."
       >

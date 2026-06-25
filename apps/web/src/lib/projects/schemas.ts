@@ -78,6 +78,8 @@ export const projectCommercialSchema = z.object({
   id: entityId,
   billingTypeId: optionalCuid,
   budgetHours: optionalNumber,
+  // Sem transform: mantém a chave opcional no tipo inferido (form converte ""→undefined).
+  commercialContractRef: z.string().trim().max(120).optional(),
 });
 
 // Tipo de cobrança por projeto, editado pelo Financeiro junto da regra de
@@ -125,6 +127,12 @@ export const projectBillingConfigSchema = z.object({
   closingDay: optionalDayOfMonth,
   dueDay: optionalDayOfMonth,
   requireApproval: z.boolean(),
+  // Hora extra (3.2) e cobranca em ferias (3.5).
+  overtimeAppliesTo: z.enum(["NONE", "CLT", "PJ", "BOTH"]).default("NONE"),
+  overtimeBillingPct: optionalPercent,
+  overtimeExcessHours: optionalNumber,
+  overtimeExcessRate: optionalNumber,
+  billDuringVacation: z.boolean().default(true),
   notes: optionalText(500),
 });
 
@@ -222,6 +230,31 @@ export const saleRateInputSchema = z
 export const saleRateUpdateSchema = saleRateInputSchema.extend({
   id: entityId,
 });
+
+// Cost rate (what we PAY) for a consultant on a specific allocation, with
+// vigência. Allocation-scoped only (the allocation implies project+consultant).
+// Mirrors the sale-rate shape; FINANCIAL_ROLES only.
+export const costRateInputSchema = z
+  .object({
+    allocationId: entityId,
+    startsAt: z.string().trim().min(10).max(10),
+    endsAt: optionalDate,
+    hourlyCost: z.coerce.number().positive().max(999999.99),
+    currency: z.string().trim().length(3).default("BRL"),
+    note: optionalText(300),
+  })
+  .refine((value) => !value.endsAt || value.endsAt > value.startsAt, {
+    message: "Fim da vigencia deve ser maior que o inicio.",
+    path: ["endsAt"],
+  });
+
+export const costRateUpdateSchema = costRateInputSchema.extend({
+  id: entityId,
+});
+export const costRateRemoveSchema = z.object({ id: entityId });
+
+export type CostRateInput = z.infer<typeof costRateInputSchema>;
+export type CostRateUpdateInput = z.infer<typeof costRateUpdateSchema>;
 
 const skillLevel = z.enum(["BASIC", "INTERMEDIATE", "ADVANCED", "SPECIALIST"]);
 

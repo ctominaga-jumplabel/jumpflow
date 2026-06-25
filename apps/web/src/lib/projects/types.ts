@@ -106,8 +106,15 @@ export interface ProjectBillingConfigItem {
   closingDay?: number;
   dueDay?: number;
   requireApproval: boolean;
+  overtimeAppliesTo: OvertimeAppliesTo;
+  overtimeBillingPct?: number;
+  overtimeExcessHours?: number;
+  overtimeExcessRate?: number;
+  billDuringVacation: boolean;
   notes?: string;
 }
+
+export type OvertimeAppliesTo = "NONE" | "CLT" | "PJ" | "BOTH";
 
 export interface ProjectItem {
   id: string;
@@ -127,6 +134,7 @@ export interface ProjectItem {
   billingHourlyRate?: number;
   budgetHours?: number;
   costCenter?: string;
+  commercialContractRef?: string;
   consumedHours: number;
   allocatedConsultants: number;
   allocations: ProjectAllocationItem[];

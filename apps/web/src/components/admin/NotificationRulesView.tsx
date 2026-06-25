@@ -24,6 +24,7 @@ const EVENT_LABELS: Record<NotificationEventKey, string> = {
   PROJECT_CREATED: "Novo projeto",
   INVOICING_OVERDUE: "Faturamento pendente",
   COMMERCIAL_CONTRACT_MISSING: "Contrato ausente",
+  OPERATION_CLOSED: "Fechamento operacional (DP)",
 };
 const EVENTS = Object.keys(EVENT_LABELS) as NotificationEventKey[];
 const SCOPES: NotificationScopeKey[] = ["GLOBAL", "PROJECT"];

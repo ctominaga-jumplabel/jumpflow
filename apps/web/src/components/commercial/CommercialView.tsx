@@ -99,6 +99,7 @@ export function CommercialView({
     projectId: string,
     billingTypeId: string | undefined,
     budgetHours: number | undefined,
+    commercialContractRef: string | undefined,
   ) {
     if (mode === "demo") {
       const billingType = billingTypes.find((type) => type.id === billingTypeId);
@@ -111,6 +112,7 @@ export function CommercialView({
                 billingTypeName: billingType?.name,
                 billingChargeType: billingType?.chargeType,
                 budgetHours,
+                commercialContractRef,
               }
             : project,
         ),
@@ -123,6 +125,7 @@ export function CommercialView({
         id: projectId,
         billingTypeId,
         budgetHours,
+        commercialContractRef,
       });
       setFeedback(result.ok ? "Dados comerciais salvos." : result.message);
     });
@@ -378,6 +381,7 @@ function PricingModal({
     projectId: string,
     billingTypeId: string | undefined,
     budgetHours: number | undefined,
+    commercialContractRef: string | undefined,
   ) => void;
   onAddSaleRate: (value: SaleRateInput) => void;
   onEditSaleRate: (id: string, value: SaleRateInput) => void;
@@ -385,6 +389,9 @@ function PricingModal({
   const [billingTypeId, setBillingTypeId] = useState(project.billingTypeId ?? "");
   const [budgetHours, setBudgetHours] = useState<number | undefined>(
     project.budgetHours,
+  );
+  const [contractRef, setContractRef] = useState(
+    project.commercialContractRef ?? "",
   );
   const [rate, setRate] = useState<SaleRateInput | null>(null);
   // When set, the sale-rate modal edits this existing rate; null = creating.
@@ -508,6 +515,16 @@ function PricingModal({
               value={budgetHours}
               onChange={setBudgetHours}
             />
+            <label className="space-y-1 text-sm font-medium text-medium md:col-span-2">
+              Contrato comercial (referência)
+              <input
+                type="text"
+                value={contractRef}
+                onChange={(event) => setContractRef(event.target.value)}
+                placeholder="Nº/identificador do contrato (vazio = sem contrato)"
+                className={fieldClass()}
+              />
+            </label>
           </form>
           <div className="flex justify-end">
             <ActionButton
@@ -518,6 +535,7 @@ function PricingModal({
                   project.id,
                   billingTypeId || undefined,
                   budgetHours,
+                  contractRef.trim() || undefined,
                 )
               }
             >

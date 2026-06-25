@@ -42,6 +42,11 @@ type ProjectBillingConfigRow = {
   closingDay: number | null;
   dueDay: number | null;
   requireApproval: boolean;
+  overtimeAppliesTo: string;
+  overtimeBillingPct: Prisma.Decimal | null;
+  overtimeExcessHours: Prisma.Decimal | null;
+  overtimeExcessRate: Prisma.Decimal | null;
+  billDuringVacation: boolean;
   notes: string | null;
 };
 
@@ -70,6 +75,12 @@ function mapBillingConfig(
     closingDay: row.closingDay ?? undefined,
     dueDay: row.dueDay ?? undefined,
     requireApproval: row.requireApproval,
+    overtimeAppliesTo:
+      row.overtimeAppliesTo as ProjectBillingConfigItem["overtimeAppliesTo"],
+    overtimeBillingPct: decimalToNumber(row.overtimeBillingPct),
+    overtimeExcessHours: decimalToNumber(row.overtimeExcessHours),
+    overtimeExcessRate: decimalToNumber(row.overtimeExcessRate),
+    billDuringVacation: row.billDuringVacation,
     notes: row.notes ?? undefined,
   };
 }
@@ -312,6 +323,7 @@ export async function listProjects(options?: {
       // Centro de custo é um dado operacional (não um valor financeiro
       // sensível), então é retornado a qualquer perfil que veja o projeto.
       costCenter: row.costCenter ?? undefined,
+      commercialContractRef: row.commercialContractRef ?? undefined,
       consumedHours,
       allocatedConsultants: allocations.filter((item) => item.status === "ACTIVE")
         .length,

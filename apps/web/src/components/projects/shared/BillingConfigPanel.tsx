@@ -12,6 +12,7 @@ import {
   adjustmentLabels,
   billingRoundingLabels,
   overageLabels,
+  overtimeAppliesToLabels,
   periodicityLabels,
 } from "./labels";
 
@@ -169,6 +170,51 @@ export function BillingConfigPanel({
           disabled={readOnly}
           onChange={(withholdingPct) => onChange({ ...value, withholdingPct })}
         />
+
+        {groupTitle("Hora extra e férias")}
+        <EnumSelect
+          label="Cobrar hora extra para"
+          value={value.overtimeAppliesTo}
+          options={overtimeAppliesToLabels}
+          disabled={readOnly}
+          onChange={(overtimeAppliesTo) =>
+            onChange({ ...value, overtimeAppliesTo })
+          }
+        />
+        <NumberField
+          label="% sobre a hora extra"
+          value={value.overtimeBillingPct}
+          disabled={readOnly}
+          onChange={(overtimeBillingPct) =>
+            onChange({ ...value, overtimeBillingPct })
+          }
+        />
+        <NumberField
+          label="Limite de HE antes do excedente (h)"
+          value={value.overtimeExcessHours}
+          disabled={readOnly}
+          onChange={(overtimeExcessHours) =>
+            onChange({ ...value, overtimeExcessHours })
+          }
+        />
+        <NumberField
+          label="Valor por hora extra excedente (R$)"
+          value={value.overtimeExcessRate}
+          disabled={readOnly}
+          onChange={(overtimeExcessRate) =>
+            onChange({ ...value, overtimeExcessRate })
+          }
+        />
+        <div className="md:col-span-2">
+          <CheckboxField
+            label="Cobrar o cliente durante as férias do consultor"
+            checked={value.billDuringVacation}
+            disabled={readOnly}
+            onChange={(billDuringVacation) =>
+              onChange({ ...value, billDuringVacation })
+            }
+          />
+        </div>
 
         {groupTitle("Aprovação e observações")}
         <div className="md:col-span-2">

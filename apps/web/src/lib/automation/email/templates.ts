@@ -162,7 +162,8 @@ export function buildApuracaoClienteEmail(
 export interface HoraExtraAlertLine {
   consultantName: string;
   contractType: "CLT" | "PJ" | "CLT_FLEX";
-  projectName: string;
+  /** Optional: hour-bank overtime has no project; per-entry sources may set it. */
+  projectName?: string;
   overtimeHours: number;
 }
 
@@ -177,17 +178,25 @@ export function buildAlertaHoraExtraEmail(input: {
   const section = (label: string, lines: HoraExtraAlertLine[]): EmailBlock[] => {
     if (lines.length === 0) return [];
     const total = lines.reduce((s, l) => s + l.overtimeHours, 0);
+    const withProject = lines.some((l) => l.projectName);
+    const table = withProject
+      ? dataTable(
+          ["Consultor", "Projeto", "Horas extras"],
+          lines.map((l) => [
+            l.consultantName,
+            l.projectName ?? "—",
+            formatHours(l.overtimeHours),
+          ]),
+          { alignRight: [2] },
+        )
+      : dataTable(
+          ["Consultor", "Horas extras"],
+          lines.map((l) => [l.consultantName, formatHours(l.overtimeHours)]),
+          { alignRight: [1] },
+        );
     return [
       heading(label),
-      dataTable(
-        ["Consultor", "Projeto", "Horas extras"],
-        lines.map((l) => [
-          l.consultantName,
-          l.projectName,
-          formatHours(l.overtimeHours),
-        ]),
-        { alignRight: [2] },
-      ),
+      table,
       keyValueList([{ label: `Subtotal ${label}`, value: formatHours(total) }]),
     ];
   };
@@ -324,6 +333,70 @@ export function buildFaturamentoPendenteEmail(input: {
 }
 
 // ---------------------------------------------------------------------------
+// Fechamento operacional para o DP — toda a equipe lançou e teve as horas
+// aprovadas no mês, liberando o Departamento Pessoal para folha/pagamento.
+// ---------------------------------------------------------------------------
+export interface FechamentoOperacaoLine {
+  consultantName: string;
+  hours: number;
+}
+
+export function buildFechamentoOperacaoEmail(input: {
+  recipientName: string;
+  projectName: string;
+  clientName: string;
+  periodLabel: string; // ex: "junho/2026"
+  lines: FechamentoOperacaoLine[];
+  totalHours: number;
+  closedByName?: string;
+  reviewUrl?: string;
+}): BuiltEmail {
+  const blocks: EmailBlock[] = [
+    paragraph(`Olá, ${input.recipientName}.`),
+    paragraph(
+      `A operação do projeto ${input.projectName} (${input.clientName}) referente a ${input.periodLabel} foi fechada: todos os consultores alocados lançaram e tiveram as horas aprovadas. O DP já pode seguir com folha e pagamento.`,
+    ),
+    keyValueList([
+      { label: "Projeto", value: input.projectName },
+      { label: "Cliente", value: input.clientName },
+      { label: "Período", value: input.periodLabel },
+      { label: "Consultores", value: String(input.lines.length) },
+      { label: "Total de horas", value: formatHours(input.totalHours) },
+      ...(input.closedByName
+        ? [{ label: "Fechado por", value: input.closedByName }]
+        : []),
+    ]),
+  ];
+
+  if (input.lines.length > 0) {
+    blocks.push(
+      dataTable(
+        ["Consultor", "Horas"],
+        input.lines.map((l) => [l.consultantName, formatHours(l.hours)]),
+        { alignRight: [1] },
+      ),
+    );
+  }
+
+  if (input.reviewUrl) {
+    blocks.push(button("Abrir fechamento operacional", input.reviewUrl));
+  }
+
+  const { html, text } = renderEmail({
+    preheader: `Operação fechada — ${input.projectName} (${input.periodLabel})`,
+    title: "Operação fechada para o DP",
+    blocks,
+    signoff: `Equipe ${app()}`,
+  });
+
+  return {
+    subject: `${app()} · Operação fechada — ${input.projectName} (${input.periodLabel})`,
+    html,
+    text,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Tema 6.2 — Alerta de contrato comercial ausente
 // ---------------------------------------------------------------------------
 export function buildContratoAusenteEmail(input: {
@@ -355,6 +428,42 @@ export function buildContratoAusenteEmail(input: {
 
   return {
     subject: `${app()} · Contrato comercial ausente — ${input.projectName}`,
+    html,
+    text,
+  };
+}
+
+/** Sweep variant: lista de projetos ativos sem contrato comercial vinculado. */
+export function buildContratosAusentesEmail(input: {
+  recipientName: string;
+  projects: Array<{ projectName: string; clientName: string }>;
+  appUrl?: string;
+}): BuiltEmail {
+  const blocks: EmailBlock[] = [
+    paragraph(`Olá, ${input.recipientName}.`),
+    callout(
+      `Existem ${input.projects.length} projeto(s) ativo(s) sem contrato comercial vinculado.`,
+      "warning",
+    ),
+    dataTable(
+      ["Projeto", "Cliente"],
+      input.projects.map((p) => [p.projectName, p.clientName]),
+    ),
+    paragraph(
+      `Vincule o contrato comercial de cada projeto para liberar faturamento com a base de cobrança correta.`,
+    ),
+  ];
+  if (input.appUrl) blocks.push(button("Abrir comercial", input.appUrl));
+
+  const { html, text } = renderEmail({
+    preheader: `Contratos comerciais ausentes (${input.projects.length})`,
+    title: "Contratos comerciais ausentes",
+    blocks,
+    signoff: `Equipe ${app()}`,
+  });
+
+  return {
+    subject: `${app()} · Contratos comerciais ausentes (${input.projects.length})`,
     html,
     text,
   };

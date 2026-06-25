@@ -13,7 +13,8 @@ export type NotificationEventKey =
   | "OVERTIME_ALERT"
   | "PROJECT_CREATED"
   | "INVOICING_OVERDUE"
-  | "COMMERCIAL_CONTRACT_MISSING";
+  | "COMMERCIAL_CONTRACT_MISSING"
+  | "OPERATION_CLOSED";
 
 export type NotificationScopeKey = "GLOBAL" | "PROJECT" | "ALLOCATION";
 export type NotificationChannelKey = "EMAIL" | "TEAMS";

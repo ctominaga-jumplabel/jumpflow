@@ -6,6 +6,10 @@ import { z, type ZodType } from "zod";
 import type { ActionResult, ErrorCode } from "@/lib/actions/result";
 import { requireRole } from "@/lib/auth/guards";
 import { FINANCIAL_ROLES } from "@/lib/auth/route-permissions";
+import {
+  notifyClientBillingSummary,
+  notifyHoursReleased,
+} from "@/lib/automation/notifications/events";
 import { buildAuditEventData } from "@/lib/db/audit";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import {
@@ -196,8 +200,33 @@ export async function advanceRevenueClosing(input: {
       });
     });
 
+    // Liberação: notify on CLOSE (READY_TO_CLOSE → CLOSED). Best-effort.
+    if (parsed.action === "CLOSE") {
+      await notifyHoursReleased(parsed.id);
+    }
+
     revalidatePath(FINANCEIRO_PATH);
     return { ok: true, data: { id: parsed.id, status: transition.next } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/**
+ * Send the per-consultant billing summary (apuração) to the client contact.
+ * Explicit, Finance-triggered action (not automatic on a status change) since
+ * it is an outward, client-facing email. Idempotent per closing + recipient.
+ */
+export async function sendClientBillingSummary(input: {
+  closingId: string;
+}): Promise<ActionResult<{ ok: true }>> {
+  try {
+    ensureDatabase();
+    await requireRole(FINANCIAL_ROLES);
+    const parsed = parseInput(closingIdInputSchema, input);
+    await notifyClientBillingSummary(parsed.closingId);
+    revalidatePath(FINANCEIRO_PATH);
+    return { ok: true, data: { ok: true } };
   } catch (error) {
     return toFailure(error);
   }

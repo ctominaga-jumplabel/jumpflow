@@ -11,6 +11,7 @@ import {
   PROJECT_WRITE_ROLES,
   SALE_RATE_ROLES,
 } from "@/lib/auth/route-permissions";
+import { notifyProjectCreated } from "@/lib/automation/notifications/events";
 import { recordAuditEvent } from "@/lib/db/audit";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { resolveDbUser } from "@/lib/db/users";
@@ -34,6 +35,11 @@ import {
   setProjectAutoApprovalActiveSchema,
   saleRateInputSchema,
   saleRateUpdateSchema,
+  costRateInputSchema,
+  costRateUpdateSchema,
+  costRateRemoveSchema,
+  type CostRateInput,
+  type CostRateUpdateInput,
   type AllocationInput,
   type AllocationRemoveInput,
   type AllocationSkillInput,
@@ -53,7 +59,11 @@ import {
   type SaleRateInput,
   type SaleRateUpdateInput,
 } from "@/lib/projects/schemas";
-import { findOverlappingSaleRate, type SaleRateRange } from "@/lib/projects/rates";
+import {
+  findOverlappingSaleRate,
+  rangesOverlap,
+  type SaleRateRange,
+} from "@/lib/projects/rates";
 
 // A single Project is the source of truth behind three surfaces (Operação,
 // Comercial, Financeiro). A change in any one must refresh all three so none
@@ -307,6 +317,8 @@ export async function createProject(
     const data = projectData(parsed, canWriteCommercials);
     const project = await prisma.project.create({ data });
     await audit("Project", project.id, "PROJECT_CREATED", null, data);
+    // Best-effort notification (Financeiro + comercial). Never throws.
+    await notifyProjectCreated(project.id);
     revalidateProjectViews();
     return { ok: true, data: { id: project.id } };
   } catch (error) {
@@ -349,12 +361,13 @@ export async function updateProjectCommercial(
     const parsed = parseInput(projectCommercialSchema, input);
     const previous = await prisma.project.findUnique({
       where: { id: parsed.id },
-      select: { billingTypeId: true, budgetHours: true },
+      select: { billingTypeId: true, budgetHours: true, commercialContractRef: true },
     });
     if (!previous) throw new ActionError("NOT_FOUND", "Projeto nao encontrado.");
     const data = {
       billingTypeId: parsed.billingTypeId ?? null,
       budgetHours: parsed.budgetHours ?? null,
+      commercialContractRef: parsed.commercialContractRef ?? null,
     };
     await prisma.project.update({ where: { id: parsed.id }, data });
     await audit("Project", parsed.id, "PROJECT_UPDATED", previous, data);
@@ -416,6 +429,11 @@ function billingConfigData(
     closingDay: input.closingDay ?? null,
     dueDay: input.dueDay ?? null,
     requireApproval: input.requireApproval,
+    overtimeAppliesTo: input.overtimeAppliesTo,
+    overtimeBillingPct: input.overtimeBillingPct ?? null,
+    overtimeExcessHours: input.overtimeExcessHours ?? null,
+    overtimeExcessRate: input.overtimeExcessRate ?? null,
+    billDuringVacation: input.billDuringVacation,
     notes: input.notes ?? null,
   };
 }
@@ -936,6 +954,132 @@ export async function updateSaleRate(
     await audit("ProjectSaleRate", parsed.id, "PROJECT_SALE_RATE_UPDATED", previous, parsed);
     revalidateProjectViews();
     return { ok: true, data: { id: parsed.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+// ── Custo por alocação (margem/PR) ───────────────────────────────────────
+// Valor que PAGAMOS pelo consultor numa alocação, com vigência. Distinto do
+// valor de venda (ProjectSaleRate). Editado só pelo Financeiro (FINANCIAL_ROLES).
+
+/** Load the allocation a cost rate targets and return its consultant/project. */
+async function loadAllocationForCostRate(
+  tx: Prisma.TransactionClient,
+  allocationId: string,
+): Promise<{ consultantId: string; projectId: string }> {
+  const allocation = await tx.allocation.findUnique({
+    where: { id: allocationId },
+    select: { consultantId: true, projectId: true },
+  });
+  if (!allocation) {
+    throw new ActionError("NOT_FOUND", "Alocação não encontrada.");
+  }
+  return allocation;
+}
+
+async function ensureNoCostRateOverlap(
+  tx: Prisma.TransactionClient,
+  allocationId: string,
+  candidate: { id?: string; startsAt: string; endsAt?: string | null },
+): Promise<void> {
+  const existing = await tx.consultantAllocationCostRate.findMany({
+    where: { allocationId },
+    select: { id: true, startsAt: true, endsAt: true },
+  });
+  const overlap = existing.some((row) => {
+    if (candidate.id && row.id === candidate.id) return false;
+    return rangesOverlap(
+      { startsAt: dateToIso(row.startsAt), endsAt: row.endsAt ? dateToIso(row.endsAt) : null },
+      { startsAt: candidate.startsAt, endsAt: candidate.endsAt ?? null },
+    );
+  });
+  if (overlap) {
+    throw new ActionError(
+      "INVALID_INPUT",
+      "Já existe custo vigente para esta alocação no período.",
+    );
+  }
+}
+
+export async function createCostRate(
+  input: CostRateInput,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(FINANCIAL_ROLES);
+    const parsed = parseInput(costRateInputSchema, input);
+    const created = await prisma.$transaction(async (tx) => {
+      const allocation = await loadAllocationForCostRate(tx, parsed.allocationId);
+      await ensureNoCostRateOverlap(tx, parsed.allocationId, parsed);
+      return tx.consultantAllocationCostRate.create({
+        data: {
+          consultantId: allocation.consultantId,
+          allocationId: parsed.allocationId,
+          startsAt: toDate(parsed.startsAt),
+          endsAt: parsed.endsAt ? toDate(parsed.endsAt) : null,
+          hourlyCost: parsed.hourlyCost,
+          currency: parsed.currency,
+          note: parsed.note,
+        },
+        select: { id: true },
+      });
+    });
+    await audit("ConsultantAllocationCostRate", created.id, "COST_RATE_CREATED", null, parsed);
+    revalidateProjectViews();
+    return { ok: true, data: created };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+export async function updateCostRate(
+  input: CostRateUpdateInput,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(FINANCIAL_ROLES);
+    const parsed = parseInput(costRateUpdateSchema, input);
+    const previous = await prisma.consultantAllocationCostRate.findUnique({
+      where: { id: parsed.id },
+    });
+    if (!previous) throw new ActionError("NOT_FOUND", "Custo não encontrado.");
+    await prisma.$transaction(async (tx) => {
+      await ensureNoCostRateOverlap(tx, parsed.allocationId, parsed);
+      await tx.consultantAllocationCostRate.update({
+        where: { id: parsed.id },
+        data: {
+          startsAt: toDate(parsed.startsAt),
+          endsAt: parsed.endsAt ? toDate(parsed.endsAt) : null,
+          hourlyCost: parsed.hourlyCost,
+          currency: parsed.currency,
+          note: parsed.note,
+        },
+      });
+    });
+    await audit("ConsultantAllocationCostRate", parsed.id, "COST_RATE_UPDATED", previous, parsed);
+    revalidateProjectViews();
+    return { ok: true, data: { id: parsed.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+export async function deleteCostRate(
+  input: { id: string },
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(FINANCIAL_ROLES);
+    const parsed = parseInput(costRateRemoveSchema, input);
+    const previous = await prisma.consultantAllocationCostRate.findUnique({
+      where: { id: parsed.id },
+    });
+    if (!previous) throw new ActionError("NOT_FOUND", "Custo não encontrado.");
+    await prisma.consultantAllocationCostRate.delete({ where: { id: parsed.id } });
+    await audit("ConsultantAllocationCostRate", parsed.id, "COST_RATE_DELETED", previous, null);
+    revalidateProjectViews();
+    return { ok: true, data: parsed };
   } catch (error) {
     return toFailure(error);
   }

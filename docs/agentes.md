@@ -281,6 +281,23 @@ Arquivos principais:
 - `apps/web/src/lib/skills/`
 - `packages/database/prisma/schema.prisma`.
 
+### `jump-nathalia-agent`
+
+Use para:
+
+- a Nathal.IA, companheira de trabalho 2D do JumpFlow;
+- niveis de presenca (icone vivo, assistente contextual, guia, celebrar);
+- motor proativo e sinais contextuais reais por tela;
+- expressoes, visemas, lip-sync e microanimacoes 2D;
+- camada de inteligencia local (FAQ/intent/knowledge) e seam de TTS/LLM.
+
+Arquivos principais:
+
+- `packages/character-nathalia/src/`
+- `apps/web/src/components/nathalia/`
+- `apps/web/src/lib/nathalia/`
+- `docs/nathalia/`
+
 ### `jump-legacy-portal-analyst`
 
 Use para:
@@ -549,6 +566,7 @@ Arquivos principais:
   ocorrencias, calendario, feedback assincrono ou offboarding.
 - O `jump-skills-intelligence-agent` deve ser chamado antes de mudancas em
   skills reais, sugestoes, catalogo ou validacao de competencias.
+- O `jump-nathalia-agent` deve ser chamado antes de mudancas na Nathal.IA: niveis de presenca, motor proativo/sinais, expressoes/visemas, microanimacoes ou a camada de inteligencia em `packages/character-nathalia`.
 - O `jump-legacy-portal-analyst` deve ser chamado quando a tarefa envolver comparacao com o portal antigo.
 - O `jump-operational-launcher-agent` deve ser chamado antes de alterar `/app` como tela inicial ou atalhos por perfil.
 - O `jump-product-owner` deve ser chamado quando houver duvida de escopo.

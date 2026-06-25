@@ -37,6 +37,30 @@ export const PROJECT_WRITE_ROLES: RoleName[] = [
 ];
 
 /**
+ * Roles that may MARK/REOPEN the operational closing for the DP (Fechamento
+ * Operacional). The decision: PROJECT_MANAGER/AREA_MANAGER/ADMIN own the
+ * operation; the financial RevenueClosing stays a separate axis (FINANCE).
+ */
+export const OPERATION_CLOSING_WRITE_ROLES: RoleName[] = [
+  "ADMIN",
+  "AREA_MANAGER",
+  "PROJECT_MANAGER",
+];
+
+/**
+ * Roles that may READ the operational closing screen. The writers plus the
+ * consumers of the signal: FINANCE (cross-check) and PEOPLE/DP (the audience of
+ * the notification, who track which projects are still pending).
+ */
+export const OPERATION_CLOSING_READ_ROLES: RoleName[] = [
+  "ADMIN",
+  "AREA_MANAGER",
+  "PROJECT_MANAGER",
+  "FINANCE",
+  "PEOPLE",
+];
+
+/**
  * Roles that own commercial sale values (ProjectSaleRate, tipo de cobrança,
  * budget) and may access the Comercial surface. Single source of truth shared
  * by the `/app/comercial` route guard and the sale-rate server actions.
@@ -192,6 +216,12 @@ export const routePermissions: RouteRule[] = [
   // Operational automation (auto-approval admin/observability). Management
   // only — PROJECT_MANAGER read-only access is deferred to a later round.
   { prefix: "/app/automacoes", access: ["ADMIN", "AREA_MANAGER"] },
+  // Fechamento Operacional para o DP: marca que toda a equipe do projeto lançou
+  // e teve as horas aprovadas no mês, notificando o DP. Leitura para gestão +
+  // FINANCE/PEOPLE; a marcação/reabertura é action-gated por
+  // OPERATION_CLOSING_WRITE_ROLES nas server actions. Eixo independente do
+  // financeiro. Regra específica antes da `/app` ampla.
+  { prefix: "/app/operacao", access: OPERATION_CLOSING_READ_ROLES },
   {
     // FINANCE participates in the expense approval chain (finance stage),
     // so it has access to the queue alongside the manager roles.
