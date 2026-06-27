@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { Lock, RotateCcw, Users } from "lucide-react";
+import Link from "next/link";
+import { ChevronRight, Lock, RotateCcw, Users } from "lucide-react";
 import { ActionButton } from "@/components/ui/ActionButton";
 import { DataTable, type DataTableColumn } from "@/components/ui/DataTable";
 import { FeedbackBanner, useFeedback } from "@/components/ui/Feedback";
@@ -12,6 +13,7 @@ import { formatHours } from "@/lib/format";
 import {
   consultantReadinessLabels,
   pendingAlert,
+  type ConsultantReadiness,
   type ConsultantReadinessState,
   type OperationClosingOverview,
   type OperationClosingRow,
@@ -40,6 +42,31 @@ export interface OperationClosingTableProps {
 function formatDate(iso: string | null): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("pt-BR");
+}
+
+/**
+ * Deep-link from a PENDING_REVIEW consultant to the approvals queue, pre-filtered
+ * on that consultant + project + client and status=PENDING. `kind=HOURS` opens
+ * the queue focused on hours (the operational closing is about hours, not
+ * expenses). The names must match the queue values exactly (it filters by
+ * clientName/projectName/consultantName) and are percent-encoded by
+ * URLSearchParams. No date window is sent on purpose: the queue's date filter
+ * compares the SUBMITTED date, which may fall outside the work month and could
+ * hide the very item we want to surface — consultant + project + PENDING already
+ * pinpoints it.
+ */
+function approvalDeepLink(
+  row: OperationClosingRow,
+  consultant: ConsultantReadiness,
+): string {
+  const params = new URLSearchParams({
+    kind: "HOURS",
+    status: "PENDING",
+    client: row.clientName,
+    project: row.projectName,
+    consultant: consultant.consultantName,
+  });
+  return `/app/aprovacoes?${params.toString()}`;
 }
 
 /**
@@ -271,22 +298,52 @@ export function OperationClosingTable({
             </p>
           ) : (
             <ul className="divide-y divide-border">
-              {detail.readiness.consultants.map((c) => (
-                <li
-                  key={c.consultantId}
-                  className="flex items-center justify-between gap-3 py-2"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-strong">
-                      {c.consultantName}
-                    </p>
-                    <p className="text-xs text-soft">{formatHours(c.hours)}</p>
-                  </div>
-                  <StatusBadge tone={readinessTone[c.state]}>
-                    {consultantReadinessLabels[c.state]}
-                  </StatusBadge>
-                </li>
-              ))}
+              {detail.readiness.consultants.map((c) => {
+                const meta = (
+                  <>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-strong">
+                        {c.consultantName}
+                      </p>
+                      <p className="text-xs text-soft">{formatHours(c.hours)}</p>
+                    </div>
+                    <StatusBadge tone={readinessTone[c.state]}>
+                      {consultantReadinessLabels[c.state]}
+                    </StatusBadge>
+                  </>
+                );
+
+                // Only "Aguardando aprovação" is actionable: it links straight
+                // to the approvals queue pre-filtered on this consultant +
+                // project, ready to Approve/Reject the month's hours.
+                if (c.state === "PENDING_REVIEW") {
+                  return (
+                    <li key={c.consultantId}>
+                      <Link
+                        href={approvalDeepLink(detail, c)}
+                        onClick={() => setDetail(null)}
+                        className="group flex items-center justify-between gap-3 rounded-md py-2 transition-colors hover:bg-surface-muted/60"
+                        title="Abrir nas Aprovações para aprovar ou reprovar as horas"
+                      >
+                        {meta}
+                        <ChevronRight
+                          aria-hidden="true"
+                          className="size-4 shrink-0 text-soft transition-transform group-hover:translate-x-0.5"
+                        />
+                      </Link>
+                    </li>
+                  );
+                }
+
+                return (
+                  <li
+                    key={c.consultantId}
+                    className="flex items-center justify-between gap-3 py-2"
+                  >
+                    {meta}
+                  </li>
+                );
+              })}
             </ul>
           )
         ) : null}

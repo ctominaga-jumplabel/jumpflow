@@ -85,10 +85,32 @@ function optionValues(items: ApprovalItem[], key: keyof ApprovalItem): string[] 
   ].sort((a, b) => a.localeCompare(b, "pt-BR"));
 }
 
+/**
+ * Optional seed for the filter state, used by deep-links (e.g. the operational
+ * closing sends consultant + project + status here). Names must match the queue
+ * values exactly (clientName/projectName/consultantName) for the filter to bind.
+ */
+export interface ApprovalQueueInitialFilters {
+  /** Kind tab (Horas/Despesas/Todos); unknown ⇒ "ALL". */
+  kind?: KindFilter;
+  status?: StatusFilter;
+  client?: string;
+  project?: string;
+  consultant?: string;
+  activity?: string;
+  startDate?: string;
+  endDate?: string;
+}
+
 export interface ApprovalQueueProps {
   items?: ApprovalItem[];
   /** Show the "no database" warning banner (demo mode). */
   demoBanner?: boolean;
+  /**
+   * Seeds the filter state on mount (deep-link). Absent ⇒ current behavior
+   * (no filters). Unknown statuses fall back to "ALL".
+   */
+  initialFilters?: ApprovalQueueInitialFilters;
   /**
    * Scoped client/consultant options (name → id) used to build the CSV export
    * link to the shared Relatorios endpoint. Present only in db mode; when
@@ -97,6 +119,39 @@ export interface ApprovalQueueProps {
   reportFilterOptions?: {
     clients: { id: string; name: string }[];
     consultants: { id: string; name: string }[];
+  };
+}
+
+const STATUS_VALUES: ReadonlySet<StatusFilter> = new Set(
+  STATUS_FILTERS.map((option) => option.value),
+);
+
+const KIND_VALUES: ReadonlySet<KindFilter> = new Set(
+  KIND_FILTERS.map((option) => option.value),
+);
+
+/** Seed the kind tab from a deep-link (unknown ⇒ "ALL"). */
+function resolveInitialKind(
+  seed: ApprovalQueueInitialFilters | undefined,
+): KindFilter {
+  return seed?.kind && KIND_VALUES.has(seed.kind) ? seed.kind : "ALL";
+}
+
+/** Build the initial filter state from a deep-link seed (falls back to empty). */
+function resolveInitialFilters(
+  seed: ApprovalQueueInitialFilters | undefined,
+): ApprovalFilters {
+  if (!seed) return emptyFilters;
+  const status =
+    seed.status && STATUS_VALUES.has(seed.status) ? seed.status : "ALL";
+  return {
+    status,
+    client: seed.client ?? "",
+    project: seed.project ?? "",
+    consultant: seed.consultant ?? "",
+    activity: seed.activity ?? "",
+    startDate: seed.startDate ?? "",
+    endDate: seed.endDate ?? "",
   };
 }
 
@@ -116,6 +171,7 @@ export interface ApprovalQueueProps {
 export function ApprovalQueue({
   items: seed = defaultItems,
   demoBanner = false,
+  initialFilters,
   reportFilterOptions,
 }: ApprovalQueueProps) {
   // Local decisions apply only to mock items; db items refresh via the server.
@@ -127,8 +183,12 @@ export function ApprovalQueue({
     >
   >({});
   const [tab, setTab] = useState<Tab>("PENDING");
-  const [kind, setKind] = useState<KindFilter>("ALL");
-  const [filters, setFilters] = useState<ApprovalFilters>(emptyFilters);
+  const [kind, setKind] = useState<KindFilter>(() =>
+    resolveInitialKind(initialFilters),
+  );
+  const [filters, setFilters] = useState<ApprovalFilters>(() =>
+    resolveInitialFilters(initialFilters),
+  );
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkComment, setBulkComment] = useState("");
   const { feedback, notify } = useFeedback();
