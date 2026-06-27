@@ -202,6 +202,22 @@ async function registerMigration() {
   );
 }
 
+// Safe query for the "before" snapshot: post-migration objects
+// (TimeEntryAttachment table, TimeEntry.multiplier column) do not exist yet on
+// the first run, so a raw query against them throws 42P01 (relation) / 42703
+// (column). We swallow only those "does not exist" errors and fall back, so the
+// before-report never blocks the DDL.
+async function safeQueryRow(sql, fallback) {
+  try {
+    const [row] = await prisma.$queryRawUnsafe(sql);
+    return row ?? fallback;
+  } catch (e) {
+    const code = e?.meta?.code ?? e?.code;
+    if (code === "42P01" || code === "42703") return fallback;
+    throw e;
+  }
+}
+
 async function report(label) {
   const [withProject] = await prisma.$queryRawUnsafe(
     `SELECT count(*)::int AS n FROM "OnCallEntry" WHERE "projectId" IS NOT NULL`,
@@ -212,16 +228,18 @@ async function report(label) {
   const [migratedEntries] = await prisma.$queryRawUnsafe(
     `SELECT count(*)::int AS n FROM "TimeEntry" WHERE "id" LIKE 'mig-oc-%'`,
   );
-  const [migratedAtt] = await prisma.$queryRawUnsafe(
+  const migratedAtt = await safeQueryRow(
     `SELECT count(*)::int AS n FROM "TimeEntryAttachment" WHERE "id" LIKE 'mig-ocatt-%'`,
+    { n: 0 },
   );
   const [onCallSum] = await prisma.$queryRawUnsafe(
     `SELECT COALESCE(SUM(round("hours" * "multiplier", 2)), 0)::float8 AS s
        FROM "OnCallEntry" WHERE "projectId" IS NOT NULL`,
   );
-  const [entrySum] = await prisma.$queryRawUnsafe(
+  const entrySum = await safeQueryRow(
     `SELECT COALESCE(SUM(round("hours" * "multiplier", 2)), 0)::float8 AS s
        FROM "TimeEntry" WHERE "id" LIKE 'mig-oc-%'`,
+    { s: 0 },
   );
   // M2: OnCallEntry WITH a project that produced NO TimeEntry. After a successful
   // apply this MUST be 0; any positive count means rows were silently dropped
