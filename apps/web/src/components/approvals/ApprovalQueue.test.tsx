@@ -113,6 +113,68 @@ describe("ApprovalQueue", () => {
     expect(await screen.findByText("10 pendentes")).toBeInTheDocument();
   });
 
+  it("seeds the filters from initialFilters (deep-link from closing)", () => {
+    render(
+      <ApprovalQueue
+        initialFilters={{
+          kind: "HOURS",
+          status: "PENDING",
+          project: "Atlas",
+          consultant: "Carlos Nunes",
+        }}
+      />,
+    );
+    // kind=HOURS narrows Carlos Nunes' two pending Atlas items (hours + expense)
+    // to just the hours one — exactly what the closing deep-link wants.
+    expect(screen.getByText("1 pendentes")).toBeInTheDocument();
+    // The Projeto/Consultor selects reflect the seeded values.
+    expect((screen.getByLabelText("Projeto") as HTMLSelectElement).value).toBe(
+      "Atlas",
+    );
+    expect(
+      (screen.getByLabelText("Consultor") as HTMLSelectElement).value,
+    ).toBe("Carlos Nunes");
+    // The matching item is auto-selected: the decision panel shows it, ready
+    // for Approve/Reject.
+    expect(
+      screen.getByRole("button", { name: /^Aprovar$/ }),
+    ).not.toBeDisabled();
+  });
+
+  it("seeds the kind tab and ignores an unknown kind (falls back to ALL)", () => {
+    const { unmount } = render(
+      <ApprovalQueue initialFilters={{ kind: "HOURS" }} />,
+    );
+    // HOURS tab active: only the 3 pending hours items remain.
+    expect(screen.getByText("3 pendentes")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Horas" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    unmount();
+
+    // Unknown kind falls back to ALL (every pending item, hours + expenses).
+    render(<ApprovalQueue initialFilters={{ kind: "BOGUS" as never }} />);
+    expect(screen.getByText("5 pendentes")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Todos" }),
+    ).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("ignores an unknown status in initialFilters (falls back to ALL)", () => {
+    render(
+      <ApprovalQueue
+        initialFilters={{ status: "BOGUS" as never, project: "Atlas" }}
+      />,
+    );
+    // Status falls back to ALL: every Atlas item (pending + decided) is in scope.
+    expect((screen.getByLabelText("Status") as HTMLSelectElement).value).toBe(
+      "ALL",
+    );
+    expect((screen.getByLabelText("Projeto") as HTMLSelectElement).value).toBe(
+      "Atlas",
+    );
+  });
+
   it("clears the selection when switching tabs", () => {
     render(<ApprovalQueue />);
     fireEvent.click(screen.getByRole("button", { name: /Selecionar visíveis/ }));

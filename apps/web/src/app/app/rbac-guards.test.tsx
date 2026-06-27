@@ -57,7 +57,8 @@ describe("module RBAC guards", () => {
   });
 
   it("Aprovações requires manager/admin/finance roles", async () => {
-    await AprovacoesPage();
+    // The guard runs before searchParams is awaited; pass an empty bag.
+    await AprovacoesPage({ searchParams: Promise.resolve({}) });
     expect(requireRoleMock).toHaveBeenCalledTimes(1);
     // FINANCE entered in Round 3: it decides the finance stage of expenses.
     expect(requireRoleMock).toHaveBeenCalledWith([
