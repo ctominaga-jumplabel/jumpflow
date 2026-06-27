@@ -32,6 +32,9 @@ export const CONSULTANT_DOCUMENTS_BUCKET = "consultant-documents";
 /** Private bucket for on-call ("sobreaviso") approval attachments. */
 export const ONCALL_APPROVALS_BUCKET = "oncall-approvals";
 
+/** Private bucket for feed post attachments (Melhoria #5). */
+export const FEED_ATTACHMENTS_BUCKET = "feed-attachments";
+
 /**
  * Storage is configured only when BOTH envs are present. These envs do not
  * exist yet in any environment — callers must degrade honestly (NO_STORAGE),
@@ -78,4 +81,9 @@ export function getConsultantDocumentStorageProvider(): StorageProvider | null {
 /** Convenience resolver for the on-call approvals bucket. */
 export function getOnCallAttachmentStorageProvider(): StorageProvider | null {
   return getStorageProvider(ONCALL_APPROVALS_BUCKET);
+}
+
+/** Convenience resolver for the feed-attachments bucket. */
+export function getFeedAttachmentStorageProvider(): StorageProvider | null {
+  return getStorageProvider(FEED_ATTACHMENTS_BUCKET);
 }

@@ -1102,6 +1102,11 @@ const PERMISSION_CATALOG = [
   { code: "RISCO_PROJETOS", name: "Risco de Projetos", module: "Inteligência", sort: 81, view: ["AREA_MANAGER", "PROJECT_MANAGER", "FINANCE"] },
   { code: "SCORE_CONSULTOR", name: "Score do Consultor", module: "Inteligência", sort: 82, view: ["PEOPLE", "AREA_MANAGER", "FINANCE", "CONSULTANT"] },
 
+  // Feed social interno (Melhoria #5, fatia 1). Todos os usuários ativos veem,
+  // postam e editam (edição do próprio conteúdo; pin/moderação são refinados na
+  // app). del = moderação: ADMIN + PEOPLE.
+  { code: "FEED", name: "Feed", module: "Comunicação", sort: 85, view: ALL_ROLES, create: ALL_ROLES, edit: ALL_ROLES, del: ["PEOPLE"] },
+
   { code: "APROVACOES", name: "Aprovações", module: "Aprovações", sort: 90, view: APPROVALS, edit: APPROVALS },
   { code: "AUTOMACOES", name: "Automações", module: "Aprovações", sort: 91, view: AUTOMATION, edit: AUTOMATION },
 

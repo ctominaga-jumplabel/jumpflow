@@ -185,6 +185,46 @@ Botão **"Apuração"** (apuração por consultor ao cliente) adicionado na tabe
 vínculo + cobrança de excedente, 3.4 anexo "ok do responsável" + exibir exceções na liberação,
 3.5 cobrança em férias.
 
+## 10. Melhoria #5 — Feed social interno: notificações (implementado)
+
+Reaproveita o motor existente **sem canal novo**. Dois eventos novos em
+`NotificationEvent`: `FEED_POST_REPLIED` e `FEED_CONTENT_REACTED`.
+
+| Arquivo | Papel |
+|---|---|
+| `notifications/feed-events.ts` | `notifyFeedReplied(commentId)` e `notifyFeedReacted({postId|commentId})`. Diferente da Onda 2, o destinatário **não** vem de `rule.recipients`: é sempre o **AUTOR do alvo** (post/comentário). A `NotificationRule` serve só como **liga/desliga** por evento (`count` de regra ativa) — fail-open. |
+| `email/templates.ts` → `buildFeedDigestEmail` | Digest de marca: lista "Fulano respondeu seu post / Beltrano reagiu 👍 a seu comentário" + CTA "Abrir o Feed". |
+| `migrations/20260626140000_feed_notification_events` + `scripts/migrate-feed-notification-events.mjs` | `ALTER TYPE NotificationEvent ADD VALUE IF NOT EXISTS` (dry-run + `--apply` + registro manual em `_prisma_migrations`). **Não aplicado em prod ainda.** |
+
+**Regras de produto:** nunca notificar a si mesmo (ator == autor → pular).
+
+**Comportamento real de agregação (honesto):** a cada reação NOVA, `notifyFeedReacted` relê
+**todas** as reações do alvo (exceto as do próprio autor) e filtra as ainda não entregues
+(`AutomationEmailLog` type `NOTIFICATION`, `referenceKey = FEED_CONTENT_REACTED:{reactionId}`,
+status `SENT`). As pendentes viram **um** `NotificationFragment` → `dispatchNotifications` (reusa
+`groupByRecipient`), e cada `reactionId` consolidado é logado como `SENT`.
+
+> ⚠️ **Não há janela de digest.** Como cada clique chega em sua própria chamada (clique → action
+> → emit), reações de usuários distintos geram **um e-mail cada** (idempotente por `reactionId`).
+> A consolidação num único e-mail só ocorre quando há **mais de uma reação pendente na mesma
+> chamada** — p.ex. um envio anterior falhou e ficou sem log `SENT`, então a próxima chamada junta
+> as pendentes. O contrato real está coberto pelo teste `feed-events.test.ts`
+> ("CONTRATO REAL (A1): … geram um e-mail cada"). Respostas usam o mesmo modelo com `referenceKey =
+> FEED_POST_REPLIED:{commentId}` (uma notificação por resposta).
+
+**Evolução futura (digest por janela):** para realmente agrupar reações de pessoas diferentes num
+só e-mail, a reação enfileiraria um fragmento pendente (nova tabela/estado) e um **cron** (plano
+Vercel Pro permite +crons) consolidaria por destinatário/janela antes de enviar. Foi avaliado e
+deixado de fora desta fatia por ser desproporcional (fila persistida + job) para uma feature
+social — registrado aqui como próximo passo se o volume justificar.
+
+**Hooks ativos (post-commit, best-effort):** `addComment` → `notifyFeedReplied`; `toggleReaction`
+(só no caminho de **adição**) → `notifyFeedReacted`. Ambos dentro do `try` da action, mas as
+funções nunca lançam (degradam como o resto do motor).
+
+Testes: `feed-events.test.ts` (10) — auto-notificação pulada, idempotência por dedupeKey,
+agregação de múltiplas reações num digest, reação a comentário, fail-open sem regra, sem DB.
+
 ## 7. Gate de deploy
 
 A migration `20260622120000_notification_engine` **ainda não foi aplicada** (esta máquina não tem

@@ -39,6 +39,23 @@ const PHOTO_MIME_EXTENSIONS: Record<string, readonly string[]> = {
 
 export const ACCEPTED_PHOTO_MIME_TYPES = Object.keys(PHOTO_MIME_EXTENSIONS);
 
+/**
+ * Whitelist for feed post attachments (Melhoria #5): images + common documents.
+ * 10 MB cap (same as receipts). SVG is excluded on purpose (it can carry
+ * scripts) — feed images are raster only.
+ */
+const FEED_MIME_EXTENSIONS: Record<string, readonly string[]> = {
+  "application/pdf": [".pdf"],
+  "image/jpeg": [".jpg", ".jpeg"],
+  "image/png": [".png"],
+  "image/webp": [".webp"],
+  "image/gif": [".gif"],
+};
+
+export const ACCEPTED_FEED_MIME_TYPES = Object.keys(FEED_MIME_EXTENSIONS);
+
+export const MAX_FEED_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
+
 export interface ReceiptFileMeta {
   name: string;
   type: string;
@@ -148,6 +165,36 @@ export function validatePhotoFile(
 }
 
 /**
+ * Validate a feed attachment's metadata. Images (JPG, PNG, WEBP, GIF) or PDF,
+ * max 10 MB. Same INVALID_FILE/FILE_TOO_LARGE typed-failure contract.
+ */
+export function validateFeedAttachmentFile(
+  file: ReceiptFileMeta,
+): FileValidationFailure | null {
+  const allowedExtensions = FEED_MIME_EXTENSIONS[file.type];
+  if (!allowedExtensions) {
+    return {
+      code: "INVALID_FILE",
+      message: "Formato não aceito. Use PDF, JPG, PNG, WEBP ou GIF.",
+    };
+  }
+  const extension = extensionOf(file.name);
+  if (!allowedExtensions.includes(extension)) {
+    return {
+      code: "INVALID_FILE",
+      message: "Extensão do arquivo não corresponde ao tipo enviado.",
+    };
+  }
+  if (file.size <= 0) {
+    return { code: "FILE_TOO_LARGE", message: "Arquivo vazio." };
+  }
+  if (file.size > MAX_FEED_ATTACHMENT_SIZE_BYTES) {
+    return { code: "FILE_TOO_LARGE", message: "Arquivo acima de 10 MB." };
+  }
+  return null;
+}
+
+/**
  * Sanitize a file name for storage keys: lowercase, pure ASCII (accents
  * stripped), spaces -> "-", only [a-z0-9._-], no ".."/path separators
  * (anti path traversal), max 100 chars, fallback "comprovante".
@@ -199,6 +246,19 @@ export function buildConsultantDocumentKey(
   now: Date = new Date(),
 ): string {
   return `consultants/${consultantId}/${type.toLowerCase()}/${compactUtcTimestamp(now)}-${safeFileName(fileName)}`;
+}
+
+/**
+ * Storage key for a feed post attachment:
+ * `feed/{postId}/{timestamp}-{name}`. The path carries no sensitive data —
+ * only the post cuid and the sanitized file name.
+ */
+export function buildFeedAttachmentKey(
+  postId: string,
+  fileName: string,
+  now: Date = new Date(),
+): string {
+  return `feed/${postId}/${compactUtcTimestamp(now)}-${safeFileName(fileName)}`;
 }
 
 /**

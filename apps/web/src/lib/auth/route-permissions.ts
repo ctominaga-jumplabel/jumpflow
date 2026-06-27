@@ -228,6 +228,13 @@ export const routePermissions: RouteRule[] = [
     prefix: "/app/aprovacoes",
     access: ["ADMIN", "AREA_MANAGER", "PROJECT_MANAGER", "FINANCE"],
   },
+  // Feed social interno (Melhoria #5): mural interno. Leitura para todos os
+  // usuários ativos (matrix FEED.view = todos); criar/editar/reagir é
+  // action-gated por FEED.create/edit + autoria, e moderar/fixar por FEED.delete
+  // + papel de moderação (ADMIN/PEOPLE) nas server actions. A rota só é exposta
+  // com a feature flag NEXT_PUBLIC_FEATURE_FEED (a página retorna notFound
+  // quando off). Regra específica antes da `/app` ampla.
+  { prefix: "/app/feed", access: "ALL" },
   // Despesas are open to any authenticated user (consultants log their own).
   // Payment-status changes are gated in-page by FINANCIAL_ROLES, not here.
   { prefix: "/app/despesas", access: "ALL" },

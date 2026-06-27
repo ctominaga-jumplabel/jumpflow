@@ -28,7 +28,9 @@ export type NotificationEventKey =
   | "PROJECT_CREATED"
   | "INVOICING_OVERDUE"
   | "COMMERCIAL_CONTRACT_MISSING"
-  | "OPERATION_CLOSED";
+  | "OPERATION_CLOSED"
+  | "FEED_POST_REPLIED"
+  | "FEED_CONTENT_REACTED";
 
 export type NotificationScopeKey = "GLOBAL" | "PROJECT" | "ALLOCATION";
 
