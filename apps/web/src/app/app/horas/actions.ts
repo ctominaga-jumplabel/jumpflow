@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma, Prisma } from "@jumpflow/database";
-import type { ZodType } from "zod";
+import { z, type ZodType } from "zod";
 import { isDevAuthEnabled } from "@/lib/auth/dev";
 import { requireRole, requireUser } from "@/lib/auth/guards";
 import type { AppUser } from "@/lib/auth/types";
@@ -14,6 +14,15 @@ import {
   recomputePeriodStatus,
 } from "@/lib/db/timesheet";
 import { resolveDbUser } from "@/lib/db/users";
+import {
+  getStorageProvider,
+  isStorageConfigured,
+  ONCALL_APPROVALS_BUCKET,
+} from "@/lib/storage/provider";
+import {
+  safeFileName,
+  validateReceiptFile,
+} from "@/lib/storage/file-validation";
 import {
   COMMENT_REQUIRED_MESSAGE,
   DECIDE_HOURS_SOURCE_STATUS,
@@ -271,6 +280,7 @@ export async function createTimeEntry(
             ...clock,
             description,
             billable: parsed.billable,
+            multiplier: parsed.multiplier,
             status: "SUBMITTED",
             submittedAt: now,
             allocationId: allocation.id,
@@ -289,6 +299,7 @@ export async function createTimeEntry(
             activityType: parsed.activityType,
             description,
             billable: parsed.billable,
+            multiplier: parsed.multiplier,
             status: "SUBMITTED",
             submittedAt: now,
           },
@@ -413,6 +424,7 @@ export async function createWeeklyTimeEntries(
             activityType: parsed.activityType,
             description,
             billable: parsed.billable,
+            multiplier: parsed.multiplier,
             status: "SUBMITTED",
             submittedAt,
           },
@@ -540,6 +552,7 @@ export async function updateTimeEntry(
           ...clockToData(parsed),
           description: parsed.description.trim(),
           billable: parsed.billable,
+          multiplier: parsed.multiplier,
           date,
           allocationId,
           status: "SUBMITTED",
@@ -671,6 +684,16 @@ export async function saveTimesheetDefault(
     const user = await requireUser();
     const consultant = await requireConsultant(user);
     const parsed = parseInput(saveTimesheetDefaultInputSchema, input);
+    // Sobreaviso (ON_CALL) não pode virar padrão semanal: é irregular e o
+    // TimesheetDefault não tem coluna de fator de remuneração, então aplicá-lo
+    // criaria lançamentos com multiplier 1.00 e superpagaria o sobreaviso.
+    // Lance ON_CALL manualmente, com o fator, pela tela de Horas.
+    if (parsed.activityType === "ON_CALL") {
+      throw new ActionError(
+        "INVALID_INPUT",
+        "Sobreaviso não pode ser definido como padrão semanal. Lance-o manualmente com o fator de remuneração.",
+      );
+    }
     const dbUser = await requireDbUser(user);
 
     const allocation = await requireOwnedActiveAllocation(
@@ -770,6 +793,16 @@ export async function applyTimesheetDefault(
           skippedNoDefault: 1,
         },
       };
+    }
+    // Defense-in-depth: ON_CALL nunca deveria ter sido salvo como padrão
+    // (bloqueado em saveTimesheetDefault), mas se um default legado existir,
+    // recusamos aplicá-lo — o TimesheetDefault não carrega fator de remuneração
+    // e geraria lançamentos com multiplier 1.00 (superpagamento do sobreaviso).
+    if (allocation.timesheetDefault.activityType === "ON_CALL") {
+      throw new ActionError(
+        "INVALID_INPUT",
+        "Sobreaviso não pode ser aplicado como padrão semanal. Lance-o manualmente com o fator de remuneração.",
+      );
     }
 
     const result = await prisma.$transaction(async (tx) => {
@@ -967,6 +1000,9 @@ export async function copyPreviousWeek(
             allocationId: allocation.id,
             date: destDate,
             hours: entry.hours,
+            // Preserva o fator de remuneração do lançamento de origem: copiar um
+            // ON_CALL (ex.: 0.33) com multiplier 1.00 superpagaria ~3x.
+            multiplier: entry.multiplier,
             startTime: entry.startTime,
             breakStart: entry.breakStart,
             breakEnd: entry.breakEnd,
@@ -1249,6 +1285,294 @@ export async function decideHours(
     revalidatePath(APROVACOES_PATH);
     revalidatePath(HORAS_PATH);
     return { ok: true, data: { decided, alreadyDecided } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+// --- Anexo genérico do lançamento (TimeEntryAttachment) ---------------------
+//
+// Melhoria #2: qualquer lançamento de horas pode carregar 1 anexo (PDF/JPG/
+// PNG/WebP) — nasceu para o "ok do responsável" do sobreaviso (ON_CALL), mas
+// vale para qualquer activityType. Mesmo padrão de Despesas/Sobreaviso: o
+// arquivo vive em object storage (bucket privado + chave), a URL é sempre
+// assinada e de vida curta. Reusa o bucket privado de anexos (oncall-approvals)
+// que já é provisionado, evitando uma mudança de devops nesta etapa.
+
+/** Papéis que podem visualizar o anexo de um lançamento (além do dono). */
+const ATTACHMENT_VIEW_ROLES = [
+  "ADMIN",
+  "AREA_MANAGER",
+  "PROJECT_MANAGER",
+  "FINANCE",
+] as const;
+
+// Não validamos com .cuid(): ids do seed não são cuid (apenas string não vazia).
+const attachmentIdSchema = z.object({
+  id: z.string().trim().min(1, "Identificador obrigatório."),
+});
+
+/**
+ * Chave de storage do anexo: `time-entries/{entryId}/{timestamp}-{nome}`. O
+ * caminho NUNCA carrega dado sensível — apenas o id do lançamento e o nome
+ * sanitizado do arquivo.
+ */
+function buildTimeEntryAttachmentKey(entryId: string, fileName: string): string {
+  const ts = new Date()
+    .toISOString()
+    .replace(/[-:]/g, "")
+    .replace(/\.\d+Z$/, "Z");
+  return `time-entries/${entryId}/${ts}-${safeFileName(fileName)}`;
+}
+
+/**
+ * Statuses do lançamento que ainda aceitam mexer no anexo (mesma fronteira de
+ * edição do consultor): DRAFT/REJECTED/SUBMITTED. APPROVED/CLOSED são terminais.
+ */
+const ATTACHMENT_EDITABLE_STATUS = ["DRAFT", "REJECTED", "SUBMITTED"] as const;
+
+/**
+ * Anexa (ou substitui) o arquivo de um lançamento de horas. Só o próprio
+ * consultor anexa, e só enquanto o lançamento é editável (período aberto e
+ * status não-terminal). Validação de arquivo e autorização no servidor.
+ */
+export async function attachTimeEntryFile(
+  formData: FormData,
+): Promise<ActionResult<{ fileName: string }>> {
+  try {
+    ensureDatabase();
+    const user = await requireUser();
+    if (!isStorageConfigured()) {
+      throw new ActionError(
+        "NO_STORAGE",
+        "Anexos indisponíveis: storage não configurado.",
+      );
+    }
+    const consultant = await requireConsultant(user);
+    const parsed = parseInput(attachmentIdSchema, { id: formData.get("id") });
+
+    const file = formData.get("file");
+    if (!(file instanceof File)) {
+      throw new ActionError("INVALID_FILE", "Nenhum arquivo enviado.");
+    }
+    const invalid = validateReceiptFile({
+      name: file.name,
+      type: file.type,
+      size: file.size,
+    });
+    if (invalid) throw new ActionError(invalid.code, invalid.message);
+
+    const entry = await prisma.timeEntry.findUnique({
+      where: { id: parsed.id },
+      select: {
+        consultantId: true,
+        status: true,
+        period: { select: { status: true } },
+        attachment: { select: { storageKey: true } },
+      },
+    });
+    if (!entry) throw new ActionError("NOT_FOUND", "Lançamento não encontrado.");
+    if (entry.consultantId !== consultant.id) {
+      throw new ActionError(
+        "FORBIDDEN",
+        "Você só pode anexar nos seus próprios lançamentos.",
+      );
+    }
+    if (entry.period.status === "CLOSED") {
+      throw new ActionError(
+        "PERIOD_CLOSED",
+        "Esta semana já foi fechada e não aceita alterações.",
+      );
+    }
+    if (
+      !(ATTACHMENT_EDITABLE_STATUS as readonly string[]).includes(entry.status)
+    ) {
+      throw new ActionError(
+        "ATTACHMENT_LOCKED",
+        "Lançamento aprovado ou fechado: anexo bloqueado.",
+      );
+    }
+    const dbUser = await resolveDbUser(user);
+
+    const provider = getStorageProvider(ONCALL_APPROVALS_BUCKET)!;
+    const storageKey = buildTimeEntryAttachmentKey(parsed.id, file.name);
+    await provider.upload(storageKey, await file.arrayBuffer(), file.type);
+
+    const previousKey = entry.attachment?.storageKey ?? null;
+    const data = {
+      fileName: file.name,
+      contentType: file.type,
+      size: file.size,
+      storageBucket: ONCALL_APPROVALS_BUCKET,
+      storageKey,
+      uploadedByUserId: dbUser?.id ?? null,
+    };
+    try {
+      await prisma.$transaction(async (tx) => {
+        // Re-check the editable status inside the transaction to avoid racing a
+        // decision/closing between the read and the write.
+        const guard = await tx.timeEntry.updateMany({
+          where: {
+            id: parsed.id,
+            status: { in: [...ATTACHMENT_EDITABLE_STATUS] },
+          },
+          data: { updatedAt: new Date() },
+        });
+        if (guard.count !== 1) {
+          throw new ActionError(
+            "ATTACHMENT_LOCKED",
+            "Lançamento aprovado ou fechado: anexo bloqueado.",
+          );
+        }
+        await tx.timeEntryAttachment.upsert({
+          where: { timeEntryId: parsed.id },
+          update: data,
+          create: { timeEntryId: parsed.id, ...data },
+        });
+        await tx.auditEvent.create({
+          data: buildAuditEventData({
+            actorUserId: dbUser?.id ?? null,
+            entityType: "TimeEntry",
+            entityId: parsed.id,
+            action: "TIME_ENTRY_ATTACHMENT_ADDED",
+            after: { fileName: file.name, size: file.size },
+          }),
+        });
+      });
+    } catch (error) {
+      // Orphan-object cleanup: the row write failed, so remove the uploaded file.
+      try {
+        await provider.delete(storageKey);
+      } catch (cleanup) {
+        console.error("[horas] failed to clean up attachment object", cleanup);
+      }
+      throw error;
+    }
+    if (previousKey && previousKey !== storageKey) {
+      try {
+        await provider.delete(previousKey);
+      } catch (e) {
+        console.error("[horas] failed to delete replaced attachment", e);
+      }
+    }
+
+    revalidatePath(HORAS_PATH);
+    return { ok: true, data: { fileName: file.name } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/**
+ * Short-lived signed URL for a lançamento's attachment. Visível ao próprio
+ * consultor e aos papéis de gestão/financeiro. Anti-enumeração: a mesma resposta
+ * para lançamento inexistente e sem acesso.
+ */
+export async function getTimeEntryAttachmentUrl(
+  input: z.infer<typeof attachmentIdSchema>,
+): Promise<ActionResult<{ url: string }>> {
+  try {
+    ensureDatabase();
+    const user = await requireUser();
+    const parsed = parseInput(attachmentIdSchema, input);
+    const consultant = await getConsultantForUser(user);
+    const isViewer = ATTACHMENT_VIEW_ROLES.some((r) => user.roles.includes(r));
+
+    const entry = await prisma.timeEntry.findUnique({
+      where: { id: parsed.id },
+      select: {
+        consultantId: true,
+        attachment: { select: { storageKey: true, storageBucket: true } },
+      },
+    });
+    const allowed =
+      entry &&
+      (isViewer || (consultant && entry.consultantId === consultant.id));
+    if (!entry || !allowed || !entry.attachment) {
+      throw new ActionError("NOT_FOUND", "Anexo não encontrado.");
+    }
+    const provider = getStorageProvider(
+      entry.attachment.storageBucket || ONCALL_APPROVALS_BUCKET,
+    );
+    if (!provider) {
+      throw new ActionError("NO_STORAGE", "Storage não configurado.");
+    }
+    const url = await provider.getSignedUrl(entry.attachment.storageKey, 300);
+    return { ok: true, data: { url } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/**
+ * Remove o anexo de um lançamento (somente o dono, somente enquanto editável).
+ * Apaga a linha e o objeto de storage.
+ */
+export async function removeTimeEntryAttachment(
+  input: z.infer<typeof attachmentIdSchema>,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    const user = await requireUser();
+    const consultant = await requireConsultant(user);
+    const parsed = parseInput(attachmentIdSchema, input);
+
+    const entry = await prisma.timeEntry.findUnique({
+      where: { id: parsed.id },
+      select: {
+        consultantId: true,
+        status: true,
+        period: { select: { status: true } },
+        attachment: { select: { storageKey: true } },
+      },
+    });
+    if (!entry) throw new ActionError("NOT_FOUND", "Lançamento não encontrado.");
+    if (entry.consultantId !== consultant.id) {
+      throw new ActionError(
+        "FORBIDDEN",
+        "Você só pode remover anexos dos seus próprios lançamentos.",
+      );
+    }
+    if (!entry.attachment) {
+      throw new ActionError("NOT_FOUND", "Anexo não encontrado.");
+    }
+    if (entry.period.status === "CLOSED") {
+      throw new ActionError(
+        "PERIOD_CLOSED",
+        "Esta semana já foi fechada e não aceita alterações.",
+      );
+    }
+    if (
+      !(ATTACHMENT_EDITABLE_STATUS as readonly string[]).includes(entry.status)
+    ) {
+      throw new ActionError(
+        "ATTACHMENT_LOCKED",
+        "Lançamento aprovado ou fechado: anexo bloqueado.",
+      );
+    }
+    const dbUser = await resolveDbUser(user);
+    const storageKey = entry.attachment.storageKey;
+
+    await prisma.$transaction(async (tx) => {
+      await tx.timeEntryAttachment.delete({ where: { timeEntryId: parsed.id } });
+      await tx.auditEvent.create({
+        data: buildAuditEventData({
+          actorUserId: dbUser?.id ?? null,
+          entityType: "TimeEntry",
+          entityId: parsed.id,
+          action: "TIME_ENTRY_ATTACHMENT_REMOVED",
+        }),
+      });
+    });
+    const provider = getStorageProvider(ONCALL_APPROVALS_BUCKET);
+    try {
+      await provider?.delete(storageKey);
+    } catch (e) {
+      console.error("[horas] failed to delete attachment object", e);
+    }
+
+    revalidatePath(HORAS_PATH);
+    return { ok: true, data: { id: parsed.id } };
   } catch (error) {
     return toFailure(error);
   }

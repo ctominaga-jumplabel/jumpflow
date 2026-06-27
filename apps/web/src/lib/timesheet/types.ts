@@ -115,6 +115,13 @@ export interface TimeEntryRow {
   activity: string;
   billable: boolean;
   status: TimeEntryStatus;
+  /**
+   * Fator de remuneração do lançamento (melhoria #2). 1.00 para atividades
+   * normais; um fator fracionário para ON_CALL. As linhas são agrupadas por
+   * projeto+atividade+status, então o fator é coerente por linha. Opcional para
+   * compatibilidade com a grade demo (assume 1.00 quando ausente).
+   */
+  multiplier?: number;
   /** Optional note about the work logged on this row. */
   description?: string;
   /** Hours per weekday, aligned with `weekDays` (length 7, Mon→Sun). */

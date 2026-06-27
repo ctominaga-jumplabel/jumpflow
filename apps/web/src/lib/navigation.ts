@@ -101,13 +101,6 @@ export const primaryNavigation: NavItemDef[] = [
     description: "Lançamento de despesas, comprovantes e reembolsos.",
   },
   {
-    label: "Sobreaviso",
-    href: "/app/sobreaviso",
-    permissionCode: "SOBREAVISO",
-    icon: BellRing,
-    description: "Horas de sobreaviso com fator de remuneração e ok do responsável.",
-  },
-  {
     label: "Projetos",
     href: "/app/projetos",
     permissionCode: "PROJETOS",

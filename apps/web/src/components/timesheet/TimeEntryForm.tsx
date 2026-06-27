@@ -12,12 +12,21 @@ import {
   type ActivityType,
   type WeekDay,
 } from "@/lib/timesheet/types";
+import { timeEntryEffectiveHours } from "@/lib/timesheet/effective-hours";
+import { formatHours } from "@/lib/format";
 import {
   ClockFields,
   clockHours,
   emptyClock,
   type ClockFieldsValue,
 } from "./ClockFields";
+
+/**
+ * Fator de remuneração sugerido para Sobreaviso (ON_CALL). O consultor é pago
+ * pelo equivalente `horas x fator`; o sobreaviso normalmente vale uma fração da
+ * hora cheia. Editável no formulário.
+ */
+const DEFAULT_ON_CALL_MULTIPLIER = 0.33;
 
 export interface TimeEntryFormValue {
   mode: "daily" | "weekly";
@@ -35,6 +44,11 @@ export interface TimeEntryFormValue {
   weekdays: number[];
   description: string;
   billable: boolean;
+  /**
+   * Fator de remuneração (melhoria #2). 1.00 para atividades normais; um fator
+   * fracionário para ON_CALL. O equivalente remunerado é `horas x fator`.
+   */
+  multiplier: number;
 }
 
 export interface TimeEntryFormProject {
@@ -79,6 +93,7 @@ const emptyValue = (days: WeekDay[]): TimeEntryFormValue => ({
   weekdays: [1, 2, 3, 4, 5],
   description: "",
   billable: true,
+  multiplier: 1,
 });
 
 const weekdayOptions = [
@@ -133,11 +148,33 @@ export function TimeEntryForm({
       weekdays: value.mode === "weekly" && value.weekdays.length === 0,
       clock: clockHours(value.clock) === null,
       description: value.description.trim().length === 0,
+      // O fator só é editável (e validado) para ON_CALL; demais atividades
+      // mantêm 1.00 e o servidor revalida em qualquer caso.
+      multiplier: value.activity === "ON_CALL" && !(value.multiplier > 0),
     }),
-    [value.mode, value.projectId, value.weekdays.length, value.clock, value.description],
+    [
+      value.mode,
+      value.projectId,
+      value.weekdays.length,
+      value.clock,
+      value.description,
+      value.activity,
+      value.multiplier,
+    ],
   );
   const hasErrors =
-    errors.projectId || errors.clock || errors.weekdays || errors.description;
+    errors.projectId ||
+    errors.clock ||
+    errors.weekdays ||
+    errors.description ||
+    errors.multiplier;
+
+  // Equivalente remunerado (horas × fator), via a fonte única de cálculo. Usa 0
+  // quando o relógio ainda não fecha um total válido.
+  const effectiveHours = timeEntryEffectiveHours(
+    clockHours(value.clock) ?? 0,
+    value.multiplier > 0 ? value.multiplier : 0,
+  );
 
   const isEditing = Boolean(initial);
 
@@ -274,12 +311,28 @@ export function TimeEntryForm({
             <select
               id="entry-activity"
               value={value.activity}
-              onChange={(e) =>
-                setValue((v) => ({
-                  ...v,
-                  activity: e.target.value as ActivityType,
-                }))
-              }
+              onChange={(e) => {
+                const activity = e.target.value as ActivityType;
+                setValue((v) => {
+                  const wasOnCall = v.activity === "ON_CALL";
+                  const isOnCall = activity === "ON_CALL";
+                  if (isOnCall && !wasOnCall) {
+                    // Entering ON_CALL: sugerir o fator usual e marcar como não
+                    // faturável por padrão (sobreaviso normalmente não é faturado).
+                    return {
+                      ...v,
+                      activity,
+                      multiplier: DEFAULT_ON_CALL_MULTIPLIER,
+                      billable: false,
+                    };
+                  }
+                  if (!isOnCall && wasOnCall) {
+                    // Leaving ON_CALL: voltar aos defaults de atividade normal.
+                    return { ...v, activity, multiplier: 1, billable: true };
+                  }
+                  return { ...v, activity };
+                });
+              }}
               disabled={isEditing}
               className={cn(
                 inputClass(false),
@@ -355,6 +408,48 @@ export function TimeEntryForm({
             idPrefix="entry"
           />
         </fieldset>
+
+        {value.activity === "ON_CALL" ? (
+          <div>
+            <label htmlFor="entry-multiplier" className={labelClass}>
+              Fator de remuneração
+            </label>
+            <input
+              id="entry-multiplier"
+              type="number"
+              min="0"
+              step="0.01"
+              value={value.multiplier}
+              onChange={(e) =>
+                setValue((v) => ({
+                  ...v,
+                  // Mantém vazio como 0 controlado; o servidor valida > 0.
+                  multiplier:
+                    e.target.value === "" ? 0 : Number(e.target.value),
+                }))
+              }
+              aria-invalid={showErrors && errors.multiplier}
+              className={cn(
+                inputClass(showErrors && errors.multiplier),
+                "w-32",
+              )}
+            />
+            {showErrors && errors.multiplier ? (
+              <p className="mt-1 text-xs text-danger">
+                O fator deve ser maior que zero.
+              </p>
+            ) : (
+              <p className="mt-1 text-xs text-soft">
+                Sobreaviso é remunerado pelo equivalente (horas × fator).
+                Equivalente:{" "}
+                <span className="font-semibold tabular-nums text-medium">
+                  {formatHours(effectiveHours)}
+                </span>
+                .
+              </p>
+            )}
+          </div>
+        ) : null}
 
         <div>
           <label htmlFor="entry-description" className={labelClass}>

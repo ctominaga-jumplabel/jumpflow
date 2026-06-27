@@ -1,5 +1,6 @@
 import { Prisma, prisma } from "@jumpflow/database";
 import { buildConsultantPaymentAmounts } from "@/lib/payments/amounts";
+import { timeEntryEffectiveHours } from "@/lib/timesheet/effective-hours";
 import type { ConsultantPaymentStatus } from "@/lib/payments/state-machine";
 import type {
   PaymentForecastView,
@@ -249,7 +250,14 @@ export async function generateConsultantPayments(input: {
         { projectName: string; hours: number; amount: number; unitRate: number }
       >();
       for (const entry of consultantEntries) {
-        const hours = toNumber(entry.hours);
+        // Consultor é SEMPRE remunerado pelo equivalente (hours x multiplier).
+        // Atividades normais têm multiplier=1.00 (effectiveHours == hours);
+        // ON_CALL carrega fator fracionário (ex.: 0.33). Fonte única de cálculo:
+        // timeEntryEffectiveHours. A flag `billable` não afeta pagamento.
+        const hours = timeEntryEffectiveHours(
+          toNumber(entry.hours),
+          toNumber(entry.multiplier),
+        );
         const rate = toNumber(compensation.hourlyRate);
         const amount = hours * rate;
         const current = byProject.get(entry.projectId) ?? {

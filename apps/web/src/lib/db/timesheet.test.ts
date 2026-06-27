@@ -44,6 +44,7 @@ interface EntryRec {
   projectId: string;
   date: Date;
   hours: number;
+  multiplier: number;
   activityType: string;
   description: string | null;
   billable: boolean;
@@ -331,6 +332,7 @@ function seedEntry(over: Partial<EntryRec> = {}): EntryRec {
     projectId: "proj-atlas",
     date: new Date("2026-06-10T00:00:00.000Z"),
     hours: 8,
+    multiplier: 1,
     activityType: "DEVELOPMENT",
     description: null,
     billable: true,
@@ -474,6 +476,31 @@ describe("getWeekForConsultant", () => {
     const week = await getWeekForConsultant("con-1", MONDAY);
     expect(week.rows).toHaveLength(1);
     expect(week.status).toBe("DRAFT");
+  });
+
+  it("não colapsa dois ON_CALL do mesmo projeto/status com fatores divergentes (M3)", async () => {
+    seedPeriod({ status: "SUBMITTED" });
+    // Mesmo projeto, atividade (ON_CALL) e status, mas fatores distintos: o grid
+    // deve manter DUAS linhas para não corromper o "Equivalente" exibido.
+    seedEntry({
+      date: new Date("2026-06-08T00:00:00.000Z"),
+      hours: 6,
+      activityType: "ON_CALL",
+      multiplier: 0.33,
+      status: "SUBMITTED",
+    });
+    seedEntry({
+      date: new Date("2026-06-09T00:00:00.000Z"),
+      hours: 6,
+      activityType: "ON_CALL",
+      multiplier: 0.5,
+      status: "SUBMITTED",
+    });
+
+    const week = await getWeekForConsultant("con-1", MONDAY);
+    const onCallRows = week.rows.filter((r) => r.activity === "ON_CALL");
+    expect(onCallRows).toHaveLength(2);
+    expect(onCallRows.map((r) => r.multiplier).sort()).toEqual([0.33, 0.5]);
   });
 
   it("renders legacy activity codes with a readable label (compat)", async () => {

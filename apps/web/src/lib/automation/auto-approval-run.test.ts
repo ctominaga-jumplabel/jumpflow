@@ -56,13 +56,25 @@ const h = vi.hoisted(() => {
       }),
     },
     timeEntry: {
-      findMany: async ({ where }: { where: { status: unknown } }) => {
+      findMany: async ({
+        where,
+      }: {
+        where: { status: unknown; activityType?: { not?: string } };
+      }) => {
         const s = where.status as string | { in: string[] };
-        const match =
+        const matchStatus =
           typeof s === "string"
             ? (e: Entry) => e.status === s
             : (e: Entry) => s.in.includes(e.status);
-        return store.entries.filter(match).map((e) => ({ ...e }));
+        // Melhoria #2: a query principal exclui ON_CALL (activityType: { not }).
+        const excludeOnCall = where.activityType?.not;
+        return store.entries
+          .filter(
+            (e) =>
+              matchStatus(e) &&
+              (excludeOnCall === undefined || e.activityType !== excludeOnCall),
+          )
+          .map((e) => ({ ...e }));
       },
       updateMany: async ({
         where,
@@ -539,6 +551,46 @@ describe("runAutoApproval — a rejected entry never re-enters the engine", () =
     expect(result.approved).toBe(0);
     expect(result.pending).toBe(1);
     expect(h.store.entries.find((e) => e.id === "resubmitted")?.status).toBe(
+      "SUBMITTED",
+    );
+  });
+});
+
+describe("runAutoApproval — Sobreaviso (ON_CALL) sempre humano", () => {
+  it("nunca auto-aprova um lançamento ON_CALL, mesmo satisfazendo a regra padrão", async () => {
+    // Um ON_CALL de 8h num dia útil com o delay vencido satisfaria a regra
+    // padrão; mas ON_CALL exige aprovação humana e é excluído do motor na origem.
+    h.store.entries = [entry({ id: "oncall", activityType: "ON_CALL" })];
+
+    // O caminho read-only nem carrega o ON_CALL (não aparece como candidato).
+    const collection = await collectAutoApprovalDecisions(NOW);
+    expect(collection.evaluations).toHaveLength(0);
+
+    const result = await runAutoApproval(NOW);
+    expect(result.processed).toBe(0);
+    expect(result.approved).toBe(0);
+    expect(h.store.entries.find((e) => e.id === "oncall")?.status).toBe(
+      "SUBMITTED",
+    );
+    expect(h.store.approvals).toHaveLength(0);
+    expect(h.store.audits).toHaveLength(0);
+  });
+
+  it("processa atividades normais e ignora apenas o ON_CALL numa fila mista", async () => {
+    // Consultores distintos para que os totais diários não se misturem (o motor
+    // soma SUBMITTED+APPROVED por consultor/dia, em todas as atividades).
+    h.store.entries = [
+      entry({ id: "normal", activityType: "DEV", consultantId: "cN", projectId: "pX" }),
+      entry({ id: "oncall", activityType: "ON_CALL", consultantId: "cO", projectId: "pY" }),
+    ];
+    const result = await runAutoApproval(NOW);
+    // Apenas o lançamento normal é avaliado/aprovado; o ON_CALL fica na fila.
+    expect(result.processed).toBe(1);
+    expect(result.approved).toBe(1);
+    expect(h.store.entries.find((e) => e.id === "normal")?.status).toBe(
+      "APPROVED",
+    );
+    expect(h.store.entries.find((e) => e.id === "oncall")?.status).toBe(
       "SUBMITTED",
     );
   });

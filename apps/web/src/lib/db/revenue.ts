@@ -10,6 +10,7 @@ import {
   type BillingEngineConfig,
 } from "@/lib/billing/charge-engine";
 import type { BillingChargeType } from "@/lib/clients/types";
+import { timeEntryEffectiveHours } from "@/lib/timesheet/effective-hours";
 
 function monthBounds(month: number, year: number) {
   const start = new Date(Date.UTC(year, month - 1, 1));
@@ -374,7 +375,14 @@ export async function generateRevenueClosings(input: {
       let hourlyAmount = 0;
       const rates = project.saleRates.map(toRateRange);
       const lineData = projectEntries.map((entry) => {
-        const hours = Number(entry.hours);
+        // Faturamento usa o equivalente (hours x multiplier) como base de horas.
+        // Só chegam aqui lançamentos billable=true (filtro na query acima);
+        // não faturáveis são excluídos da receita. Atividades normais têm
+        // multiplier=1.00, então effectiveHours == hours (sem regressão).
+        const hours = timeEntryEffectiveHours(
+          Number(entry.hours),
+          Number(entry.multiplier),
+        );
         const resolved = resolveSaleRate(rates, {
           date: toIsoDate(entry.date),
           consultantId: entry.consultantId,

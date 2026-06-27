@@ -777,6 +777,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
       weekdays: [1, 2, 3, 4, 5],
       description: row.description ?? "",
       billable: row.billable,
+      multiplier: row.multiplier ?? 1,
     });
     setFormOpen(true);
   }
@@ -804,6 +805,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
           weekdays: value.weekdays,
           description: value.description,
           billable: value.billable,
+          multiplier: value.multiplier,
         });
         if (result.ok) {
           setFormOpen(false);
@@ -829,6 +831,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
             ...clockPayload,
             description: value.description,
             billable: value.billable,
+            multiplier: value.multiplier,
             date: value.date,
           })
         : await createTimeEntry({
@@ -841,6 +844,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
             ...clockPayload,
             description: value.description,
             billable: value.billable,
+            multiplier: value.multiplier,
           });
       if (result.ok) {
         setFormOpen(false);
@@ -920,6 +924,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
                 status: "SUBMITTED" as const,
                 description: value.description,
                 billable: value.billable,
+                multiplier: value.multiplier,
                 hours: r.hours.map((h, i) =>
                   targetIndexes.includes(i) ? hoursValue : h,
                 ),
@@ -944,6 +949,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
                   status: "SUBMITTED" as const,
                   description: value.description || r.description,
                   billable: value.billable,
+                  multiplier: value.multiplier,
                   hours: r.hours.map((h, i) =>
                     targetIndexes.includes(i) ? hoursValue : h,
                   ),
@@ -965,6 +971,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
               clientName: project.clientName,
               activity: value.activity,
               billable: value.billable,
+              multiplier: value.multiplier,
               status: "SUBMITTED",
               description: value.description || undefined,
               hours,

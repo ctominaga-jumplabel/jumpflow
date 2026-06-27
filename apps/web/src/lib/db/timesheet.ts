@@ -215,7 +215,13 @@ export async function getWeekForConsultant(
 
   const rowsByKey = new Map<string, TimeEntryRow>();
   for (const entry of entries) {
-    const key = `${entry.projectId}|${entry.activityType}|${entry.status}`;
+    // O fator de remuneração entra na chave: dois ON_CALL no mesmo
+    // projeto/atividade/status mas com fatores diferentes (ex.: 0.33 e 0.50)
+    // são linhas distintas — colapsá-los exibiria um único fator e corromperia
+    // o "Equivalente" mostrado na grade.
+    const key = `${entry.projectId}|${entry.activityType}|${entry.status}|${Number(
+      entry.multiplier,
+    )}`;
     let row = rowsByKey.get(key);
     if (!row) {
       row = {
@@ -225,6 +231,7 @@ export async function getWeekForConsultant(
         clientName: entry.project.client.name,
         activity: toActivity(entry.activityType),
         billable: entry.billable,
+        multiplier: Number(entry.multiplier),
         status: entry.status as TimeEntryStatus,
         hours: [0, 0, 0, 0, 0, 0, 0],
         entryIds: [null, null, null, null, null, null, null],

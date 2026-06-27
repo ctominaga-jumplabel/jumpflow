@@ -689,7 +689,7 @@ model Role {
   users       UserRole[]
   permissions RolePermission[]
   createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt @default(now())
+  updatedAt   DateTime         @default(now()) @updatedAt
 }
 
 /// Funcionalidade do sistema no RBAC configurável (módulo ou submódulo).
@@ -733,7 +733,7 @@ model RolePermission {
   canCreate    Boolean    @default(false)
   canEdit      Boolean    @default(false)
   canDelete    Boolean    @default(false)
-  updatedAt    DateTime   @updatedAt @default(now())
+  updatedAt    DateTime   @default(now()) @updatedAt
 
   @@id([roleId, permissionId])
   @@index([permissionId])
@@ -1056,12 +1056,20 @@ model ConsultantHourBankEntry {
   @@index([consultantId, occurredAt])
 }
 
+/// @deprecated Melhoria #2: Sobreaviso passou a ser um TimeEntry (activityType
+/// ON_CALL) com status proprio de TimeEntryStatus. Enum mantido (NAO dropar)
+/// enquanto a migracao de dados e a remocao das telas legadas nao concluem.
 enum OnCallStatus {
   PENDING
   APPROVED
   REJECTED
 }
 
+/// @deprecated Melhoria #2: Sobreaviso virou Atividade na tela de Horas. Os
+/// lancamentos passam a viver em TimeEntry (activityType ON_CALL, multiplier,
+/// attachment via TimeEntryAttachment). Este modelo NAO deve ser dropado ainda:
+/// e a origem do script de migracao de dados e mantem o historico legado.
+///
 /// Sobreaviso (on-call): horas de prontidao de um consultor, com fator de
 /// remuneracao (multiplier) e anexo com o "ok" do responsavel. Aprovacao por
 /// gestor (PENDING -> APPROVED/REJECTED) gravada em status + AuditEvent.
@@ -1075,7 +1083,7 @@ model OnCallEntry {
   date             DateTime
   hours            Decimal           @db.Decimal(6, 2)
   /// Fator de remuneracao do sobreaviso (ex.: 0.33). Default 1.00.
-  multiplier       Decimal           @db.Decimal(5, 2) @default(1.00)
+  multiplier       Decimal           @default(1.00) @db.Decimal(5, 2)
   status           OnCallStatus      @default(PENDING)
   note             String?
   approvedByUserId String?
@@ -1090,6 +1098,10 @@ model OnCallEntry {
   @@index([projectId])
 }
 
+/// @deprecated Melhoria #2: sucedido por TimeEntryAttachment (anexo generico de
+/// TimeEntry). Mantido (NAO dropar) ate a migracao de dados copiar os anexos e
+/// as telas legadas serem removidas.
+///
 /// Anexo do "ok do responsavel" para um sobreaviso (1:1). Mesmo padrao do
 /// ExpenseAttachment: bucket privado + chave de storage; URL sempre assinada.
 model OnCallAttachment {
@@ -1382,6 +1394,13 @@ model TimeEntry {
   // (Saida - Inicio - pausa). Mantido como Decimal porque revenue/payment leem
   // diretamente entry.hours. Linhas legadas podem ter horarios nulos.
   hours                  Decimal                 @db.Decimal(5, 2)
+  /// Fator de remuneracao do lancamento (melhoria #2: Sobreaviso vira
+  /// Atividade). O consultor e sempre pago pelo equivalente
+  /// `hours x multiplier`. Atividades normais usam 1.00 (effectiveHours ==
+  /// hours); ON_CALL usa um fator fracionario (ex.: 0.33). O faturamento
+  /// respeita a flag `billable`, nao o multiplier. Fonte unica de calculo:
+  /// timeEntryEffectiveHours em @/lib/timesheet/effective-hours.
+  multiplier             Decimal                 @default(1.00) @db.Decimal(5, 2)
   startTime              String?
   breakStart             String?
   breakEnd               String?
@@ -1391,6 +1410,9 @@ model TimeEntry {
   billable               Boolean                 @default(true)
   status                 TimeEntryStatus         @default(DRAFT)
   submittedAt            DateTime?
+  /// Anexo opcional do lancamento (ex.: "ok do responsavel" no sobreaviso). 1:1
+  /// generico, valido para qualquer activityType. Sucede OnCallAttachment.
+  attachment             TimeEntryAttachment?
   revenueClosingLines    RevenueClosingLine[]
   consultantPaymentLines ConsultantPaymentLine[]
   createdAt              DateTime                @default(now())
@@ -1407,6 +1429,25 @@ model TimeEntry {
   // with consultantId/projectId/status, so a pure date-range filter would seq
   // scan without this single-column index.
   @@index([date])
+}
+
+/// Anexo generico de um lancamento de horas (1:1). Vale para qualquer
+/// activityType; nasceu para carregar o "ok do responsavel" do sobreaviso
+/// (melhoria #2), substituindo OnCallAttachment. Mesmo padrao de
+/// ConsultantDocument/ExpenseAttachment: o arquivo vive em object storage
+/// (bucket privado + chave), a URL e sempre assinada. onDelete Cascade: o
+/// anexo segue o ciclo de vida do lancamento.
+model TimeEntryAttachment {
+  id               String    @id @default(cuid())
+  timeEntryId      String    @unique
+  timeEntry        TimeEntry @relation(fields: [timeEntryId], references: [id], onDelete: Cascade)
+  fileName         String
+  contentType      String
+  size             Int
+  storageBucket    String
+  storageKey       String
+  uploadedByUserId String?
+  createdAt        DateTime  @default(now())
 }
 
 model Approval {
