@@ -1,0 +1,56 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+  body{margin:0;background:#f4efe6;font-family:ui-sans-serif,system-ui;padding:30px}
+  h2{color:#222;margin:0 0 4px}.note{color:#777;font-size:12px;margin:0 0 22px}
+  .row{display:flex;gap:26px;flex-wrap:wrap;align-items:flex-end;margin-bottom:30px}
+  .col{display:flex;flex-direction:column;align-items:center;gap:8px}
+  .lbl{font-size:12px;font-weight:700;color:#333}.map{font-size:10.5px;color:#999}
+  .ava{position:relative;border-radius:9999px;overflow:hidden;background:#eceae2;
+       border:3px solid #14110f;box-shadow:5px 5px 0 #14110f}
+  .ava img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:50% 26%;opacity:0;transition:opacity .45s ease}
+  .ava img.on{opacity:1}
+  .rPos{box-shadow:0 0 0 4px #bfe8cf,5px 5px 0 #14110f}
+  .rWarm{box-shadow:0 0 0 4px #ffd9a8,5px 5px 0 #14110f}
+  .rInfo{box-shadow:0 0 0 4px #bcd6f5,5px 5px 0 #14110f}
+  .live .stage{animation:breathe 4s ease-in-out infinite, sway 6.5s ease-in-out infinite;transform-origin:50% 80%}
+  .stage{position:absolute;inset:0}
+  @keyframes breathe{0%,100%{scale:1}50%{scale:1.03}}
+  @keyframes sway{0%,100%{rotate:-1.3deg}50%{rotate:1.3deg}}
+</style></head><body>
+<h2>Nathal.IA — 2D animado por troca de expressões REAIS (recortadas de Avatar_NathIA.png)</h2>
+<p class="note">Cada estado da Intelligence Layer aponta para uma expressão de fato desenhada na folha de referência; transição por crossfade + micro-movimento idle. Sem arte nova. (Estados negativos — warning/error — não existem na folha: precisam de +1 quadro.)</p>
+
+<div class="row" id="big"></div>
+<h2 style="font-size:15px">Mapa estado → expressão (real)</h2>
+<div class="row" id="grid"></div>
+
+<script>
+const E={
+ oi:"expr/e0-oi.png", deixa:"expr/e1-deixa-eu-ver.png", resolvido:"expr/e2-resolvido.png",
+ entendi:"expr/e3-entendi.png", dica:"expr/e4-dica.png"
+};
+// state -> expression + ring
+const MAP=[
+ ["welcome","oi","rWarm","aceno 'Oi!'"],
+ ["idle / listening","entendi","rInfo","sorriso atento"],
+ ["thinking / searching","deixa","rInfo","mão no queixo"],
+ ["explaining / pointing","dica","rWarm","dica, dedo em riste"],
+ ["happy","entendi","rPos","sorriso"],
+ ["success / celebrate","resolvido","rPos","piscadinha"],
+];
+function ava(size,exprKey,ring,live){
+  const imgs=Object.entries(E).map(([k,src])=>`<img src="${src}" class="${k===exprKey?'on':''}">`).join("");
+  return `<div class="ava ${ring}" style="width:${size}px;height:${size}px">
+      <div class="stage ${live?'':''}">${imgs}</div></div>`;
+}
+// big LIVE avatar (idle motion). Also a static welcome + success to show distinct faces big.
+document.getElementById("big").innerHTML=
+  `<div class="col"><div class="ava rWarm live" style="width:220px;height:220px"><div class="stage">`+
+   Object.entries(E).map(([k,src])=>`<img src="${src}" class="${k==='oi'?'on':''}">`).join("")+
+   `</div></div><div class="lbl">LIVE · idle anima + troca de cara</div></div>`+
+  `<div class="col">${ava(160,'deixa','rInfo')}<div class="lbl">thinking</div></div>`+
+  `<div class="col">${ava(160,'resolvido','rPos')}<div class="lbl">success</div></div>`+
+  `<div class="col">${ava(96,'oi','rWarm')}<div class="lbl">bubble welcome</div></div>`;
+document.getElementById("grid").innerHTML=MAP.map(([st,ex,ring,desc])=>
+  `<div class="col">${ava(120,ex,ring)}<div class="lbl">${st}</div><div class="map">${desc}</div></div>`).join("");
+</script>
+</body></html>

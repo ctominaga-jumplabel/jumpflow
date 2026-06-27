@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "name": "nathalia-assets",
+  "version": 2,
+  "description": "Contrato de ativos 3D da Nathal.IA. Fonte unica consumida pelos scripts de pipeline (validate/inspect/export/normalize/thumbnails). Espelha docs/nathalia/GLB_REQUIREMENTS.md.",
+  "paths": {
+    "master": "packages/character-nathalia/assets/models/master.glb",
+    "base": "packages/character-nathalia/assets/models/nathalia_base.glb",
+    "modelsDir": "packages/character-nathalia/assets/models",
+    "texturesDir": "packages/character-nathalia/assets/textures",
+    "thumbnailsDir": "packages/character-nathalia/assets/thumbnails",
+    "variantsDir": "packages/character-nathalia/assets/models/variants",
+    "altMasterDir": "assets/nathalia"
+  },
+  "intake": {
+    "comment": "Fase 3A — bancada de intake/validacao (ADR-010). Binarios nao versionados (D-004); relatorios .report.md sao versionados.",
+    "rawDir": "assets/nathalia/raw",
+    "baseDir": "assets/nathalia/base",
+    "masterDir": "assets/nathalia/master",
+    "reportsDir": "assets/nathalia/reports",
+    "thumbnailsDir": "assets/nathalia/thumbnails"
+  },
+  "transform": {
+    "unitMetersPerUnit": 1,
+    "upAxis": "Y",
+    "facingAxis": "-Z",
+    "originAtFeet": true,
+    "originXYZ": [0, 0, 0]
+  },
+  "polycount": {
+    "mvpMaxTris": 25000,
+    "idealMaxTris": 40000,
+    "hardMaxTris": 60000
+  },
+  "textures": {
+    "preferredSize": 1024,
+    "maxSize": 2048,
+    "preferredFormats": ["webp", "ktx2"],
+    "avoidMultipleLargeTextures": true
+  },
+  "fileBudget": {
+    "targetMaxBytes": 1572864,
+    "idealMaxBytes": 1048576
+  },
+  "materials": [
+    "MAT_Body",
+    "MAT_Hair",
+    "MAT_Shirt",
+    "MAT_Pants",
+    "MAT_Shoes",
+    "MAT_Eyes",
+    "MAT_Logo"
+  ],
+  "objects": [
+    "Body",
+    "Hair",
+    "Shirt",
+    "Pants",
+    "Shoes",
+    "Eyes",
+    "Logo"
+  ],
+  "rigBones": [
+    "Pelvis",
+    "Spine",
+    "Neck",
+    "Head",
+    "UpperArm.L",
+    "UpperArm.R",
+    "LowerArm.L",
+    "LowerArm.R",
+    "Hand.L",
+    "Hand.R",
+    "UpperLeg.L",
+    "UpperLeg.R",
+    "LowerLeg.L",
+    "LowerLeg.R",
+    "Foot.L",
+    "Foot.R"
+  ],
+  "shapeKeys": [
+    "Smile",
+    "Blink_L",
+    "Blink_R",
+    "Thinking",
+    "Surprised",
+    "OpenMouth",
+    "Sad"
+  ],
+  "animations": [
+    "Idle",
+    "Wave",
+    "Thinking",
+    "Pointing",
+    "Explaining",
+    "Celebrate",
+    "Typing",
+    "Alert"
+  ],
+  "states": [
+    "idle",
+    "welcome",
+    "listening",
+    "thinking",
+    "searching",
+    "explaining",
+    "pointing",
+    "happy",
+    "warning",
+    "error",
+    "success",
+    "celebrate"
+  ],
+  "plannedVariants": [
+    { "key": "master", "description": "Modelo canonico completo (fonte de verdade)" },
+    { "key": "lod0", "description": "LOD alta (= master), uso em painel expandido" },
+    { "key": "lod1", "description": "LOD media para avatar medio", "targetMaxTris": 20000 },
+    { "key": "lod2", "description": "LOD baixa para avatar pequeno (40-64px)", "targetMaxTris": 8000 },
+    { "key": "bust", "description": "Recorte busto/rosto para o avatar circular pequeno" }
+  ]
+}

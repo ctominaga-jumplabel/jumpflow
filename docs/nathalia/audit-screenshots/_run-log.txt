@@ -1,0 +1,24 @@
+→ /login
+  after login url = http://localhost:3100/login
+→ /
+  status=200 finalUrl=http://localhost:3100/app launcherCount=1
+→ /app
+  status=200 finalUrl=http://localhost:3100/app launcherCount=1
+→ /app/horas
+  status=200 finalUrl=http://localhost:3100/app/horas launcherCount=1
+→ /app/projetos
+  status=200 finalUrl=http://localhost:3100/app/projetos launcherCount=1
+→ /app/aprovacoes
+  status=200 finalUrl=http://localhost:3100/app/aprovacoes launcherCount=1
+→ /app/relatorios
+  status=200 finalUrl=http://localhost:3100/app/relatorios launcherCount=1
+→ /app/dev/nathalia
+  status=200 finalUrl=http://localhost:3100/app/dev/nathalia launcherCount=1
+→ Nathalia widget (on /app/horas)
+  widget ERROR: page.screenshot: Clipped area is either empty or outside the resulting image
+Call log:
+[2m  - taking page screenshot[22m
+[2m  - waiting for fonts to load...[22m
+[2m  - fonts loaded[22m
+
+DONE
