@@ -298,6 +298,41 @@ Arquivos principais:
 - `apps/web/src/lib/nathalia/`
 - `docs/nathalia/`
 
+### `jump-checkpoint-intelligence-agent`
+
+Use para:
+
+- checkpoint/1-on-1 entre gestor e consultor;
+- transcricao de reuniao (texto ou voz);
+- pipeline de IA que verifica a transcricao;
+- extracao de Skills, Oportunidades e Cases com validacao humana;
+- entidades novas `Checkpoint`, `Opportunity` e `Case`.
+
+Arquivos principais:
+
+- `docs/backlog-talentos.md`
+- `docs/p3-inteligencia-design.md`
+- `apps/web/src/lib/ai/`
+- `apps/web/src/app/app/feedback/` (padrao de transcricao a reaproveitar)
+- `packages/database/prisma/schema.prisma`
+
+### `jump-feed-social-agent`
+
+Use para:
+
+- Feed interno do JumpFlow;
+- posts dos consultores;
+- respostas/comentarios e reacoes com emoji;
+- visibilidade, moderacao e RBAC do feed;
+- integracao com o motor de notificacoes.
+
+Arquivos principais:
+
+- `docs/infra-notificacoes.md`
+- `apps/web/src/app/app/feed/`, quando existir.
+- `apps/web/src/components/feed/`, quando existir.
+- `packages/database/prisma/schema.prisma`
+
 ### `jump-legacy-portal-analyst`
 
 Use para:
@@ -567,6 +602,8 @@ Arquivos principais:
 - O `jump-skills-intelligence-agent` deve ser chamado antes de mudancas em
   skills reais, sugestoes, catalogo ou validacao de competencias.
 - O `jump-nathalia-agent` deve ser chamado antes de mudancas na Nathal.IA: niveis de presenca, motor proativo/sinais, expressoes/visemas, microanimacoes ou a camada de inteligencia em `packages/character-nathalia`.
+- O `jump-checkpoint-intelligence-agent` deve ser chamado antes de checkpoint/1-on-1, transcricao de reuniao ou extracao de Skills/Oportunidades/Cases por IA.
+- O `jump-feed-social-agent` deve ser chamado antes de criar ou alterar o Feed interno: posts, comentarios, reacoes, visibilidade ou moderacao.
 - O `jump-legacy-portal-analyst` deve ser chamado quando a tarefa envolver comparacao com o portal antigo.
 - O `jump-operational-launcher-agent` deve ser chamado antes de alterar `/app` como tela inicial ou atalhos por perfil.
 - O `jump-product-owner` deve ser chamado quando houver duvida de escopo.
