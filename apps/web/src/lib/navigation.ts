@@ -18,6 +18,7 @@ import {
   KeyRound,
   LayoutDashboard,
   MessageSquareHeart,
+  MessagesSquare,
   Receipt,
   ReceiptText,
   ShieldCheck,
@@ -32,6 +33,7 @@ import {
   Wallet,
 } from "lucide-react";
 import type { RoleName } from "@/lib/auth/roles";
+import { isFeedEnabled } from "@/lib/feed/flags";
 
 export interface NavItemDef {
   /** Visible label in the sidebar. */
@@ -316,6 +318,23 @@ export const primaryNavigation: NavItemDef[] = [
     icon: Award,
     description: "Certificações, validade e alertas de vencimento.",
   },
+  // Feed social interno (Melhoria #5): mural interno com posts, comentários,
+  // reações e anexos. Visível a todos (permissão FEED); a moderação e o pin são
+  // restritos a ADMIN/PEOPLE no servidor. Atrás da feature flag
+  // NEXT_PUBLIC_FEATURE_FEED: quando off, o item some e a rota não é exposta.
+  // O spread condicional preserva o tipo NavItemDef[] sem item desligado.
+  ...(isFeedEnabled()
+    ? [
+        {
+          label: "Feed",
+          href: "/app/feed",
+          permissionCode: "FEED",
+          icon: MessagesSquare,
+          description:
+            "Mural interno da Jump: posts, comentários, reações e anexos.",
+        } satisfies NavItemDef,
+      ]
+    : []),
   {
     label: "Aprovações",
     href: "/app/aprovacoes",

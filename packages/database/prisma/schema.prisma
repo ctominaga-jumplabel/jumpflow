@@ -630,6 +630,24 @@ enum IntegrationEventStatus {
   RETRYING
 }
 
+/// Visibilidade de um post do feed social interno (Melhoria #5). No v1 so
+/// PUBLIC_INTERNAL esta ativa na UI (toda a empresa ve). AREA fica modelado para
+/// segmentacao futura por area (usa FeedPost.areaScope), mas desligado no produto.
+enum FeedVisibility {
+  PUBLIC_INTERNAL
+  AREA
+}
+
+/// Estado de um post ou comentario do feed (soft delete por status, padrao das
+/// entidades operacionais). VISIBLE = ativo; DELETED_BY_AUTHOR = removido pelo
+/// proprio autor; REMOVED_BY_MODERATION = retirado por ADMIN/PEOPLE (guarda
+/// removedByUserId/removedAt/removalReason para auditoria).
+enum FeedContentStatus {
+  VISIBLE
+  DELETED_BY_AUTHOR
+  REMOVED_BY_MODERATION
+}
+
 model User {
   id                          String                      @id @default(cuid())
   name                        String
@@ -660,6 +678,12 @@ model User {
   developmentPlansOwned       DevelopmentPlan[]           @relation("DevelopmentPlanOwner")
   surveysCreated              Survey[]                    @relation("SurveyCreator")
   objectivesOwned             Objective[]                 @relation("ObjectiveOwner")
+  // Feed social interno (Melhoria #5, fatia 1). Autoria por User com onDelete
+  // SetNull: remover o usuario nao apaga o post/comentario, apenas desvincula a
+  // autoria (preserva o historico). Reacoes sao do proprio usuario e somem com ele.
+  feedPostsAuthored           FeedPost[]                  @relation("FeedPostAuthor")
+  feedCommentsAuthored        FeedComment[]               @relation("FeedCommentAuthor")
+  feedReactions               FeedReaction[]              @relation("FeedReactionUser")
   // Invitations this user created (actor side) and the invitation that created
   // this user on acceptance (at most one).
   invitationsSent             UserInvitation[]            @relation("InvitedBy")
@@ -2320,6 +2344,8 @@ enum NotificationEvent {
   INVOICING_OVERDUE // 4.3/5.2 faturamento nao realizado
   COMMERCIAL_CONTRACT_MISSING // 6.2 contrato comercial ausente
   OPERATION_CLOSED // fechamento operacional do projeto para o DP
+  FEED_POST_REPLIED // melhoria #5: alguem respondeu seu post no feed
+  FEED_CONTENT_REACTED // melhoria #5: reacoes ao seu post/comentario (digest agregado)
 }
 
 /// Nivel de agregacao em que a regra dispara.
@@ -2456,5 +2482,100 @@ model ExpenseAttachment {
   uploadedBy       User?    @relation("ExpenseAttachmentUploader", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
   createdAt        DateTime @default(now())
 
+  @@index([uploadedByUserId])
+}
+
+/// Post do feed social interno (Melhoria #5, fatia 1). Autoria por User com
+/// onDelete SetNull (preserva o post se o autor sair). Soft delete por `status`.
+/// Moderacao (ADMIN/PEOPLE) usa removedByUserId/removedAt/removalReason; edicao
+/// do proprio autor marca editedAt. `pinned` e regra de app (max 3 por
+/// moderadores), nao schema. No v1 so visibility = PUBLIC_INTERNAL; AREA fica
+/// modelado (com areaScope) mas desligado na UI.
+model FeedPost {
+  id              String               @id @default(cuid())
+  authorUserId    String?
+  author          User?                @relation("FeedPostAuthor", fields: [authorUserId], references: [id], onDelete: SetNull)
+  body            String
+  visibility      FeedVisibility       @default(PUBLIC_INTERNAL)
+  /// Area-alvo quando visibility = AREA. Chave livre (desligada na UI no v1).
+  areaScope       String?
+  status          FeedContentStatus    @default(VISIBLE)
+  pinned          Boolean              @default(false)
+  removedByUserId String?
+  removedAt       DateTime?
+  removalReason   String?
+  editedAt        DateTime?
+  comments        FeedComment[]
+  reactions       FeedReaction[]
+  attachments     FeedPostAttachment[]
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  @@index([status, pinned, createdAt])
+  @@index([visibility, areaScope, createdAt])
+  @@index([authorUserId])
+}
+
+/// Comentario de um post do feed. onDelete Cascade no post: apagar o post leva
+/// os comentarios junto. Autoria SetNull (preserva o comentario sem o autor).
+/// Mesmo padrao de soft delete/moderacao/edicao do FeedPost.
+model FeedComment {
+  id              String            @id @default(cuid())
+  postId          String
+  post            FeedPost          @relation(fields: [postId], references: [id], onDelete: Cascade)
+  authorUserId    String?
+  author          User?             @relation("FeedCommentAuthor", fields: [authorUserId], references: [id], onDelete: SetNull)
+  body            String
+  status          FeedContentStatus @default(VISIBLE)
+  removedByUserId String?
+  removedAt       DateTime?
+  removalReason   String?
+  editedAt        DateTime?
+  reactions       FeedReaction[]
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([postId, status, createdAt])
+  @@index([authorUserId])
+}
+
+/// Reacao (emoji) de um usuario a um post OU a um comentario, nunca aos dois.
+/// O XOR `(postId IS NOT NULL) <> (commentId IS NOT NULL)` e a unicidade
+/// idempotente (um usuario, um emoji, por post/comentario) sao garantidos por
+/// CHECK + indices unicos PARCIAIS na migration SQL — o @@unique do Prisma nao
+/// expressa o WHERE parcial, entao NAO ha @@unique aqui (vide migration.sql).
+/// onDelete Cascade em todas as FKs: a reacao some com o autor/post/comentario.
+model FeedReaction {
+  id        String       @id @default(cuid())
+  emoji     String
+  userId    String
+  user      User         @relation("FeedReactionUser", fields: [userId], references: [id], onDelete: Cascade)
+  postId    String?
+  post      FeedPost?    @relation(fields: [postId], references: [id], onDelete: Cascade)
+  commentId String?
+  comment   FeedComment? @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  createdAt DateTime     @default(now())
+
+  @@index([postId])
+  @@index([commentId])
+  @@index([userId])
+}
+
+/// Anexo (imagem/arquivo) de um post do feed (v1: anexo so no POST). Espelha
+/// ExpenseAttachment: bucket privado + storageKey; a URL e sempre assinada.
+/// 1:N com FeedPost, onDelete Cascade (anexos somem com o post).
+model FeedPostAttachment {
+  id               String   @id @default(cuid())
+  postId           String
+  post             FeedPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  fileName         String
+  contentType      String
+  size             Int
+  storageBucket    String
+  storageKey       String
+  uploadedByUserId String?
+  createdAt        DateTime @default(now())
+
+  @@index([postId])
   @@index([uploadedByUserId])
 }

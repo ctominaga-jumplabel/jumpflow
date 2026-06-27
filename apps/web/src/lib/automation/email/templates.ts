@@ -397,6 +397,80 @@ export function buildFechamentoOperacaoEmail(input: {
 }
 
 // ---------------------------------------------------------------------------
+// Melhoria #5 — Feed social interno: resumo de interações (respostas + reações).
+// Reaproveita o motor de notificações (sem canal novo). O template aceita N
+// itens e os lista numa tabela; hoje normalmente recebe 1 item por envio (uma
+// notificação por interação nova, idempotente — ver feed-events.ts §A1), mas
+// consolida vários quando o emitter passa um lote pendente.
+// ---------------------------------------------------------------------------
+export interface FeedDigestItem {
+  /** Quem gerou a interação. */
+  actorName: string;
+  /** Tipo de interação no alvo do destinatário. */
+  kind: "reply" | "reaction";
+  /** Para reações: o emoji (ex. "👍"). Ignorado em respostas. */
+  emoji?: string;
+  /** "post" | "comentário" — o alvo do destinatário que recebeu a interação. */
+  target: "post" | "comment";
+}
+
+/** "Fulano respondeu seu post" / "Beltrano reagiu 👍 ao seu comentário". */
+function describeFeedItem(item: FeedDigestItem): string {
+  const targetLabel = item.target === "post" ? "seu post" : "seu comentário";
+  if (item.kind === "reply") {
+    return `${item.actorName} respondeu ${targetLabel}`;
+  }
+  const emoji = item.emoji ? ` ${item.emoji}` : "";
+  return `${item.actorName} reagiu${emoji} a ${targetLabel}`;
+}
+
+export function buildFeedDigestEmail(input: {
+  recipientName: string;
+  items: FeedDigestItem[];
+  feedUrl?: string;
+}): BuiltEmail {
+  const count = input.items.length;
+  const replies = input.items.filter((i) => i.kind === "reply").length;
+  const reactions = count - replies;
+
+  // Resumo curto e operacional do que aconteceu.
+  const summaryParts: string[] = [];
+  if (replies > 0)
+    summaryParts.push(`${replies} ${replies === 1 ? "resposta" : "respostas"}`);
+  if (reactions > 0)
+    summaryParts.push(`${reactions} ${reactions === 1 ? "reação" : "reações"}`);
+  const summary = summaryParts.join(" e ");
+
+  const blocks: EmailBlock[] = [
+    paragraph(`Olá, ${input.recipientName}.`),
+    paragraph(
+      `Você tem ${summary} no Feed. Veja o que rolou nas suas publicações:`,
+    ),
+    dataTable(
+      ["Interação"],
+      input.items.map((i) => [describeFeedItem(i)]),
+    ),
+  ];
+
+  if (input.feedUrl) {
+    blocks.push(button("Abrir o Feed", input.feedUrl));
+  }
+
+  const { html, text } = renderEmail({
+    preheader: `Novas interações no Feed (${count})`,
+    title: "Novidades no seu Feed",
+    blocks,
+    signoff: `Equipe ${app()}`,
+  });
+
+  return {
+    subject: `${app()} · Você tem ${count} ${count === 1 ? "interação" : "interações"} no Feed`,
+    html,
+    text,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Tema 6.2 — Alerta de contrato comercial ausente
 // ---------------------------------------------------------------------------
 export function buildContratoAusenteEmail(input: {
