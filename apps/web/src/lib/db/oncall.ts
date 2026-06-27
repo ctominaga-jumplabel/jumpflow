@@ -3,6 +3,7 @@
  * storage and audit live in the server actions (/app/sobreaviso/actions.ts).
  */
 import { prisma } from "@jumpflow/database";
+import { timeEntryEffectiveHours } from "@/lib/timesheet/effective-hours";
 import { toIsoDate } from "@/lib/timesheet/week";
 
 export type OnCallStatus = "PENDING" | "APPROVED" | "REJECTED";
@@ -31,9 +32,16 @@ export interface OnCallEntryRow {
 
 const num = (v: unknown): number => Number(v ?? 0);
 
-/** Remunerated-equivalent hours for an on-call entry. Pure. */
+/**
+ * Remunerated-equivalent hours for an on-call entry.
+ *
+ * @deprecated Sobreaviso is migrating into TimeEntry (melhoria #2). Use
+ * {@link timeEntryEffectiveHours} from `@/lib/timesheet/effective-hours`
+ * directly. This thin alias keeps the on-call data layer working during the
+ * transition and shares the exact same rounding rule.
+ */
 export function onCallEffectiveHours(hours: number, multiplier: number): number {
-  return Math.round(hours * multiplier * 100) / 100;
+  return timeEntryEffectiveHours(hours, multiplier);
 }
 
 export interface ListOnCallOptions {

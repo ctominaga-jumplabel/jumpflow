@@ -46,11 +46,22 @@ interface EntryRec {
   allocationId: string | null;
   date: Date;
   hours: number;
+  multiplier: number;
   activityType: string;
   description: string | null;
   billable: boolean;
   status: string;
   submittedAt: Date | null;
+}
+
+interface AttachmentRec {
+  timeEntryId: string;
+  fileName: string;
+  contentType: string;
+  size: number;
+  storageBucket: string;
+  storageKey: string;
+  uploadedByUserId: string | null;
 }
 
 // The in-memory mock interprets dynamic where-shapes; `any` would be flagged,
@@ -66,6 +77,7 @@ const h = vi.hoisted(() => {
     allocations: [] as AllocationRec[],
     periods: [] as PeriodRec[],
     entries: [] as EntryRec[],
+    attachments: [] as AttachmentRec[],
     approvals: [] as Record<string, unknown>[],
     audits: [] as Record<string, unknown>[],
     currentUser: {
@@ -114,19 +126,25 @@ const h = vi.hoisted(() => {
     return true;
   }
 
-  function entryWithInclude(e: EntryRec, include?: Where) {
+  function entryWithInclude(e: EntryRec, shape?: Where) {
+    // The actions use both `include` (relations) and `select` (relations +
+    // scalar fields); the mock treats either as "load these relations".
     const out: Record<string, unknown> = { ...e };
-    if (include?.project) {
+    if (shape?.project) {
       out.project = { ...store.projects.find((p) => p.id === e.projectId)! };
     }
-    if (include?.period) {
+    if (shape?.period) {
       out.period = { ...store.periods.find((p) => p.id === e.periodId)! };
     }
-    if (include?.consultant) {
+    if (shape?.consultant) {
       const consultant = store.consultants.find((c) => c.id === e.consultantId);
       out.consultant = consultant
         ? { userId: consultant.userId, email: consultant.email }
         : { userId: null, email: "" };
+    }
+    if (shape?.attachment) {
+      const attachment = store.attachments.find((a) => a.timeEntryId === e.id);
+      out.attachment = attachment ? { ...attachment } : null;
     }
     return out;
   }
@@ -219,9 +237,17 @@ const h = vi.hoisted(() => {
       },
     },
     timeEntry: {
-      findUnique: async ({ where, include }: { where: Where; include?: Where }) => {
+      findUnique: async ({
+        where,
+        include,
+        select,
+      }: {
+        where: Where;
+        include?: Where;
+        select?: Where;
+      }) => {
         const entry = store.entries.find((e) => e.id === where.id);
-        return entry ? entryWithInclude(entry, include) : null;
+        return entry ? entryWithInclude(entry, include ?? select) : null;
       },
       findFirst: async ({ where }: { where: Where }) => {
         const entry = store.entries.find((e) => matchEntry(e, where));
@@ -240,6 +266,7 @@ const h = vi.hoisted(() => {
           allocationId: data.allocationId ?? null,
           date: data.date,
           hours: Number(data.hours),
+          multiplier: data.multiplier === undefined ? 1 : Number(data.multiplier),
           activityType: data.activityType,
           description: data.description ?? null,
           billable: data.billable,
@@ -251,7 +278,14 @@ const h = vi.hoisted(() => {
       },
       update: async ({ where, data }: { where: Where; data: Where }) => {
         const entry = store.entries.find((e) => e.id === where.id)!;
-        Object.assign(entry, data, data.hours ? { hours: Number(data.hours) } : {});
+        Object.assign(
+          entry,
+          data,
+          data.hours ? { hours: Number(data.hours) } : {},
+          data.multiplier !== undefined
+            ? { multiplier: Number(data.multiplier) }
+            : {},
+        );
         return { ...entry };
       },
       updateMany: async ({ where, data }: { where: Where; data: Where }) => {
@@ -262,6 +296,43 @@ const h = vi.hoisted(() => {
       delete: async ({ where }: { where: Where }) => {
         const index = store.entries.findIndex((e) => e.id === where.id);
         const [removed] = store.entries.splice(index, 1);
+        return removed;
+      },
+    },
+    timeEntryAttachment: {
+      upsert: async ({
+        where,
+        update,
+        create,
+      }: {
+        where: Where;
+        update: Where;
+        create: Where;
+      }) => {
+        const existing = store.attachments.find(
+          (a) => a.timeEntryId === where.timeEntryId,
+        );
+        if (existing) {
+          Object.assign(existing, update);
+          return { ...existing };
+        }
+        const rec: AttachmentRec = {
+          timeEntryId: create.timeEntryId,
+          fileName: create.fileName,
+          contentType: create.contentType,
+          size: create.size,
+          storageBucket: create.storageBucket,
+          storageKey: create.storageKey,
+          uploadedByUserId: create.uploadedByUserId ?? null,
+        };
+        store.attachments.push(rec);
+        return { ...rec };
+      },
+      delete: async ({ where }: { where: Where }) => {
+        const index = store.attachments.findIndex(
+          (a) => a.timeEntryId === where.timeEntryId,
+        );
+        const [removed] = store.attachments.splice(index, 1);
         return removed;
       },
     },
@@ -295,12 +366,42 @@ vi.mock("@/lib/auth/guards", () => ({
   requireRole: vi.fn(async () => h.store.currentUser),
 }));
 
+// Storage provider: an in-memory stub so the attachment actions exercise upload/
+// delete/getSignedUrl without Supabase. file-validation stays REAL (pure).
+const storage = vi.hoisted(() => {
+  const objects = new Map<string, true>();
+  const provider = {
+    upload: vi.fn(async (key: string) => {
+      objects.set(key, true);
+    }),
+    delete: vi.fn(async (key: string) => {
+      objects.delete(key);
+    }),
+    getSignedUrl: vi.fn(async (key: string) => `https://signed.example/${key}`),
+  };
+  return { objects, provider, configured: { value: true } };
+});
+
+vi.mock("@/lib/storage/provider", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    isStorageConfigured: () => storage.configured.value,
+    getStorageProvider: () =>
+      storage.configured.value ? storage.provider : null,
+  };
+});
+
 import {
+  attachTimeEntryFile,
   copyPreviousWeek,
   createTimeEntry,
   createWeeklyTimeEntries,
   decideHours,
   deleteTimeEntry,
+  getTimeEntryAttachmentUrl,
+  removeTimeEntryAttachment,
+  saveTimesheetDefault,
   submitWeek,
   updateTimeEntry,
 } from "./actions";
@@ -319,6 +420,7 @@ function seedEntry(over: Partial<EntryRec> = {}): EntryRec {
     allocationId: "alloc-1",
     date: new Date("2026-06-10T00:00:00.000Z"),
     hours: 8,
+    multiplier: 1,
     activityType: "WORKDAY",
     description: null,
     billable: true,
@@ -402,8 +504,14 @@ beforeEach(() => {
   ];
   h.store.periods = [];
   h.store.entries = [];
+  h.store.attachments = [];
   h.store.approvals = [];
   h.store.audits = [];
+  storage.objects.clear();
+  storage.configured.value = true;
+  storage.provider.upload.mockClear();
+  storage.provider.delete.mockClear();
+  storage.provider.getSignedUrl.mockClear();
 });
 
 afterEach(() => vi.unstubAllEnvs());
@@ -852,6 +960,59 @@ describe("copyPreviousWeek", () => {
       h.store.entries.filter((e) => e.date.getTime() >= MONDAY.getTime()),
     ).toHaveLength(0);
   });
+
+  it("preserva o fator de remuneração ao copiar um ON_CALL (A1: senão superpaga ~3x)", async () => {
+    h.store.periods.push({
+      id: "period-prev",
+      consultantId: "con-1",
+      startDate: PREV_MONDAY,
+      endDate: PREV_SUNDAY,
+      status: "APPROVED",
+      submittedAt: new Date(),
+    });
+    seedEntry({
+      periodId: "period-prev",
+      date: new Date("2026-06-03T00:00:00.000Z"),
+      status: "APPROVED",
+      hours: 6,
+      activityType: "ON_CALL",
+      billable: false,
+      multiplier: 0.33,
+    });
+
+    const result = await copyPreviousWeek({ weekStart: "2026-06-08" });
+    expect(result).toMatchObject({ ok: true, data: { copied: 1 } });
+    const copied = h.store.entries.find(
+      (e) => e.date.getTime() === new Date("2026-06-10T00:00:00.000Z").getTime(),
+    );
+    // O fator do lançamento de origem é preservado (não volta para 1.00).
+    expect(copied).toMatchObject({
+      activityType: "ON_CALL",
+      multiplier: 0.33,
+      billable: false,
+    });
+  });
+});
+
+describe("saveTimesheetDefault — Sobreaviso não pode ser padrão semanal (A2)", () => {
+  const baseDefault = {
+    allocationId: "alloc-1",
+    ...clockFor(8),
+    weekdays: [1, 2, 3, 4, 5],
+    description: "Padrão",
+    billable: true,
+  };
+
+  it("rejeita salvar um padrão com activityType ON_CALL (antes de qualquer escrita)", async () => {
+    const result = await saveTimesheetDefault({
+      ...baseDefault,
+      activityType: "ON_CALL",
+    });
+    expect(result).toMatchObject({ ok: false, error: "INVALID_INPUT" });
+    expect(result.ok ? null : result.message).toMatch(/Sobreaviso/i);
+    // A recusa acontece logo após a validação, sem auditar nem persistir nada.
+    expect(h.store.audits).toHaveLength(0);
+  });
 });
 
 describe("decideHours", () => {
@@ -1240,5 +1401,163 @@ describe("guards", () => {
     h.store.consultants = [];
     const result = await createTimeEntry(baseInput);
     expect(result).toMatchObject({ ok: false, error: "NO_CONSULTANT" });
+  });
+});
+
+// --- Melhoria #2: multiplier (fator de remuneração) ------------------------
+
+describe("multiplier — persistência e validação", () => {
+  it("defaults the multiplier to 1.00 when omitted (atividade normal)", async () => {
+    const result = await createTimeEntry(baseInput);
+    expect(result.ok).toBe(true);
+    expect(h.store.entries[0].multiplier).toBe(1);
+  });
+
+  it("persists a fractional multiplier for an ON_CALL entry", async () => {
+    const result = await createTimeEntry({
+      ...baseInput,
+      activityType: "ON_CALL",
+      billable: false,
+      multiplier: 0.33,
+    });
+    expect(result.ok).toBe(true);
+    const entry = h.store.entries[0];
+    expect(entry.activityType).toBe("ON_CALL");
+    expect(entry.multiplier).toBe(0.33);
+    // ON_CALL é enviado para a fila (SUBMITTED) como qualquer lançamento; a
+    // exclusão da auto-aprovação é responsabilidade do motor (testada à parte).
+    expect(entry.status).toBe("SUBMITTED");
+  });
+
+  it("rejects a non-positive multiplier (horas zero de valor)", async () => {
+    const result = await createTimeEntry({
+      ...baseInput,
+      activityType: "ON_CALL",
+      multiplier: 0,
+    });
+    expect(result).toMatchObject({ ok: false, error: "INVALID_INPUT" });
+    expect(h.store.entries).toHaveLength(0);
+  });
+
+  it("updates the multiplier on an existing entry", async () => {
+    seedCurrentPeriod();
+    const existing = seedEntry({
+      activityType: "ON_CALL",
+      status: "SUBMITTED",
+      multiplier: 0.33,
+      submittedAt: new Date(),
+    });
+    const result = await updateTimeEntry({
+      id: existing.id,
+      ...clockFor(8),
+      description: "Sobreaviso noturno",
+      billable: false,
+      multiplier: 0.5,
+    });
+    expect(result.ok).toBe(true);
+    expect(h.store.entries[0].multiplier).toBe(0.5);
+  });
+});
+
+// --- Melhoria #2: anexo genérico (TimeEntryAttachment) ---------------------
+
+function attachForm(id: string, file: File): FormData {
+  const fd = new FormData();
+  fd.set("id", id);
+  fd.set("file", file);
+  return fd;
+}
+
+const okPdf = () =>
+  new File([new Uint8Array([1, 2, 3])], "ok-responsavel.pdf", {
+    type: "application/pdf",
+  });
+
+describe("anexo do lançamento — gravar / ler / remover", () => {
+  it("grava o anexo de um lançamento (qualquer atividade) e audita", async () => {
+    seedCurrentPeriod();
+    const entry = seedEntry({ status: "SUBMITTED", submittedAt: new Date() });
+    const result = await attachTimeEntryFile(attachForm(entry.id, okPdf()));
+    expect(result).toMatchObject({ ok: true, data: { fileName: "ok-responsavel.pdf" } });
+    expect(h.store.attachments).toHaveLength(1);
+    expect(h.store.attachments[0]).toMatchObject({
+      timeEntryId: entry.id,
+      fileName: "ok-responsavel.pdf",
+      contentType: "application/pdf",
+    });
+    expect(storage.provider.upload).toHaveBeenCalledTimes(1);
+    expect(h.store.audits.at(-1)).toMatchObject({
+      action: "TIME_ENTRY_ATTACHMENT_ADDED",
+      entityType: "TimeEntry",
+    });
+  });
+
+  it("emite uma URL assinada de vida curta para o dono", async () => {
+    seedCurrentPeriod();
+    const entry = seedEntry({ status: "SUBMITTED", submittedAt: new Date() });
+    await attachTimeEntryFile(attachForm(entry.id, okPdf()));
+    const result = await getTimeEntryAttachmentUrl({ id: entry.id });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data.url).toContain("https://signed.example/");
+    expect(storage.provider.getSignedUrl).toHaveBeenCalledTimes(1);
+  });
+
+  it("remove o anexo e apaga o objeto de storage", async () => {
+    seedCurrentPeriod();
+    const entry = seedEntry({ status: "SUBMITTED", submittedAt: new Date() });
+    await attachTimeEntryFile(attachForm(entry.id, okPdf()));
+    const result = await removeTimeEntryAttachment({ id: entry.id });
+    expect(result.ok).toBe(true);
+    expect(h.store.attachments).toHaveLength(0);
+    expect(storage.provider.delete).toHaveBeenCalled();
+  });
+
+  it("bloqueia anexar em lançamento APROVADO (item aprovado)", async () => {
+    seedCurrentPeriod();
+    const entry = seedEntry({ status: "APPROVED", submittedAt: new Date() });
+    const result = await attachTimeEntryFile(attachForm(entry.id, okPdf()));
+    expect(result).toMatchObject({ ok: false, error: "ATTACHMENT_LOCKED" });
+    expect(h.store.attachments).toHaveLength(0);
+  });
+
+  it("bloqueia anexar quando a semana está fechada (item fechado)", async () => {
+    seedCurrentPeriod("CLOSED");
+    const entry = seedEntry({ status: "SUBMITTED", submittedAt: new Date() });
+    const result = await attachTimeEntryFile(attachForm(entry.id, okPdf()));
+    expect(result).toMatchObject({ ok: false, error: "PERIOD_CLOSED" });
+  });
+
+  it("recusa arquivo fora do whitelist (INVALID_FILE)", async () => {
+    seedCurrentPeriod();
+    const entry = seedEntry({ status: "SUBMITTED", submittedAt: new Date() });
+    const bad = new File([new Uint8Array([1])], "script.exe", {
+      type: "application/x-msdownload",
+    });
+    const result = await attachTimeEntryFile(attachForm(entry.id, bad));
+    expect(result).toMatchObject({ ok: false, error: "INVALID_FILE" });
+    expect(storage.provider.upload).not.toHaveBeenCalled();
+  });
+
+  it("degrada honestamente quando o storage não está configurado", async () => {
+    storage.configured.value = false;
+    seedCurrentPeriod();
+    const entry = seedEntry({ status: "SUBMITTED", submittedAt: new Date() });
+    const result = await attachTimeEntryFile(attachForm(entry.id, okPdf()));
+    expect(result).toMatchObject({ ok: false, error: "NO_STORAGE" });
+  });
+
+  it("não vaza anexo para outro consultor sem papel de gestão", async () => {
+    seedCurrentPeriod();
+    const entry = seedEntry({ status: "SUBMITTED", submittedAt: new Date() });
+    await attachTimeEntryFile(attachForm(entry.id, okPdf()));
+    // Troca a sessão para o consultor 2 (CONSULTANT, sem papel de gestão).
+    h.store.currentUser = {
+      id: "dev-user-2",
+      name: "Bruno Costa",
+      email: "bruno@jumplabel.com.br",
+      roles: ["CONSULTANT"],
+    };
+    const result = await getTimeEntryAttachmentUrl({ id: entry.id });
+    expect(result).toMatchObject({ ok: false, error: "NOT_FOUND" });
   });
 });

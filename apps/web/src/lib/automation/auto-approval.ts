@@ -89,8 +89,12 @@ export async function collectAutoApprovalDecisions(
     return { skipped: true, reason: "disabled", evaluations: [] };
   }
 
+  // Sobreaviso (melhoria #2): ON_CALL SEMPRE exige aprovação humana — nunca é
+  // auto-aprovado. Excluímos esses lançamentos do motor na origem, então eles
+  // permanecem SUBMITTED na fila de aprovação manual (e não aparecem como
+  // candidatos no painel read-only de observabilidade).
   const submitted = await prisma.timeEntry.findMany({
-    where: { status: "SUBMITTED" },
+    where: { status: "SUBMITTED", activityType: { not: "ON_CALL" } },
     select: {
       id: true,
       consultantId: true,

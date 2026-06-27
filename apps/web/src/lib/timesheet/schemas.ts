@@ -75,6 +75,18 @@ const descriptionSchema = z
   .min(1, "Descrição é obrigatória.")
   .max(500, "Descrição deve ter no máximo 500 caracteres.");
 
+/**
+ * Fator de remuneração do lançamento (melhoria #2). O consultor é sempre pago
+ * pelo equivalente `hours x multiplier`. Atividades normais usam 1.00; ON_CALL
+ * usa um fator fracionário (ex.: 0.33). Default 1.00 quando omitido (linhas e
+ * formulários que não enviam o campo). Sempre > 0 e <= 10 (sanidade).
+ */
+const multiplierSchema = z.coerce
+  .number()
+  .positive("O fator de remuneração deve ser maior que zero.")
+  .max(10, "Fator de remuneração inválido (máximo 10).")
+  .default(1);
+
 export const timeEntryInputSchema = refineClock(
   z.object({
     projectId: idSchema,
@@ -83,10 +95,14 @@ export const timeEntryInputSchema = refineClock(
     ...clockFields,
     description: descriptionSchema,
     billable: z.boolean(),
+    multiplier: multiplierSchema,
   }),
 );
 
-export type TimeEntryInput = z.infer<typeof timeEntryInputSchema>;
+// `z.input`: o `multiplier` tem `.default(1)`, então é OPCIONAL para quem chama
+// a action (o servidor preenche 1.00). O valor já parseado (output) sempre tem
+// `multiplier: number`.
+export type TimeEntryInput = z.input<typeof timeEntryInputSchema>;
 
 const weekdaySchema = z
   .number()
@@ -106,10 +122,11 @@ export const weeklyTimeEntryInputSchema = refineClock(
       .max(7, "Selecione no maximo sete dias."),
     description: descriptionSchema,
     billable: z.boolean(),
+    multiplier: multiplierSchema,
   }),
 );
 
-export type WeeklyTimeEntryInput = z.infer<typeof weeklyTimeEntryInputSchema>;
+export type WeeklyTimeEntryInput = z.input<typeof weeklyTimeEntryInputSchema>;
 
 export const updateTimeEntryInputSchema = refineClock(
   z.object({
@@ -117,12 +134,13 @@ export const updateTimeEntryInputSchema = refineClock(
     ...clockFields,
     description: descriptionSchema,
     billable: z.boolean(),
+    multiplier: multiplierSchema,
     /** Optional move to another day of the SAME week. */
     date: isoDateSchema.optional(),
   }),
 );
 
-export type UpdateTimeEntryInput = z.infer<typeof updateTimeEntryInputSchema>;
+export type UpdateTimeEntryInput = z.input<typeof updateTimeEntryInputSchema>;
 
 export const deleteTimeEntryInputSchema = z.object({ id: idSchema });
 
