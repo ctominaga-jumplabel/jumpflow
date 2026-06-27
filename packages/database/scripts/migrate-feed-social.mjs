@@ -212,7 +212,7 @@ async function alreadyRegistered() {
 
 async function tableExists(name) {
   const rows = await prisma.$queryRawUnsafe(
-    `SELECT to_regclass($1) AS reg`,
+    `SELECT to_regclass($1)::text AS reg`,
     `public."${name}"`,
   );
   return Array.isArray(rows) && rows[0] && rows[0].reg !== null;
