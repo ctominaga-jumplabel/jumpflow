@@ -15,7 +15,10 @@
 export type AiLlmFeature =
   | "ALLOCATION_EXPLANATION"
   | "RISK_SENTIMENT"
-  | "SCORE_NARRATIVE";
+  | "SCORE_NARRATIVE"
+  // Melhoria #4 (Checkpoint Intelligence, F4): extração de insights do corpo
+  // do checkpoint (skills/oportunidades/cases) para curadoria humana.
+  | "CHECKPOINT_EXTRACTION";
 
 export interface AiUsageLog {
   feature: AiLlmFeature;

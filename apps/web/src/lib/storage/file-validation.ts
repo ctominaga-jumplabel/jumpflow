@@ -262,6 +262,20 @@ export function buildFeedAttachmentKey(
 }
 
 /**
+ * Storage key for a checkpoint voice recording:
+ * `checkpoints/{checkpointId}/{timestamp}-{name}`. The path carries NO sensitive
+ * data — only the checkpoint cuid and the sanitized file name. The audio itself
+ * (a private 1-on-1) is never public; access is via a short-lived signed URL.
+ */
+export function buildCheckpointAudioKey(
+  checkpointId: string,
+  fileName: string,
+  now: Date = new Date(),
+): string {
+  return `checkpoints/${checkpointId}/${compactUtcTimestamp(now)}-${safeFileName(fileName)}`;
+}
+
+/**
  * Storage key for a client logo: `client-logos/{clientId}/{timestamp}-{name}`.
  * For a brand-new client (no id yet) `clientId` is "temp"; the action re-keys
  * to the real id after the row is created. Path carries no sensitive data.
