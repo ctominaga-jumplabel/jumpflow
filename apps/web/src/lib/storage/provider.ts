@@ -36,6 +36,13 @@ export const ONCALL_APPROVALS_BUCKET = "oncall-approvals";
 export const FEED_ATTACHMENTS_BUCKET = "feed-attachments";
 
 /**
+ * Private bucket for checkpoint / 1-on-1 voice recordings (Melhoria #4, F3).
+ * Sensitive audio (conversa de carreira) — NEVER public; the raw audio is only
+ * reachable through a short-lived signed URL gated by the checkpoint read scope.
+ */
+export const CHECKPOINT_AUDIO_BUCKET = "checkpoint-audio";
+
+/**
  * Storage is configured only when BOTH envs are present. These envs do not
  * exist yet in any environment — callers must degrade honestly (NO_STORAGE),
  * never fake an upload.
@@ -86,4 +93,9 @@ export function getOnCallAttachmentStorageProvider(): StorageProvider | null {
 /** Convenience resolver for the feed-attachments bucket. */
 export function getFeedAttachmentStorageProvider(): StorageProvider | null {
   return getStorageProvider(FEED_ATTACHMENTS_BUCKET);
+}
+
+/** Convenience resolver for the checkpoint-audio bucket (Melhoria #4, F3). */
+export function getCheckpointAudioStorageProvider(): StorageProvider | null {
+  return getStorageProvider(CHECKPOINT_AUDIO_BUCKET);
 }

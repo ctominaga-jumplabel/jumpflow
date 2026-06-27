@@ -648,6 +648,82 @@ enum FeedContentStatus {
   REMOVED_BY_MODERATION
 }
 
+/// Tipo de um registro de acompanhamento do consultor (Melhoria #4). ONE_ON_ONE e
+/// a conversa 1-on-1 (por padrao PRIVATE: o consultor nao ve); CHECKPOINT e um
+/// ponto de acompanhamento mais amplo (semanal/quinzenal por projeto). So o GESTOR
+/// registra; a distincao orienta visibilidade padrao e UI, nao regra de banco.
+enum CheckpointType {
+  ONE_ON_ONE
+  CHECKPOINT
+}
+
+/// Ciclo de vida de um Checkpoint. DRAFT = rascunho; RECORDED = registrado
+/// (texto/audio salvos); EXTRACTED = a IA ja extraiu insights (skills,
+/// oportunidades, cases); ARCHIVED = arquivado (soft delete operacional).
+/// Transicoes aplicadas no servidor; nao retrocede de ARCHIVED.
+enum CheckpointStatus {
+  DRAFT
+  RECORDED
+  EXTRACTED
+  ARCHIVED
+}
+
+/// Visibilidade de um Checkpoint (LGPD/confianca). PRIVATE (padrao do 1-on-1) so e
+/// visto por autor/gestor + PEOPLE; o consultor avaliado NAO ve. SHARED libera o
+/// registro ao consultor. Regra aplicada no servidor.
+enum CheckpointVisibility {
+  PRIVATE
+  SHARED
+}
+
+/// Estado da extracao de insights por IA a partir do Checkpoint. NONE = ainda nao
+/// solicitada; PENDING = na fila; DONE = concluida (insights gerados); FAILED =
+/// falhou. Apenas coluna de apoio; a logica de extracao vive fora do banco.
+enum CheckpointExtractionStatus {
+  NONE
+  PENDING
+  DONE
+  FAILED
+}
+
+/// Estado de um insight extraido por IA pendente de curadoria humana. Reusa o
+/// padrao de SkillSuggestionStatus: PENDING (aguardando decisao do gestor),
+/// ACCEPTED (promovido a registro real), DISMISSED (descartado).
+enum CheckpointInsightStatus {
+  PENDING
+  ACCEPTED
+  DISMISSED
+}
+
+/// Natureza de uma Oportunidade (chance futura a agir, INTERNA + handoff manual,
+/// sem CRM). EXPANSION = ampliar escopo na conta; UPSELL = vender mais ao mesmo
+/// cliente; RISK = risco de conta/churn a tratar; REFERRAL = indicacao para outra
+/// area/cliente; RENEWAL = renovacao de contrato a encaminhar.
+enum OpportunityKind {
+  EXPANSION
+  UPSELL
+  RISK
+  REFERRAL
+  RENEWAL
+}
+
+/// Prioridade de uma Oportunidade para triagem do gestor/comercial.
+enum OpportunityPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+/// Estagio de maturidade de um Case (entrega concluida digna de referencia, INTERNO).
+/// DRAFT_INSIGHT = insight bruto extraido pela IA; APPROVED = revisado e aprovado
+/// internamente; PUBLISHABLE = liberado para uso comercial/referencia (sujeito a
+/// consentimento do cliente, registrado em clientConsentState).
+enum CaseStage {
+  DRAFT_INSIGHT
+  APPROVED
+  PUBLISHABLE
+}
+
 model User {
   id                          String                      @id @default(cuid())
   name                        String
@@ -684,6 +760,13 @@ model User {
   feedPostsAuthored           FeedPost[]                  @relation("FeedPostAuthor")
   feedCommentsAuthored        FeedComment[]               @relation("FeedCommentAuthor")
   feedReactions               FeedReaction[]              @relation("FeedReactionUser")
+  // Checkpoint/1-on-1 + entidades de inteligencia (Melhoria #4, fatia 1). Autoria
+  // por User com onDelete SetNull em todas: remover o usuario nao apaga o
+  // historico (checkpoint, oportunidade, case) — apenas desvincula a autoria.
+  checkpointsManaged          Checkpoint[]                @relation("CheckpointManager")
+  opportunitiesDecided        Opportunity[]               @relation("OpportunityDecider")
+  opportunitiesOwned          Opportunity[]               @relation("OpportunityOwner")
+  casesDecided                Case[]                      @relation("CaseDecider")
   // Invitations this user created (actor side) and the invitation that created
   // this user on acceptance (at most one).
   invitationsSent             UserInvitation[]            @relation("InvitedBy")
@@ -859,6 +942,13 @@ model Consultant {
   surveyInvitations   SurveyInvitation[]
   objectives          Objective[]
   enrollments         Enrollment[]
+  // Checkpoint/1-on-1 + inteligencia (Melhoria #4). checkpoints sao Cascade no
+  // consultor (o registro nao faz sentido sem o avaliado); oportunidade/case usam
+  // SetNull no consultantId para preservar o insight comercial mesmo se o consultor
+  // for removido.
+  checkpoints         Checkpoint[]
+  opportunities       Opportunity[]
+  cases               Case[]
   createdAt           DateTime                       @default(now())
   updatedAt           DateTime                       @updatedAt
 }
@@ -1197,6 +1287,10 @@ model Client {
   revenueClosings   RevenueClosing[]
   fiscalDocuments   FiscalDocument[]
   feedbacks         Feedback[]
+  // Inteligencia comercial (Melhoria #4). Oportunidade/Case podem apontar para um
+  // cliente (relatedClientId) com onDelete SetNull: o insight sobrevive ao cliente.
+  opportunities     Opportunity[]
+  cases             Case[]
   createdAt         DateTime            @default(now())
   updatedAt         DateTime            @updatedAt
 
@@ -1251,6 +1345,11 @@ model Project {
   onCallEntries               OnCallEntry[]
   feedbacks                   Feedback[]
   objectives                  Objective[]
+  // Checkpoint/1-on-1 + inteligencia (Melhoria #4). Todas as FKs sao opcionais e
+  // onDelete SetNull: o registro pode existir sem projeto e sobrevive a remocao dele.
+  checkpoints                 Checkpoint[]
+  opportunities               Opportunity[]
+  cases                       Case[]
   createdAt                   DateTime                     @default(now())
   updatedAt                   DateTime                     @updatedAt
 
@@ -2578,4 +2677,119 @@ model FeedPostAttachment {
 
   @@index([postId])
   @@index([uploadedByUserId])
+}
+
+/// Checkpoint / 1-on-1 (Melhoria #4, fatia 1). Registro de acompanhamento de um
+/// consultor feito pelo GESTOR (so gestor registra; regra de app). type distingue
+/// a conversa 1-on-1 (PRIVATE por padrao: o consultor nao ve) do checkpoint amplo.
+/// Cascade no consultor (o registro nao existe sem o avaliado); managerUserId e
+/// relatedProjectId sao SetNull (preservam o historico se o usuario/projeto sair).
+/// Campos de voz/IA (audioStorageKey, transcription, transcriptionStatus,
+/// extractionStatus) sao apoio para a fatia de IA — sem logica no banco. A
+/// extracao gera Opportunity/Case (relacoes abaixo) e Skills via SkillSuggestion
+/// (convencao sourceEntryIds = ["checkpoint:<id>"], sem modelo proprio aqui).
+model Checkpoint {
+  id                  String                     @id @default(cuid())
+  consultantId        String
+  consultant          Consultant                 @relation(fields: [consultantId], references: [id], onDelete: Cascade)
+  managerUserId       String?
+  manager             User?                      @relation("CheckpointManager", fields: [managerUserId], references: [id], onDelete: SetNull)
+  relatedProjectId    String?
+  relatedProject      Project?                   @relation(fields: [relatedProjectId], references: [id], onDelete: SetNull)
+  type                CheckpointType
+  occurredAt          DateTime
+  weekStart           DateTime?
+  weekEnd             DateTime?
+  title               String?
+  notes               String?
+  audioStorageKey     String?
+  transcription       String?
+  transcriptionStatus TranscriptionStatus        @default(NONE)
+  extractionStatus    CheckpointExtractionStatus @default(NONE)
+  extractedAt         DateTime?
+  status              CheckpointStatus           @default(DRAFT)
+  visibility          CheckpointVisibility       @default(PRIVATE)
+  opportunities       Opportunity[]
+  cases               Case[]
+  createdAt           DateTime                   @default(now())
+  updatedAt           DateTime                   @updatedAt
+
+  @@index([consultantId])
+  @@index([consultantId, occurredAt])
+  @@index([managerUserId])
+  @@index([status])
+  @@index([extractionStatus])
+}
+
+/// Oportunidade (Melhoria #4): chance FUTURA a agir, INTERNA + handoff manual (sem
+/// CRM). Pode nascer de um Checkpoint (sourceCheckpointId) e/ou ser gerada por IA
+/// (aiGenerated) — nesse caso entra como status PENDING para curadoria humana.
+/// Todas as FKs sao opcionais com onDelete SetNull para preservar o insight
+/// comercial mesmo se a origem (checkpoint/consultor/cliente/projeto/usuario) sair.
+/// sourceQuote guarda o trecho da conversa que originou a sugestao (rastreio da IA).
+model Opportunity {
+  id                 String                  @id @default(cuid())
+  sourceCheckpointId String?
+  sourceCheckpoint   Checkpoint?             @relation(fields: [sourceCheckpointId], references: [id], onDelete: SetNull)
+  consultantId       String?
+  consultant         Consultant?             @relation(fields: [consultantId], references: [id], onDelete: SetNull)
+  relatedClientId    String?
+  relatedClient      Client?                 @relation(fields: [relatedClientId], references: [id], onDelete: SetNull)
+  relatedProjectId   String?
+  relatedProject     Project?                @relation(fields: [relatedProjectId], references: [id], onDelete: SetNull)
+  kind               OpportunityKind
+  title              String
+  description        String?
+  priority           OpportunityPriority     @default(MEDIUM)
+  sourceQuote        String?
+  aiGenerated        Boolean                 @default(false)
+  status             CheckpointInsightStatus @default(PENDING)
+  decidedByUserId    String?
+  decidedBy          User?                   @relation("OpportunityDecider", fields: [decidedByUserId], references: [id], onDelete: SetNull)
+  decidedAt          DateTime?
+  ownerUserId        String?
+  owner              User?                   @relation("OpportunityOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+
+  @@index([sourceCheckpointId])
+  @@index([relatedClientId])
+  @@index([status])
+}
+
+/// Case (Melhoria #4): entrega CONCLUIDA digna de referencia, INTERNO + handoff
+/// manual. Pode nascer de um Checkpoint (sourceCheckpointId) e/ou da IA
+/// (aiGenerated). stage e a maturidade interna (DRAFT_INSIGHT -> APPROVED ->
+/// PUBLISHABLE); status e a curadoria do insight (PENDING/ACCEPTED/DISMISSED).
+/// clientConsentState e texto livre do estado de consentimento do cliente para uso
+/// comercial (regra no servidor). Todas as FKs SetNull preservam o case se a origem
+/// sair. sourceQuote guarda o trecho da conversa que originou a sugestao.
+model Case {
+  id                 String                  @id @default(cuid())
+  sourceCheckpointId String?
+  sourceCheckpoint   Checkpoint?             @relation(fields: [sourceCheckpointId], references: [id], onDelete: SetNull)
+  consultantId       String?
+  consultant         Consultant?             @relation(fields: [consultantId], references: [id], onDelete: SetNull)
+  relatedClientId    String?
+  relatedClient      Client?                 @relation(fields: [relatedClientId], references: [id], onDelete: SetNull)
+  relatedProjectId   String?
+  relatedProject     Project?                @relation(fields: [relatedProjectId], references: [id], onDelete: SetNull)
+  title              String
+  summary            String?
+  outcome            String?
+  stage              CaseStage               @default(DRAFT_INSIGHT)
+  clientConsentState String?
+  sourceQuote        String?
+  aiGenerated        Boolean                 @default(false)
+  status             CheckpointInsightStatus @default(PENDING)
+  decidedByUserId    String?
+  decidedBy          User?                   @relation("CaseDecider", fields: [decidedByUserId], references: [id], onDelete: SetNull)
+  decidedAt          DateTime?
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+
+  @@index([sourceCheckpointId])
+  @@index([relatedClientId])
+  @@index([status])
+  @@index([stage])
 }

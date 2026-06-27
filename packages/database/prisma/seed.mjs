@@ -1091,6 +1091,16 @@ const PERMISSION_CATALOG = [
   { code: "DISPONIBILIDADE", name: "Disponibilidade", module: "Pessoas", sort: 63, view: AVAILABILITY_READ },
   { code: "CERTIFICADOS", name: "Certificados", module: "Pessoas", sort: 64, view: ALL_ROLES, create: ALL_ROLES, edit: ALL_ROLES },
 
+  // Checkpoint/1-on-1 + inteligência (Melhoria #4, fatia 1). Só GESTOR registra
+  // (create/edit = TALENT_MANAGE); del = PEOPLE (ADMIN implícito). view inclui
+  // CONSULTANT (TALENT_READ) porque o consultor avaliado VÊ os PRÓPRIOS
+  // checkpoints SHARED — com conteúdo REDIGIDO (sem transcrição/notas crus nem
+  // candidatos), enforced pelo read-scope "subject" + canViewCheckpointRaw=false.
+  // Oportunidade/Case continuam INTERNOS (só gestão) + handoff manual.
+  { code: "CHECKPOINT", name: "Checkpoint / 1-on-1", module: "Pessoas", sort: 65, view: TALENT_READ, create: TALENT_MANAGE, edit: TALENT_MANAGE, del: ["PEOPLE"] },
+  { code: "OPPORTUNITY", name: "Oportunidades", module: "Pessoas", sort: 66, view: TALENT_MANAGE, create: TALENT_MANAGE, edit: TALENT_MANAGE, del: ["PEOPLE"] },
+  { code: "CASE", name: "Cases", module: "Pessoas", sort: 67, view: TALENT_MANAGE, create: TALENT_MANAGE, edit: TALENT_MANAGE, del: ["PEOPLE"] },
+
   { code: "FEEDBACK", name: "Feedback contínuo", module: "Desenvolvimento", sort: 70, view: TALENT_READ, create: TALENT_MANAGE, edit: TALENT_MANAGE },
   { code: "AVALIACOES", name: "Avaliações", module: "Desenvolvimento", sort: 71, view: TALENT_READ, create: PEOPLE_MANAGE, edit: PEOPLE_MANAGE },
   { code: "PDI", name: "PDI", module: "Desenvolvimento", sort: 72, view: TALENT_READ, create: TALENT_MANAGE, edit: TALENT_MANAGE },
