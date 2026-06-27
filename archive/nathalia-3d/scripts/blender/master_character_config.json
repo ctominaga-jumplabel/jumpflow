@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "name": "nathalia-master-character",
+  "version": 1,
+  "description": "Contrato de build do master.glb da Nathal.IA (Fase 4). Consumido pelos scripts de scripts/nathalia/blender/. ESPELHA o contrato de ativos scripts/nathalia/nathalia_assets.config.json (fonte unica do repo) e a planta docs/nathalia/MASTER_GLB_BLUEPRINT.md. Mantenha os dois em sincronia: nomes/limites aqui sao a visao de build; nathalia_assets.config.json e a visao de validacao do .glb.",
+  "mirrors": "../nathalia_assets.config.json",
+  "paths": {
+    "reference": "packages/character-nathalia/assets/raw/nathalia_tripo_v02.glb",
+    "masterBlend": "packages/character-nathalia/assets/blender/master.blend",
+    "masterBlendV2": "packages/character-nathalia/assets/blender/master_v2.blend",
+    "masterGlb": "packages/character-nathalia/assets/models/master.glb",
+    "accessoriesDir": "packages/character-nathalia/assets/models/accessories",
+    "previewDir": "assets/nathalia/thumbnails",
+    "reportsDir": "docs/nathalia/reports"
+  },
+  "rootObject": "Nathalia",
+  "rig": "Armature",
+  "objects": [
+    "Body",
+    "Hair",
+    "Eyes",
+    "Shirt",
+    "Pants",
+    "Shoes",
+    "Logo"
+  ],
+  "materials": [
+    "MAT_Body",
+    "MAT_Hair",
+    "MAT_Eyes",
+    "MAT_Shirt",
+    "MAT_Pants",
+    "MAT_Shoes",
+    "MAT_Logo"
+  ],
+  "rigBones": [
+    "Pelvis",
+    "Spine",
+    "Neck",
+    "Head",
+    "UpperArm.L",
+    "UpperArm.R",
+    "LowerArm.L",
+    "LowerArm.R",
+    "Hand.L",
+    "Hand.R",
+    "UpperLeg.L",
+    "UpperLeg.R",
+    "LowerLeg.L",
+    "LowerLeg.R",
+    "Foot.L",
+    "Foot.R"
+  ],
+  "rigHierarchy": {
+    "Pelvis": ["Spine", "UpperLeg.L", "UpperLeg.R"],
+    "Spine": ["Neck", "UpperArm.L", "UpperArm.R"],
+    "Neck": ["Head"],
+    "UpperArm.L": ["LowerArm.L"],
+    "UpperArm.R": ["LowerArm.R"],
+    "LowerArm.L": ["Hand.L"],
+    "LowerArm.R": ["Hand.R"],
+    "UpperLeg.L": ["LowerLeg.L"],
+    "UpperLeg.R": ["LowerLeg.R"],
+    "LowerLeg.L": ["Foot.L"],
+    "LowerLeg.R": ["Foot.R"]
+  },
+  "shapeKeys": [
+    "Smile",
+    "Blink_L",
+    "Blink_R",
+    "Thinking",
+    "Surprised",
+    "Sad",
+    "OpenMouth",
+    "Curious",
+    "Greeting",
+    "Celebrate"
+  ],
+  "actions": [
+    { "name": "Idle", "loop": true, "minSeconds": 3.0, "maxSeconds": 5.0 },
+    { "name": "Wave", "loop": false, "minSeconds": 1.0, "maxSeconds": 2.2 },
+    { "name": "Thinking", "loop": true, "minSeconds": 1.8, "maxSeconds": 2.6 },
+    { "name": "Pointing", "loop": false, "minSeconds": 1.0, "maxSeconds": 2.0 },
+    { "name": "Explaining", "loop": true, "minSeconds": 1.0, "maxSeconds": 2.6 },
+    { "name": "Celebrate", "loop": false, "minSeconds": 1.2, "maxSeconds": 2.2 },
+    { "name": "Typing", "loop": true, "minSeconds": 1.2, "maxSeconds": 2.2 },
+    { "name": "Alert", "loop": false, "minSeconds": 0.8, "maxSeconds": 1.6 },
+    { "name": "Greeting", "loop": false, "minSeconds": 1.0, "maxSeconds": 2.2 }
+  ],
+  "limits": {
+    "polycount": {
+      "mvpMaxTris": 25000,
+      "idealMaxTris": 40000,
+      "hardMaxTris": 60000
+    },
+    "textures": {
+      "preferredSize": 1024,
+      "maxSize": 2048,
+      "maxCount": 4
+    },
+    "materials": {
+      "exactCount": 7
+    },
+    "objects": {
+      "exactCount": 7
+    },
+    "fileBudget": {
+      "idealMaxBytes": 1048576,
+      "targetMaxBytes": 1572864
+    }
+  },
+  "transform": {
+    "unitMetersPerUnit": 1,
+    "heightMeters": 1.6,
+    "upAxis": "Y",
+    "facingAxis": "-Z",
+    "originXYZ": [0, 0, 0],
+    "originAtFeet": true
+  },
+  "export": {
+    "format": "glb",
+    "embedTextures": true,
+    "compression": "draco",
+    "noCamerasOrLights": true
+  }
+}

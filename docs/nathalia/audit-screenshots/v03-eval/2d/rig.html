@@ -1,0 +1,62 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+  body{margin:0;background:#f4efe6;font-family:ui-sans-serif,system-ui;padding:34px}
+  h2{color:#333;font-weight:700;margin:0 0 18px}
+  .grid{display:flex;gap:30px;flex-wrap:wrap}
+  .col{display:flex;flex-direction:column;align-items:center;gap:8px;width:200px}
+  .lbl{font-size:13px;color:#444;font-weight:600;text-align:center}
+  .sub{font-size:11px;color:#888;text-align:center}
+  .ava{position:relative;width:180px;height:180px;border-radius:9999px;overflow:hidden;
+       background:#e9e7df;border:3px solid #14110f;box-shadow:5px 5px 0 #14110f}
+  .ring-pos{box-shadow:0 0 0 4px #bfe8cf,5px 5px 0 #14110f}
+  .ring-warm{box-shadow:0 0 0 4px #ffd9a8,5px 5px 0 #14110f}
+  .ring-amber{box-shadow:0 0 0 4px #f6c34d,5px 5px 0 #14110f}
+  .ring-info{box-shadow:0 0 0 4px #bcd6f5,5px 5px 0 #14110f}
+  .head{position:absolute;inset:0;transform-origin:50% 78%}
+  .bust{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:50% 15%}
+  /* eyes: upper + lower skin lids that close to blink / squint */
+  .eye{position:absolute;width:15%;height:11%}
+  .eyeL{left:33.5%;top:30.5%}
+  .eyeR{left:54%;top:30.5%}
+  .lid{position:absolute;left:-6%;width:112%;height:100%;
+       background:linear-gradient(#f0ad6a,#e2974f);}
+  .eyeL .lid{background:linear-gradient(#cf9152,#b97c3f)} /* left eye sits in hair shadow */
+  .lidTop{top:0;transform-origin:50% 0%;border-radius:0 0 60% 60%/0 0 28% 28%}
+  .lidBot{bottom:0;transform-origin:50% 100%;border-radius:60% 60% 0 0/28% 28% 0 0}
+  .live .head{animation:sway 6s ease-in-out infinite, breathe 4s ease-in-out infinite}
+  .live .lidTop{animation:blink 4.6s ease-in-out infinite}
+  @keyframes sway{0%,100%{rotate:-1.4deg;translate:0 0}50%{rotate:1.4deg;translate:0 -1%}}
+  @keyframes breathe{0%,100%{scale:1}50%{scale:1.02}}
+  @keyframes blink{0%,92%,100%{transform:scaleY(0.03)}95%{transform:scaleY(1)}}
+</style></head><body>
+<h2>Nathal.IA — rig 2D em camadas (a partir de Avatar_NathIA.png) · 1 arte, sem quadros novos</h2>
+<div class="grid" id="grid"></div>
+<script>
+const BUST="hero-bust-crop.png";
+// per-state pose: head {rot,ty,sc}, lids {top,bot} (0=aberto,1=fechado), ring, label, sub
+const STATES=[
+ {k:"idle",      label:"idle",      sub:"respira + pisca + balança", ring:"", head:[0,0,1], lid:[0.04,0]},
+ {k:"listening", label:"listening", sub:"cabeça à frente, atenta", ring:"ring-info", head:[ -1,1.5,1.01], lid:[0,0]},
+ {k:"thinking",  label:"thinking",  sub:"inclina + olha p/ cima", ring:"ring-info", head:[6,-2,1], lid:[0.15,0]},
+ {k:"happy",     label:"happy",     sub:"olhos sorridentes", ring:"ring-warm", head:[-2,-1,1.01], lid:[0.42,0.34]},
+ {k:"success",   label:"success",   sub:"squint + leve salto", ring:"ring-pos", head:[0,-3,1.03], lid:[0.5,0.4]},
+ {k:"warning",   label:"warning",   sub:"inclina p/ baixo, alerta", ring:"ring-amber", head:[-4,2,1], lid:[0.12,0.0]},
+];
+function rig(s,live){
+  const lids=(cls)=>`<div class="lid lidTop" style="transform:scaleY(${live?'':s.lid[0]})"></div>
+                     <div class="lid lidBot" style="transform:scaleY(${s.lid[1]})"></div>`;
+  return `<div class="col">
+    <div class="ava ${s.ring}">
+      <div class="head ${live?'live':''}" style="transform:rotate(${s.head[0]}deg) translateY(${s.head[1]}%) scale(${s.head[2]})">
+        <img class="bust" src="${BUST}">
+        <div class="eye eyeL">${lids()}</div>
+        <div class="eye eyeR">${lids()}</div>
+      </div>
+    </div>
+    <div class="lbl">${s.label}${live?' · LIVE':''}</div><div class="sub">${s.sub}</div>
+  </div>`;
+}
+let html = rig({...STATES[0],label:"idle"},true);          // live animated one first
+html += STATES.map(s=>rig(s,false)).join("");
+document.getElementById("grid").innerHTML=html;
+</script>
+</body></html>

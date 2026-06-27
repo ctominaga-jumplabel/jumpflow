@@ -1,0 +1,51 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+  body{margin:0;background:#f4efe6;font-family:ui-sans-serif,system-ui;display:flex;gap:40px;align-items:flex-end;padding:48px;flex-wrap:wrap}
+  .col{display:flex;flex-direction:column;align-items:center;gap:10px}
+  .lbl{font-size:13px;color:#555;font-weight:600}
+  /* circular bust avatar built from the reference PNG */
+  .ava{position:relative;border-radius:9999px;overflow:hidden;background:#e9e7df;
+       border:3px solid #14110f;box-shadow:5px 5px 0 #14110f;}
+  .ring-warm{box-shadow:0 0 0 4px #ffd9a8,5px 5px 0 #14110f}
+  .ring-mint{box-shadow:0 0 0 4px #bfe8cf,5px 5px 0 #14110f}
+  .bust{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
+        object-position:50% 16%;            /* frame the face+shoulders */
+        transform-origin:50% 70%;
+        animation:breathe 4.2s ease-in-out infinite, sway 7s ease-in-out infinite;}
+  @keyframes breathe{0%,100%{transform:translateY(0) scale(1.04)}50%{transform:translateY(-1.5%) scale(1.06)}}
+  @keyframes sway{0%,100%{rotate:-1.1deg}50%{rotate:1.1deg}}
+  /* eyelids: skin-tone ellipses over each eye, scaleY 0->1 to blink */
+  .lid{position:absolute;background:#eab98f;border-radius:50%;transform-origin:50% 0%;
+       animation:blink 5.2s ease-in-out infinite;}
+  @keyframes blink{0%,93%,100%{transform:scaleY(0.04)}96%{transform:scaleY(1)}}
+  .static .bust{animation:none;transform:scale(1.04)}
+  .static .lid{animation:none}
+  .blinkframe .lid{animation:none;transform:scaleY(1)}
+</style></head><body>
+
+<div class="col"><div class="lbl">2D · widget bubble (~96px)</div>
+  <div class="ava" style="width:96px;height:96px" id="a-bubble">
+    <img class="bust" src="hero-bust-crop.png">
+    <div class="lid" style="left:34%;top:31%;width:13%;height:7%"></div>
+    <div class="lid" style="left:55%;top:31%;width:13%;height:7%"></div>
+  </div></div>
+
+<div class="col"><div class="lbl">2D · large, idle (breathe+sway+blink)</div>
+  <div class="ava ring-warm" style="width:300px;height:300px">
+    <img class="bust" src="hero-bust-crop.png">
+    <div class="lid" style="left:34%;top:31%;width:13%;height:7%"></div>
+    <div class="lid" style="left:55%;top:31%;width:13%;height:7%"></div>
+  </div></div>
+
+<div class="col"><div class="lbl">2D · eyes open (static frame)</div>
+  <div class="ava ring-mint static" style="width:300px;height:300px">
+    <img class="bust" src="hero-bust-crop.png">
+  </div></div>
+
+<div class="col"><div class="lbl">2D · mid-blink (static frame)</div>
+  <div class="ava static blinkframe" style="width:300px;height:300px">
+    <img class="bust" src="hero-bust-crop.png">
+    <div class="lid" style="left:34%;top:31%;width:13%;height:7%"></div>
+    <div class="lid" style="left:55%;top:31%;width:13%;height:7%"></div>
+  </div></div>
+
+</body></html>
