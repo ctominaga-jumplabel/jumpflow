@@ -1,5 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
+
+// O TimeEntryForm importa o ActivityVoiceButton (Melhoria #3), que por sua vez
+// importa a server action de Horas (next-auth). Mockamos a action e mantemos a
+// flag de voz desligada para isolar estes testes do form sem puxar next/server.
+vi.mock("@/lib/transcription/flags", () => ({
+  isTranscriptionEnabled: () => false,
+}));
+vi.mock("@/app/app/horas/actions", () => ({
+  transcribeActivityAudio: vi.fn(),
+}));
+
 import { TimeEntryForm, type TimeEntryFormProject } from "./TimeEntryForm";
 import type { WeekDay } from "@/lib/timesheet/types";
 

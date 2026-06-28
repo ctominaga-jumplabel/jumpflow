@@ -14,12 +14,14 @@ import {
 } from "@/lib/timesheet/types";
 import { timeEntryEffectiveHours } from "@/lib/timesheet/effective-hours";
 import { formatHours } from "@/lib/format";
+import { isTranscriptionEnabled } from "@/lib/transcription/flags";
 import {
   ClockFields,
   clockHours,
   emptyClock,
   type ClockFieldsValue,
 } from "./ClockFields";
+import { ActivityVoiceButton } from "./ActivityVoiceButton";
 
 /**
  * Fator de remuneração sugerido para Sobreaviso (ON_CALL). O consultor é pago
@@ -177,6 +179,24 @@ export function TimeEntryForm({
   );
 
   const isEditing = Boolean(initial);
+  // Flag de cliente (NEXT_PUBLIC_TRANSCRIPTION). Quando off, o mic some e o
+  // fluxo de digitar manualmente segue intacto.
+  const voiceEnabled = isTranscriptionEnabled();
+
+  /**
+   * Aplica o texto transcrito à descrição: anexa ao que já existe (preservando
+   * o que o consultor digitou) e separa com espaço/quebra; substitui quando o
+   * campo está vazio. O consultor sempre pode editar depois.
+   */
+  function applyTranscription(text: string) {
+    const transcript = text.trim();
+    if (!transcript) return;
+    setValue((v) => {
+      const current = v.description.trim();
+      const merged = current ? `${current} ${transcript}` : transcript;
+      return { ...v, description: merged };
+    });
+  }
 
   function handleSubmit() {
     if (hasErrors) {
@@ -468,6 +488,12 @@ export function TimeEntryForm({
           />
           {showErrors && errors.description ? (
             <p className="mt-1 text-xs text-danger">Descrição é obrigatória.</p>
+          ) : null}
+          {voiceEnabled ? (
+            <ActivityVoiceButton
+              onTranscribed={applyTranscription}
+              disabled={busy}
+            />
           ) : null}
         </div>
 
