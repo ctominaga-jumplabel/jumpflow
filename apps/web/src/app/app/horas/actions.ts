@@ -14,6 +14,7 @@ import {
   recomputePeriodStatus,
 } from "@/lib/db/timesheet";
 import { resolveDbUser } from "@/lib/db/users";
+import { transcribeAudio } from "@/lib/transcription/transcribe";
 import {
   getStorageProvider,
   isStorageConfigured,
@@ -1575,5 +1576,99 @@ export async function removeTimeEntryAttachment(
     return { ok: true, data: { id: parsed.id } };
   } catch (error) {
     return toFailure(error);
+  }
+}
+
+// --- Transcrição por voz da descrição (Melhoria #3) -------------------------
+//
+// Recebe um áudio gravado no cliente (MediaRecorder) e devolve só o texto
+// transcrito para o formulário preencher a Descrição. NÃO persiste nada: é um
+// utilitário de preenchimento. A autorização é server-side (requireUser); a
+// regra de flag/provider/limite vive no seam (transcribeAudio), que degrada
+// honesto quando desativado ou sem provider.
+
+/** Resultado da transcrição devolvido ao cliente (não é um ActionResult). */
+export type TranscribeActivityAudioResult =
+  | { ok: true; text: string }
+  | { ok: false; reason: string; message: string };
+
+/**
+ * Teto específico desta feature (descrição de Horas), MENOR que o
+ * `MAX_AUDIO_BYTES` (25 MB) do seam: a fala de uma descrição é curta, e o
+ * caminho inline do Gemini rejeita áudio grande (gerando um NO_RESULT confuso).
+ * Cortamos AQUI, antes de materializar/encodar o buffer, com uma mensagem clara.
+ * 10 MB de áudio comprimido (webm/opus) cobre vários minutos de fala.
+ */
+export const ACTIVITY_AUDIO_MAX_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Transcreve o áudio enviado (FormData com um Blob no campo `audio`). Aceita o
+ * mimeType do próprio Blob. Não grava nada — devolve o texto para o cliente.
+ */
+export async function transcribeActivityAudio(
+  formData: FormData,
+): Promise<TranscribeActivityAudioResult> {
+  try {
+    // Autorização: qualquer usuário autenticado pode transcrever a própria fala
+    // que vai digitar na descrição. Sem persistência, sem escopo de consultor.
+    await requireUser();
+
+    const audio = formData.get("audio");
+    if (!(audio instanceof Blob)) {
+      return {
+        ok: false,
+        reason: "INVALID_SIZE",
+        message: "Nenhum áudio enviado.",
+      };
+    }
+    if (audio.size <= 0) {
+      return { ok: false, reason: "INVALID_SIZE", message: "Áudio vazio." };
+    }
+    // Teto da feature: corta ANTES de materializar/encodar o buffer. Evita o
+    // NO_RESULT confuso do inline do Gemini para áudio longo e dá uma mensagem
+    // acionável. O MAX_AUDIO_BYTES (25 MB) do seam segue como defesa-em-
+    // profundidade lá dentro, mas a action corta bem antes.
+    if (audio.size > ACTIVITY_AUDIO_MAX_BYTES) {
+      return {
+        ok: false,
+        reason: "AUDIO_TOO_LONG",
+        message: `Áudio muito longo (limite de ${Math.floor(ACTIVITY_AUDIO_MAX_BYTES / (1024 * 1024))} MB). Grave um trecho menor.`,
+      };
+    }
+
+    // MediaRecorder costuma anexar codecs ao mimeType (ex. "audio/webm;codecs=opus").
+    // O seam valida contra a allow-list pelo tipo base, então enviamos só ele.
+    const mimeType = (audio.type || "audio/webm").split(";")[0].trim();
+    const buffer = Buffer.from(await audio.arrayBuffer());
+
+    const outcome = await transcribeAudio({
+      audio: buffer,
+      mimeType,
+      languageHint: "pt-BR",
+      entityType: "TimeEntry",
+    });
+
+    if (outcome.ok) {
+      return { ok: true, text: outcome.text };
+    }
+    return { ok: false, reason: outcome.reason, message: outcome.message };
+  } catch (error) {
+    // Never throw to the client; mirror toFailure's framework-error guard.
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "digest" in error &&
+      typeof (error as { digest?: unknown }).digest === "string" &&
+      ((error as { digest: string }).digest.startsWith("NEXT_") ||
+        (error as { digest: string }).digest.startsWith("NEXT_REDIRECT"))
+    ) {
+      throw error;
+    }
+    console.error("[horas] transcribeActivityAudio error", error);
+    return {
+      ok: false,
+      reason: "UNEXPECTED",
+      message: "Não foi possível transcrever o áudio.",
+    };
   }
 }
