@@ -28,12 +28,18 @@ import {
   validateReceiptFile,
 } from "@/lib/storage/file-validation";
 import {
+  buildConsultantCurriculum,
+  type ConsultantCurriculum,
+} from "@/lib/consultants/curriculum";
+import {
   addressSchema,
   bankAccountSchema,
   benefitSchema,
   companyInfoSchema,
   compensationSchema,
   consultantDocumentDeleteSchema,
+  curriculumBioSchema,
+  generateCurriculumSnapshotSchema,
   consultantDocumentUploadSchema,
   consultantIdentitySchema,
   consultantPhotoDeleteSchema,
@@ -59,7 +65,9 @@ import {
   type CompanyInfoInput,
   type CompensationInput,
   type ConsultantIdentityInput,
+  type CurriculumBioInput,
   type EducationInput,
+  type GenerateCurriculumSnapshotInput,
   type HourBankEntryInput,
   type LanguageInput,
   type LegalRepresentativeInput,
@@ -1295,6 +1303,140 @@ export async function saveLegalRepresentative(
     );
     revalidatePath(CONSULTORES_PATH);
     return { ok: true, data: { consultantId: parsed.consultantId } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Curriculo do Consultor (EP-M06)
+// ---------------------------------------------------------------------------
+
+export interface CurriculumSnapshotSummary {
+  id: string;
+  createdAt: string;
+  generatedByName: string | null;
+}
+
+export interface CurriculumView {
+  curriculum: ConsultantCurriculum;
+  snapshots: CurriculumSnapshotSummary[];
+}
+
+/**
+ * Carrega o curriculo derivado (sempre atualizado) + o historico de snapshots.
+ * Leitura protegida por People. Sem dados financeiros.
+ */
+export async function loadConsultantCurriculum(
+  consultantId: string,
+): Promise<ActionResult<CurriculumView>> {
+  try {
+    ensureDatabase();
+    await requireRole(PEOPLE_ROLES);
+    const curriculum = await buildConsultantCurriculum(consultantId);
+    if (!curriculum) {
+      throw new ActionError("NOT_FOUND", "Consultor nao encontrado.");
+    }
+    const snapshots = await prisma.consultantCurriculumSnapshot.findMany({
+      where: { consultantId },
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        createdAt: true,
+        generatedBy: { select: { name: true, email: true } },
+      },
+    });
+    return {
+      ok: true,
+      data: {
+        curriculum,
+        snapshots: snapshots.map((row) => ({
+          id: row.id,
+          createdAt: row.createdAt.toISOString(),
+          generatedByName:
+            row.generatedBy?.name ?? row.generatedBy?.email ?? null,
+        })),
+      },
+    };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/**
+ * Salva a bio curada (headline/summary) do curriculo — a UNICA parte
+ * nao-derivada. RBAC People, auditado. Sem dados financeiros.
+ */
+export async function saveCurriculumBio(
+  input: CurriculumBioInput,
+): Promise<ActionResult<{ consultantId: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(PEOPLE_ROLES);
+    const parsed = parseInput(curriculumBioSchema, input);
+    const previous = await prisma.consultant.findUnique({
+      where: { id: parsed.consultantId },
+      select: { curriculumHeadline: true, curriculumSummary: true },
+    });
+    if (!previous) {
+      throw new ActionError("NOT_FOUND", "Consultor nao encontrado.");
+    }
+    const data = {
+      curriculumHeadline: parsed.headline ?? null,
+      curriculumSummary: parsed.summary ?? null,
+    };
+    await prisma.consultant.update({
+      where: { id: parsed.consultantId },
+      data,
+    });
+    await audit(
+      "Consultant",
+      parsed.consultantId,
+      "CONSULTANT_CURRICULUM_BIO_SAVED",
+      previous,
+      data,
+    );
+    revalidatePath(CONSULTORES_PATH);
+    return { ok: true, data: { consultantId: parsed.consultantId } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/**
+ * Congela o curriculo atual em um snapshot versionado (US-M06.04). RBAC People,
+ * auditado. O content e o agregado derivado no momento; sem assinatura nem
+ * dados financeiros.
+ */
+export async function generateCurriculumSnapshot(
+  input: GenerateCurriculumSnapshotInput,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(PEOPLE_ROLES);
+    const parsed = parseInput(generateCurriculumSnapshotSchema, input);
+    const curriculum = await buildConsultantCurriculum(parsed.consultantId);
+    if (!curriculum) {
+      throw new ActionError("NOT_FOUND", "Consultor nao encontrado.");
+    }
+    const user = await requireUser();
+    const dbUser = await resolveDbUser(user);
+    const snapshot = await prisma.consultantCurriculumSnapshot.create({
+      data: {
+        consultantId: parsed.consultantId,
+        content: curriculum as unknown as Prisma.InputJsonValue,
+        generatedByUserId: dbUser?.id ?? null,
+      },
+    });
+    await audit(
+      "ConsultantCurriculumSnapshot",
+      snapshot.id,
+      "CONSULTANT_CURRICULUM_SNAPSHOT_GENERATED",
+      null,
+      { consultantId: parsed.consultantId, generatedAt: curriculum.generatedAt },
+    );
+    revalidatePath(CONSULTORES_PATH);
+    return { ok: true, data: { id: snapshot.id } };
   } catch (error) {
     return toFailure(error);
   }
