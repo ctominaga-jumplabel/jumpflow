@@ -4,7 +4,9 @@ import { AppShell } from "@/components/app-shell/AppShell";
 import { requireUser } from "@/lib/auth/guards";
 import { logout } from "@/lib/auth/actions";
 import { isDatabaseConfigured } from "@/lib/db/config";
+import { isDevAuthEnabled } from "@/lib/auth/dev";
 import { getCurrentMatrix } from "@/lib/auth/permissions";
+import { shouldGateTerms } from "@/lib/terms/gate";
 import {
   filterViewableCodes,
   matrixAllows,
@@ -15,6 +17,26 @@ export default async function AppLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   const user = await requireUser();
+
+  // Terms-of-use gate (EP-M08): without an acceptance of the CURRENT terms
+  // version the user cannot reach the platform — redirect to `/termos`.
+  //
+  // Fail-safe (mirrors `getCurrentMatrix`): in dev mode or with no database
+  // there is nowhere to persist/read an acceptance, so the gate is skipped —
+  // blocking would lock everyone out of demo/offline setups. Only the real
+  // session + database path enforces the gate. The read itself fails OPEN on a
+  // transient database error (see `hasAcceptedCurrentTerms`) to avoid a global
+  // lockout during database downtime.
+  const devMode = isDevAuthEnabled();
+  const dbConfigured = isDatabaseConfigured();
+  let acceptedTerms = true;
+  if (!devMode && dbConfigured) {
+    const { hasAcceptedCurrentTerms } = await import("@/lib/db/terms");
+    acceptedTerms = await hasAcceptedCurrentTerms(user.id);
+  }
+  if (shouldGateTerms({ devMode, dbConfigured, accepted: acceptedTerms })) {
+    redirect("/termos");
+  }
 
   // Permission matrix (database-driven RBAC). Used for both route enforcement
   // (403 on direct URL access) and to gate the navigation menu by `can_view`.

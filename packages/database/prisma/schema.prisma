@@ -688,8 +688,28 @@ model User {
   // this user on acceptance (at most one).
   invitationsSent             UserInvitation[]            @relation("InvitedBy")
   invitationCreated           UserInvitation?             @relation("CreatedUser")
+  // Aceite dos Termos de Uso (EP-M08). Um registro por versao aceita; a versao
+  // vigente exigida esta em apps/web/src/lib/terms (CURRENT_TERMS_VERSION).
+  termsAcceptances            TermsAcceptance[]           @relation("TermsAcceptanceUser")
   createdAt                   DateTime                    @default(now())
   updatedAt                   DateTime                    @updatedAt
+}
+
+/// Aceite dos Termos de Uso e Politica de Uso Aceitavel (EP-M08). O gate no
+/// layout autenticado bloqueia o acesso ate existir um aceite da versao vigente.
+/// Idempotente por (userId, termsVersion): reaceitar a mesma versao nao duplica.
+/// O texto canonico vive em docs/termos-de-uso-jumpflow.md e e derivado para a
+/// UI em apps/web/src/lib/terms/terms.ts.
+model TermsAcceptance {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation("TermsAcceptanceUser", fields: [userId], references: [id], onDelete: Cascade)
+  /// Versao dos Termos aceita (ex.: "1.0"). Casa com CURRENT_TERMS_VERSION.
+  termsVersion String
+  acceptedAt   DateTime @default(now())
+
+  @@unique([userId, termsVersion])
+  @@index([userId])
 }
 
 /// Grupo de acesso (perfil) do RBAC. Os 7 grupos do sistema têm `name` (enum
