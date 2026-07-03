@@ -13,6 +13,7 @@ import {
   PinOff,
   Shield,
   Trash2,
+  VideoOff,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -37,6 +38,7 @@ import { FeedCommentThread, Avatar } from "./FeedCommentThread";
 const BODY_LIMIT = Math.min(2000, FEED_BODY_MAX);
 
 const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+const VIDEO_TYPES = new Set(["video/mp4", "video/webm"]);
 
 export interface FeedPostCapabilities {
   canPost: boolean;
@@ -398,9 +400,10 @@ function formatSize(bytes: number): string {
 }
 
 /**
- * One attachment. Images load a short-lived signed URL on demand and render
- * inline; other files render as a download link that signs on click. The URL
- * is fetched via the `getAttachmentUrl` action (RBAC + signing server-side).
+ * One attachment. Images and videos load a short-lived signed URL on demand and
+ * render inline (image via <img>, video via a native <video controls>); other
+ * files render as a download link that signs on click. The URL is fetched via
+ * the `getAttachmentUrl` action (RBAC + signing server-side).
  */
 function AttachmentItem({
   attachment,
@@ -410,16 +413,18 @@ function AttachmentItem({
   notify: (tone: FeedbackTone, text: string) => void;
 }) {
   const isImage = IMAGE_TYPES.has(attachment.contentType);
+  const isVideo = VIDEO_TYPES.has(attachment.contentType);
+  const isMedia = isImage || isVideo;
   const [url, setUrl] = useState<string | null>(null);
-  // Loading starts true for images (the effect signs the URL); the effect only
-  // sets state from the async callback, never synchronously, to avoid a
+  // Loading starts true for inline media (the effect signs the URL); the effect
+  // only sets state from the async callback, never synchronously, to avoid a
   // setState-in-effect cascade.
-  const [loading, setLoading] = useState(isImage);
+  const [loading, setLoading] = useState(isMedia);
   const [failed, setFailed] = useState(false);
 
-  // Lazily sign the image URL once the item mounts.
+  // Lazily sign the media URL once the item mounts.
   useEffect(() => {
-    if (!isImage) return;
+    if (!isMedia) return;
     let active = true;
     getAttachmentUrl({ attachmentId: attachment.id }).then((result) => {
       if (!active) return;
@@ -430,7 +435,7 @@ function AttachmentItem({
     return () => {
       active = false;
     };
-  }, [attachment.id, isImage]);
+  }, [attachment.id, isMedia]);
 
   async function openFile() {
     const result = await getAttachmentUrl({ attachmentId: attachment.id });
@@ -466,6 +471,39 @@ function AttachmentItem({
             className="grid h-40 place-items-center text-xs text-soft"
           >
             {loading ? "Carregando imagem…" : ""}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (isVideo) {
+    if (failed) {
+      return (
+        <p className="flex items-center gap-2 rounded-md border border-border bg-surface-muted/40 px-3 py-2 text-xs text-soft">
+          <VideoOff aria-hidden="true" className="size-4 shrink-0" />
+          Não foi possível carregar o vídeo.
+        </p>
+      );
+    }
+    return (
+      <div className="overflow-hidden rounded-md border border-border bg-black/90">
+        {url ? (
+          <video
+            src={url}
+            controls
+            preload="none"
+            aria-label={`Vídeo: ${attachment.fileName}`}
+            className="max-h-96 w-full bg-black object-contain"
+          >
+            Seu navegador não suporta reprodução de vídeo.
+          </video>
+        ) : (
+          <div
+            aria-busy={loading}
+            className="grid h-40 place-items-center text-xs text-white/70"
+          >
+            {loading ? "Carregando vídeo…" : ""}
           </div>
         )}
       </div>

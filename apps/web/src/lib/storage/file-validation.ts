@@ -40,9 +40,11 @@ const PHOTO_MIME_EXTENSIONS: Record<string, readonly string[]> = {
 export const ACCEPTED_PHOTO_MIME_TYPES = Object.keys(PHOTO_MIME_EXTENSIONS);
 
 /**
- * Whitelist for feed post attachments (Melhoria #5): images + common documents.
- * 10 MB cap (same as receipts). SVG is excluded on purpose (it can carry
- * scripts) — feed images are raster only.
+ * Whitelist for feed post attachments (Melhoria #5): images, common documents
+ * and short videos (mp4/webm). SVG is excluded on purpose (it can carry
+ * scripts) — feed images are raster only. Videos are treated as plain bucket
+ * objects served by signed URL (no transcoding/HLS/CDN pipeline). Size is
+ * capped per type (see MAX_FEED_ATTACHMENT_SIZE_BYTES / MAX_FEED_VIDEO_SIZE_BYTES).
  */
 const FEED_MIME_EXTENSIONS: Record<string, readonly string[]> = {
   "application/pdf": [".pdf"],
@@ -50,11 +52,32 @@ const FEED_MIME_EXTENSIONS: Record<string, readonly string[]> = {
   "image/png": [".png"],
   "image/webp": [".webp"],
   "image/gif": [".gif"],
+  "video/mp4": [".mp4"],
+  "video/webm": [".webm"],
 };
+
+/** Feed MIME types that are videos (larger size cap, inline <video> playback). */
+const FEED_VIDEO_MIME_TYPES = new Set(["video/mp4", "video/webm"]);
 
 export const ACCEPTED_FEED_MIME_TYPES = Object.keys(FEED_MIME_EXTENSIONS);
 
+/** Non-video attachments (images, PDF): 10 MB cap. */
 export const MAX_FEED_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
+
+/** Video attachments get a higher ceiling (50 MB) — still a single object. */
+export const MAX_FEED_VIDEO_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
+
+/** True when a feed MIME type is a video (drives the per-type size limit). */
+export function isFeedVideoType(type: string): boolean {
+  return FEED_VIDEO_MIME_TYPES.has(type);
+}
+
+/** The size ceiling that applies to a feed attachment of the given MIME type. */
+export function maxFeedAttachmentSizeFor(type: string): number {
+  return isFeedVideoType(type)
+    ? MAX_FEED_VIDEO_SIZE_BYTES
+    : MAX_FEED_ATTACHMENT_SIZE_BYTES;
+}
 
 export interface ReceiptFileMeta {
   name: string;
@@ -165,8 +188,9 @@ export function validatePhotoFile(
 }
 
 /**
- * Validate a feed attachment's metadata. Images (JPG, PNG, WEBP, GIF) or PDF,
- * max 10 MB. Same INVALID_FILE/FILE_TOO_LARGE typed-failure contract.
+ * Validate a feed attachment's metadata. Images (JPG, PNG, WEBP, GIF), PDF or
+ * video (MP4, WEBM). Size is capped per type: 50 MB for video, 10 MB otherwise.
+ * Same INVALID_FILE/FILE_TOO_LARGE typed-failure contract.
  */
 export function validateFeedAttachmentFile(
   file: ReceiptFileMeta,
@@ -175,7 +199,7 @@ export function validateFeedAttachmentFile(
   if (!allowedExtensions) {
     return {
       code: "INVALID_FILE",
-      message: "Formato não aceito. Use PDF, JPG, PNG, WEBP ou GIF.",
+      message: "Formato não aceito. Use PDF, JPG, PNG, WEBP, GIF, MP4 ou WEBM.",
     };
   }
   const extension = extensionOf(file.name);
@@ -188,8 +212,13 @@ export function validateFeedAttachmentFile(
   if (file.size <= 0) {
     return { code: "FILE_TOO_LARGE", message: "Arquivo vazio." };
   }
-  if (file.size > MAX_FEED_ATTACHMENT_SIZE_BYTES) {
-    return { code: "FILE_TOO_LARGE", message: "Arquivo acima de 10 MB." };
+  const maxBytes = maxFeedAttachmentSizeFor(file.type);
+  if (file.size > maxBytes) {
+    const limitLabel = isFeedVideoType(file.type) ? "50 MB" : "10 MB";
+    return {
+      code: "FILE_TOO_LARGE",
+      message: `Arquivo acima de ${limitLabel}.`,
+    };
   }
   return null;
 }

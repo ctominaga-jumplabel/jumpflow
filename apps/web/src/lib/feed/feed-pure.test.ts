@@ -16,6 +16,7 @@ import {
 import {
   validateFeedAttachmentFile,
   MAX_FEED_ATTACHMENT_SIZE_BYTES,
+  MAX_FEED_VIDEO_SIZE_BYTES,
 } from "@/lib/storage/file-validation";
 import { buildFeedAttachmentKey } from "@/lib/storage/file-validation";
 
@@ -176,6 +177,44 @@ describe("feed attachment validation", () => {
     ).toBeNull();
   });
 
+  it("accepts videos (MP4, WEBM) up to the 50 MB video cap", () => {
+    expect(
+      validateFeedAttachmentFile({
+        name: "demo.mp4",
+        type: "video/mp4",
+        size: 20 * 1024 * 1024,
+      }),
+    ).toBeNull();
+    expect(
+      validateFeedAttachmentFile({
+        name: "demo.webm",
+        type: "video/webm",
+        size: MAX_FEED_VIDEO_SIZE_BYTES,
+      }),
+    ).toBeNull();
+  });
+
+  it("rejects a video above the 50 MB video cap (FILE_TOO_LARGE)", () => {
+    expect(
+      validateFeedAttachmentFile({
+        name: "demo.mp4",
+        type: "video/mp4",
+        size: MAX_FEED_VIDEO_SIZE_BYTES + 1,
+      })?.code,
+    ).toBe("FILE_TOO_LARGE");
+  });
+
+  it("applies the 10 MB cap to images even though video is allowed 50 MB", () => {
+    // A 20 MB image is under the video cap but over the image cap.
+    expect(
+      validateFeedAttachmentFile({
+        name: "big.png",
+        type: "image/png",
+        size: 20 * 1024 * 1024,
+      })?.code,
+    ).toBe("FILE_TOO_LARGE");
+  });
+
   it("rejects SVG (script vector) and unknown types", () => {
     expect(
       validateFeedAttachmentFile({ name: "x.svg", type: "image/svg+xml", size: 10 })?.code,
@@ -183,6 +222,10 @@ describe("feed attachment validation", () => {
     expect(
       validateFeedAttachmentFile({ name: "x.exe", type: "application/x-msdownload", size: 10 })
         ?.code,
+    ).toBe("INVALID_FILE");
+    // A video MIME with a mismatched extension is still rejected.
+    expect(
+      validateFeedAttachmentFile({ name: "clip.mov", type: "video/mp4", size: 10 })?.code,
     ).toBe("INVALID_FILE");
   });
 

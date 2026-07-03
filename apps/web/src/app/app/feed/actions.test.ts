@@ -703,6 +703,44 @@ describe("attachments", () => {
     expect(uploaded).toHaveLength(0);
   });
 
+  it("accepts an mp4 video attachment (under the 50 MB video cap)", async () => {
+    h.store.storageConfigured = true;
+    const post = seedPost({ authorUserId: "user-1" });
+    // 20 MB video: over the 10 MB image/pdf cap but within the 50 MB video cap.
+    const video = new File([new Uint8Array(1)], "demo.mp4", {
+      type: "video/mp4",
+    });
+    Object.defineProperty(video, "size", { value: 20 * 1024 * 1024 });
+    const r = await attachToPost(formDataWith(post.id, video));
+    expect(r.ok).toBe(true);
+    expect(h.store.attachments).toHaveLength(1);
+    expect(h.store.attachments[0].contentType).toBe("video/mp4");
+    expect(uploaded).toHaveLength(1);
+  });
+
+  it("rejects a video above the 50 MB cap before touching storage", async () => {
+    h.store.storageConfigured = true;
+    const post = seedPost({ authorUserId: "user-1" });
+    const huge = new File([new Uint8Array(1)], "big.mp4", {
+      type: "video/mp4",
+    });
+    Object.defineProperty(huge, "size", { value: 51 * 1024 * 1024 });
+    const r = await attachToPost(formDataWith(post.id, huge));
+    expect(r).toMatchObject({ ok: false, error: "FILE_TOO_LARGE" });
+    expect(uploaded).toHaveLength(0);
+  });
+
+  it("rejects a video type outside the whitelist (INVALID_FILE)", async () => {
+    h.store.storageConfigured = true;
+    const post = seedPost({ authorUserId: "user-1" });
+    const bad = new File([new Uint8Array(1)], "clip.mov", {
+      type: "video/quicktime",
+    });
+    const r = await attachToPost(formDataWith(post.id, bad));
+    expect(r).toMatchObject({ ok: false, error: "INVALID_FILE" });
+    expect(uploaded).toHaveLength(0);
+  });
+
   it("a non-author cannot attach (FORBIDDEN)", async () => {
     h.store.storageConfigured = true;
     const post = seedPost({ authorUserId: "user-2" });
