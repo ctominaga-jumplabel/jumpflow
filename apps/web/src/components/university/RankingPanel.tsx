@@ -23,7 +23,7 @@ export function RankingPanel({
 }: RankingPanelProps) {
   return (
     <SectionPanel
-      title="Ranking da Universidade"
+      title="Ranking da JumpAcademy"
       description="Pontos derivados das conclusões de curso (base por conclusão + bônus por carga horária)."
     >
       {ranking.length === 0 ? (

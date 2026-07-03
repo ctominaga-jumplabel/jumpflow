@@ -17,10 +17,14 @@ import {
   listCompetencyProfiles,
   listSkillCatalog,
 } from "@/lib/db/competencies";
+import { assertModuleEnabled } from "@/lib/modules/disabled-modules";
 
 export const metadata: Metadata = { title: "Competências" };
 
 export default async function CompetenciasPage() {
+  // Módulo desligado (EP-M07): retorna 404 antes de qualquer fetch. Dados e
+  // actions permanecem intactos; reabilitar = remover de disabled-modules.ts.
+  assertModuleEnabled("COMPETENCIAS");
   const user = await requireRole(COMPETENCY_READ_ROLES);
   const databaseReady = isDatabaseConfigured();
   const canManage = hasRole(user, COMPETENCY_WRITE_ROLES);

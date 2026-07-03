@@ -15,6 +15,7 @@ import {
   isBroadManager,
 } from "@/lib/development/visibility";
 import type { RoleName } from "@/lib/auth/roles";
+import { assertModuleEnabled } from "@/lib/modules/disabled-modules";
 
 export const metadata: Metadata = { title: "PDI" };
 
@@ -27,6 +28,9 @@ function canManageStructure(roles: readonly RoleName[]): boolean {
 }
 
 export default async function PdiPage() {
+  // Módulo desligado (EP-M07): retorna 404 antes de qualquer fetch. Dados e
+  // actions permanecem intactos; reabilitar = remover de disabled-modules.ts.
+  assertModuleEnabled("PDI");
   const user = await requireRole(DEVELOPMENT_READ_ROLES);
   const databaseReady = isDatabaseConfigured();
   const canManage = canManageStructure(user.roles);

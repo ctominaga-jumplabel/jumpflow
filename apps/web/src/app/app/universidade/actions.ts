@@ -50,7 +50,7 @@ function ensureDatabase(): void {
   if (!isDatabaseConfigured()) {
     throw new ActionError(
       "NO_DATABASE",
-      "Banco de dados nao configurado para a Universidade.",
+      "Banco de dados nao configurado para a JumpAcademy.",
     );
   }
 }

@@ -34,6 +34,7 @@ import {
 } from "lucide-react";
 import type { RoleName } from "@/lib/auth/roles";
 import { isFeedEnabled } from "@/lib/feed/flags";
+import { isModuleDisabled } from "@/lib/modules/disabled-modules";
 
 export interface NavItemDef {
   /** Visible label in the sidebar. */
@@ -72,8 +73,13 @@ export interface NavItemDef {
 /**
  * Primary operational navigation for the authenticated app shell.
  * Order follows the MVP operational cycle (docs/backlog-mvp.md).
+ *
+ * `primaryNavigationRaw` is the full catalog; the exported `primaryNavigation`
+ * below hides items whose `permissionCode` belongs to a disabled module
+ * (EP-M07). Keeping the raw list makes reabilitar um módulo uma edição de um
+ * único ponto (disabled-modules.ts).
  */
-export const primaryNavigation: NavItemDef[] = [
+const primaryNavigationRaw: NavItemDef[] = [
   {
     label: "Início",
     href: "/app",
@@ -160,13 +166,14 @@ export const primaryNavigation: NavItemDef[] = [
     permissionCode: "DISPONIBILIDADE",
     icon: CalendarRange,
     description: "Heatmap de capacidade do time por consultor e semana.",
+    // EP-M09: CONSULTANT removido do fallback de papel (o matrix já barra); a
+    // navegação restrita do Consultor não inclui Disponibilidade.
     requiredRoles: [
       "ADMIN",
       "PEOPLE",
       "AREA_MANAGER",
       "PROJECT_MANAGER",
       "SALES",
-      "CONSULTANT",
     ],
   },
   {
@@ -209,7 +216,9 @@ export const primaryNavigation: NavItemDef[] = [
     permissionCode: "SCORE_CONSULTOR",
     icon: Trophy,
     description: "Score 0–100 do consultor por avaliações, horas, certificações, feedback e realização, com breakdown transparente.",
-    requiredRoles: ["ADMIN", "PEOPLE", "AREA_MANAGER", "FINANCE", "CONSULTANT"],
+    // EP-M09: CONSULTANT removido do fallback de papel (o matrix já barra); a
+    // navegação restrita do Consultor não inclui Score.
+    requiredRoles: ["ADMIN", "PEOPLE", "AREA_MANAGER", "FINANCE"],
   },
   {
     // Feedback Contínuo (Talentos, Prioridade 1 — EP15): timeline + registro de
@@ -221,12 +230,13 @@ export const primaryNavigation: NavItemDef[] = [
     permissionCode: "FEEDBACK",
     icon: MessageSquareHeart,
     description: "Feedback contínuo por consultor, ancorado em projetos e clientes.",
+    // EP-M09: CONSULTANT removido do fallback de papel (o matrix já barra); a
+    // navegação restrita do Consultor não inclui Feedback.
     requiredRoles: [
       "ADMIN",
       "PEOPLE",
       "AREA_MANAGER",
       "PROJECT_MANAGER",
-      "CONSULTANT",
     ],
   },
   {
@@ -240,12 +250,13 @@ export const primaryNavigation: NavItemDef[] = [
     permissionCode: "AVALIACOES",
     icon: Gauge,
     description: "Ciclos 90/180/360, radar de competências, gap e evolução.",
+    // EP-M09: CONSULTANT removido do fallback de papel (o matrix já barra); a
+    // navegação restrita do Consultor não inclui Avaliações.
     requiredRoles: [
       "ADMIN",
       "PEOPLE",
       "AREA_MANAGER",
       "PROJECT_MANAGER",
-      "CONSULTANT",
     ],
   },
   {
@@ -305,11 +316,13 @@ export const primaryNavigation: NavItemDef[] = [
     // navega o catálogo e se matricula); a curadoria (CRUD) é enforced no
     // servidor (UNIVERSITY_CURATE_ROLES = ADMIN/PEOPLE); o ranking com nomes é
     // restrito a ADMIN/PEOPLE/AREA_MANAGER. Discoverability, não a fronteira.
-    label: "Universidade",
+    // Rótulo de exibição = JumpAcademy (EP-M09). A rota /app/universidade e o
+    // permissionCode UNIVERSIDADE são mantidos para não quebrar links/matrix.
+    label: "JumpAcademy",
     href: "/app/universidade",
     permissionCode: "UNIVERSIDADE",
     icon: BookOpen,
-    description: "Trilhas e cursos da Universidade Jump, matrícula, progresso e ranking.",
+    description: "Trilhas e cursos da JumpAcademy, matrícula, progresso e ranking.",
   },
   {
     label: "Certificados",
@@ -419,6 +432,24 @@ export const adminNavigation: NavItemDef[] = [
     requiredRoles: ["ADMIN"],
   },
 ];
+
+/**
+ * Hide navigation items whose `permissionCode` belongs to a disabled module
+ * (EP-M07). Items without a code are always kept. Preserves the `NavItemDef[]`
+ * type. Reabilitar = remover o code de `disabled-modules.ts`.
+ */
+function withoutDisabledModules(items: NavItemDef[]): NavItemDef[] {
+  return items.filter(
+    (item) => !item.permissionCode || !isModuleDisabled(item.permissionCode),
+  );
+}
+
+/**
+ * Primary operational navigation, com os módulos desligados (EP-M07) já
+ * filtrados. Esta é a lista consumida pela sidebar e pelo layout.
+ */
+export const primaryNavigation: NavItemDef[] =
+  withoutDisabledModules(primaryNavigationRaw);
 
 /** Whether the current user's roles allow seeing a navigation item. */
 export function canSeeNavItem(

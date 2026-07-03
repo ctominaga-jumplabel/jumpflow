@@ -1056,6 +1056,20 @@ const APPROVALS = ["ADMIN", "AREA_MANAGER", "PROJECT_MANAGER", "FINANCE"];
 const AUTOMATION = ["ADMIN", "AREA_MANAGER"];
 const ADMIN_ONLY = ["ADMIN"];
 
+// EP-M09: navegação restrita do Consultor. O papel CONSULTANT só pode
+// ver/acessar estas 6 funcionalidades; para qualquer outro code o CONSULTANT
+// fica com view/create/edit/delete = false (mesmo que apareça nos sets de
+// papel acima). O launcher "Início" (/app) não tem permissionCode e permanece
+// sempre visível. Isto é a fronteira: o matrix é o gate real de rota e de menu.
+const CONSULTANT_ALLOWED_CODES = new Set([
+  "FEED",
+  "HORAS",
+  "DESPESAS",
+  "SKILLS",
+  "UNIVERSIDADE",
+  "CERTIFICADOS",
+]);
+
 // Each entry: code, name, module (display group), parent code (hierarchy),
 // sortOrder and the role sets per action. ADMIN is added to every action set
 // automatically (platform owner = full control), so it is omitted below.
@@ -1162,7 +1176,16 @@ async function seedRolePermissions() {
     if (!permissionId) continue;
 
     // ADMIN always has full control; other roles get the action if listed.
-    const has = (set, key) => key === "ADMIN" || (set ?? []).includes(key);
+    // EP-M09: o CONSULTANT é negado em qualquer code fora do allow-list, mesmo
+    // que apareça nos sets de papel — a navegação restrita do Consultor é a
+    // fronteira. ADMIN nunca é afetado.
+    const has = (set, key) => {
+      if (key === "ADMIN") return true;
+      if (key === "CONSULTANT" && !CONSULTANT_ALLOWED_CODES.has(p.code)) {
+        return false;
+      }
+      return (set ?? []).includes(key);
+    };
 
     for (const key of ROLE_NAMES) {
       const roleId = roleByKey.get(key);

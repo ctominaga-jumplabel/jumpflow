@@ -12,6 +12,7 @@ import {
 } from "@/lib/db/okrs";
 import { OKR_READ_ROLES, isBroadManager, isPeople } from "@/lib/okrs/visibility";
 import type { RoleName } from "@/lib/auth/roles";
+import { assertModuleEnabled } from "@/lib/modules/disabled-modules";
 
 export const metadata: Metadata = { title: "Metas" };
 
@@ -25,6 +26,9 @@ function canManageStructure(roles: readonly RoleName[]): boolean {
 }
 
 export default async function MetasPage() {
+  // Módulo desligado (EP-M07): retorna 404 antes de qualquer fetch. Dados e
+  // actions permanecem intactos; reabilitar = remover de disabled-modules.ts.
+  assertModuleEnabled("METAS");
   const user = await requireRole(OKR_READ_ROLES);
   const databaseReady = isDatabaseConfigured();
   const canManage = canManageStructure(user.roles);

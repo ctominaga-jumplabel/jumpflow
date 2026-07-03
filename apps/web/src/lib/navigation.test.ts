@@ -7,6 +7,7 @@ import {
   navPermissionCodes,
   primaryNavigation,
 } from "@/lib/navigation";
+import { DISABLED_MODULE_CODES } from "@/lib/modules/disabled-modules";
 
 describe("findActiveNav", () => {
   it("matches an exact route", () => {
@@ -45,6 +46,41 @@ describe("findActiveNav", () => {
     expect(findActiveNav("/app/admin/acessos")?.href).toBe(
       "/app/admin/acessos",
     );
+  });
+});
+
+describe("disabled modules (EP-M07)", () => {
+  it("hides Competências, PDI, Clima and Metas from the primary nav", () => {
+    const codes = primaryNavigation
+      .map((item) => item.permissionCode)
+      .filter((code): code is string => Boolean(code));
+    for (const disabled of DISABLED_MODULE_CODES) {
+      expect(codes).not.toContain(disabled);
+    }
+  });
+
+  it("keeps Skills active (Skills != Competências)", () => {
+    const skills = primaryNavigation.find((i) => i.href === "/app/skills");
+    expect(skills?.permissionCode).toBe("SKILLS");
+  });
+
+  it("does not expose the disabled routes in the nav catalog", () => {
+    const hrefs = primaryNavigation.map((i) => i.href);
+    expect(hrefs).not.toContain("/app/competencias");
+    expect(hrefs).not.toContain("/app/pdi");
+    expect(hrefs).not.toContain("/app/clima");
+    expect(hrefs).not.toContain("/app/metas");
+  });
+});
+
+describe("JumpAcademy rename (EP-M09)", () => {
+  it("labels the learning module JumpAcademy while keeping route + code", () => {
+    const academy = primaryNavigation.find(
+      (i) => i.href === "/app/universidade",
+    );
+    expect(academy?.label).toBe("JumpAcademy");
+    expect(academy?.permissionCode).toBe("UNIVERSIDADE");
+    expect(academy?.description).not.toMatch(/Universidade/);
   });
 });
 
