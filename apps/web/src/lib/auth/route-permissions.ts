@@ -8,6 +8,7 @@ import { OKR_READ_ROLES } from "@/lib/okrs/visibility";
 import { ALLOCATION_AI_READ_ROLES } from "@/lib/allocation-ai/visibility";
 import { PROJECT_RISK_READ_ROLES } from "@/lib/project-risk/visibility";
 import { CONSULTANT_SCORE_READ_ROLES } from "@/lib/consultant-score/visibility";
+import { CHECKPOINT_READ_ROLES } from "@/lib/checkpoint/visibility";
 
 /**
  * Pure RBAC primitives and the central route → roles map.
@@ -213,6 +214,15 @@ export const routePermissions: RouteRule[] = [
   // financeiro. A narrativa por LLM não recalcula o número. Regra específica
   // antes da `/app` ampla.
   { prefix: "/app/score", access: CONSULTANT_SCORE_READ_ROLES },
+  // Checkpoint / 1-on-1 (Pessoas, Melhoria #4): registro de acompanhamento do
+  // consultor (1-on-1 nasce PRIVATE — o consultor não vê; CHECKPOINT semanal).
+  // SÓ GESTOR registra; a escrita é action-gated por requirePermission
+  // ("CHECKPOINT", create/edit/delete). Leitura para gestão + CONSULTANT (este
+  // só vê os PRÓPRIOS SHARED, sem transcrição/insights crus — escopo por linha
+  // aplicado pela função de read). A rota só é exposta com a feature flag
+  // NEXT_PUBLIC_FEATURE_CHECKPOINT (a página retorna notFound quando off). Regra
+  // específica antes da `/app` ampla.
+  { prefix: "/app/checkpoints", access: CHECKPOINT_READ_ROLES },
   // Operational automation (auto-approval admin/observability). Management
   // only — PROJECT_MANAGER read-only access is deferred to a later round.
   { prefix: "/app/automacoes", access: ["ADMIN", "AREA_MANAGER"] },

@@ -14,6 +14,7 @@ import {
   FolderKanban,
   Gauge,
   GraduationCap,
+  Headset,
   Home,
   KeyRound,
   LayoutDashboard,
@@ -35,6 +36,7 @@ import {
 import type { RoleName } from "@/lib/auth/roles";
 import { isFeedEnabled } from "@/lib/feed/flags";
 import { isModuleDisabled } from "@/lib/modules/disabled-modules";
+import { isCheckpointEnabled } from "@/lib/checkpoint/flags";
 
 export interface NavItemDef {
   /** Visible label in the sidebar. */
@@ -239,6 +241,32 @@ const primaryNavigationRaw: NavItemDef[] = [
       "PROJECT_MANAGER",
     ],
   },
+  // Checkpoint / 1-on-1 (Pessoas, Melhoria #4): registro de acompanhamento do
+  // consultor. SÓ GESTOR registra; o 1-on-1 nasce PRIVATE (o consultor avaliado
+  // não vê), o CHECKPOINT é o ponto semanal por projeto. Visível a gestão +
+  // CONSULTANT (que só vê os próprios SHARED, sem transcrição/insights crus); a
+  // escrita é enforced no servidor (permissão CHECKPOINT). Atrás da feature flag
+  // NEXT_PUBLIC_FEATURE_CHECKPOINT: quando off, o item some e a rota não é
+  // exposta. O spread condicional preserva o tipo NavItemDef[] (como o Feed).
+  ...(isCheckpointEnabled()
+    ? [
+        {
+          label: "Checkpoints",
+          href: "/app/checkpoints",
+          permissionCode: "CHECKPOINT",
+          icon: Headset,
+          description:
+            "1-on-1 e checkpoints por consultor; o consultor só vê o que for compartilhado.",
+          requiredRoles: [
+            "ADMIN",
+            "PEOPLE",
+            "AREA_MANAGER",
+            "PROJECT_MANAGER",
+            "CONSULTANT",
+          ],
+        } satisfies NavItemDef,
+      ]
+    : []),
   {
     // Avaliação de Desempenho (Talentos, Prioridade 1 — EP16): ciclos 90/180/360,
     // resposta por competência, resultado (radar/gap) e evolução histórica.
