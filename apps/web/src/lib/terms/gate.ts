@@ -6,6 +6,8 @@
  */
 
 export interface TermsGateSignals {
+  /** Feature flag `NEXT_PUBLIC_FEATURE_TERMS` ligada (`isTermsGateEnabled()`). */
+  enabled: boolean;
   /** Dev auth ativo (`isDevAuthEnabled()`). */
   devMode: boolean;
   /** Banco configurado (`isDatabaseConfigured()`). */
@@ -17,12 +19,16 @@ export interface TermsGateSignals {
 /**
  * Deve bloquear o acesso e redirecionar para `/termos`?
  *
+ * Off por padrao (`enabled`): enquanto os Termos forem rascunho pendente de
+ * revisao juridica, o gate fica DESLIGADO e nao bloqueia ninguem.
+ *
  * Fail-safe (espelha o padrao de `getCurrentMatrix`): em dev mode ou sem banco
  * NAO ha onde persistir/consultar o aceite, entao o gate e PULADO — bloquear
- * trancaria todos fora em setups de demo/offline. Com banco real, bloqueia
- * enquanto `accepted` for falso.
+ * trancaria todos fora em setups de demo/offline. Com a flag ligada + banco
+ * real, bloqueia enquanto `accepted` for falso.
  */
 export function shouldGateTerms(signals: TermsGateSignals): boolean {
+  if (!signals.enabled) return false;
   if (signals.devMode) return false;
   if (!signals.dbConfigured) return false;
   return !signals.accepted;
