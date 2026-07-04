@@ -17,7 +17,7 @@ import {
 } from "@/lib/db/university";
 import { canCurate, canViewRanking } from "@/lib/university/visibility";
 
-export const metadata: Metadata = { title: "Universidade" };
+export const metadata: Metadata = { title: "JumpAcademy" };
 
 export default async function UniversidadePage() {
   // Catálogo visível a todos os autenticados; curadoria/ranking gated por papel.
@@ -33,13 +33,13 @@ export default async function UniversidadePage() {
       <div className="space-y-6">
         <PageHeader
           eyebrow="Talentos"
-          title="Universidade Jump"
+          title="JumpAcademy"
           description="Trilhas e cursos de capacitação, matrícula, progresso e gamificação."
         />
         <EmptyState
           icon={BookOpen}
           title="Banco de dados não configurado"
-          description="A Universidade consome trilhas, cursos e matrículas persistidos. Configure o banco para curar o catálogo e acompanhar o progresso."
+          description="A JumpAcademy consome trilhas, cursos e matrículas persistidos. Configure o banco para curar o catálogo e acompanhar o progresso."
         />
       </div>
     );
@@ -69,7 +69,7 @@ export default async function UniversidadePage() {
     <div className="space-y-6">
       <PageHeader
         eyebrow="Talentos"
-        title="Universidade Jump"
+        title="JumpAcademy"
         description="Navegue pelas trilhas e cursos, matricule-se e registre seu progresso. Ao concluir um curso ligado a uma competência, a conclusão vira evidência da sua skill. Pontos e ranking são derivados das conclusões."
       />
       <UniversityView

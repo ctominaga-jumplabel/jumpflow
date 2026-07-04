@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 import { LauncherView } from "@/components/launcher/LauncherView";
 import { getCurrentUser } from "@/lib/auth/current-user";
+import { landingPathFor } from "@/lib/auth/redirects";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import {
   mockLauncherBadges,
@@ -21,6 +23,15 @@ export const metadata: Metadata = { title: "Início" };
  */
 export default async function AppIndex() {
   const user = await getCurrentUser();
+
+  // EP-M09: o Consultor não usa o launcher — sua home é o Feed (ou o fallback
+  // seguro quando a flag do Feed está off). `redirect()` lança internamente,
+  // então fica antes de qualquer render. Demais perfis seguem no launcher.
+  if (user) {
+    const landing = landingPathFor(user.roles);
+    if (landing !== "/app") redirect(landing);
+  }
+
   const firstName = user?.name.split(" ")[0] ?? "";
   const shortcuts = shortcutsForUser(user);
 

@@ -74,13 +74,14 @@ function renderFeed(
   posts: FeedPostView[],
   capabilities: FeedCapabilities = caps.member,
   cursor: string | null = null,
+  storageEnabled = false,
 ) {
   return render(
     <FeedView
       initialPosts={posts}
       initialCursor={cursor}
       capabilities={capabilities}
-      storageEnabled={false}
+      storageEnabled={storageEnabled}
       authorName="Ana Lima"
     />,
   );
@@ -135,6 +136,34 @@ describe("FeedComposer limit + read-only", () => {
     fireEvent.change(textarea, { target: { value: "12345" } });
     // 2000 soft limit - 5 chars.
     expect(screen.getByText("1995")).toBeInTheDocument();
+  });
+});
+
+describe("FeedComposer media pickers + visibility removal", () => {
+  it("exposes explicit Foto and Vídeo pickers when storage is enabled", () => {
+    renderFeed([], caps.member, null, true);
+    expect(screen.getByRole("button", { name: "Foto" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Vídeo" })).toBeInTheDocument();
+    // The generic PDF/file picker stays available too.
+    expect(screen.getByRole("button", { name: "Arquivo" })).toBeInTheDocument();
+  });
+
+  it("no longer renders the visibility selector", () => {
+    renderFeed([], caps.member, null, true);
+    expect(
+      screen.queryByLabelText("Visibilidade do post"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Empresa toda")).not.toBeInTheDocument();
+  });
+
+  it("hides the media pickers when storage is not configured", () => {
+    renderFeed([], caps.member, null, false);
+    expect(
+      screen.queryByRole("button", { name: "Foto" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Vídeo" }),
+    ).not.toBeInTheDocument();
   });
 });
 

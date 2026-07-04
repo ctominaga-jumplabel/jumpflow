@@ -101,7 +101,7 @@ export function UniversityView({
       {tabs.length > 1 ? (
         <div
           role="tablist"
-          aria-label="Seções da Universidade"
+          aria-label="Seções da JumpAcademy"
           className="flex flex-wrap gap-2"
         >
           {tabs.map((t) => (

@@ -378,6 +378,21 @@ export const lookupInputSchema = z.object({
   value: z.string().trim().min(8).max(20),
 });
 
+/**
+ * Bio curada do curriculo (EP-M06 / US-M06.03). Unica parte NAO-derivada do
+ * curriculo. Campos livres e opcionais (sem dados financeiros). Vazio limpa.
+ */
+export const curriculumBioSchema = z.object({
+  consultantId: entityId,
+  headline: optionalText(160),
+  summary: optionalText(2000),
+});
+
+/** Gerar snapshot do curriculo (US-M06.04): congela o agregado atual. */
+export const generateCurriculumSnapshotSchema = z.object({
+  consultantId: entityId,
+});
+
 export type ConsultantIdentityInput = z.infer<typeof consultantIdentitySchema>;
 export type PersonalInfoInput = z.infer<typeof personalInfoSchema>;
 export type CompanyInfoInput = z.infer<typeof companyInfoSchema>;
@@ -405,6 +420,10 @@ export type BankAccountInput = z.infer<typeof bankAccountSchema>;
 export type CompensationInput = z.infer<typeof compensationSchema>;
 export type BenefitInput = z.infer<typeof benefitSchema>;
 export type VoucherBenefitsInput = z.infer<typeof voucherBenefitsSchema>;
+export type CurriculumBioInput = z.infer<typeof curriculumBioSchema>;
+export type GenerateCurriculumSnapshotInput = z.infer<
+  typeof generateCurriculumSnapshotSchema
+>;
 
 /** Maps the pt-BR voucher shortcut keys to ConsultantBenefit.type values. */
 export const VOUCHER_TYPE_BY_KEY = {

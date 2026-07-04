@@ -16,10 +16,14 @@ import {
   canViewSurveyDashboards,
 } from "@/lib/surveys/visibility";
 import type { SurveyDashboard } from "@/lib/surveys/types";
+import { assertModuleEnabled } from "@/lib/modules/disabled-modules";
 
 export const metadata: Metadata = { title: "Clima / NPS interno" };
 
 export default async function ClimaPage() {
+  // Módulo desligado (EP-M07): retorna 404 antes de qualquer fetch. Dados e
+  // actions permanecem intactos; reabilitar = remover de disabled-modules.ts.
+  assertModuleEnabled("CLIMA");
   const user = await requireRole(SURVEY_READ_ROLES);
   const databaseReady = isDatabaseConfigured();
   const canManage = canManageSurveys(user.roles);

@@ -14,6 +14,11 @@ import {
   type SuggestedSkillLevel,
 } from "@/lib/skills/suggestions";
 import { addDays, parseIsoDateUtc, weekStartOf } from "@/lib/timesheet/week";
+import {
+  buildConsultantCurriculum,
+  type ConsultantCurriculum,
+} from "@/lib/consultants/curriculum";
+import { curriculumBioSchema } from "@/lib/consultants/schemas";
 
 const SKILLS_PATH = "/app/skills";
 
@@ -43,6 +48,14 @@ const updateInputSchema = z.object({
   level: skillLevelSchema,
 });
 const deleteInputSchema = z.object({ suggestionId: idSchema });
+
+// Escopo de dono: NAO aceitamos consultantId do cliente na bio propria; o
+// consultor sempre vem resolvido do usuario logado. Reusamos a validacao de
+// campos do EP-M06 (curriculumBioSchema) omitindo o id.
+const myCurriculumBioSchema = curriculumBioSchema.pick({
+  headline: true,
+  summary: true,
+});
 
 class ActionError extends Error {
   constructor(
@@ -378,6 +391,88 @@ export async function updateSkillSuggestion(
 
     revalidatePath(SKILLS_PATH);
     return { ok: true, data: { suggestionId: suggestion.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Meu Curriculo (EP-M06 / US-M06.03) — escopo de DONO
+// ---------------------------------------------------------------------------
+//
+// Estas duas actions servem a aba "Meu Curriculo" em /app/skills. O consultor
+// e SEMPRE resolvido a partir do usuario logado (Consultant.userId ==
+// currentUser.id) via requireConsultant(); o cliente NUNCA informa o id. Assim
+// e impossivel ler ou editar o curriculo de outra pessoa por esta via. A action
+// de RH (saveCurriculumBio, gated People em /app/consultores) permanece intacta.
+// Sem dados financeiros (o agregador ja garante). Sem snapshot (RH-only).
+
+export interface MyCurriculumView {
+  curriculum: ConsultantCurriculum;
+}
+
+/**
+ * Carrega o curriculo derivado do PROPRIO consultor logado (read-only, sempre
+ * atualizado). Retorna NO_CONSULTANT quando o usuario nao tem um Consultant
+ * vinculado (ex.: ADMIN sem cadastro) — nunca vaza curriculo de terceiro.
+ */
+export async function loadMyCurriculum(): Promise<ActionResult<MyCurriculumView>> {
+  try {
+    ensureDatabase();
+    const { consultant } = await requireConsultant();
+    const curriculum = await buildConsultantCurriculum(consultant.id);
+    if (!curriculum) {
+      throw new ActionError("NOT_FOUND", "Curriculo nao encontrado.");
+    }
+    return { ok: true, data: { curriculum } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/**
+ * Salva a bio curada (headline/summary) do PROPRIO consultor (US-M06.03). O
+ * consultantId nunca vem do cliente: usamos sempre o consultor resolvido do
+ * usuario logado, de modo que ninguem edita a bio de outra pessoa. Auditado
+ * (CONSULTANT_CURRICULUM_BIO_SELF_SAVED). Sem dados financeiros.
+ */
+export async function saveMyCurriculumBio(
+  input: z.infer<typeof myCurriculumBioSchema>,
+): Promise<ActionResult<{ consultantId: string }>> {
+  try {
+    ensureDatabase();
+    const result = myCurriculumBioSchema.safeParse(input);
+    if (!result.success) {
+      throw new ActionError("INVALID_INPUT", "Revise os campos informados.");
+    }
+    const parsed = result.data;
+    const { user, consultant } = await requireConsultant();
+    const dbUser = await resolveDbUser(user);
+
+    const previous = {
+      curriculumHeadline: consultant.curriculumHeadline,
+      curriculumSummary: consultant.curriculumSummary,
+    };
+    const data = {
+      curriculumHeadline: parsed.headline ?? null,
+      curriculumSummary: parsed.summary ?? null,
+    };
+    await prisma.$transaction(async (tx) => {
+      await tx.consultant.update({ where: { id: consultant.id }, data });
+      await tx.auditEvent.create({
+        data: buildAuditEventData({
+          actorUserId: dbUser?.id ?? null,
+          entityType: "Consultant",
+          entityId: consultant.id,
+          action: "CONSULTANT_CURRICULUM_BIO_SELF_SAVED",
+          before: previous,
+          after: data,
+        }),
+      });
+    });
+
+    revalidatePath(SKILLS_PATH);
+    return { ok: true, data: { consultantId: consultant.id } };
   } catch (error) {
     return toFailure(error);
   }

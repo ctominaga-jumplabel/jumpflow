@@ -113,6 +113,6 @@ export function decideCourseEvidence(args: {
     shouldRecord,
     sourceType: COURSE_EVIDENCE_SOURCE,
     sourceId: args.enrollmentId,
-    note: `Conclusão do curso "${args.courseTitle}" na Universidade Jump.`,
+    note: `Conclusão do curso "${args.courseTitle}" na JumpAcademy.`,
   };
 }

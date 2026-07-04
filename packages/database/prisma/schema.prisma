@@ -752,6 +752,7 @@ model User {
   evaluationCyclesCreated     EvaluationCycle[]           @relation("EvaluationCycleCreator")
   evaluationResponsesAsRater  EvaluationResponse[]        @relation("EvaluationResponseRater")
   developmentPlansOwned       DevelopmentPlan[]           @relation("DevelopmentPlanOwner")
+  curriculumSnapshotsCreated  ConsultantCurriculumSnapshot[] @relation("CurriculumSnapshotGeneratedBy")
   surveysCreated              Survey[]                    @relation("SurveyCreator")
   objectivesOwned             Objective[]                 @relation("ObjectiveOwner")
   // Feed social interno (Melhoria #5, fatia 1). Autoria por User com onDelete
@@ -771,8 +772,28 @@ model User {
   // this user on acceptance (at most one).
   invitationsSent             UserInvitation[]            @relation("InvitedBy")
   invitationCreated           UserInvitation?             @relation("CreatedUser")
+  // Aceite dos Termos de Uso (EP-M08). Um registro por versao aceita; a versao
+  // vigente exigida esta em apps/web/src/lib/terms (CURRENT_TERMS_VERSION).
+  termsAcceptances            TermsAcceptance[]           @relation("TermsAcceptanceUser")
   createdAt                   DateTime                    @default(now())
   updatedAt                   DateTime                    @updatedAt
+}
+
+/// Aceite dos Termos de Uso e Politica de Uso Aceitavel (EP-M08). O gate no
+/// layout autenticado bloqueia o acesso ate existir um aceite da versao vigente.
+/// Idempotente por (userId, termsVersion): reaceitar a mesma versao nao duplica.
+/// O texto canonico vive em docs/termos-de-uso-jumpflow.md e e derivado para a
+/// UI em apps/web/src/lib/terms/terms.ts.
+model TermsAcceptance {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation("TermsAcceptanceUser", fields: [userId], references: [id], onDelete: Cascade)
+  /// Versao dos Termos aceita (ex.: "1.0"). Casa com CURRENT_TERMS_VERSION.
+  termsVersion String
+  acceptedAt   DateTime @default(now())
+
+  @@unique([userId, termsVersion])
+  @@index([userId])
 }
 
 /// Grupo de acesso (perfil) do RBAC. Os 7 grupos do sistema têm `name` (enum
@@ -908,6 +929,12 @@ model Consultant {
   /// sem antes preencher os registros existentes.
   contractType        ConsultantContractType?
   hourlyCost          Decimal?                       @db.Decimal(12, 2)
+  /// Curriculo (EP-M06): bio curada por People. `headline` e uma linha curta
+  /// (ex.: "Engenheira de dados focada em analytics"); `summary` e um resumo
+  /// livre. Sao a UNICA parte nao-derivada do curriculo; o restante vem das
+  /// tabelas-fonte. Nunca contem dados financeiros.
+  curriculumHeadline  String?
+  curriculumSummary   String?
   allocations         Allocation[]
   periods             TimesheetPeriod[]
   timeEntries         TimeEntry[]
@@ -942,6 +969,7 @@ model Consultant {
   surveyInvitations   SurveyInvitation[]
   objectives          Objective[]
   enrollments         Enrollment[]
+  curriculumSnapshots ConsultantCurriculumSnapshot[]
   // Checkpoint/1-on-1 + inteligencia (Melhoria #4). checkpoints sao Cascade no
   // consultor (o registro nao faz sentido sem o avaliado); oportunidade/case usam
   // SetNull no consultantId para preservar o insight comercial mesmo se o consultor
@@ -951,6 +979,27 @@ model Consultant {
   cases               Case[]
   createdAt           DateTime                       @default(now())
   updatedAt           DateTime                       @updatedAt
+}
+
+/// Snapshot versionado do curriculo do consultor (EP-M06 / US-M06.04). Congela
+/// o agregado derivado (buildConsultantCurriculum) no momento da geracao em
+/// `content` (JSON), para historico e versao imprimivel estavel. SEM assinatura
+/// e SEM dados financeiros. `pdfStorageKey` fica reservado para uma futura
+/// geracao server-side de PDF (hoje o PDF sai pelo navegador via impressao).
+model ConsultantCurriculumSnapshot {
+  id                String     @id @default(cuid())
+  consultantId      String
+  consultant        Consultant @relation(fields: [consultantId], references: [id], onDelete: Cascade)
+  /// Agregado congelado (identidade, formacao, idiomas, skills validadas,
+  /// certificados, historico de projetos, destaques, bio curada).
+  content           Json
+  generatedByUserId String?
+  generatedBy       User?      @relation("CurriculumSnapshotGeneratedBy", fields: [generatedByUserId], references: [id], onDelete: SetNull)
+  /// Reservado para PDF gerado server-side no futuro. Nullable; nao usado agora.
+  pdfStorageKey     String?
+  createdAt         DateTime   @default(now())
+
+  @@index([consultantId, createdAt])
 }
 
 model ConsultantPersonalInfo {

@@ -39,6 +39,7 @@ import type {
 } from "@/lib/db/consultants";
 import { computeCompensation } from "@/lib/consultants/compensation";
 import { ConsultantAvailabilityBadge } from "./ConsultantAvailabilityBadge";
+import { ConsultantCurriculumSection } from "./ConsultantCurriculumSection";
 import { ConsultantProfileSections } from "./ConsultantProfileSections";
 import { ConsultantSkillChips } from "./ConsultantSkillChips";
 
@@ -436,6 +437,14 @@ function ConsultantDetailModal({
             canManagePeople={canManagePeople}
             onMessage={onMessage}
             onReload={onReload}
+          />
+        ) : null}
+
+        {canManagePeople ? (
+          <ConsultantCurriculumSection
+            consultantId={consultantId}
+            canManagePeople={canManagePeople}
+            onMessage={onMessage}
           />
         ) : null}
 
