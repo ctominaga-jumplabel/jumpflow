@@ -20,10 +20,14 @@ import type {
   EvaluationResult,
   HistorySeries,
 } from "@/lib/evaluations/types";
+import { assertModuleEnabled } from "@/lib/modules/disabled-modules";
 
 export const metadata: Metadata = { title: "Avaliações" };
 
 export default async function AvaliacoesPage() {
+  // Módulo desligado (EP-M07): retorna 404 antes de qualquer fetch. Dados e
+  // actions permanecem intactos; reabilitar = remover de disabled-modules.ts.
+  assertModuleEnabled("AVALIACOES");
   const user = await requireRole(EVALUATION_READ_ROLES);
   const databaseReady = isDatabaseConfigured();
   const canManage = canManageCycles(user.roles);

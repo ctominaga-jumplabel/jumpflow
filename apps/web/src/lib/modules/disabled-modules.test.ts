@@ -20,9 +20,9 @@ afterEach(() => {
 });
 
 describe("disabled modules (EP-M07)", () => {
-  it("lists exactly the four turned-off codes", () => {
+  it("lists exactly the turned-off codes", () => {
     expect([...DISABLED_MODULE_CODES].sort()).toEqual(
-      ["CLIMA", "COMPETENCIAS", "METAS", "PDI"].sort(),
+      ["AVALIACOES", "CLIMA", "COMPETENCIAS", "METAS", "PDI"].sort(),
     );
   });
 
