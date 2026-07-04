@@ -18,12 +18,14 @@ import { notFound } from "next/navigation";
  *  - PDI          → /app/pdi
  *  - CLIMA        → /app/clima
  *  - METAS        → /app/metas
+ *  - AVALIACOES   → /app/avaliacoes
  */
 export const DISABLED_MODULE_CODES: ReadonlySet<string> = new Set([
   "COMPETENCIAS",
   "PDI",
   "CLIMA",
   "METAS",
+  "AVALIACOES",
 ]);
 
 /** Whether a permission code belongs to a module that is currently disabled. */
