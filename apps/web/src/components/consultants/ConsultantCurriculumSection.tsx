@@ -1,17 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import {
-  Award,
-  Briefcase,
-  FileText,
-  GraduationCap,
-  Languages,
-  Printer,
-  Sparkles,
-  Star,
-} from "lucide-react";
+import { FileText, Printer, Sparkles } from "lucide-react";
 import { ActionButton } from "@/components/ui/ActionButton";
+import {
+  ConsultantCurriculumView,
+  CurriculumSubSection,
+} from "@/components/consultants/ConsultantCurriculumView";
 import { focusRingInput } from "@/lib/styles";
 import { cn } from "@/lib/utils";
 import {
@@ -31,24 +26,6 @@ function fieldClass() {
 
 function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString("pt-BR");
-}
-
-interface ListSectionProps {
-  icon: React.ComponentType<{ className?: string; "aria-hidden"?: boolean }>;
-  title: string;
-  children: React.ReactNode;
-}
-
-function SubSection({ icon: Icon, title, children }: ListSectionProps) {
-  return (
-    <div className="space-y-1">
-      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-medium">
-        <Icon aria-hidden className="size-3.5" />
-        {title}
-      </div>
-      {children}
-    </div>
-  );
 }
 
 /**
@@ -162,15 +139,6 @@ export function ConsultantCurriculumSection({
         </div>
       </div>
 
-      <div className="rounded-md border border-border bg-surface-muted p-3">
-        <p className="text-base font-semibold text-strong">{cv.identity.name}</p>
-        <p className="text-sm text-medium">
-          {[cv.identity.jobTitle, cv.identity.seniority, cv.identity.area]
-            .filter(Boolean)
-            .join(" · ")}
-        </p>
-      </div>
-
       {/* Bio curada — unica parte editavel (nao-derivada). */}
       <div className="space-y-2 rounded-md border border-border p-3">
         <div className="text-sm font-semibold text-strong">Bio curada</div>
@@ -202,86 +170,7 @@ export function ConsultantCurriculumSection({
         </ActionButton>
       </div>
 
-      {cv.highlights.length > 0 ? (
-        <SubSection icon={Star} title="Destaques">
-          <ul className="space-y-0.5 text-sm text-strong">
-            {cv.highlights.map((item) => (
-              <li key={item.label}>
-                <span className="text-medium">{item.label}:</span> {item.value}
-              </li>
-            ))}
-          </ul>
-        </SubSection>
-      ) : null}
-
-      {cv.education.length > 0 ? (
-        <SubSection icon={GraduationCap} title="Formacao">
-          <ul className="space-y-0.5 text-sm text-strong">
-            {cv.education.map((entry, index) => (
-              <li key={`${entry.institution}-${index}`}>
-                {entry.course}, {entry.degree} — {entry.institution}
-                {entry.period ? ` (${entry.period})` : ""}
-                {entry.completed ? "" : " — em andamento"}
-              </li>
-            ))}
-          </ul>
-        </SubSection>
-      ) : null}
-
-      {cv.languages.length > 0 ? (
-        <SubSection icon={Languages} title="Idiomas">
-          <ul className="space-y-0.5 text-sm text-strong">
-            {cv.languages.map((entry) => (
-              <li key={entry.name}>
-                {entry.name} — {entry.level}
-              </li>
-            ))}
-          </ul>
-        </SubSection>
-      ) : null}
-
-      {cv.skills.length > 0 ? (
-        <SubSection icon={Sparkles} title="Competencias validadas">
-          <ul className="space-y-0.5 text-sm text-strong">
-            {cv.skills.map((entry) => (
-              <li key={entry.name}>
-                {entry.name}
-                {entry.category ? ` (${entry.category})` : ""} — {entry.level}
-                {entry.yearsExperience != null
-                  ? ` — ${entry.yearsExperience} ano(s)`
-                  : ""}
-              </li>
-            ))}
-          </ul>
-        </SubSection>
-      ) : null}
-
-      {cv.certificates.length > 0 ? (
-        <SubSection icon={Award} title="Certificados">
-          <ul className="space-y-0.5 text-sm text-strong">
-            {cv.certificates.map((entry, index) => (
-              <li key={`${entry.name}-${index}`}>
-                {entry.name} — {entry.issuer}, {entry.issuedAt}
-                {entry.expiresAt ? ` (valido ate ${entry.expiresAt})` : ""}
-              </li>
-            ))}
-          </ul>
-        </SubSection>
-      ) : null}
-
-      {cv.projects.length > 0 ? (
-        <SubSection icon={Briefcase} title="Historico de projetos">
-          <ul className="space-y-0.5 text-sm text-strong">
-            {cv.projects.map((entry, index) => (
-              <li key={`${entry.projectName}-${index}`}>
-                {entry.projectName}
-                {entry.clientName ? ` — ${entry.clientName}` : ""} — {entry.role}{" "}
-                ({entry.period})
-              </li>
-            ))}
-          </ul>
-        </SubSection>
-      ) : null}
+      <ConsultantCurriculumView cv={cv} />
 
       <SnapshotHistory snapshots={view.snapshots} printBase={printBase} />
     </section>
@@ -304,7 +193,7 @@ function SnapshotHistory({
     );
   }
   return (
-    <SubSection icon={FileText} title="Historico de snapshots">
+    <CurriculumSubSection icon={FileText} title="Historico de snapshots">
       <ul className="divide-y divide-border text-sm">
         {snapshots.map((snap) => (
           <li key={snap.id} className="flex items-center justify-between gap-2 py-1.5">
@@ -326,6 +215,6 @@ function SnapshotHistory({
           </li>
         ))}
       </ul>
-    </SubSection>
+    </CurriculumSubSection>
   );
 }

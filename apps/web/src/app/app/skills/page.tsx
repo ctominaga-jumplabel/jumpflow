@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { SkillMatrix } from "@/components/skills/SkillMatrix";
 import { SkillCoveragePanel } from "@/components/skills/SkillCoveragePanel";
 import { SkillSuggestionPanel } from "@/components/skills/SkillSuggestionPanel";
+import { SkillsTabs } from "@/components/skills/SkillsTabs";
 import { requireUser } from "@/lib/auth/guards";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { parseWeekParam, toIsoDate } from "@/lib/timesheet/week";
@@ -70,17 +71,21 @@ export default async function SkillsPage({ searchParams }: SkillsPageProps) {
         title="Skills"
         description="Matriz de competencias por categoria, niveis e gaps de cobertura do time."
       />
-      <div className="grid gap-6 lg:grid-cols-[1fr_360px] lg:items-start">
-        <SkillMatrix skills={catalogSkills} />
-        <div className="space-y-6">
-          <SkillSuggestionPanel
-            weekStart={toIsoDate(weekStart)}
-            suggestions={suggestions}
-            databaseReady={databaseReady}
-          />
-          <SkillCoveragePanel skills={catalogSkills} />
-        </div>
-      </div>
+      <SkillsTabs
+        skillsContent={
+          <div className="grid gap-6 lg:grid-cols-[1fr_360px] lg:items-start">
+            <SkillMatrix skills={catalogSkills} />
+            <div className="space-y-6">
+              <SkillSuggestionPanel
+                weekStart={toIsoDate(weekStart)}
+                suggestions={suggestions}
+                databaseReady={databaseReady}
+              />
+              <SkillCoveragePanel skills={catalogSkills} />
+            </div>
+          </div>
+        }
+      />
     </div>
   );
 }
