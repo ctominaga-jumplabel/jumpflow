@@ -7,6 +7,7 @@ import { isDatabaseConfigured } from "@/lib/db/config";
 import { isDevAuthEnabled } from "@/lib/auth/dev";
 import { getCurrentMatrix } from "@/lib/auth/permissions";
 import { shouldGateTerms } from "@/lib/terms/gate";
+import { isTermsGateEnabled } from "@/lib/terms/flags";
 import {
   filterViewableCodes,
   matrixAllows,
@@ -27,14 +28,22 @@ export default async function AppLayout({
   // session + database path enforces the gate. The read itself fails OPEN on a
   // transient database error (see `hasAcceptedCurrentTerms`) to avoid a global
   // lockout during database downtime.
+  const termsEnabled = isTermsGateEnabled();
   const devMode = isDevAuthEnabled();
   const dbConfigured = isDatabaseConfigured();
   let acceptedTerms = true;
-  if (!devMode && dbConfigured) {
+  if (termsEnabled && !devMode && dbConfigured) {
     const { hasAcceptedCurrentTerms } = await import("@/lib/db/terms");
     acceptedTerms = await hasAcceptedCurrentTerms(user.id);
   }
-  if (shouldGateTerms({ devMode, dbConfigured, accepted: acceptedTerms })) {
+  if (
+    shouldGateTerms({
+      enabled: termsEnabled,
+      devMode,
+      dbConfigured,
+      accepted: acceptedTerms,
+    })
+  ) {
     redirect("/termos");
   }
 

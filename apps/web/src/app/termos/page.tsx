@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/auth/guards";
 import { isDevAuthEnabled } from "@/lib/auth/dev";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { CURRENT_TERMS } from "@/lib/terms/terms";
+import { isTermsGateEnabled } from "@/lib/terms/flags";
 import { cn } from "@/lib/utils";
 import { focusRing, tactileButton } from "@/lib/styles";
 import { acceptTerms, declineTerms } from "./actions";
@@ -18,6 +19,10 @@ export const metadata: Metadata = { title: "Termos de Uso" };
  */
 export default async function TermsPage() {
   const user = await requireUser();
+
+  // Gate desligado (rascunho pendente de revisao juridica): nao exibe o texto a
+  // ninguem — segue para o app.
+  if (!isTermsGateEnabled()) redirect("/app");
 
   // Se ja aceitou a versao vigente (apenas no caminho com banco real), nao ha o
   // que exibir — segue para o app. Em dev/sem banco o gate ja e pulado no
