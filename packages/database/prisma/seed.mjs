@@ -1222,30 +1222,61 @@ async function seedRolePermissions() {
 // /app/admin/notificacoes are never overwritten. The Teams channel needs a
 // per-environment webhook URL (a secret), so it is NOT seeded — add it via the
 // admin UI as a STATIC recipient on the TEAMS channel.
-async function seedNotificationDefaults() {
+// Idempotent per event: only creates a rule when the event has none yet, so
+// admin edits in /app/admin/notificacoes are never overwritten.
+async function ensureNotificationRule(event, recipients, label) {
   const existing = await prisma.notificationRule.findFirst({
-    where: { event: "OPERATION_CLOSED" },
+    where: { event },
     select: { id: true },
   });
   if (existing) {
-    console.log("Notification rule OPERATION_CLOSED already present — skipping.");
+    console.log(`Notification rule ${event} already present — skipping.`);
     return;
   }
   await prisma.notificationRule.create({
     data: {
-      event: "OPERATION_CLOSED",
+      event,
       scope: "PROJECT",
       channel: "EMAIL",
       groupByRecipient: true,
       active: true,
-      recipients: {
-        create: [
-          { type: "ROLE", channel: "EMAIL", address: "PEOPLE", name: "DP / People" },
-        ],
-      },
+      recipients: { create: recipients },
     },
   });
-  console.log("Seeded default notification rule: OPERATION_CLOSED → ROLE PEOPLE (EMAIL).");
+  console.log(`Seeded default notification rule: ${label}`);
+}
+
+async function seedNotificationDefaults() {
+  // Fechamento operacional → DP/People podem seguir com folha e pagamento.
+  await ensureNotificationRule(
+    "OPERATION_CLOSED",
+    [{ type: "ROLE", channel: "EMAIL", address: "PEOPLE", name: "DP / People" }],
+    "OPERATION_CLOSED → ROLE PEOPLE (EMAIL)",
+  );
+
+  // Liberação de horas (mensal) → DP/People + Financeiro (alimenta faturamento).
+  await ensureNotificationRule(
+    "HOURS_RELEASED",
+    [
+      { type: "ROLE", channel: "EMAIL", address: "PEOPLE", name: "DP / People" },
+      { type: "ROLE", channel: "EMAIL", address: "FINANCE", name: "Financeiro" },
+    ],
+    "HOURS_RELEASED → ROLE PEOPLE + FINANCE (EMAIL)",
+  );
+
+  // Apuração ao cliente (disparo explícito do Financeiro) → contato do cliente.
+  await ensureNotificationRule(
+    "CLIENT_BILLING_SUMMARY",
+    [
+      {
+        type: "CLIENT_CONTACT",
+        channel: "EMAIL",
+        address: null,
+        name: "Contato do cliente",
+      },
+    ],
+    "CLIENT_BILLING_SUMMARY → CLIENT_CONTACT (EMAIL)",
+  );
 }
 
 async function main() {

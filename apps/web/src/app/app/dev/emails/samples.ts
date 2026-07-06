@@ -8,6 +8,7 @@ import {
   buildApuracaoClienteEmail,
   buildContratoAusenteEmail,
   buildFaturamentoPendenteEmail,
+  buildFechamentoOperacaoEmail,
   buildLiberacaoEmail,
   buildProjetoCriadoEmail,
   type BuiltEmail,
@@ -28,7 +29,7 @@ export const SAMPLE_EMAILS: SampleEmail[] = [
         recipientName: name,
         projectName: "Portal de Atendimento",
         clientName: "ACME S.A.",
-        periodLabel: "16–22 jun 2026",
+        periodLabel: "junho/2026",
         totalHours: 186,
         consultantsCount: 4,
         exceptions: [
@@ -97,6 +98,25 @@ export const SAMPLE_EMAILS: SampleEmail[] = [
         managerName: "Fernanda Alves",
         hasCommercialContract: false,
         projectUrl: "https://jumpflow.example/app/projetos/123",
+      }),
+  },
+  {
+    key: "fechamento-operacao",
+    label: "Fechamento operacional (DP)",
+    build: (name) =>
+      buildFechamentoOperacaoEmail({
+        recipientName: name,
+        projectName: "Portal de Atendimento",
+        clientName: "ACME S.A.",
+        periodLabel: "junho/2026",
+        lines: [
+          { consultantName: "João Pereira", hours: 168 },
+          { consultantName: "Maria Lima", hours: 176 },
+          { consultantName: "Carla Souza", hours: 152 },
+        ],
+        totalHours: 496,
+        closedByName: "Fernanda Alves",
+        reviewUrl: "https://jumpflow.example/app/operacao/fechamento",
       }),
   },
   {

@@ -32,6 +32,8 @@ export interface BuiltEmail {
 }
 
 const app = () => appConfig.name;
+/** Parent company brand — used for client-facing mail (apuração). */
+const company = () => appConfig.company.name;
 
 // ---------------------------------------------------------------------------
 // Tema 1.1 — Notificação por liberação de horas
@@ -40,7 +42,7 @@ export interface LiberacaoEmailInput {
   recipientName: string;
   projectName: string;
   clientName: string;
-  periodLabel: string; // ex: "16–22 jun 2026"
+  periodLabel: string; // competência mensal, ex: "junho/2026"
   totalHours: number;
   consultantsCount: number;
   exceptions?: string[]; // ex: ["Hora extra: 4h (João)", "Sobreaviso: 2h (Maria)"]
@@ -51,12 +53,12 @@ export function buildLiberacaoEmail(input: LiberacaoEmailInput): BuiltEmail {
   const blocks: EmailBlock[] = [
     paragraph(`Olá, ${input.recipientName}.`),
     paragraph(
-      `As horas do projeto ${input.projectName} (${input.clientName}) referentes a ${input.periodLabel} foram liberadas e estão prontas para a próxima etapa.`,
+      `As horas do projeto ${input.projectName} (${input.clientName}) referentes à competência de ${input.periodLabel} foram liberadas e estão prontas para a próxima etapa.`,
     ),
     keyValueList([
       { label: "Projeto", value: input.projectName },
       { label: "Cliente", value: input.clientName },
-      { label: "Período", value: input.periodLabel },
+      { label: "Competência", value: input.periodLabel },
       { label: "Total de horas", value: formatHours(input.totalHours) },
       { label: "Consultores", value: String(input.consultantsCount) },
     ]),
@@ -143,14 +145,16 @@ export function buildApuracaoClienteEmail(
   ];
 
   const { html, text } = renderEmail({
+    // Client-facing: wears the Jump (company) brand, not the internal tool.
+    brand: "company",
     preheader: `Apuração ${input.competenceLabel} — ${input.projectName}`,
     title: `Apuração de horas — ${input.competenceLabel}`,
     blocks,
-    signoff: `Atenciosamente,\nEquipe ${app()} · ${input.clientName}`,
+    signoff: `Atenciosamente,\nEquipe ${company()}`,
   });
 
   return {
-    subject: `${app()} · Apuração de horas ${input.competenceLabel} — ${input.projectName}`,
+    subject: `${company()} · Apuração de horas ${input.competenceLabel} — ${input.projectName}`,
     html,
     text,
   };
@@ -359,7 +363,7 @@ export function buildFechamentoOperacaoEmail(input: {
     keyValueList([
       { label: "Projeto", value: input.projectName },
       { label: "Cliente", value: input.clientName },
-      { label: "Período", value: input.periodLabel },
+      { label: "Competência", value: input.periodLabel },
       { label: "Consultores", value: String(input.lines.length) },
       { label: "Total de horas", value: formatHours(input.totalHours) },
       ...(input.closedByName
