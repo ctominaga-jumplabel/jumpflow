@@ -16,6 +16,10 @@ import {
 import { resolveDbUser } from "@/lib/db/users";
 import { transcribeAudio } from "@/lib/transcription/transcribe";
 import {
+  ACTIVITY_AUDIO_MAX_BYTES,
+  type TranscribeActivityAudioResult,
+} from "./activityAudio";
+import {
   getStorageProvider,
   isStorageConfigured,
   ONCALL_APPROVALS_BUCKET,
@@ -1586,20 +1590,6 @@ export async function removeTimeEntryAttachment(
 // utilitário de preenchimento. A autorização é server-side (requireUser); a
 // regra de flag/provider/limite vive no seam (transcribeAudio), que degrada
 // honesto quando desativado ou sem provider.
-
-/** Resultado da transcrição devolvido ao cliente (não é um ActionResult). */
-export type TranscribeActivityAudioResult =
-  | { ok: true; text: string }
-  | { ok: false; reason: string; message: string };
-
-/**
- * Teto específico desta feature (descrição de Horas), MENOR que o
- * `MAX_AUDIO_BYTES` (25 MB) do seam: a fala de uma descrição é curta, e o
- * caminho inline do Gemini rejeita áudio grande (gerando um NO_RESULT confuso).
- * Cortamos AQUI, antes de materializar/encodar o buffer, com uma mensagem clara.
- * 10 MB de áudio comprimido (webm/opus) cobre vários minutos de fala.
- */
-export const ACTIVITY_AUDIO_MAX_BYTES = 10 * 1024 * 1024;
 
 /**
  * Transcreve o áudio enviado (FormData com um Blob no campo `audio`). Aceita o
