@@ -36,7 +36,8 @@ vi.mock("@/lib/transcription/transcribe", async (importOriginal) => {
   return { ...actual, transcribeAudio: h.transcribeAudio };
 });
 
-import { ACTIVITY_AUDIO_MAX_BYTES, transcribeActivityAudio } from "./actions";
+import { ACTIVITY_AUDIO_MAX_BYTES } from "./activityAudio";
+import { transcribeActivityAudio } from "./actions";
 
 function audioFormData(blob: Blob): FormData {
   const form = new FormData();
