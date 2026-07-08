@@ -33,6 +33,7 @@ import {
   Users,
   Wallet,
 } from "lucide-react";
+import { appConfig } from "@/config/app";
 import type { RoleName } from "@/lib/auth/roles";
 import { isFeedEnabled } from "@/lib/feed/flags";
 import { isModuleDisabled } from "@/lib/modules/disabled-modules";
@@ -43,6 +44,12 @@ export interface NavItemDef {
   label: string;
   /** Route the item links to. */
   href: string;
+  /**
+   * When true, `href` is an absolute URL to an external site (e.g. the
+   * JumpAcademy portal). Rendered as a plain `<a target="_blank">` instead of a
+   * Next `<Link>`, and never treated as the active route.
+   */
+  external?: boolean;
   /** Icon rendered to the left of the label. */
   icon: LucideIcon;
   /** Short operational description used on placeholder pages. */
@@ -339,18 +346,17 @@ const primaryNavigationRaw: NavItemDef[] = [
     ],
   },
   {
-    // Universidade Jump (Talentos, Prioridade 2 — EP 7.3): trilhas, cursos,
-    // matrícula, progresso e gamificação derivada. Visível a TODOS (o consultor
-    // navega o catálogo e se matricula); a curadoria (CRUD) é enforced no
-    // servidor (UNIVERSITY_CURATE_ROLES = ADMIN/PEOPLE); o ranking com nomes é
-    // restrito a ADMIN/PEOPLE/AREA_MANAGER. Discoverability, não a fronteira.
-    // Rótulo de exibição = JumpAcademy (EP-M09). A rota /app/universidade e o
-    // permissionCode UNIVERSIDADE são mantidos para não quebrar links/matrix.
+    // JumpAcademy: portal EXTERNO de trilhas e cursos (app separado, mesmo
+    // tenant Entra ID) — abre em nova aba. A visibilidade continua governada
+    // pela matriz via UNIVERSIDADE (discoverability, não a fronteira). O módulo
+    // interno legado permanece em /app/universidade, apenas sem entrada no menu.
+    // URL em config (appConfig.academyUrl) para ficar fácil de renomear.
     label: "JumpAcademy",
-    href: "/app/universidade",
+    href: appConfig.academyUrl,
+    external: true,
     permissionCode: "UNIVERSIDADE",
     icon: BookOpen,
-    description: "Trilhas e cursos da JumpAcademy, matrícula, progresso e ranking.",
+    description: "Trilhas e cursos no portal JumpAcademy (abre em nova aba).",
   },
   {
     label: "Certificados",

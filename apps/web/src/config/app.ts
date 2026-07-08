@@ -11,6 +11,17 @@ const companyName = (process.env.NEXT_PUBLIC_COMPANY_NAME ?? "Jump").trim();
 const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "").trim().replace(/\/+$/, "");
 
 /**
+ * External JumpAcademy portal (separate app, same Entra ID tenant). Kept in
+ * config so the URL is easy to change/rename. Normalized without a trailing
+ * slash. Defaults to the known production portal.
+ */
+const academyUrl = (
+  process.env.NEXT_PUBLIC_JUMP_ACADEMY_URL ?? "https://academy.jump.tec.br"
+)
+  .trim()
+  .replace(/\/+$/, "");
+
+/**
  * Company logo for client-facing email. Resolves to an explicit URL when set;
  * otherwise, once the asset lives at `public/brand/jump-logo.png`, derives it
  * from the public origin. Kept null when neither is available so the shell
@@ -43,6 +54,8 @@ export const appConfig = {
   url: appUrl || null,
   /** Bare host of the public origin (e.g. "app.jumpflow.com"), or null. */
   host: appUrl ? appUrl.replace(/^https?:\/\//, "") : null,
+  /** External JumpAcademy portal URL (opens in a new tab from the sidebar). */
+  academyUrl,
   /**
    * Absolute https URL of the brand logo, suitable for `<img src>` in email.
    * Email clients cannot fetch app-relative assets, so this is only available
