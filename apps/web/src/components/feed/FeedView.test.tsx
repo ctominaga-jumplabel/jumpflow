@@ -46,6 +46,7 @@ function comment(over: Partial<FeedPostView["comments"][number]> = {}) {
     editedAt: null,
     createdAt: new Date().toISOString(),
     reactions: [],
+    mentions: [],
     isOwn: false,
     ...over,
   };
@@ -63,6 +64,7 @@ function post(over: Partial<FeedPostView> = {}): FeedPostView {
     createdAt: new Date().toISOString(),
     reactions: [{ emoji: "👍", count: 2, reacted: false }],
     attachments: [],
+    mentions: [],
     comments: [comment()],
     commentCount: 1,
     isOwn: false,

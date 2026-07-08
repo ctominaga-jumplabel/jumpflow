@@ -411,15 +411,23 @@ export interface FeedDigestItem {
   /** Quem gerou a interação. */
   actorName: string;
   /** Tipo de interação no alvo do destinatário. */
-  kind: "reply" | "reaction";
-  /** Para reações: o emoji (ex. "👍"). Ignorado em respostas. */
+  kind: "reply" | "reaction" | "mention";
+  /** Para reações: o emoji (ex. "👍"). Ignorado nos demais tipos. */
   emoji?: string;
   /** "post" | "comentário" — o alvo do destinatário que recebeu a interação. */
   target: "post" | "comment";
 }
 
-/** "Fulano respondeu seu post" / "Beltrano reagiu 👍 ao seu comentário". */
+/**
+ * "Fulano respondeu seu post" / "Beltrano reagiu 👍 ao seu comentário" /
+ * "Ciclana mencionou você em um post". Menção usa artigo indefinido ("um post")
+ * porque o alvo não é necessariamente do destinatário — ele só foi citado nele.
+ */
 function describeFeedItem(item: FeedDigestItem): string {
+  if (item.kind === "mention") {
+    const alvo = item.target === "post" ? "um post" : "um comentário";
+    return `${item.actorName} mencionou você em ${alvo}`;
+  }
   const targetLabel = item.target === "post" ? "seu post" : "seu comentário";
   if (item.kind === "reply") {
     return `${item.actorName} respondeu ${targetLabel}`;
@@ -435,7 +443,8 @@ export function buildFeedDigestEmail(input: {
 }): BuiltEmail {
   const count = input.items.length;
   const replies = input.items.filter((i) => i.kind === "reply").length;
-  const reactions = count - replies;
+  const reactions = input.items.filter((i) => i.kind === "reaction").length;
+  const mentions = input.items.filter((i) => i.kind === "mention").length;
 
   // Resumo curto e operacional do que aconteceu.
   const summaryParts: string[] = [];
@@ -443,13 +452,13 @@ export function buildFeedDigestEmail(input: {
     summaryParts.push(`${replies} ${replies === 1 ? "resposta" : "respostas"}`);
   if (reactions > 0)
     summaryParts.push(`${reactions} ${reactions === 1 ? "reação" : "reações"}`);
+  if (mentions > 0)
+    summaryParts.push(`${mentions} ${mentions === 1 ? "menção" : "menções"}`);
   const summary = summaryParts.join(" e ");
 
   const blocks: EmailBlock[] = [
     paragraph(`Olá, ${input.recipientName}.`),
-    paragraph(
-      `Você tem ${summary} no Feed. Veja o que rolou nas suas publicações:`,
-    ),
+    paragraph(`Você tem ${summary} no Feed. Veja o que rolou:`),
     dataTable(
       ["Interação"],
       input.items.map((i) => [describeFeedItem(i)]),

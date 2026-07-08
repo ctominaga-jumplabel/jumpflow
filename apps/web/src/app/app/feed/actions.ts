@@ -8,6 +8,7 @@ import { can } from "@/lib/auth/permissions";
 import { requirePermission, requireUser } from "@/lib/auth/guards";
 import type { AppUser } from "@/lib/auth/types";
 import {
+  notifyFeedMentioned,
   notifyFeedReacted,
   notifyFeedReplied,
 } from "@/lib/automation/notifications/feed-events";
@@ -19,7 +20,7 @@ import {
   listFeed,
 } from "@/lib/db/feed";
 import type { FeedPage } from "@/lib/feed/types";
-import { resolveDbUser } from "@/lib/db/users";
+import { resolveDbUser, searchActiveUsersByName } from "@/lib/db/users";
 import {
   addCommentSchema,
   attachmentIdSchema,
@@ -152,6 +153,50 @@ async function requireModerator(user: AppUser): Promise<void> {
   }
 }
 
+/**
+ * Resolve a lista de ids mencionados (vinda do cliente — NÃO é fronteira de
+ * confiança) para os ids de usuários ATIVOS reais, deduplicados e EXCLUINDO o
+ * próprio autor (não faz sentido mencionar/notificar a si mesmo). Ids inválidos
+ * ou de usuários inativos são silenciosamente descartados (evita erro de FK e
+ * menções fantasmas).
+ */
+async function resolveMentionUserIds(
+  rawIds: string[] | undefined,
+  selfId: string,
+): Promise<string[]> {
+  const unique = [...new Set((rawIds ?? []).map((id) => id.trim()))].filter(
+    (id) => id.length > 0 && id !== selfId,
+  );
+  if (unique.length === 0) return [];
+  const users = await prisma.user.findMany({
+    where: { id: { in: unique }, status: "ACTIVE" },
+    select: { id: true },
+  });
+  return users.map((u) => u.id);
+}
+
+// ── Mention autocomplete ─────────────────────────────────────────────────────
+
+/**
+ * Busca usuários para o autocomplete de menção (@) no Feed. RBAC: FEED.view (a
+ * mesma porta da tela). Retorna no máximo 8 usuários ativos por nome/e-mail.
+ * Query vazia → lista vazia (o cliente não abre o dropdown).
+ */
+export async function searchFeedMentionUsers(
+  query: string,
+): Promise<ActionResult<{ users: { id: string; name: string }[] }>> {
+  try {
+    ensureDatabase();
+    await requirePermission(FEED_PERMISSION, "view");
+    const q = typeof query === "string" ? query.trim() : "";
+    if (q.length === 0) return { ok: true, data: { users: [] } };
+    const users = await searchActiveUsersByName(q, 8);
+    return { ok: true, data: { users } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
 // ── Read (pagination) ───────────────────────────────────────────────────────
 
 /**
@@ -185,13 +230,39 @@ export async function createPost(
     await requireFeed("create");
     const parsed = parseInput(createPostSchema, input);
     const dbUser = await requireDbUser(user);
+    const mentionIds = await resolveMentionUserIds(
+      parsed.mentionedUserIds,
+      dbUser.id,
+    );
 
-    const post = await prisma.feedPost.create({
-      data: {
-        authorUserId: dbUser.id,
-        body: parsed.body,
-        visibility: "PUBLIC_INTERNAL",
-      },
+    // Post + menções na MESMA transação (atômico: nunca fica um post sem as
+    // menções que o usuário selecionou).
+    const post = await prisma.$transaction(async (tx) => {
+      const created = await tx.feedPost.create({
+        data: {
+          authorUserId: dbUser.id,
+          body: parsed.body,
+          visibility: "PUBLIC_INTERNAL",
+        },
+      });
+      if (mentionIds.length > 0) {
+        await tx.feedMention.createMany({
+          data: mentionIds.map((uid) => ({
+            postId: created.id,
+            mentionedUserId: uid,
+          })),
+          skipDuplicates: true,
+        });
+      }
+      return created;
+    });
+
+    // Post-commit, best-effort: notifica cada mencionado (pula o autor; fail-open
+    // sem regra). Nunca quebra a action.
+    await notifyFeedMentioned({
+      postId: post.id,
+      actorUserId: dbUser.id,
+      mentionedUserIds: mentionIds,
     });
 
     revalidatePath(FEED_PATH);
@@ -210,19 +281,50 @@ export async function editPost(
     await requireFeed("edit");
     const parsed = parseInput(editPostSchema, input);
     const dbUser = await requireDbUser(user);
+    const mentionIds = await resolveMentionUserIds(
+      parsed.mentionedUserIds,
+      dbUser.id,
+    );
 
-    // Authorship + status guard in one write (race-safe): only the author may
-    // edit, and only a VISIBLE post (a removed post cannot be revived by edit).
-    const updated = await prisma.feedPost.updateMany({
-      where: { id: parsed.postId, authorUserId: dbUser.id, status: "VISIBLE" },
-      data: { body: parsed.body, editedAt: new Date() },
+    // Menções já existentes ANTES da edição (para notificar só as novas).
+    const before = await prisma.feedMention.findMany({
+      where: { postId: parsed.postId },
+      select: { mentionedUserId: true },
     });
-    if (updated.count !== 1) {
-      throw new ActionError(
-        "FORBIDDEN",
-        "Você só pode editar os seus próprios posts ativos.",
-      );
-    }
+    const existingIds = new Set(before.map((m) => m.mentionedUserId));
+
+    // Edição + sincronização das menções na mesma transação. Authorship + status
+    // guard no updateMany (race-safe); as menções só mudam se a edição aplicou.
+    await prisma.$transaction(async (tx) => {
+      const updated = await tx.feedPost.updateMany({
+        where: { id: parsed.postId, authorUserId: dbUser.id, status: "VISIBLE" },
+        data: { body: parsed.body, editedAt: new Date() },
+      });
+      if (updated.count !== 1) {
+        throw new ActionError(
+          "FORBIDDEN",
+          "Você só pode editar os seus próprios posts ativos.",
+        );
+      }
+      await tx.feedMention.deleteMany({ where: { postId: parsed.postId } });
+      if (mentionIds.length > 0) {
+        await tx.feedMention.createMany({
+          data: mentionIds.map((uid) => ({
+            postId: parsed.postId,
+            mentionedUserId: uid,
+          })),
+          skipDuplicates: true,
+        });
+      }
+    });
+
+    // Notifica só quem passou a ser mencionado nesta edição (não re-notifica).
+    const addedIds = mentionIds.filter((id) => !existingIds.has(id));
+    await notifyFeedMentioned({
+      postId: parsed.postId,
+      actorUserId: dbUser.id,
+      mentionedUserIds: addedIds,
+    });
 
     revalidatePath(FEED_PATH);
     return { ok: true, data: { id: parsed.postId } };
@@ -271,6 +373,10 @@ export async function addComment(
     await requireFeed("create");
     const parsed = parseInput(addCommentSchema, input);
     const dbUser = await requireDbUser(user);
+    const mentionIds = await resolveMentionUserIds(
+      parsed.mentionedUserIds,
+      dbUser.id,
+    );
 
     // Only comment on a VISIBLE post.
     const post = await prisma.feedPost.findUnique({
@@ -281,17 +387,36 @@ export async function addComment(
       throw new ActionError("NOT_FOUND", "Post não encontrado ou removido.");
     }
 
-    const comment = await prisma.feedComment.create({
-      data: {
-        postId: post.id,
-        authorUserId: dbUser.id,
-        body: parsed.body,
-      },
+    // Comentário + menções na mesma transação (atômico).
+    const comment = await prisma.$transaction(async (tx) => {
+      const created = await tx.feedComment.create({
+        data: {
+          postId: post.id,
+          authorUserId: dbUser.id,
+          body: parsed.body,
+        },
+      });
+      if (mentionIds.length > 0) {
+        await tx.feedMention.createMany({
+          data: mentionIds.map((uid) => ({
+            commentId: created.id,
+            mentionedUserId: uid,
+          })),
+          skipDuplicates: true,
+        });
+      }
+      return created;
     });
 
     // Post-commit, best-effort: notifica o AUTOR do post que recebeu a resposta
-    // (pula auto-notificação; fail-open sem regra). Nunca quebra a action.
+    // e cada mencionado no comentário (ambos pulam auto-notificação; fail-open
+    // sem regra). Nunca quebram a action.
     await notifyFeedReplied(comment.id);
+    await notifyFeedMentioned({
+      commentId: comment.id,
+      actorUserId: dbUser.id,
+      mentionedUserIds: mentionIds,
+    });
 
     revalidatePath(FEED_PATH);
     return { ok: true, data: { id: comment.id } };
@@ -309,17 +434,50 @@ export async function editComment(
     await requireFeed("edit");
     const parsed = parseInput(editCommentSchema, input);
     const dbUser = await requireDbUser(user);
+    const mentionIds = await resolveMentionUserIds(
+      parsed.mentionedUserIds,
+      dbUser.id,
+    );
 
-    const updated = await prisma.feedComment.updateMany({
-      where: { id: parsed.commentId, authorUserId: dbUser.id, status: "VISIBLE" },
-      data: { body: parsed.body, editedAt: new Date() },
+    const before = await prisma.feedMention.findMany({
+      where: { commentId: parsed.commentId },
+      select: { mentionedUserId: true },
     });
-    if (updated.count !== 1) {
-      throw new ActionError(
-        "FORBIDDEN",
-        "Você só pode editar os seus próprios comentários ativos.",
-      );
-    }
+    const existingIds = new Set(before.map((m) => m.mentionedUserId));
+
+    await prisma.$transaction(async (tx) => {
+      const updated = await tx.feedComment.updateMany({
+        where: {
+          id: parsed.commentId,
+          authorUserId: dbUser.id,
+          status: "VISIBLE",
+        },
+        data: { body: parsed.body, editedAt: new Date() },
+      });
+      if (updated.count !== 1) {
+        throw new ActionError(
+          "FORBIDDEN",
+          "Você só pode editar os seus próprios comentários ativos.",
+        );
+      }
+      await tx.feedMention.deleteMany({ where: { commentId: parsed.commentId } });
+      if (mentionIds.length > 0) {
+        await tx.feedMention.createMany({
+          data: mentionIds.map((uid) => ({
+            commentId: parsed.commentId,
+            mentionedUserId: uid,
+          })),
+          skipDuplicates: true,
+        });
+      }
+    });
+
+    const addedIds = mentionIds.filter((id) => !existingIds.has(id));
+    await notifyFeedMentioned({
+      commentId: parsed.commentId,
+      actorUserId: dbUser.id,
+      mentionedUserIds: addedIds,
+    });
 
     revalidatePath(FEED_PATH);
     return { ok: true, data: { id: parsed.commentId } };
