@@ -1283,6 +1283,16 @@ async function seedNotificationDefaults() {
     ],
     "CLIENT_BILLING_SUMMARY → CLIENT_CONTACT (EMAIL)",
   );
+
+  // Menção no Feed (@usuário) → o próprio mencionado. Nos eventos de Feed o
+  // destinatário NÃO vem de rule.recipients (é resolvido para o usuário
+  // mencionado em feed-events.ts): a regra serve só como liga/desliga do evento
+  // (fail-open — sem regra ativa, nada é enviado). Por isso recipients fica vazio.
+  await ensureNotificationRule(
+    "FEED_MENTIONED",
+    [],
+    "FEED_MENTIONED (toggle; destinatário = usuário mencionado)",
+  );
 }
 
 async function main() {

@@ -12,12 +12,24 @@ import { z } from "zod";
 export const FEED_BODY_MAX = 5000;
 export const FEED_COMMENT_MAX = 2000;
 export const FEED_REMOVAL_REASON_MAX = 500;
+/** Máximo de usuários mencionados (@) por post/comentário. */
+export const FEED_MENTIONS_MAX = 20;
 
 /** Generic id: a trimmed, non-empty string (never `.cuid()` — seed ids differ). */
 const idSchema = z
   .string()
   .trim()
   .min(1, "Identificador obrigatório.");
+
+/**
+ * Ids dos usuários mencionados (@). Opcional; o SERVIDOR revalida cada id contra
+ * usuários ATIVOS antes de persistir — a lista do cliente não é fronteira de
+ * confiança. Deduplicado e limitado por FEED_MENTIONS_MAX.
+ */
+const mentionsSchema = z
+  .array(idSchema)
+  .max(FEED_MENTIONS_MAX, `No máximo ${FEED_MENTIONS_MAX} menções.`)
+  .optional();
 
 const bodySchema = z
   .string()
@@ -41,12 +53,14 @@ const emojiSchema = z
 
 export const createPostSchema = z.object({
   body: bodySchema,
+  mentionedUserIds: mentionsSchema,
 });
 export type CreatePostInput = z.infer<typeof createPostSchema>;
 
 export const editPostSchema = z.object({
   postId: idSchema,
   body: bodySchema,
+  mentionedUserIds: mentionsSchema,
 });
 export type EditPostInput = z.infer<typeof editPostSchema>;
 
@@ -56,12 +70,14 @@ export type PostIdInput = z.infer<typeof postIdSchema>;
 export const addCommentSchema = z.object({
   postId: idSchema,
   body: commentSchema,
+  mentionedUserIds: mentionsSchema,
 });
 export type AddCommentInput = z.infer<typeof addCommentSchema>;
 
 export const editCommentSchema = z.object({
   commentId: idSchema,
   body: commentSchema,
+  mentionedUserIds: mentionsSchema,
 });
 export type EditCommentInput = z.infer<typeof editCommentSchema>;
 

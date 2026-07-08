@@ -184,6 +184,31 @@ export async function resolveDbUser(
 }
 
 /**
+ * Search ACTIVE users by name/email for the @mention autocomplete (Feed). Case
+ * insensitive `contains`, ordered by name, capped at `limit`. Returns id + name
+ * only (the picker needs no more). An empty/blank query returns `[]`.
+ */
+export async function searchActiveUsersByName(
+  query: string,
+  limit = 8,
+): Promise<{ id: string; name: string }[]> {
+  const q = query.trim();
+  if (!q) return [];
+  return prisma.user.findMany({
+    where: {
+      status: "ACTIVE",
+      OR: [
+        { name: { contains: q, mode: "insensitive" } },
+        { email: { contains: q, mode: "insensitive" } },
+      ],
+    },
+    select: { id: true, name: true },
+    orderBy: { name: "asc" },
+    take: Math.min(Math.max(1, limit), 20),
+  });
+}
+
+/**
  * Load persisted roles for an email. Returns `[]` when the user is unknown.
  * The persisted roles are the authoritative source for RBAC in production.
  */

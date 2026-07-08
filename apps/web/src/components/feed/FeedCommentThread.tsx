@@ -3,10 +3,12 @@
 import { useState, useTransition } from "react";
 import { Check, MessageSquare, Pencil, Shield, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { focusRing, focusRingInput } from "@/lib/styles";
+import { focusRing } from "@/lib/styles";
 import type { FeedCommentView } from "@/lib/feed/types";
 import { formatRelativeTime } from "@/lib/feed/types";
 import { FEED_COMMENT_MAX } from "@/lib/feed/schemas";
+import { MentionTextarea, type MentionUser } from "./MentionTextarea";
+import { MentionText, collectActiveMentionIds } from "./MentionText";
 import {
   addComment,
   deleteComment,
@@ -88,6 +90,9 @@ function CommentItem({
   const [pending, startTransition] = useTransition();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(comment.body ?? "");
+  const [editMentions, setEditMentions] = useState<MentionUser[]>(() =>
+    comment.mentions.map((m) => ({ id: m.userId, name: m.name })),
+  );
 
   if (comment.body === null) {
     return <FeedTombstone label={comment.tombstone ?? ""} compact />;
@@ -96,8 +101,13 @@ function CommentItem({
   function submitEdit() {
     const body = draft.trim();
     if (!body) return;
+    const mentionedUserIds = collectActiveMentionIds(body, editMentions);
     startTransition(async () => {
-      const result = await editComment({ commentId: comment.id, body });
+      const result = await editComment({
+        commentId: comment.id,
+        body,
+        mentionedUserIds,
+      });
       if (result.ok) {
         setEditing(false);
         notify("success", "Comentário atualizado.");
@@ -138,16 +148,18 @@ function CommentItem({
 
       {editing ? (
         <div className="mt-2 space-y-2">
-          <textarea
+          <MentionTextarea
             value={draft}
             maxLength={COMMENT_LIMIT}
             rows={2}
-            onChange={(e) => setDraft(e.target.value)}
-            aria-label="Editar comentário"
-            className={cn(
-              "w-full resize-y rounded-md border border-border bg-surface px-3 py-2 text-sm text-strong",
-              focusRingInput,
-            )}
+            disabled={pending}
+            onChange={setDraft}
+            onAddMention={(user) =>
+              setEditMentions((prev) =>
+                prev.some((m) => m.id === user.id) ? prev : [...prev, user],
+              )
+            }
+            ariaLabel="Editar comentário"
           />
           <div className="flex items-center gap-2">
             <button
@@ -167,6 +179,9 @@ function CommentItem({
               onClick={() => {
                 setEditing(false);
                 setDraft(comment.body ?? "");
+                setEditMentions(
+                  comment.mentions.map((m) => ({ id: m.userId, name: m.name })),
+                );
               }}
               disabled={pending}
               className={cn(
@@ -180,9 +195,11 @@ function CommentItem({
           </div>
         </div>
       ) : (
-        <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-6 text-strong">
-          {comment.body}
-        </p>
+        <MentionText
+          text={comment.body}
+          mentions={comment.mentions}
+          className="mt-1 whitespace-pre-wrap break-words text-sm leading-6 text-strong"
+        />
       )}
 
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
@@ -235,15 +252,22 @@ function CommentComposer({
 }) {
   const [pending, startTransition] = useTransition();
   const [body, setBody] = useState("");
+  const [mentions, setMentions] = useState<MentionUser[]>([]);
   const remaining = COMMENT_LIMIT - body.length;
   const trimmed = body.trim();
 
   function submit() {
     if (!trimmed || pending) return;
+    const mentionedUserIds = collectActiveMentionIds(trimmed, mentions);
     startTransition(async () => {
-      const result = await addComment({ postId, body: trimmed });
+      const result = await addComment({
+        postId,
+        body: trimmed,
+        mentionedUserIds,
+      });
       if (result.ok) {
         setBody("");
+        setMentions([]);
         notify("success", "Comentário publicado.");
       } else {
         notify("warning", result.message);
@@ -258,13 +282,19 @@ function CommentComposer({
         className="mt-2 size-4 shrink-0 text-soft"
       />
       <div className="min-w-0 flex-1">
-        <textarea
+        <MentionTextarea
           value={body}
           maxLength={COMMENT_LIMIT}
           rows={1}
-          placeholder="Escreva um comentário…"
-          aria-label="Escrever comentário"
-          onChange={(e) => setBody(e.target.value)}
+          placeholder="Escreva um comentário… Use @ para mencionar."
+          ariaLabel="Escrever comentário"
+          disabled={pending}
+          onChange={setBody}
+          onAddMention={(user) =>
+            setMentions((prev) =>
+              prev.some((m) => m.id === user.id) ? prev : [...prev, user],
+            )
+          }
           onKeyDown={(e) => {
             // Enter envia; Shift+Enter quebra linha.
             if (e.key === "Enter" && !e.shiftKey) {
@@ -272,10 +302,6 @@ function CommentComposer({
               submit();
             }
           }}
-          className={cn(
-            "w-full resize-y rounded-md border border-border bg-surface px-3 py-2 text-sm text-strong",
-            focusRingInput,
-          )}
         />
         <div className="mt-1 flex items-center justify-between gap-2">
           <span

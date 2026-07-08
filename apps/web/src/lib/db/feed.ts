@@ -13,6 +13,7 @@ import {
   aggregateReactions,
   tombstoneLabel,
   type FeedCommentView,
+  type FeedMentionMeta,
   type FeedPage,
   type FeedPostView,
 } from "@/lib/feed/types";
@@ -50,6 +51,12 @@ interface ReactionRow {
   userId: string;
 }
 
+/** Narrow mention row → mapped to FeedMentionMeta. */
+interface MentionRow {
+  mentionedUserId: string;
+  mentionedUser: { name: string } | null;
+}
+
 interface CommentRow {
   id: string;
   authorUserId: string | null;
@@ -59,6 +66,7 @@ interface CommentRow {
   editedAt: Date | null;
   createdAt: Date;
   reactions: ReactionRow[];
+  mentions: MentionRow[];
 }
 
 interface PostRow {
@@ -72,6 +80,7 @@ interface PostRow {
   editedAt: Date | null;
   createdAt: Date;
   reactions: ReactionRow[];
+  mentions: MentionRow[];
   attachments: {
     id: string;
     fileName: string;
@@ -82,6 +91,11 @@ interface PostRow {
   _count: { comments: number };
 }
 
+const mentionSelect = {
+  mentionedUserId: true,
+  mentionedUser: { select: { name: true } },
+} as const;
+
 const commentSelect = {
   id: true,
   authorUserId: true,
@@ -91,6 +105,7 @@ const commentSelect = {
   editedAt: true,
   createdAt: true,
   reactions: { select: { emoji: true, userId: true } },
+  mentions: { select: mentionSelect },
 } as const;
 
 const postSelect = {
@@ -104,6 +119,7 @@ const postSelect = {
   editedAt: true,
   createdAt: true,
   reactions: { select: { emoji: true, userId: true } },
+  mentions: { select: mentionSelect },
   attachments: {
     select: { id: true, fileName: true, contentType: true, size: true },
     orderBy: { createdAt: "asc" as const },
@@ -125,6 +141,13 @@ function authorOf(row: { authorUserId: string | null; author: { name: string } |
   };
 }
 
+/** Map raw mention rows to the UI shape (skips rows whose user row is gone). */
+function mapMentions(rows: MentionRow[] | undefined): FeedMentionMeta[] {
+  return (rows ?? [])
+    .filter((m) => m.mentionedUser?.name)
+    .map((m) => ({ userId: m.mentionedUserId, name: m.mentionedUser!.name }));
+}
+
 function mapComment(
   row: CommentRow,
   viewerDbUserId: string | null,
@@ -139,6 +162,8 @@ function mapComment(
     editedAt: row.editedAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
     reactions: aggregateReactions(row.reactions, viewerDbUserId),
+    // A tombstoned comment hides its mentions too.
+    mentions: visible ? mapMentions(row.mentions) : [],
     isOwn: viewerDbUserId !== null && row.authorUserId === viewerDbUserId,
   };
 }
@@ -161,8 +186,9 @@ function mapPost(row: PostRow, viewerDbUserId: string | null): FeedPostView {
     editedAt: row.editedAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
     reactions: aggregateReactions(row.reactions, viewerDbUserId),
-    // A tombstoned post hides its attachments too.
+    // A tombstoned post hides its attachments + mentions too.
     attachments: visible ? row.attachments : [],
+    mentions: visible ? mapMentions(row.mentions) : [],
     comments,
     commentCount: row._count.comments,
     isOwn: viewerDbUserId !== null && row.authorUserId === viewerDbUserId,

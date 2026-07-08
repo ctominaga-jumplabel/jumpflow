@@ -17,11 +17,13 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { focusRing, focusRingInput } from "@/lib/styles";
+import { focusRing } from "@/lib/styles";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import type { FeedAttachmentMeta, FeedPostView } from "@/lib/feed/types";
 import { formatRelativeTime } from "@/lib/feed/types";
 import { FEED_BODY_MAX } from "@/lib/feed/schemas";
+import { MentionTextarea, type MentionUser } from "./MentionTextarea";
+import { MentionText, collectActiveMentionIds } from "./MentionText";
 import {
   deletePost,
   editPost,
@@ -103,13 +105,17 @@ function PostBody({
   const [pending, startTransition] = useTransition();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(post.body ?? "");
+  const [editMentions, setEditMentions] = useState<MentionUser[]>(() =>
+    post.mentions.map((m) => ({ id: m.userId, name: m.name })),
+  );
   const [menuOpen, setMenuOpen] = useState(false);
 
   function submitEdit() {
     const body = draft.trim();
     if (!body) return;
+    const mentionedUserIds = collectActiveMentionIds(body, editMentions);
     startTransition(async () => {
-      const result = await editPost({ postId: post.id, body });
+      const result = await editPost({ postId: post.id, body, mentionedUserIds });
       if (result.ok) {
         setEditing(false);
         notify("success", "Post atualizado.");
@@ -163,6 +169,9 @@ function PostBody({
             setMenuOpen(false);
             setEditing(true);
             setDraft(post.body ?? "");
+            setEditMentions(
+              post.mentions.map((m) => ({ id: m.userId, name: m.name })),
+            );
           }}
           onDelete={() =>
             run(() => deletePost({ postId: post.id }), "Post removido.")
@@ -184,16 +193,18 @@ function PostBody({
 
       {editing ? (
         <div className="mt-3 space-y-2">
-          <textarea
+          <MentionTextarea
             value={draft}
             maxLength={BODY_LIMIT}
             rows={4}
-            onChange={(e) => setDraft(e.target.value)}
-            aria-label="Editar post"
-            className={cn(
-              "w-full resize-y rounded-md border border-border bg-surface px-3 py-2 text-sm text-strong",
-              focusRingInput,
-            )}
+            disabled={pending}
+            onChange={setDraft}
+            onAddMention={(user) =>
+              setEditMentions((prev) =>
+                prev.some((m) => m.id === user.id) ? prev : [...prev, user],
+              )
+            }
+            ariaLabel="Editar post"
           />
           <div className="flex items-center gap-2">
             <button
@@ -213,6 +224,9 @@ function PostBody({
               onClick={() => {
                 setEditing(false);
                 setDraft(post.body ?? "");
+                setEditMentions(
+                  post.mentions.map((m) => ({ id: m.userId, name: m.name })),
+                );
               }}
               disabled={pending}
               className={cn(
@@ -226,9 +240,7 @@ function PostBody({
           </div>
         </div>
       ) : (
-        <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-strong">
-          {post.body}
-        </p>
+        <MentionText text={post.body ?? ""} mentions={post.mentions} />
       )}
 
       {post.attachments.length > 0 ? (

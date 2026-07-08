@@ -761,6 +761,7 @@ model User {
   feedPostsAuthored           FeedPost[]                  @relation("FeedPostAuthor")
   feedCommentsAuthored        FeedComment[]               @relation("FeedCommentAuthor")
   feedReactions               FeedReaction[]              @relation("FeedReactionUser")
+  feedMentions                FeedMention[]               @relation("FeedMentionUser")
   // Checkpoint/1-on-1 + entidades de inteligencia (Melhoria #4, fatia 1). Autoria
   // por User com onDelete SetNull em todas: remover o usuario nao apaga o
   // historico (checkpoint, oportunidade, case) — apenas desvincula a autoria.
@@ -2494,6 +2495,7 @@ enum NotificationEvent {
   OPERATION_CLOSED // fechamento operacional do projeto para o DP
   FEED_POST_REPLIED // melhoria #5: alguem respondeu seu post no feed
   FEED_CONTENT_REACTED // melhoria #5: reacoes ao seu post/comentario (digest agregado)
+  FEED_MENTIONED // melhoria #5: voce foi mencionado (@) num post/comentario
 }
 
 /// Nivel de agregacao em que a regra dispara.
@@ -2656,6 +2658,7 @@ model FeedPost {
   comments        FeedComment[]
   reactions       FeedReaction[]
   attachments     FeedPostAttachment[]
+  mentions        FeedMention[]
   createdAt       DateTime             @default(now())
   updatedAt       DateTime             @updatedAt
 
@@ -2680,6 +2683,7 @@ model FeedComment {
   removalReason   String?
   editedAt        DateTime?
   reactions       FeedReaction[]
+  mentions        FeedMention[]
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
@@ -2726,6 +2730,26 @@ model FeedPostAttachment {
 
   @@index([postId])
   @@index([uploadedByUserId])
+}
+
+/// Mencao (@) de um usuario num post OU num comentario, nunca nos dois. Espelha o
+/// FeedReaction: XOR `(postId IS NOT NULL) <> (commentId IS NOT NULL)` + indices
+/// unicos PARCIAIS (um usuario mencionado no maximo uma vez por post/comentario)
+/// garantidos na migration SQL (o @@unique do Prisma nao expressa o WHERE parcial).
+/// onDelete Cascade em todas as FKs: a mencao some com o usuario/post/comentario.
+model FeedMention {
+  id              String       @id @default(cuid())
+  mentionedUserId String
+  mentionedUser   User         @relation("FeedMentionUser", fields: [mentionedUserId], references: [id], onDelete: Cascade)
+  postId          String?
+  post            FeedPost?    @relation(fields: [postId], references: [id], onDelete: Cascade)
+  commentId       String?
+  comment         FeedComment? @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  createdAt       DateTime     @default(now())
+
+  @@index([postId])
+  @@index([commentId])
+  @@index([mentionedUserId])
 }
 
 /// Checkpoint / 1-on-1 (Melhoria #4, fatia 1). Registro de acompanhamento de um

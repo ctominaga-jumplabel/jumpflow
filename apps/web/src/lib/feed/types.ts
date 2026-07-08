@@ -25,6 +25,12 @@ export interface FeedAuthorMeta {
   name: string;
 }
 
+/** A user mentioned (@) in a post/comment — drives inline highlight + edit re-hydration. */
+export interface FeedMentionMeta {
+  userId: string;
+  name: string;
+}
+
 export interface FeedCommentView {
   id: string;
   author: FeedAuthorMeta;
@@ -36,6 +42,8 @@ export interface FeedCommentView {
   editedAt: string | null;
   createdAt: string;
   reactions: FeedReactionSummary[];
+  /** Users mentioned (@) in this comment (empty when tombstoned). */
+  mentions: FeedMentionMeta[];
   /** Viewer authored this comment (drives edit/delete affordances). */
   isOwn: boolean;
 }
@@ -52,6 +60,8 @@ export interface FeedPostView {
   createdAt: string;
   reactions: FeedReactionSummary[];
   attachments: FeedAttachmentMeta[];
+  /** Users mentioned (@) in this post (empty when tombstoned). */
+  mentions: FeedMentionMeta[];
   /** The 3 most recent comments (already cropped/tombstoned). */
   comments: FeedCommentView[];
   /** Total VISIBLE comment count (drives the "ver mais" affordance). */

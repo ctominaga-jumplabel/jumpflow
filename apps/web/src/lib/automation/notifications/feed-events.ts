@@ -36,7 +36,10 @@ import {
 } from "@/lib/automation/notifications/dispatch";
 import { isDatabaseConfigured } from "@/lib/db/config";
 
-type FeedNotificationEvent = "FEED_POST_REPLIED" | "FEED_CONTENT_REACTED";
+type FeedNotificationEvent =
+  | "FEED_POST_REPLIED"
+  | "FEED_CONTENT_REACTED"
+  | "FEED_MENTIONED";
 
 /** CTA "Abrir o Feed" quando a URL pública do app está configurada. */
 function feedUrl(): string | undefined {
@@ -308,5 +311,86 @@ export async function notifyFeedReacted(input: {
     });
   } catch (error) {
     console.error("[feed-notification] notifyFeedReacted failed", { input, error });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// FEED_MENTIONED — o autor mencionou (@) um ou mais usuários num post/comentário.
+// Diferente de resposta/reação, o destinatário é o próprio MENCIONADO (não o
+// autor do alvo). Notifica cada mencionado com um digest individual. Idempotência
+// por (alvo + usuário mencionado): re-editar/re-salvar não reenvia. Pula
+// auto-menção (autor == mencionado). Best-effort: nunca lança na action.
+// ---------------------------------------------------------------------------
+export async function notifyFeedMentioned(input: {
+  /** Informe exatamente um: o alvo onde a menção ocorreu. */
+  postId?: string;
+  commentId?: string;
+  /** Autor da menção (nunca notificar a si mesmo). */
+  actorUserId: string | null;
+  /** Ids dos usuários mencionados a notificar (já filtrados/validados). */
+  mentionedUserIds: string[];
+}): Promise<void> {
+  if (!isDatabaseConfigured()) return;
+  const targetId = input.postId ?? input.commentId;
+  if (!targetId || input.mentionedUserIds.length === 0) return;
+  try {
+    if (!(await eventEnabled("FEED_MENTIONED"))) return;
+
+    const target: "post" | "comment" = input.postId ? "post" : "comment";
+
+    // O alvo precisa existir e estar VISIBLE + resolve o nome do ator (autor).
+    let actorName = "Alguém";
+    if (input.postId) {
+      const post = await prisma.feedPost
+        .findUnique({
+          where: { id: input.postId },
+          select: { status: true, author: { select: { name: true } } },
+        })
+        .catch(() => null);
+      if (!post || post.status !== "VISIBLE") return;
+      actorName = post.author?.name ?? actorName;
+    } else {
+      const comment = await prisma.feedComment
+        .findUnique({
+          where: { id: input.commentId },
+          select: { status: true, author: { select: { name: true } } },
+        })
+        .catch(() => null);
+      if (!comment || comment.status !== "VISIBLE") return;
+      actorName = comment.author?.name ?? actorName;
+    }
+
+    // Resolve os mencionados (ativos, com e-mail), excluindo o próprio autor.
+    const uniqueIds = [...new Set(input.mentionedUserIds)].filter(
+      (id) => id !== input.actorUserId,
+    );
+    if (uniqueIds.length === 0) return;
+
+    const users = await prisma.user.findMany({
+      where: { id: { in: uniqueIds }, status: "ACTIVE" },
+      select: { id: true, name: true, email: true },
+    });
+
+    // Um digest individual por mencionado, idempotente por (alvo + usuário).
+    for (const user of users) {
+      const recipient = authorToRecipient(user);
+      if (!recipient) continue;
+
+      const itemId = `${targetId}:${user.id}`;
+      const pending = await pendingItemIds("FEED_MENTIONED", [itemId]);
+      if (pending.length === 0) continue; // já notificado (idempotente)
+
+      await dispatchFeedDigest({
+        event: "FEED_MENTIONED",
+        recipient,
+        itemIds: pending,
+        items: [{ actorName, kind: "mention", target }],
+      });
+    }
+  } catch (error) {
+    console.error("[feed-notification] notifyFeedMentioned failed", {
+      targetId,
+      error,
+    });
   }
 }

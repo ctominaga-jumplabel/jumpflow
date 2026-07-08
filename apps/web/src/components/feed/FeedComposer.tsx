@@ -3,8 +3,10 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { FileText, Image as ImageIcon, Lock, Send, Video, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { focusRing, focusRingInput } from "@/lib/styles";
+import { focusRing } from "@/lib/styles";
 import { Avatar } from "./FeedCommentThread";
+import { MentionTextarea, type MentionUser } from "./MentionTextarea";
+import { collectActiveMentionIds } from "./MentionText";
 import { FEED_BODY_MAX } from "@/lib/feed/schemas";
 import { FEED_MAX_ATTACHMENTS } from "@/lib/feed/visibility";
 import { attachToPost, createPost } from "@/app/app/feed/actions";
@@ -74,6 +76,7 @@ export function FeedComposer({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [pending, startTransition] = useTransition();
   const [body, setBody] = useState("");
+  const [mentions, setMentions] = useState<MentionUser[]>([]);
   const [files, setFiles] = useState<File[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
 
@@ -125,14 +128,16 @@ export function FeedComposer({
 
   function reset() {
     setBody("");
+    setMentions([]);
     setFiles([]);
     setFileError(null);
   }
 
   function submit() {
     if (!canSubmit) return;
+    const mentionedUserIds = collectActiveMentionIds(trimmed, mentions);
     startTransition(async () => {
-      const created = await createPost({ body: trimmed });
+      const created = await createPost({ body: trimmed, mentionedUserIds });
       if (!created.ok) {
         notify("warning", created.message);
         return;
@@ -166,13 +171,19 @@ export function FeedComposer({
           <label htmlFor="feed-composer-body" className="sr-only">
             Escreva um post
           </label>
-          <textarea
+          <MentionTextarea
             id="feed-composer-body"
             value={body}
             maxLength={BODY_LIMIT}
             rows={3}
-            placeholder="Compartilhe um comunicado, conquista ou novidade…"
-            onChange={(e) => setBody(e.target.value)}
+            placeholder="Compartilhe um comunicado, conquista ou novidade… Use @ para mencionar alguém."
+            disabled={pending}
+            onChange={setBody}
+            onAddMention={(user) =>
+              setMentions((prev) =>
+                prev.some((m) => m.id === user.id) ? prev : [...prev, user],
+              )
+            }
             onKeyDown={(e) => {
               // Ctrl/Cmd+Enter envia (Enter simples quebra linha em posts longos).
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -180,10 +191,6 @@ export function FeedComposer({
                 submit();
               }
             }}
-            className={cn(
-              "w-full resize-y rounded-md border border-border bg-surface px-3 py-2 text-sm leading-6 text-strong",
-              focusRingInput,
-            )}
           />
 
           {files.length > 0 ? (

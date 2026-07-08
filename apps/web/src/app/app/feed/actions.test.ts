@@ -67,6 +67,18 @@ const h = vi.hoisted(() => {
     comments: [] as CommentRec[],
     reactions: [] as ReactionRec[],
     attachments: [] as AttachmentRec[],
+    mentions: [] as {
+      id: string;
+      mentionedUserId: string;
+      postId: string | null;
+      commentId: string | null;
+    }[],
+    // Active users the mention resolver can validate against.
+    users: [
+      { id: "user-1", name: "Ana Lima", email: "ana@jumplabel.com.br", status: "ACTIVE" },
+      { id: "user-2", name: "Bia Souza", email: "bia@jumplabel.com.br", status: "ACTIVE" },
+      { id: "user-3", name: "Caio Melo", email: "caio@jumplabel.com.br", status: "ACTIVE" },
+    ] as { id: string; name: string; email: string; status: string }[],
     audits: [] as Record<string, unknown>[],
     // The acting user. `dbUserId` is the resolved db row id (FK target).
     currentUser: {
@@ -276,6 +288,53 @@ const h = vi.hoisted(() => {
         return removed;
       },
     },
+    feedMention: {
+      findMany: async ({ where, select }: { where: Where; select?: Where }) => {
+        const rows = store.mentions.filter((m) =>
+          where.postId !== undefined
+            ? m.postId === where.postId
+            : m.commentId === where.commentId,
+        );
+        if (select?.mentionedUserId)
+          return rows.map((m) => ({ mentionedUserId: m.mentionedUserId }));
+        return rows.map((m) => ({ ...m }));
+      },
+      createMany: async ({ data }: { data: Where[] }) => {
+        for (const d of data) {
+          store.mentions.push({
+            id: nextId("mention"),
+            mentionedUserId: d.mentionedUserId,
+            postId: d.postId ?? null,
+            commentId: d.commentId ?? null,
+          });
+        }
+        return { count: data.length };
+      },
+      deleteMany: async ({ where }: { where: Where }) => {
+        const before = store.mentions.length;
+        store.mentions = store.mentions.filter((m) =>
+          where.postId !== undefined
+            ? m.postId !== where.postId
+            : m.commentId !== where.commentId,
+        );
+        return { count: before - store.mentions.length };
+      },
+    },
+    user: {
+      findMany: async ({ where, select }: { where: Where; select?: Where }) => {
+        const ids: string[] | undefined = where.id?.in;
+        let rows = store.users.filter((u) =>
+          where.status !== undefined ? u.status === where.status : true,
+        );
+        if (ids) rows = rows.filter((u) => ids.includes(u.id));
+        return rows.map((u) => {
+          if (!select) return { ...u };
+          const out: Record<string, unknown> = {};
+          for (const key of Object.keys(select)) out[key] = (u as never)[key];
+          return out;
+        });
+      },
+    },
     auditEvent: {
       create: async ({ data }: { data: Record<string, unknown> }) => {
         store.audits.push(data);
@@ -283,6 +342,22 @@ const h = vi.hoisted(() => {
       },
     },
   };
+
+  /** Mentions for a target shaped like the read layer's `select`. */
+  function projectMentions(target: { postId?: string; commentId?: string }) {
+    return store.mentions
+      .filter((m) =>
+        target.postId !== undefined
+          ? m.postId === target.postId
+          : m.commentId === target.commentId,
+      )
+      .map((m) => ({
+        mentionedUserId: m.mentionedUserId,
+        mentionedUser: {
+          name: store.users.find((u) => u.id === m.mentionedUserId)?.name ?? "X",
+        },
+      }));
+  }
 
   /** Shape a post like the read layer's `select` (author, reactions, comments). */
   function projectPost(p: PostRec) {
@@ -292,6 +367,7 @@ const h = vi.hoisted(() => {
       reactions: store.reactions
         .filter((r) => r.postId === p.id)
         .map((r) => ({ emoji: r.emoji, userId: r.userId })),
+      mentions: projectMentions({ postId: p.id }),
       attachments: store.attachments
         .filter((a) => a.postId === p.id)
         .map((a) => ({
@@ -310,6 +386,7 @@ const h = vi.hoisted(() => {
           reactions: store.reactions
             .filter((r) => r.commentId === c.id)
             .map((r) => ({ emoji: r.emoji, userId: r.userId })),
+          mentions: projectMentions({ commentId: c.id }),
         })),
       _count: {
         comments: store.comments.filter(
@@ -463,6 +540,7 @@ beforeEach(() => {
   h.store.comments = [];
   h.store.reactions = [];
   h.store.attachments = [];
+  h.store.mentions = [];
   h.store.audits = [];
   h.store.seq = 0;
   h.store.can = { view: true, create: true, edit: true, delete: false };
@@ -501,6 +579,64 @@ describe("createPost / RBAC", () => {
   it("rejects an empty body (INVALID_INPUT)", async () => {
     const r = await createPost({ body: "   " });
     expect(r).toMatchObject({ ok: false, error: "INVALID_INPUT" });
+  });
+});
+
+describe("mentions (@) persistence", () => {
+  it("persists mentions for valid active users, excluding the author", async () => {
+    const r = await createPost({
+      body: "Oi @Bia Souza e @Caio Melo",
+      // user-1 is the author (self) → must be dropped; user-9 is invalid.
+      mentionedUserIds: ["user-2", "user-3", "user-1", "user-9"],
+    });
+    expect(r.ok).toBe(true);
+    const stored = h.store.mentions
+      .filter((m) => m.postId === h.store.posts[0].id)
+      .map((m) => m.mentionedUserId)
+      .sort();
+    expect(stored).toEqual(["user-2", "user-3"]);
+  });
+
+  it("editing a post replaces its mention set", async () => {
+    const created = await createPost({
+      body: "@Bia Souza",
+      mentionedUserIds: ["user-2"],
+    });
+    expect(created.ok).toBe(true);
+    const postId = h.store.posts[0].id;
+
+    const edited = await editPost({
+      postId,
+      body: "agora @Caio Melo",
+      mentionedUserIds: ["user-3"],
+    });
+    expect(edited.ok).toBe(true);
+    const stored = h.store.mentions
+      .filter((m) => m.postId === postId)
+      .map((m) => m.mentionedUserId);
+    expect(stored).toEqual(["user-3"]);
+  });
+
+  it("stores comment mentions on the comment", async () => {
+    const post = seedPost({ authorUserId: "user-2" });
+    const r = await addComment({
+      postId: post.id,
+      body: "cc @Caio Melo",
+      mentionedUserIds: ["user-3"],
+    });
+    expect(r.ok).toBe(true);
+    const commentId = h.store.comments[0].id;
+    const stored = h.store.mentions
+      .filter((m) => m.commentId === commentId)
+      .map((m) => m.mentionedUserId);
+    expect(stored).toEqual(["user-3"]);
+  });
+
+  it("rejects more than FEED_MENTIONS_MAX mentions (INVALID_INPUT)", async () => {
+    const many = Array.from({ length: 21 }, (_, i) => `user-${i}`);
+    const r = await createPost({ body: "spam", mentionedUserIds: many });
+    expect(r).toMatchObject({ ok: false, error: "INVALID_INPUT" });
+    expect(h.store.posts).toHaveLength(0);
   });
 });
 
