@@ -10,6 +10,7 @@ import {
   Lock,
   Mail,
   RotateCw,
+  Undo2,
   Users,
 } from "lucide-react";
 import { ActionButton } from "@/components/ui/ActionButton";
@@ -287,26 +288,48 @@ export function MonthlyClosingTable({
             </ActionButton>
           ) : null}
           {r.status === "IN_REVIEW" ? (
-            <ActionButton
-              size="sm"
-              variant="secondary"
-              icon={CheckCircle2}
-              disabled={isPending}
-              onClick={() => handleAdvance(r.id, "MARK_READY")}
-            >
-              Pronto
-            </ActionButton>
+            <>
+              <ActionButton
+                size="sm"
+                variant="secondary"
+                icon={CheckCircle2}
+                disabled={isPending}
+                onClick={() => handleAdvance(r.id, "MARK_READY")}
+              >
+                Pronto
+              </ActionButton>
+              <ActionButton
+                size="sm"
+                variant="secondary"
+                icon={Undo2}
+                disabled={isPending}
+                onClick={() => handleAdvance(r.id, "REVERT_TO_OPEN")}
+              >
+                Voltar
+              </ActionButton>
+            </>
           ) : null}
           {r.status === "READY_TO_CLOSE" ? (
-            <ActionButton
-              size="sm"
-              variant="primary"
-              icon={Lock}
-              disabled={isPending}
-              onClick={() => handleAdvance(r.id, "CLOSE")}
-            >
-              Fechar
-            </ActionButton>
+            <>
+              <ActionButton
+                size="sm"
+                variant="primary"
+                icon={Lock}
+                disabled={isPending}
+                onClick={() => handleAdvance(r.id, "CLOSE")}
+              >
+                Fechar
+              </ActionButton>
+              <ActionButton
+                size="sm"
+                variant="secondary"
+                icon={Undo2}
+                disabled={isPending}
+                onClick={() => handleAdvance(r.id, "REVERT_TO_REVIEW")}
+              >
+                Voltar
+              </ActionButton>
+            </>
           ) : null}
           {r.status === "CLOSED" ? (
             <ActionButton
@@ -372,6 +395,18 @@ export function MonthlyClosingTable({
               onClick={() => handleAdvance(r.id, "MARK_INVOICED")}
             >
               Faturado
+            </ActionButton>
+          ) : null}
+          {r.status === "CLOSED" &&
+          (!r.fiscalDocument || r.fiscalDocument.status === "CANCELLED") ? (
+            <ActionButton
+              size="sm"
+              variant="danger"
+              icon={Undo2}
+              disabled={isPending}
+              onClick={() => handleAdvance(r.id, "REOPEN")}
+            >
+              Reabrir
             </ActionButton>
           ) : null}
         </div>
