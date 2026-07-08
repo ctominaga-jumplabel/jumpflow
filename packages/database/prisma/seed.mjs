@@ -1236,7 +1236,13 @@ async function ensureNotificationRule(event, recipients, label) {
   await prisma.notificationRule.create({
     data: {
       event,
-      scope: "PROJECT",
+      // GLOBAL (não PROJECT): estes eventos emitem com scope PROJECT + o id do
+      // projeto, mas os destinatários são por PAPEL/contato (sem scopeId por
+      // projeto). Uma regra PROJECT com scopeId null NUNCA casa
+      // (rule.scopeId === input.scope.id vira null === projectId), então o
+      // e-mail jamais dispara. GLOBAL casa com qualquer emit — igual ao
+      // PROJECT_CREATED, que funciona.
+      scope: "GLOBAL",
       channel: "EMAIL",
       groupByRecipient: true,
       active: true,
