@@ -64,6 +64,9 @@ const advanceInputSchema = z.object({
     "CLOSE",
     "MARK_INVOICED",
     "CANCEL",
+    "REVERT_TO_OPEN",
+    "REVERT_TO_REVIEW",
+    "REOPEN",
   ]),
 });
 
@@ -170,6 +173,21 @@ export async function advanceRevenueClosing(input: {
         );
       }
     }
+    if (parsed.action === "REOPEN") {
+      // Reopening a CLOSED closing is blocked while a non-cancelled fiscal
+      // document exists: the pre-invoice/NFS-e were built from the closed
+      // figures. Cancel the NFS-e through the fiscal flow before reopening.
+      const fiscalDocument = await prisma.fiscalDocument.findFirst({
+        where: { revenueClosingId: parsed.id, status: { not: "CANCELLED" } },
+        select: { id: true },
+      });
+      if (fiscalDocument) {
+        throw new ActionError(
+          "INVALID_INPUT",
+          "Cancele a NFS-e antes de reabrir o fechamento.",
+        );
+      }
+    }
 
     await prisma.$transaction(async (tx) => {
       const updateData: Prisma.RevenueClosingUpdateManyMutationInput = {
@@ -177,6 +195,9 @@ export async function advanceRevenueClosing(input: {
       };
       if (parsed.action === "CLOSE") {
         updateData.closedAt = new Date();
+      }
+      if (parsed.action === "REOPEN") {
+        updateData.closedAt = null;
       }
       const updated = await tx.revenueClosing.updateMany({
         where: { id: parsed.id, status: transition.expected },

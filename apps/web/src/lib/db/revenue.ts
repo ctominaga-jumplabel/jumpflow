@@ -105,13 +105,26 @@ export type RevenueClosingAdvanceAction =
   | "MARK_READY"
   | "CLOSE"
   | "MARK_INVOICED"
-  | "CANCEL";
+  | "CANCEL"
+  // Reverse transitions ("voltar status"). Reopening a CLOSED closing is a
+  // sensitive change (audited) and is blocked upstream when a non-cancelled
+  // fiscal document exists. Un-invoicing (INVOICED -> CLOSED) is NOT offered:
+  // an issued NFS-e must be cancelled through the fiscal flow first.
+  | "REVERT_TO_OPEN"
+  | "REVERT_TO_REVIEW"
+  | "REOPEN";
 
 export const revenueClosingTransitions: Record<
   RevenueClosingAdvanceAction,
   {
     expected: "OPEN" | "IN_REVIEW" | "READY_TO_CLOSE" | "CLOSED";
-    next: "IN_REVIEW" | "READY_TO_CLOSE" | "CLOSED" | "INVOICED" | "CANCELLED";
+    next:
+      | "OPEN"
+      | "IN_REVIEW"
+      | "READY_TO_CLOSE"
+      | "CLOSED"
+      | "INVOICED"
+      | "CANCELLED";
     auditAction: string;
   }
 > = {
@@ -139,6 +152,21 @@ export const revenueClosingTransitions: Record<
     expected: "OPEN",
     next: "CANCELLED",
     auditAction: "REVENUE_CLOSING_CANCELLED",
+  },
+  REVERT_TO_OPEN: {
+    expected: "IN_REVIEW",
+    next: "OPEN",
+    auditAction: "REVENUE_CLOSING_REVERTED_OPEN",
+  },
+  REVERT_TO_REVIEW: {
+    expected: "READY_TO_CLOSE",
+    next: "IN_REVIEW",
+    auditAction: "REVENUE_CLOSING_REVERTED_REVIEW",
+  },
+  REOPEN: {
+    expected: "CLOSED",
+    next: "READY_TO_CLOSE",
+    auditAction: "REVENUE_CLOSING_REOPENED",
   },
 };
 
