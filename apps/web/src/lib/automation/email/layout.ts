@@ -277,10 +277,31 @@ function renderHeaderCells(b: ResolvedBrand): string {
           </td>`;
 }
 
+/**
+ * Secondary company mark shown on the RIGHT of the product header — the Jump
+ * logo, opposite the JumpFlow mark. Only for the product brand: the company
+ * brand header already IS the Jump wordmark. Returns "" when no company logo
+ * URL is available so the header degrades cleanly (no broken image).
+ */
+function renderCompanyMarkCell(brand: EmailBrand): string {
+  if (brand === "company") return "";
+  const url = appConfig.company.logoUrl;
+  if (!url) return "";
+  // Jump wordmark is 1369×310 → keep aspect ratio at 24px tall.
+  const h = 24;
+  const w = 106;
+  return `<td align="right" style="vertical-align:middle;text-align:right;"><img src="${esc(
+    url,
+  )}" width="${w}" height="${h}" alt="${esc(
+    appConfig.company.name,
+  )}" style="border:0;outline:none;text-decoration:none;display:inline-block;height:${h}px;width:auto;" /></td>`;
+}
+
 export function renderEmail(input: RenderEmailInput): RenderedEmail {
   const brand = input.brand ?? "product";
   const b = resolveBrand(brand);
   const isCompany = brand === "company";
+  const companyMarkCell = renderCompanyMarkCell(brand);
   const year = "2026"; // Date.now() is unavailable in some runtimes; static is fine for footer.
   const preheader = input.preheader ?? "";
   const copyrightName = appConfig.company.name;
@@ -304,7 +325,7 @@ export function renderEmail(input: RenderEmailInput): RenderedEmail {
     ? `Em caso de divergência, responda a este e-mail.<br/>© ${year} ${esc(
         copyrightName,
       )}.`
-    : `E-mail operacional automático — responda a esta mensagem em caso de divergência.<br/>© ${year} ${esc(
+    : `E-mail operacional automático — em caso de divergência, entre em contato com o WhatsApp da operação (11) 97845-1754.<br/>© ${year} ${esc(
         copyrightName,
       )}.${footerLink}`;
 
@@ -314,8 +335,13 @@ export function renderEmail(input: RenderEmailInput): RenderedEmail {
   <tr><td align="center">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:${emailTheme.maxWidth};margin:0 auto;">
       <tr><td style="padding:0 0 18px;">
-        <table role="presentation" cellpadding="0" cellspacing="0"><tr>
-          ${renderHeaderCells(b)}
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+          <td style="vertical-align:middle;">
+            <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+              ${renderHeaderCells(b)}
+            </tr></table>
+          </td>
+          ${companyMarkCell}
         </tr></table>
       </td></tr>
       <tr><td style="background:${C.surface};border:2px solid ${C.ink};border-radius:${emailTheme.radius};box-shadow:6px 6px 0 ${C.ink};padding:28px;">
