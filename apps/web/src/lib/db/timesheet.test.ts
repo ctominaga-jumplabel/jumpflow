@@ -51,6 +51,12 @@ interface EntryRec {
   status: string;
   submittedAt: Date | null;
 }
+interface HolidayRec {
+  date: Date;
+  name: string;
+  scope: string;
+  region: string | null;
+}
 interface ApprovalRec {
   id: string;
   entityType: string;
@@ -76,6 +82,7 @@ const h = vi.hoisted(() => {
     periods: [] as PeriodRec[],
     entries: [] as EntryRec[],
     approvals: [] as ApprovalRec[],
+    holidays: [] as HolidayRec[],
   };
 
   const projectOf = (projectId: string) =>
@@ -249,6 +256,20 @@ const h = vi.hoisted(() => {
         }));
       },
     },
+    holiday: {
+      findMany: async ({ where }: { where: Where }) => {
+        return store.holidays.filter((holiday) => {
+          if (where.scope && holiday.scope !== where.scope) return false;
+          if (where.date?.gte && holiday.date.getTime() < where.date.gte.getTime()) {
+            return false;
+          }
+          if (where.date?.lte && holiday.date.getTime() > where.date.lte.getTime()) {
+            return false;
+          }
+          return true;
+        });
+      },
+    },
     approval: {
       findMany: async ({
         where,
@@ -390,6 +411,7 @@ beforeEach(() => {
   h.store.periods = [];
   h.store.entries = [];
   h.store.approvals = [];
+  h.store.holidays = [];
 });
 
 describe("getConsultantForUser", () => {
@@ -522,6 +544,62 @@ describe("getPeriodForConsultant", () => {
     expect(period.startDate).toBe("2026-01-01");
     expect(period.endDate).toBe("2026-04-03");
     expect(period.days).toHaveLength(93);
+  });
+});
+
+describe("holiday awareness (Onda A/3, aviso não-bloqueante)", () => {
+  it("annotates the matching week day with the national holiday name", async () => {
+    // Sexta-feira Santa 2026 cai no intervalo Seg 08→Dom 14? Não; usar um
+    // feriado dentro da semana de teste: 2026-06-10 (quarta) como feriado
+    // fictício NACIONAL para validar o mapeamento por data-calendário.
+    h.store.holidays.push({
+      date: new Date("2026-06-10T00:00:00.000Z"),
+      name: "Feriado de Teste",
+      scope: "NATIONAL",
+      region: null,
+    });
+
+    const week = await getWeekForConsultant("con-1", MONDAY);
+
+    const wednesday = week.days.find((d) => d.date === "2026-06-10");
+    expect(wednesday?.holidayName).toBe("Feriado de Teste");
+    // Demais dias permanecem sem feriado (não-bloqueante, só sinalização).
+    expect(
+      week.days.filter((d) => d.holidayName !== undefined),
+    ).toHaveLength(1);
+  });
+
+  it("ignores non-national holidays (regional out of scope for now)", async () => {
+    h.store.holidays.push({
+      date: new Date("2026-06-10T00:00:00.000Z"),
+      name: "Aniversário da Cidade",
+      scope: "CITY",
+      region: "3550308",
+    });
+
+    const week = await getWeekForConsultant("con-1", MONDAY);
+
+    expect(
+      week.days.filter((d) => d.holidayName !== undefined),
+    ).toHaveLength(0);
+  });
+
+  it("annotates the period calendar day with the holiday name", async () => {
+    h.store.holidays.push({
+      date: new Date("2026-06-10T00:00:00.000Z"),
+      name: "Feriado de Teste",
+      scope: "NATIONAL",
+      region: null,
+    });
+
+    const period = await getPeriodForConsultant(
+      "con-1",
+      "2026-06-08",
+      "2026-06-14",
+    );
+
+    const day = period.days.find((d) => d.date === "2026-06-10");
+    expect(day?.holidayName).toBe("Feriado de Teste");
   });
 });
 

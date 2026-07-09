@@ -92,6 +92,13 @@ export interface WeekDay {
   /** ISO date yyyy-mm-dd. */
   date: string;
   weekend: boolean;
+  /**
+   * Nome do feriado NACIONAL nesta data, quando houver (Onda A/3). Preenchido
+   * no servidor a partir do calendário `Holiday`; ausente em dias comuns e no
+   * modo demo (sem banco). Usado apenas para SINALIZAÇÃO — nunca bloqueia o
+   * lançamento.
+   */
+  holidayName?: string;
 }
 
 /** Per-day relógio de ponto detail, used to pre-fill the edit form. */

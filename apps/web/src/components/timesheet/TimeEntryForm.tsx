@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Save, Trash2 } from "lucide-react";
+import { CalendarClock, Save, Trash2 } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import { ActionButton } from "@/components/ui/ActionButton";
 import { cn } from "@/lib/utils";
@@ -177,6 +177,11 @@ export function TimeEntryForm({
     clockHours(value.clock) ?? 0,
     value.multiplier > 0 ? value.multiplier : 0,
   );
+
+  // Feriado do dia selecionado (aviso não-bloqueante). Derivado de props/estado
+  // — sem efeito, sem setState.
+  const selectedHolidayName = days.find((d) => d.date === value.date)
+    ?.holidayName;
 
   const isEditing = Boolean(initial);
   // Flag de cliente (NEXT_PUBLIC_TRANSCRIPTION). Quando off, o mic some e o
@@ -381,11 +386,27 @@ export function TimeEntryForm({
               {days.map((day) => (
                 <option key={day.date} value={day.date}>
                   {day.label} · {day.date.slice(8, 10)}/{day.date.slice(5, 7)}
+                  {day.holidayName ? " · Feriado" : ""}
                 </option>
               ))}
             </select>
           </div>
         </div>
+
+        {/* Aviso NÃO-BLOQUEANTE: o dia escolhido é feriado. Não impede o
+            submit — apenas sinaliza. */}
+        {selectedHolidayName ? (
+          <div
+            role="status"
+            className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm font-medium text-warning"
+          >
+            <CalendarClock aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+            <span>
+              Você está apontando em um feriado ({selectedHolidayName}). Você
+              ainda pode salvar normalmente.
+            </span>
+          </div>
+        ) : null}
 
         {value.mode === "weekly" && !isEditing ? (
           <fieldset>

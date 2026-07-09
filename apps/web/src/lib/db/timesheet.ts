@@ -19,6 +19,7 @@ import {
   addDays,
   buildWeekDays,
   parseIsoDateUtc,
+  startOfUtcDay,
   toIsoDate,
   weekLabel,
   weekStartOf,
@@ -49,6 +50,42 @@ export async function getConsultantForUser(user: AppUser) {
   if (byUserId) return byUserId;
   if (!isDevAuthEnabled()) return null;
   return prisma.consultant.findUnique({ where: { email: user.email } });
+}
+
+/**
+ * Lookup de feriados no intervalo [start, end] (inclusivo), devolvendo um mapa
+ * ISO `yyyy-mm-dd` -> nome do feriado. Usado para o AVISO NÃO-BLOQUEANTE ao
+ * apontar horas em feriado (Onda A/3).
+ *
+ * Semântica date-only: `Holiday.date` é `@db.Date` e o seed grava à meia-noite
+ * UTC (mesma convenção de `TimeEntry.date`). Comparamos SEMPRE por
+ * data-calendário via `toIsoDate` (campos UTC), nunca por timestamp, para não
+ * errar o dia por fuso.
+ *
+ * Escopo: por ora só feriados NACIONAIS (`scope = NATIONAL`). Feriados
+ * regionais (STATE/CITY) existem no modelo mas são ignorados aqui até haver
+ * vínculo de UF/município por consultor/projeto.
+ */
+export async function getHolidayMap(
+  start: Date,
+  end: Date,
+): Promise<Map<string, string>> {
+  const holidays = await prisma.holiday.findMany({
+    where: {
+      scope: "NATIONAL",
+      date: { gte: startOfUtcDay(start), lte: startOfUtcDay(end) },
+    },
+    select: { date: true, name: true },
+  });
+  const map = new Map<string, string>();
+  for (const holiday of holidays) {
+    // Primeiro feriado vence em caso de colisão de data (não deve ocorrer para
+    // NATIONAL, cuja unicidade é [date, scope, region=null]).
+    if (!map.has(toIsoDate(holiday.date))) {
+      map.set(toIsoDate(holiday.date), holiday.name);
+    }
+  }
+  return map;
 }
 
 /**
@@ -188,7 +225,7 @@ export async function getWeekForConsultant(
   const start = weekStartOf(weekStart);
   const end = addDays(start, 6);
 
-  const [period, entries] = await Promise.all([
+  const [period, entries, holidayMap] = await Promise.all([
     prisma.timesheetPeriod.findUnique({
       where: {
         consultantId_startDate_endDate: {
@@ -211,6 +248,9 @@ export async function getWeekForConsultant(
       },
       orderBy: { date: "asc" },
     }),
+    // Reaproveita o mesmo intervalo já calculado (Seg→Dom) — não recalcula
+    // semana. Anexa o nome do feriado a cada dia da grade (aviso não-bloqueante).
+    getHolidayMap(start, end),
   ]);
 
   const rowsByKey = new Map<string, TimeEntryRow>();
@@ -281,7 +321,10 @@ export async function getWeekForConsultant(
     startDate: toIsoDate(start),
     endDate: toIsoDate(end),
     status: "DRAFT",
-    days: buildWeekDays(start),
+    days: buildWeekDays(start).map((day) => {
+      const holidayName = holidayMap.get(day.date);
+      return holidayName ? { ...day, holidayName } : day;
+    }),
     rows,
   };
   week.status = period
@@ -311,6 +354,11 @@ export interface PeriodCalendarDay {
   totalHours: number;
   statuses: TimeEntryStatus[];
   entries: PeriodCalendarEntry[];
+  /**
+   * Nome do feriado NACIONAL nesta data, quando houver (Onda A/3). Só para
+   * sinalização no resumo do período; nunca bloqueia lançamento.
+   */
+  holidayName?: string;
 }
 
 export interface TimesheetPeriodOverview {
@@ -334,17 +382,21 @@ export async function getPeriodForConsultant(
   const maxEnd = addDays(start, MAX_PERIOD_OVERVIEW_DAYS - 1);
   const end = requestedEnd > maxEnd ? maxEnd : requestedEnd;
 
-  const entries = await prisma.timeEntry.findMany({
-    where: {
-      consultantId,
-      date: { gte: start, lte: end },
-      ...entryFilterWhere(filter),
-    },
-    include: {
-      project: { select: { name: true, client: { select: { name: true } } } },
-    },
-    orderBy: { date: "asc" },
-  });
+  const [entries, holidayMap] = await Promise.all([
+    prisma.timeEntry.findMany({
+      where: {
+        consultantId,
+        date: { gte: start, lte: end },
+        ...entryFilterWhere(filter),
+      },
+      include: {
+        project: { select: { name: true, client: { select: { name: true } } } },
+      },
+      orderBy: { date: "asc" },
+    }),
+    // Mesmo intervalo do período já calculado: anexa feriado a cada dia.
+    getHolidayMap(start, end),
+  ]);
 
   const daysByDate = new Map<string, PeriodCalendarDay>();
   for (
@@ -353,11 +405,13 @@ export async function getPeriodForConsultant(
     cursor = addDays(cursor, 1)
   ) {
     const iso = toIsoDate(cursor);
+    const holidayName = holidayMap.get(iso);
     daysByDate.set(iso, {
       date: iso,
       totalHours: 0,
       statuses: [],
       entries: [],
+      ...(holidayName ? { holidayName } : {}),
     });
   }
 

@@ -274,6 +274,7 @@ function deriveDemoPeriod(week: TimesheetWeek): TimesheetPeriodOverview {
       totalHours: entries.reduce((sum, entry) => sum + entry.hours, 0),
       statuses: entries.map((entry) => entry.status),
       entries,
+      ...(day.holidayName ? { holidayName: day.holidayName } : {}),
     };
   });
   const projectTotals = week.rows
@@ -465,7 +466,7 @@ function PeriodOverview({
         <div className="grid grid-cols-7 gap-1">
           {period.days.map((day) => {
             const dominant = day.entries[0]?.status ?? "DRAFT";
-            const title =
+            const entriesTitle =
               day.entries.length > 0
                 ? day.entries
                     .map(
@@ -474,6 +475,9 @@ function PeriodOverview({
                     )
                     .join("\n")
                 : "Sem lançamentos";
+            const title = day.holidayName
+              ? `Feriado: ${day.holidayName}\n${entriesTitle}`
+              : entriesTitle;
             return (
               <div
                 key={day.date}
@@ -483,6 +487,7 @@ function PeriodOverview({
                   day.totalHours > 0
                     ? statusToneClass[dominant]
                     : "border-border bg-surface text-soft",
+                  day.holidayName && "ring-1 ring-inset ring-warning/40",
                 )}
               >
                 <div className="flex items-center justify-between gap-1">
@@ -491,6 +496,11 @@ function PeriodOverview({
                     {day.totalHours > 0 ? formatHours(day.totalHours) : "-"}
                   </span>
                 </div>
+                {day.holidayName ? (
+                  <p className="mt-1 truncate text-[10px] font-medium text-warning">
+                    Feriado
+                  </p>
+                ) : null}
                 {day.entries.length > 0 ? (
                   <p className="mt-1 truncate text-[11px]">
                     {day.entries[0].projectName}
@@ -1238,12 +1248,23 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
                     <th
                       key={day.date}
                       scope="col"
+                      title={
+                        day.holidayName
+                          ? `Feriado: ${day.holidayName}`
+                          : undefined
+                      }
                       className={cn(
                         "px-2 py-3 text-center text-xs font-semibold uppercase tracking-wide text-soft",
                         day.weekend && "bg-surface-muted/40",
+                        day.holidayName && "bg-warning-soft/60",
                       )}
                     >
                       {day.label}
+                      {day.holidayName ? (
+                        <span className="mt-0.5 block text-[10px] font-medium normal-case tracking-normal text-warning">
+                          Feriado
+                        </span>
+                      ) : null}
                     </th>
                   ))}
                   <th

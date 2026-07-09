@@ -75,9 +75,11 @@ export function TimeEntryRow({ row, days, onEdit }: TimeEntryRowProps) {
         return (
           <td
             key={day.date}
+            title={day.holidayName ? `Feriado: ${day.holidayName}` : undefined}
             className={cn(
               "px-2 py-3 text-center align-middle tabular-nums",
               day.weekend && "bg-surface-muted/40",
+              day.holidayName && "bg-warning-soft/40",
               value > 0 ? "text-strong" : "text-soft",
             )}
           >
