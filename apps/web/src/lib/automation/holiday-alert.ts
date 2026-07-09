@@ -102,11 +102,14 @@ export async function runHolidayAlert(
 
   const now = input.now ?? new Date();
   // Date-only window at UTC midnight to match @db.Date semantics.
+  // The window is exactly `daysAhead` calendar days INCLUDING today, matching
+  // the email copy "próximos N dias": for daysAhead=7 it spans [today, today+6]
+  // (7 days). Today is included so a holiday landing today still notifies.
   const today = new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
   );
   const end = new Date(today);
-  end.setUTCDate(end.getUTCDate() + daysAhead);
+  end.setUTCDate(end.getUTCDate() + daysAhead - 1);
 
   const holidays = (await prisma.holiday.findMany({
     where: { date: { gte: today, lte: end } },

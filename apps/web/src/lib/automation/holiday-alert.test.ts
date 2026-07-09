@@ -205,18 +205,19 @@ describe("runHolidayAlert", () => {
   it("selects only holidays inside the daysAhead window and skips those outside", async () => {
     h.store.holidays = [
       holiday("2026-09-03", "Dentro"), // now + 2 days → in
-      holiday("2026-09-08", "Borda"), // now + 7 days → boundary, in
+      holiday("2026-09-07", "Borda"), // now + 6 days → last day in window, in
+      holiday("2026-09-08", "Fora"), // now + 7 days → just outside (8th day)
       holiday("2026-09-20", "Fora"), // now + 19 days → out
     ];
 
     const result = await runHolidayAlert({ now: NOW });
 
-    // Window is [today, today + 7] at UTC midnight.
+    // Window is exactly 7 calendar days including today: [today, today + 6].
     expect(h.store.lastWhere?.date.gte.toISOString()).toBe(
       "2026-09-01T00:00:00.000Z",
     );
     expect(h.store.lastWhere?.date.lte.toISOString()).toBe(
-      "2026-09-08T00:00:00.000Z",
+      "2026-09-07T00:00:00.000Z",
     );
 
     // Two distinct in-window dates → two GLOBAL emits, dedupeKey = ISO date.
@@ -225,7 +226,7 @@ describe("runHolidayAlert", () => {
     expect(result.sent).toBe(2);
     expect(h.store.emitCalls.map((c) => c.dedupeKey)).toEqual([
       "2026-09-03",
-      "2026-09-08",
+      "2026-09-07",
     ]);
     // The out-of-window holiday never reached the engine.
     expect(h.store.delivered.map((d) => d.subject).join(" ")).not.toContain(
@@ -235,12 +236,13 @@ describe("runHolidayAlert", () => {
 
   it("honours a custom daysAhead window", async () => {
     h.store.holidays = [
-      holiday("2026-09-03", "Dentro"),
-      holiday("2026-09-08", "Fora do 3 dias"),
+      holiday("2026-09-03", "Dentro"), // now + 2 days → last day of a 3-day window
+      holiday("2026-09-04", "Fora do 3 dias"), // now + 3 days → outside
     ];
     const result = await runHolidayAlert({ now: NOW, daysAhead: 3 });
+    // 3 calendar days including today: [today, today + 2] → 2026-09-03.
     expect(h.store.lastWhere?.date.lte.toISOString()).toBe(
-      "2026-09-04T00:00:00.000Z",
+      "2026-09-03T00:00:00.000Z",
     );
     expect(result.daysAhead).toBe(3);
     expect(result.holidayDates).toBe(1);
