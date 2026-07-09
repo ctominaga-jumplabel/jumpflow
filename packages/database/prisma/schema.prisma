@@ -2496,6 +2496,7 @@ enum NotificationEvent {
   FEED_POST_REPLIED // melhoria #5: alguem respondeu seu post no feed
   FEED_CONTENT_REACTED // melhoria #5: reacoes ao seu post/comentario (digest agregado)
   FEED_MENTIONED // melhoria #5: voce foi mencionado (@) num post/comentario
+  HOLIDAY_UPCOMING // Onda A/2: feriado proximo (job agendado varre o calendario)
 }
 
 /// Nivel de agregacao em que a regra dispara.

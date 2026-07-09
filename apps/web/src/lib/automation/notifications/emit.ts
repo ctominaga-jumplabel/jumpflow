@@ -31,7 +31,8 @@ export type NotificationEventKey =
   | "OPERATION_CLOSED"
   | "FEED_POST_REPLIED"
   | "FEED_CONTENT_REACTED"
-  | "FEED_MENTIONED";
+  | "FEED_MENTIONED"
+  | "HOLIDAY_UPCOMING";
 
 export type NotificationScopeKey = "GLOBAL" | "PROJECT" | "ALLOCATION";
 

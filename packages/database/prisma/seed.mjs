@@ -1293,6 +1293,15 @@ async function seedNotificationDefaults() {
     [],
     "FEED_MENTIONED (toggle; destinatário = usuário mencionado)",
   );
+
+  // Feriado próximo (Onda A/2) → DP/People planeja escalas e apontamento. Regra
+  // GLOBAL por padrão; regras adicionais scope=PROJECT podem ser criadas na
+  // admin para notificação por projeto (o motor casa por escopo).
+  await ensureNotificationRule(
+    "HOLIDAY_UPCOMING",
+    [{ type: "ROLE", channel: "EMAIL", address: "PEOPLE", name: "DP / People" }],
+    "HOLIDAY_UPCOMING → ROLE PEOPLE (EMAIL)",
+  );
 }
 
 // Feriados nacionais brasileiros. Datas oficiais fixas + móveis (Sexta-feira

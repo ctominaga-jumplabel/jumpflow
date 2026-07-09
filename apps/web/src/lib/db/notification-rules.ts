@@ -14,7 +14,8 @@ export type NotificationEventKey =
   | "PROJECT_CREATED"
   | "INVOICING_OVERDUE"
   | "COMMERCIAL_CONTRACT_MISSING"
-  | "OPERATION_CLOSED";
+  | "OPERATION_CLOSED"
+  | "HOLIDAY_UPCOMING";
 
 export type NotificationScopeKey = "GLOBAL" | "PROJECT" | "ALLOCATION";
 export type NotificationChannelKey = "EMAIL" | "TEAMS";
