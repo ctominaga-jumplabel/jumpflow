@@ -1295,11 +1295,61 @@ async function seedNotificationDefaults() {
   );
 }
 
+// Feriados nacionais brasileiros. Datas oficiais fixas + móveis (Sexta-feira
+// Santa) já calculadas por ano. Consciência Negra é feriado NACIONAL desde 2024.
+// Fonte de dados da Onda A (notificação de feriado + aviso ao apontar horas em
+// feriado). scope = NATIONAL, region = null para todos.
+const NATIONAL_HOLIDAYS = [
+  // 2026
+  { date: "2026-01-01", name: "Confraternização Universal" },
+  { date: "2026-04-03", name: "Sexta-feira Santa" },
+  { date: "2026-04-21", name: "Tiradentes" },
+  { date: "2026-05-01", name: "Dia do Trabalho" },
+  { date: "2026-09-07", name: "Independência do Brasil" },
+  { date: "2026-10-12", name: "Nossa Senhora Aparecida" },
+  { date: "2026-11-02", name: "Finados" },
+  { date: "2026-11-15", name: "Proclamação da República" },
+  { date: "2026-11-20", name: "Consciência Negra" },
+  { date: "2026-12-25", name: "Natal" },
+  // 2027
+  { date: "2027-01-01", name: "Confraternização Universal" },
+  { date: "2027-03-26", name: "Sexta-feira Santa" },
+  { date: "2027-04-21", name: "Tiradentes" },
+  { date: "2027-05-01", name: "Dia do Trabalho" },
+  { date: "2027-09-07", name: "Independência do Brasil" },
+  { date: "2027-10-12", name: "Nossa Senhora Aparecida" },
+  { date: "2027-11-02", name: "Finados" },
+  { date: "2027-11-15", name: "Proclamação da República" },
+  { date: "2027-11-20", name: "Consciência Negra" },
+  { date: "2027-12-25", name: "Natal" },
+];
+
+async function ensureHoliday({ date, name, scope = "NATIONAL", region = null }) {
+  // `date` é uma string YYYY-MM-DD; new Date interpreta como UTC midnight, o que
+  // casa com a semântica date-only de @db.Date.
+  const dateValue = new Date(`${date}T00:00:00.000Z`);
+  const year = dateValue.getUTCFullYear();
+  await prisma.holiday.upsert({
+    // Chave única [date, scope, region]; region null para feriados nacionais.
+    where: { date_scope_region: { date: dateValue, scope, region } },
+    update: { name, year },
+    create: { date: dateValue, name, scope, region, year },
+  });
+}
+
+async function seedHolidayDefaults() {
+  for (const holiday of NATIONAL_HOLIDAYS) {
+    await ensureHoliday(holiday);
+  }
+  console.log(`Seeded ${NATIONAL_HOLIDAYS.length} national holidays (2026–2027).`);
+}
+
 async function main() {
   await seedRoles();
   await seedPermissions();
   await seedRolePermissions();
   await seedNotificationDefaults();
+  await seedHolidayDefaults();
   await seedBootstrapAdmin();
   await seedBillingTypes();
   await seedDevUser();

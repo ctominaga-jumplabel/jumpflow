@@ -2572,6 +2572,31 @@ model IntegrationEvent {
   @@index([createdAt])
 }
 
+/// Abrangencia de um feriado no calendario.
+enum HolidayScope {
+  NATIONAL
+  STATE
+  CITY
+}
+
+/// Calendario de feriados. Base de dados para notificacao de feriado e aviso ao
+/// apontar horas em feriado (Onda A do plano de melhorias). `date` e armazenada
+/// como data pura (@db.Date). Para feriados nao-nacionais, `region` guarda a UF
+/// (STATE) ou o municipio (CITY); nacionais tem region null.
+model Holiday {
+  id        String       @id @default(cuid())
+  date      DateTime     @db.Date
+  name      String
+  scope     HolidayScope @default(NATIONAL)
+  region    String?
+  year      Int
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  @@unique([date, scope, region])
+  @@index([year])
+}
+
 /// Consultant expense tied to a project (and the active allocation that
 /// authorized it). `date` is stored as UTC midnight (date-only semantics,
 /// same convention as TimeEntry.date). Status transitions, RBAC and the
