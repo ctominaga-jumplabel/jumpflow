@@ -750,7 +750,10 @@ export async function saveTimesheetDefault(
       breakEnd: clock.breakEnd,
       endTime: clock.endTime,
       weekdays,
-      billable: parsed.billable,
+      // Enforcement de campo financeiro por papel: um consultor puro não dita
+      // billable nem via padrão semanal — deriva-se pela atividade (ON_CALL já é
+      // rejeitado acima, então não-gestão sempre grava true aqui).
+      billable: resolveBillable(user, parsed.activityType, parsed.billable),
       description: parsed.description.trim(),
     };
 
@@ -891,7 +894,10 @@ export async function applyTimesheetDefault(
             endTime: def.endTime,
             activityType: def.activityType,
             description: def.description ?? "",
-            billable: def.billable,
+            // Defesa-em-profundidade: mesmo que um default legado guarde
+            // billable=false, um consultor puro aplicando-o gera lançamentos
+            // faturáveis (ON_CALL nunca é padrão). Gestão aplica o que está no def.
+            billable: resolveBillable(user, def.activityType, def.billable),
             status: "SUBMITTED",
             submittedAt,
           },

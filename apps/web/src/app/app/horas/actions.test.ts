@@ -78,6 +78,7 @@ const h = vi.hoisted(() => {
     periods: [] as PeriodRec[],
     entries: [] as EntryRec[],
     attachments: [] as AttachmentRec[],
+    defaults: [] as Record<string, unknown>[],
     approvals: [] as Record<string, unknown>[],
     audits: [] as Record<string, unknown>[],
     currentUser: {
@@ -174,17 +175,47 @@ const h = vi.hoisted(() => {
       },
     },
     allocation: {
-      findFirst: async ({ where }: { where: Where }) => {
-        const date: Date = where.startDate.lte;
+      findFirst: async ({
+        where,
+        include,
+      }: {
+        where: Where;
+        include?: Where;
+      }) => {
+        // Shape A — findActiveAllocation: filtra por consultor/projeto/data.
+        if (where.startDate?.lte) {
+          const date: Date = where.startDate.lte;
+          const found = store.allocations.find(
+            (a) =>
+              a.consultantId === where.consultantId &&
+              a.projectId === where.projectId &&
+              a.status === where.status &&
+              a.startDate.getTime() <= date.getTime() &&
+              (a.endDate === null || a.endDate.getTime() >= date.getTime()),
+          );
+          return found ? { ...found } : null;
+        }
+        // Shape B — por id (requireOwnedActiveAllocation / applyTimesheetDefault),
+        // com includes opcionais de project e timesheetDefault.
         const found = store.allocations.find(
           (a) =>
+            a.id === where.id &&
             a.consultantId === where.consultantId &&
-            a.projectId === where.projectId &&
-            a.status === where.status &&
-            a.startDate.getTime() <= date.getTime() &&
-            (a.endDate === null || a.endDate.getTime() >= date.getTime()),
+            a.status === where.status,
         );
-        return found ? { ...found } : null;
+        if (!found) return null;
+        const out: Record<string, unknown> = { ...found };
+        if (include?.project) {
+          const project = store.projects.find((p) => p.id === found.projectId);
+          out.project = project
+            ? { id: project.id, status: project.status }
+            : null;
+        }
+        if (include?.timesheetDefault) {
+          const def = store.defaults.find((d) => d.allocationId === found.id);
+          out.timesheetDefault = def ? { ...def } : null;
+        }
+        return out;
       },
     },
     timesheetPeriod: {
@@ -336,6 +367,31 @@ const h = vi.hoisted(() => {
         return removed;
       },
     },
+    timesheetDefault: {
+      upsert: async ({
+        where,
+        update,
+        create,
+      }: {
+        where: Where;
+        update: Where;
+        create: Where;
+      }) => {
+        const existing = store.defaults.find(
+          (d) => d.allocationId === where.allocationId,
+        );
+        if (existing) {
+          Object.assign(existing, update);
+          return { ...existing };
+        }
+        const rec: Record<string, unknown> = {
+          id: nextId("def"),
+          ...create,
+        };
+        store.defaults.push(rec);
+        return { ...rec };
+      },
+    },
     approval: {
       create: async ({ data }: { data: Record<string, unknown> }) => {
         store.approvals.push(data);
@@ -393,6 +449,7 @@ vi.mock("@/lib/storage/provider", async (importOriginal) => {
 });
 
 import {
+  applyTimesheetDefault,
   attachTimeEntryFile,
   copyPreviousWeek,
   createTimeEntry,
@@ -505,6 +562,7 @@ beforeEach(() => {
   h.store.periods = [];
   h.store.entries = [];
   h.store.attachments = [];
+  h.store.defaults = [];
   h.store.approvals = [];
   h.store.audits = [];
   storage.objects.clear();
@@ -1089,6 +1147,65 @@ describe("saveTimesheetDefault — Sobreaviso não pode ser padrão semanal (A2)
     expect(result.ok ? null : result.message).toMatch(/Sobreaviso/i);
     // A recusa acontece logo após a validação, sem auditar nem persistir nada.
     expect(h.store.audits).toHaveLength(0);
+  });
+});
+
+// Onda B/fix2: fechar o bypass do padrão semanal. `billable` no padrão também é
+// protegido por papel: um consultor puro não sub-fatura salvando/aplicando um
+// default com billable=false.
+describe("billable — enforcement no padrão semanal", () => {
+  it("consultor puro salvando padrão com billable=false → persiste true (WORKDAY)", async () => {
+    h.store.currentUser.roles = ["CONSULTANT"];
+    const result = await saveTimesheetDefault({
+      allocationId: "alloc-1",
+      activityType: "WORKDAY",
+      ...clockFor(8),
+      weekdays: [1, 2, 3, 4, 5],
+      description: "Padrão",
+      billable: false,
+    });
+    expect(result.ok).toBe(true);
+    expect(h.store.defaults).toHaveLength(1);
+    expect(h.store.defaults[0].billable).toBe(true);
+  });
+
+  it("gestor salvando padrão com billable=false → persiste false", async () => {
+    h.store.currentUser.roles = ["PROJECT_MANAGER"];
+    const result = await saveTimesheetDefault({
+      allocationId: "alloc-1",
+      activityType: "WORKDAY",
+      ...clockFor(8),
+      weekdays: [1, 2, 3, 4, 5],
+      description: "Padrão",
+      billable: false,
+    });
+    expect(result.ok).toBe(true);
+    expect(h.store.defaults[0].billable).toBe(false);
+  });
+
+  it("consultor puro aplicando um default billable=false → lançamentos billable=true", async () => {
+    h.store.currentUser.roles = ["CONSULTANT"];
+    // Default legado/adulterado guardando billable=false diretamente no store.
+    h.store.defaults.push({
+      id: "def-legacy",
+      allocationId: "alloc-1",
+      activityType: "WORKDAY",
+      hoursPerDay: 8,
+      startTime: "09:00",
+      breakStart: null,
+      breakEnd: null,
+      endTime: "17:00",
+      weekdays: [1, 2],
+      billable: false,
+      description: "Legado",
+    });
+    const result = await applyTimesheetDefault({
+      allocationId: "alloc-1",
+      weekStart: "2026-06-08",
+    });
+    expect(result.ok).toBe(true);
+    expect(h.store.entries.length).toBeGreaterThan(0);
+    expect(h.store.entries.every((e) => e.billable === true)).toBe(true);
   });
 });
 
