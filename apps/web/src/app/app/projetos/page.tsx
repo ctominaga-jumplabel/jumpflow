@@ -37,6 +37,10 @@ export default async function ProjetosPage() {
   const canManageSaleRates = hasRole(user, SALE_RATE_ROLES);
   // A configuracao de cobranca (motor de regras) e editada pelo Financeiro.
   const canEditBillingConfig = hasRole(user, FINANCIAL_ROLES);
+  // Recebimentos previstos são valores de receita: escrita para o Comercial ou
+  // o Financeiro (mesmo gate/mascaramento dos valores de venda).
+  const canManageReceivables =
+    hasRole(user, SALE_RATE_ROLES) || hasRole(user, FINANCIAL_ROLES);
   const [projects, clients, consultants, managers, skills, billingTypeItems] =
     databaseReady
       ? await Promise.all([
@@ -84,6 +88,7 @@ export default async function ProjetosPage() {
         canViewCommercials={canViewCommercials}
         canManageSaleRates={canManageSaleRates}
         canEditBillingConfig={canEditBillingConfig}
+        canManageReceivables={canManageReceivables}
       />
     </div>
   );

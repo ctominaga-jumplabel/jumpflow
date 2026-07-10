@@ -1,4 +1,10 @@
 export type ProjectStatus = "PROPOSAL" | "ACTIVE" | "PAUSED" | "CLOSED";
+export type ProjectPaymentType =
+  | "ONE_TIME"
+  | "INSTALLMENTS"
+  | "MONTHLY"
+  | "ON_MILESTONE";
+export type ReceivableStatus = "FORECAST" | "RECEIVED" | "CANCELLED";
 export type AllocationStatus =
   | "ACTIVE"
   | "PLANNED"
@@ -71,6 +77,21 @@ export interface ProjectSaleRateItem {
   note?: string;
 }
 
+/**
+ * Recebimento previsto do cliente (lado receita — ProjectReceivableSchedule).
+ * `amount` é um VALOR DE RECEITA (D1): fica `undefined` (mascarado) para perfis
+ * sem permissão comercial/financeira, espelhando `ProjectSaleRateItem.hourlyRate`.
+ */
+export interface ProjectReceivableItem {
+  id: string;
+  projectId: string;
+  dueAt: string;
+  amount?: number;
+  label: string;
+  status: ReceivableStatus;
+  note?: string;
+}
+
 export type BillingPeriodicity = "MONTHLY" | "BIWEEKLY" | "WEEKLY" | "PER_EVENT";
 export type BillingRoundingRule =
   | "NONE"
@@ -135,6 +156,21 @@ export interface ProjectItem {
   budgetHours?: number;
   costCenter?: string;
   commercialContractRef?: string;
+  /** Condição de pagamento do cliente (comercial). Opcional. */
+  paymentType?: ProjectPaymentType;
+  /**
+   * Flag INFORMATIVA de termo de aceite (não bloqueia lançamento/faturamento).
+   * Opcional na borda (mock/otimista); o loader sempre popula com boolean.
+   */
+  requiresAcceptanceTerm?: boolean;
+  /** Quando/por quem o termo foi marcado como aceito (referência solta ao User). */
+  acceptanceTermAcceptedAt?: string;
+  acceptanceTermAcceptedByUserId?: string;
+  /**
+   * Recebimentos previstos do cliente (lado receita). Vazio para quem não tem
+   * permissão comercial/financeira (mesmo gate dos valores de venda).
+   */
+  receivables?: ProjectReceivableItem[];
   consumedHours: number;
   allocatedConsultants: number;
   allocations: ProjectAllocationItem[];

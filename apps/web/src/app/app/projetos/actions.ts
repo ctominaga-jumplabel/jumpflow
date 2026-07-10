@@ -35,6 +35,15 @@ import {
   setProjectAutoApprovalActiveSchema,
   saleRateInputSchema,
   saleRateUpdateSchema,
+  projectPaymentTypeSchema,
+  projectAcceptanceTermSchema,
+  receivableInputSchema,
+  receivableUpdateSchema,
+  receivableRemoveSchema,
+  type ProjectPaymentTypeInput,
+  type ProjectAcceptanceTermInput,
+  type ReceivableInput,
+  type ReceivableUpdateInput,
   costRateInputSchema,
   costRateUpdateSchema,
   costRateRemoveSchema,
@@ -69,6 +78,14 @@ import {
 // Comercial, Financeiro). A change in any one must refresh all three so none
 // shows stale context. PROJECT_WRITE_ROLES/SALE_RATE_ROLES live in
 // route-permissions.ts (shared with the route guards).
+// Recebimentos previstos são VALORES DE RECEITA (D1): quem os vê/edita é o
+// Comercial (SALE_RATE_ROLES) ou o Financeiro (FINANCIAL_ROLES). Como
+// FINANCIAL_ROLES ⊂ SALE_RATE_ROLES hoje, a união coincide com SALE_RATE_ROLES,
+// mas mantemos o intent explícito para não depender dessa coincidência.
+const RECEIVABLE_ROLES = [
+  ...new Set([...SALE_RATE_ROLES, ...FINANCIAL_ROLES]),
+];
+
 const PROJETOS_PATH = "/app/projetos";
 const COMERCIAL_PATH = "/app/comercial";
 const FINANCEIRO_PROJETOS_PATH = "/app/financeiro/projetos";
@@ -157,6 +174,9 @@ function projectData(
     // Centro de custo é operacional (não é valor financeiro), gravado pela
     // Operação junto dos demais dados do projeto.
     costCenter: input.costCenter,
+    // Flag INFORMATIVA de termo de aceite (operacional). Não toca em
+    // acceptanceTermAcceptedAt/By: a marcação de aceite é uma ação à parte.
+    requiresAcceptanceTerm: input.requiresAcceptanceTerm ?? false,
   };
   if (!includeCommercialFields) return data;
   // Tipo de cobrança e budget são de titularidade exclusiva do Comercial
@@ -952,6 +972,216 @@ export async function updateSaleRate(
       });
     });
     await audit("ProjectSaleRate", parsed.id, "PROJECT_SALE_RATE_UPDATED", previous, parsed);
+    revalidateProjectViews();
+    return { ok: true, data: { id: parsed.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+// ── Tipo de pagamento (comercial) ────────────────────────────────────────
+// Condição/prazo de pagamento do cliente. Patch isolado (não toca budget/valor
+// de venda). Gated por SALE_RATE_ROLES; auditado como mudança comercial.
+
+export async function updateProjectPaymentType(
+  input: ProjectPaymentTypeInput,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(SALE_RATE_ROLES);
+    const parsed = parseInput(projectPaymentTypeSchema, input);
+    const previous = await prisma.project.findUnique({
+      where: { id: parsed.id },
+      select: { paymentType: true },
+    });
+    if (!previous) throw new ActionError("NOT_FOUND", "Projeto nao encontrado.");
+    const data = { paymentType: parsed.paymentType ?? null };
+    await prisma.project.update({ where: { id: parsed.id }, data });
+    await audit("Project", parsed.id, "PROJECT_PAYMENT_TYPE_UPDATED", previous, data);
+    revalidateProjectViews();
+    return { ok: true, data: { id: parsed.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+// ── Termo de aceite (INFORMATIVO) ─────────────────────────────────────────
+// Marca o termo como aceito (data + usuário atual). Operacional
+// (PROJECT_WRITE_ROLES). NÃO bloqueia lançamento nem faturamento (D3). A flag
+// requiresAcceptanceTerm é editada no ProjectModal (updateProject).
+
+export async function markProjectAcceptanceAccepted(
+  input: ProjectAcceptanceTermInput,
+): Promise<ActionResult<{ id: string; acceptedAt: string }>> {
+  try {
+    ensureDatabase();
+    const user = await requireRole(PROJECT_WRITE_ROLES);
+    const parsed = parseInput(projectAcceptanceTermSchema, input);
+    const previous = await prisma.project.findUnique({
+      where: { id: parsed.id },
+      select: {
+        requiresAcceptanceTerm: true,
+        acceptanceTermAcceptedAt: true,
+        acceptanceTermAcceptedByUserId: true,
+      },
+    });
+    if (!previous) throw new ActionError("NOT_FOUND", "Projeto nao encontrado.");
+    if (!previous.requiresAcceptanceTerm) {
+      throw new ActionError(
+        "INVALID_INPUT",
+        "Este projeto nao exige termo de aceite.",
+      );
+    }
+    if (previous.acceptanceTermAcceptedAt) {
+      // Idempotente: já aceito, não regrava a data/autor.
+      return {
+        ok: true,
+        data: {
+          id: parsed.id,
+          acceptedAt: previous.acceptanceTermAcceptedAt.toISOString(),
+        },
+      };
+    }
+    const dbUser = await resolveDbUser(user);
+    const acceptedAt = new Date();
+    const data = {
+      acceptanceTermAcceptedAt: acceptedAt,
+      acceptanceTermAcceptedByUserId: dbUser?.id ?? null,
+    };
+    await prisma.project.update({ where: { id: parsed.id }, data });
+    await audit("Project", parsed.id, "PROJECT_ACCEPTANCE_TERM_ACCEPTED", previous, data);
+    revalidateProjectViews();
+    return { ok: true, data: { id: parsed.id, acceptedAt: acceptedAt.toISOString() } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+// ── Recebimentos previstos do cliente (lado receita) ──────────────────────
+// ProjectReceivableSchedule: parcelas com data/valor/situação. Dado financeiro
+// (D1), gated por RECEIVABLE_ROLES (comercial ∪ financeiro) e auditado. Dedupe:
+// rejeita uma parcela idêntica (mesma data + valor + rótulo) no projeto.
+
+function receivableData(
+  input: ReceivableInput,
+): Prisma.ProjectReceivableScheduleUncheckedCreateInput {
+  return {
+    projectId: input.projectId,
+    dueAt: toDate(input.dueAt),
+    amount: input.amount,
+    label: input.label,
+    status: input.status,
+    note: input.note ?? null,
+  };
+}
+
+async function ensureNoDuplicateReceivable(
+  input: ReceivableInput,
+  excludeId?: string,
+): Promise<void> {
+  const existing = await prisma.projectReceivableSchedule.findMany({
+    where: {
+      projectId: input.projectId,
+      dueAt: toDate(input.dueAt),
+      label: input.label,
+    },
+    select: { id: true, amount: true },
+  });
+  const duplicate = existing.some(
+    (row) => row.id !== excludeId && Number(row.amount) === input.amount,
+  );
+  if (duplicate) {
+    throw new ActionError(
+      "INVALID_INPUT",
+      "Ja existe um recebimento identico (mesma data, valor e rotulo).",
+    );
+  }
+}
+
+export async function createReceivable(
+  input: ReceivableInput,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(RECEIVABLE_ROLES);
+    const parsed = parseInput(receivableInputSchema, input);
+    const project = await prisma.project.findUnique({
+      where: { id: parsed.projectId },
+      select: { id: true },
+    });
+    if (!project) throw new ActionError("NOT_FOUND", "Projeto nao encontrado.");
+    await ensureNoDuplicateReceivable(parsed);
+    const created = await prisma.projectReceivableSchedule.create({
+      data: receivableData(parsed),
+      select: { id: true },
+    });
+    await audit(
+      "ProjectReceivableSchedule",
+      created.id,
+      "PROJECT_RECEIVABLE_CREATED",
+      null,
+      parsed,
+    );
+    revalidateProjectViews();
+    return { ok: true, data: created };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+export async function updateReceivable(
+  input: ReceivableUpdateInput,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(RECEIVABLE_ROLES);
+    const parsed = parseInput(receivableUpdateSchema, input);
+    const previous = await prisma.projectReceivableSchedule.findUnique({
+      where: { id: parsed.id },
+    });
+    if (!previous) {
+      throw new ActionError("NOT_FOUND", "Recebimento nao encontrado.");
+    }
+    await ensureNoDuplicateReceivable(parsed, parsed.id);
+    await prisma.projectReceivableSchedule.update({
+      where: { id: parsed.id },
+      data: receivableData(parsed),
+    });
+    await audit(
+      "ProjectReceivableSchedule",
+      parsed.id,
+      "PROJECT_RECEIVABLE_UPDATED",
+      previous,
+      parsed,
+    );
+    revalidateProjectViews();
+    return { ok: true, data: { id: parsed.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+export async function deleteReceivable(
+  input: { id: string },
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(RECEIVABLE_ROLES);
+    const parsed = parseInput(receivableRemoveSchema, input);
+    const previous = await prisma.projectReceivableSchedule.findUnique({
+      where: { id: parsed.id },
+    });
+    if (!previous) {
+      throw new ActionError("NOT_FOUND", "Recebimento nao encontrado.");
+    }
+    await prisma.projectReceivableSchedule.delete({ where: { id: parsed.id } });
+    await audit(
+      "ProjectReceivableSchedule",
+      parsed.id,
+      "PROJECT_RECEIVABLE_DELETED",
+      previous,
+      null,
+    );
     revalidateProjectViews();
     return { ok: true, data: { id: parsed.id } };
   } catch (error) {
