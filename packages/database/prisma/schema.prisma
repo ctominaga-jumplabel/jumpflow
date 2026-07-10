@@ -282,6 +282,23 @@ enum ProjectStatus {
   CLOSED
 }
 
+/// Condicao/arranjo de pagamento do cliente no projeto (PRAZO de recebimento).
+/// NAO se confunde com BillingChargeType, que descreve o MODELO de cobranca
+/// (como o valor e apurado). Aqui e QUANDO/EM QUANTAS PARCELAS o cliente paga.
+enum ProjectPaymentType {
+  ONE_TIME
+  INSTALLMENTS
+  MONTHLY
+  ON_MILESTONE
+}
+
+/// Situacao de cada recebimento previsto do cliente (lado receita).
+enum ReceivableStatus {
+  FORECAST
+  RECEIVED
+  CANCELLED
+}
+
 enum AllocationStatus {
   ACTIVE
   PLANNED
@@ -1381,6 +1398,16 @@ model Project {
   /// Referencia do contrato comercial (numero/identificador). ADR 0002 Fase 1:
   /// presenca = contrato vinculado; ausencia dispara alerta COMMERCIAL_CONTRACT_MISSING.
   commercialContractRef       String?
+  /// Condicao de pagamento do cliente (prazo/arranjo). Opcional; complementa o
+  /// BillingChargeType (modelo de cobranca) sem substitui-lo.
+  paymentType                 ProjectPaymentType?
+  /// Flag INFORMATIVA de termo de aceite. Nao bloqueia nenhuma operacao; apenas
+  /// registra a exigencia e, quando aplicavel, quando/por quem foi aceito.
+  /// acceptanceTermAcceptedByUserId segue o padrao de managerUserId/closedByUserId:
+  /// referencia solta ao User (sem FK), para nao acoplar auditoria a User.
+  requiresAcceptanceTerm      Boolean                      @default(false)
+  acceptanceTermAcceptedAt    DateTime?
+  acceptanceTermAcceptedByUserId String?
   allocations                 Allocation[]
   timeEntries                 TimeEntry[]
   closings                    MonthlyClosing[]
@@ -1401,12 +1428,32 @@ model Project {
   opportunities               Opportunity[]
   cases                       Case[]
   holidays                    HolidayProject[]
+  receivables                 ProjectReceivableSchedule[]
   createdAt                   DateTime                     @default(now())
   updatedAt                   DateTime                     @updatedAt
 
   @@index([clientId])
   @@index([managerUserId])
   @@index([billingTypeId])
+}
+
+/// Agenda de recebimentos previstos do cliente (lado receita). Complementa
+/// BillingType/ProjectBillingConfig (como se COBRA) com a previsao de QUANDO e
+/// QUANTO entra: parcelas com data, valor e situacao. Dados financeiros; leitura
+/// restrita a perfis autorizados e alteracoes sensiveis devem gerar AuditEvent.
+model ProjectReceivableSchedule {
+  id        String           @id @default(cuid())
+  projectId String
+  project   Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  dueAt     DateTime         @db.Date
+  amount    Decimal          @db.Decimal(12, 2)
+  label     String
+  status    ReceivableStatus @default(FORECAST)
+  note      String?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  @@index([projectId, dueAt])
 }
 
 /// Regras de faturamento parametrizaveis por projeto, editadas pelo Financeiro.
