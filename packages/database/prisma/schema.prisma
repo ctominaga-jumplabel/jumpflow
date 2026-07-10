@@ -1400,6 +1400,7 @@ model Project {
   checkpoints                 Checkpoint[]
   opportunities               Opportunity[]
   cases                       Case[]
+  holidays                    HolidayProject[]
   createdAt                   DateTime                     @default(now())
   updatedAt                   DateTime                     @updatedAt
 
@@ -2584,18 +2585,45 @@ enum HolidayScope {
 /// apontar horas em feriado (Onda A do plano de melhorias). `date` e armazenada
 /// como data pura (@db.Date). Para feriados nao-nacionais, `region` guarda a UF
 /// (STATE) ou o municipio (CITY); nacionais tem region null.
+/// Feriado do calendario operacional. Aplicabilidade por projeto (Onda A-ext):
+/// sem nenhum vinculo em `projects` => feriado GLOBAL (vale para todos os
+/// projetos, caso dos nacionais); com >=1 vinculo => vale SOMENTE para os
+/// projetos vinculados (folga de cliente, feriado regional). A de-duplicacao
+/// (mesma data/escopo/regiao) e responsabilidade da Server Action de CRUD, nao
+/// do banco: o antigo `@@unique([date, scope, region])` era uma falsa garantia
+/// porque no Postgres NULLs sao distintos entre si (feriados nacionais tem
+/// region NULL, entao duplicatas passavam pelo indice unico). Mantemos apenas
+/// indices de consulta; a tela lista os feriados e a action valida a colisao.
 model Holiday {
-  id        String       @id @default(cuid())
-  date      DateTime     @db.Date
+  id        String           @id @default(cuid())
+  date      DateTime         @db.Date
   name      String
-  scope     HolidayScope @default(NATIONAL)
+  scope     HolidayScope     @default(NATIONAL)
   region    String?
   year      Int
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
+  projects  HolidayProject[]
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
 
-  @@unique([date, scope, region])
+  @@index([date, scope])
   @@index([year])
+}
+
+/// Tabela de juncao Holiday<->Project (N:N). A presenca de linhas restringe o
+/// feriado aos projetos vinculados; a ausencia de linhas o mantem GLOBAL.
+/// `onDelete: Cascade` no lado Holiday remove os vinculos junto com o feriado;
+/// o lado Project usa a acao padrao (Restrict), coerente com as demais FKs para
+/// Project no schema (Expense, TimeEntry, Allocation), protegendo contra remocao
+/// acidental de projeto com vinculos.
+model HolidayProject {
+  holidayId String
+  holiday   Holiday  @relation(fields: [holidayId], references: [id], onDelete: Cascade)
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@id([holidayId, projectId])
+  @@index([projectId])
 }
 
 /// Consultant expense tied to a project (and the active allocation that

@@ -1338,12 +1338,25 @@ async function ensureHoliday({ date, name, scope = "NATIONAL", region = null }) 
   // casa com a semântica date-only de @db.Date.
   const dateValue = new Date(`${date}T00:00:00.000Z`);
   const year = dateValue.getUTCFullYear();
-  await prisma.holiday.upsert({
-    // Chave única [date, scope, region]; region null para feriados nacionais.
-    where: { date_scope_region: { date: dateValue, scope, region } },
-    update: { name, year },
-    create: { date: dateValue, name, scope, region, year },
+  // O unique composto [date, scope, region] foi removido (era falsa garantia no
+  // Postgres: region NULL torna as linhas distintas). Idempotência do seed passa
+  // a ser findFirst+create/update sobre (date, scope, region), espelhando a
+  // colisão que a Server Action de CRUD valida. Feriados nacionais permanecem
+  // GLOBAIS: nenhum vínculo em HolidayProject é criado aqui.
+  const existing = await prisma.holiday.findFirst({
+    where: { date: dateValue, scope, region },
+    select: { id: true },
   });
+  if (existing) {
+    await prisma.holiday.update({
+      where: { id: existing.id },
+      data: { name, year },
+    });
+  } else {
+    await prisma.holiday.create({
+      data: { date: dateValue, name, scope, region, year },
+    });
+  }
 }
 
 async function seedHolidayDefaults() {
