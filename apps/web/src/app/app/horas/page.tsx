@@ -7,6 +7,7 @@ import { HorasConsultaPanel } from "@/components/timesheet/HorasConsultaPanel";
 import { requireUser } from "@/lib/auth/guards";
 import { hasRole } from "@/lib/auth/route-permissions";
 import { isDatabaseConfigured } from "@/lib/db/config";
+import { isStorageConfigured } from "@/lib/storage/provider";
 import {
   addDays,
   monthRangeOf,
@@ -91,6 +92,12 @@ export default async function HorasPage({ searchParams }: HorasPageProps) {
   const isManager = hasRole(user, [...MANAGER_ROLES]);
   // CSV export is hidden for consultant-only users (no role beyond CONSULTANT).
   const canExportCsv = user.roles.some((role) => role !== "CONSULTANT");
+  // "Faturável" (Onda B): visível/editável só para papéis de gestão. Determinado
+  // no SERVIDOR — o consultor puro não vê o controle nem o rótulo na grade.
+  const canEditBillable = isManager;
+  // Anexo opcional do lançamento (melhoria #2): só é oferecido quando o object
+  // storage está configurado (degrade honesto quando ausente).
+  const attachmentsAvailable = isStorageConfigured();
 
   // A user who is neither a consultant nor a manager has nothing to show here.
   if (!consultant && !isManager) {
@@ -142,6 +149,8 @@ export default async function HorasPage({ searchParams }: HorasPageProps) {
         holidays={holidays}
         filter={filter}
         canExportCsv={canExportCsv}
+        canEditBillable={canEditBillable}
+        attachmentsAvailable={attachmentsAvailable}
       />
     );
   }

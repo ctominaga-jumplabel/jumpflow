@@ -128,3 +128,133 @@ describe("TimeEntryForm — Fator de remuneração (multiplier)", () => {
     });
   });
 });
+
+describe("TimeEntryForm — Faturável oculto do consultor (Onda B)", () => {
+  it("esconde o controle Faturável para consultor puro (canEditBillable=false)", () => {
+    render(
+      <TimeEntryForm
+        open
+        onClose={() => {}}
+        projects={projects}
+        days={days}
+        onSubmit={vi.fn()}
+        canEditBillable={false}
+      />,
+    );
+    expect(screen.queryByLabelText("Faturável")).toBeNull();
+  });
+
+  it("mantém o controle visível para gestão (canEditBillable=true, default)", () => {
+    setup();
+    expect(screen.getByLabelText("Faturável")).toBeInTheDocument();
+  });
+
+  it("mesmo oculto, o valor billable (default true) segue no submit", () => {
+    const onSubmit = vi.fn();
+    render(
+      <TimeEntryForm
+        open
+        onClose={() => {}}
+        projects={projects}
+        days={days}
+        onSubmit={onSubmit}
+        canEditBillable={false}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Projeto"), {
+      target: { value: "p1" },
+    });
+    fireEvent.change(screen.getByLabelText("Descrição"), {
+      target: { value: "Dia normal" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({ billable: true });
+  });
+});
+
+describe("TimeEntryForm — anexo opcional (melhoria #2)", () => {
+  it("não mostra o campo de anexo quando storage indisponível", () => {
+    render(
+      <TimeEntryForm
+        open
+        onClose={() => {}}
+        projects={projects}
+        days={days}
+        onSubmit={vi.fn()}
+        attachmentsAvailable={false}
+      />,
+    );
+    expect(screen.queryByText(/Anexar arquivo/i)).toBeNull();
+  });
+
+  it("mostra o campo de anexo quando storage disponível (modo diário)", () => {
+    render(
+      <TimeEntryForm
+        open
+        onClose={() => {}}
+        projects={projects}
+        days={days}
+        onSubmit={vi.fn()}
+        attachmentsAvailable
+      />,
+    );
+    expect(screen.getByText(/Anexar arquivo/i)).toBeInTheDocument();
+  });
+
+  it("emite a intenção de upload no submit quando um arquivo é escolhido", () => {
+    const onSubmit = vi.fn();
+    render(
+      <TimeEntryForm
+        open
+        onClose={() => {}}
+        projects={projects}
+        days={days}
+        onSubmit={onSubmit}
+        attachmentsAvailable
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Projeto"), {
+      target: { value: "p1" },
+    });
+    fireEvent.change(screen.getByLabelText("Descrição"), {
+      target: { value: "Com anexo" },
+    });
+    const file = new File(["%PDF-1.4"], "ok.pdf", { type: "application/pdf" });
+    const input = document.querySelector(
+      'input[type="file"]',
+    ) as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [file] } });
+    // O nome do arquivo aparece após a pré-checagem client-side.
+    expect(screen.getByText("ok.pdf")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0][1]).toMatchObject({
+      kind: "upload",
+      file,
+    });
+  });
+
+  it("rejeita formato não aceito na pré-checagem client-side", () => {
+    const onSubmit = vi.fn();
+    render(
+      <TimeEntryForm
+        open
+        onClose={() => {}}
+        projects={projects}
+        days={days}
+        onSubmit={onSubmit}
+        attachmentsAvailable
+      />,
+    );
+    const bad = new File(["x"], "malware.exe", {
+      type: "application/x-msdownload",
+    });
+    const input = document.querySelector(
+      'input[type="file"]',
+    ) as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [bad] } });
+    expect(screen.getByRole("alert")).toHaveTextContent(/Formato não aceito/i);
+    expect(screen.queryByText("malware.exe")).toBeNull();
+  });
+});

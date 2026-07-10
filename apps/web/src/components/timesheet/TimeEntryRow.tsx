@@ -1,6 +1,6 @@
 "use client";
 
-import { Pencil } from "lucide-react";
+import { Paperclip, Pencil } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { focusRing } from "@/lib/styles";
 import {
@@ -29,6 +29,17 @@ export interface TimeEntryRowProps {
   holidays?: HolidayLookup;
   /** Called to edit the row; only wired when the row is editable. */
   onEdit?: (row: TimeEntryRowData) => void;
+  /**
+   * Whether the current user may see the billable state (Onda B). Hidden for
+   * consultores puros: o rótulo "(não faturável)" só aparece para gestão/admin/
+   * finance. Default `true` mantém o comportamento antigo.
+   */
+  canEditBillable?: boolean;
+  /**
+   * Abre o anexo de um lançamento em nova aba (melhoria #2). Recebe o id do
+   * TimeEntry; o parent resolve a URL assinada e faz `window.open`.
+   */
+  onOpenAttachment?: (entryId: string) => void;
 }
 
 /**
@@ -41,9 +52,22 @@ export function TimeEntryRow({
   days,
   holidays = EMPTY_HOLIDAY_LOOKUP,
   onEdit,
+  canEditBillable = true,
+  onOpenAttachment,
 }: TimeEntryRowProps) {
   const editable = isRowEditable(row) && Boolean(onEdit);
   const total = rowTotal(row);
+  // Anexos do lançamento (melhoria #2): cada dia da linha pode ter 1 anexo. O
+  // link abre o arquivo em nova aba via URL assinada (resolvida no parent).
+  const attachmentLinks = (row.attachments ?? [])
+    .map((attachment, index) => ({
+      attachment,
+      entryId: row.entryIds?.[index] ?? null,
+    }))
+    .filter(
+      (item): item is { attachment: { fileName: string }; entryId: string } =>
+        Boolean(item.attachment) && Boolean(item.entryId),
+    );
   // Hover tooltip mirroring PeriodOverview's day cards: total hours of the row
   // plus the readable status, so the consultant gets the same at-a-glance
   // context on the main grid without opening the entry.
@@ -81,8 +105,28 @@ export function TimeEntryRow({
         <span className="text-sm text-medium">
           {activityLabelOf(row.activity)}
         </span>
-        {!row.billable ? (
+        {canEditBillable && !row.billable ? (
           <span className="ml-2 text-xs text-soft">(não faturável)</span>
+        ) : null}
+        {onOpenAttachment && attachmentLinks.length > 0 ? (
+          <span className="mt-1 flex flex-wrap items-center gap-2">
+            {attachmentLinks.map((item) => (
+              <button
+                key={item.entryId}
+                type="button"
+                onClick={() => onOpenAttachment(item.entryId)}
+                title={`Abrir anexo: ${item.attachment.fileName}`}
+                aria-label={`Abrir anexo ${item.attachment.fileName} em nova aba`}
+                className={cn(
+                  "inline-flex max-w-[12rem] items-center gap-1 rounded-md text-xs font-medium text-brand hover:underline",
+                  focusRing,
+                )}
+              >
+                <Paperclip aria-hidden="true" className="size-3.5 shrink-0" />
+                <span className="truncate">{item.attachment.fileName}</span>
+              </button>
+            ))}
+          </span>
         ) : null}
       </td>
       {days.map((day, index) => {

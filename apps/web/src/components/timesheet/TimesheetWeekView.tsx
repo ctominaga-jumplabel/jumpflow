@@ -19,11 +19,14 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { FeedbackBanner, useFeedback } from "@/components/ui/Feedback";
 import { formatHours } from "@/lib/format";
 import {
+  attachTimeEntryFile,
   copyPreviousWeek as copyPreviousWeekAction,
   applyTimesheetDefault as applyTimesheetDefaultAction,
   createWeeklyTimeEntries,
   createTimeEntry,
   deleteTimeEntry,
+  getTimeEntryAttachmentUrl,
+  removeTimeEntryAttachment,
   saveTimesheetDefault as saveTimesheetDefaultAction,
   updateTimeEntry,
 } from "@/app/app/horas/actions";
@@ -43,6 +46,7 @@ import {
   timeEntryStatusLabels,
   weekTotal,
   type DayClock,
+  type TimeEntryAttachmentMeta,
   type TimeEntryRow as TimeEntryRowData,
   type TimeEntryStatus,
   type TimesheetWeek,
@@ -76,6 +80,7 @@ import { TimeEntryStatusBadge } from "./TimeEntryStatusBadge";
 import { TimesheetFilters } from "./TimesheetFilters";
 import {
   TimeEntryForm,
+  type TimeEntryAttachmentIntent,
   type TimeEntryFormProject,
   type TimeEntryFormValue,
 } from "./TimeEntryForm";
@@ -215,6 +220,17 @@ export interface TimesheetWeekViewProps {
    * consultant-only users (no role beyond CONSULTANT).
    */
   canExportCsv?: boolean;
+  /**
+   * Whether the user may see/edit "Faturável" (Onda B). Determined server-side
+   * (papel de gestão). Consultores puros não veem o controle nem o rótulo
+   * "(não faturável)". Default `true` (demo/gestão) preserva o comportamento.
+   */
+  canEditBillable?: boolean;
+  /**
+   * db mode: object storage está configurado, habilitando o anexo opcional do
+   * lançamento (melhoria #2). Default `false` (demo/sem storage).
+   */
+  attachmentsAvailable?: boolean;
 }
 
 export interface TimesheetDefaultOption extends TimeEntryFormProject {
@@ -566,6 +582,9 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
   const [copyDescription, setCopyDescription] = useState("");
   const [editingRow, setEditingRow] = useState<TimeEntryRowData | null>(null);
   const [editInitial, setEditInitial] = useState<TimeEntryFormValue | null>(null);
+  // Anexo persistido do lançamento sendo editado (melhoria #2), passado ao form.
+  const [editAttachment, setEditAttachment] =
+    useState<TimeEntryAttachmentMeta | null>(null);
   const [defaultValue, setDefaultValue] = useState<TimesheetDefaultFormValue>(() =>
     defaultFormValue(props.defaultOptions ?? []),
   );
@@ -589,6 +608,10 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
   const defaultOptions = props.defaultOptions ?? [];
   // Project-aware holiday lookup (empty in demo mode → no markers/confirmation).
   const holidays = props.holidays ?? EMPTY_HOLIDAY_LOOKUP;
+  // "Faturável" só é visível/editável para gestão (server-side); default true
+  // preserva demo/gestão. Anexo depende de storage configurado (db only).
+  const canEditBillable = props.canEditBillable ?? true;
+  const attachmentsAvailable = !isDemo && (props.attachmentsAvailable ?? false);
   const formProjects = isDemo ? demoProjects : dbProjects;
   // Demo project dropdown: narrow by the chosen project status (db mode gets the
   // already-narrowed list from the server via listAllowedProjects).
@@ -654,7 +677,20 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
   function openNew() {
     setEditingRow(null);
     setEditInitial(null);
+    setEditAttachment(null);
     setFormOpen(true);
+  }
+
+  /** Abre o anexo de um lançamento em nova aba via URL assinada (melhoria #2). */
+  function openAttachment(entryId: string) {
+    startTransition(async () => {
+      const result = await getTimeEntryAttachmentUrl({ id: entryId });
+      if (result.ok) {
+        window.open(result.data.url, "_blank", "noopener,noreferrer");
+      } else {
+        notify("warning", result.message);
+      }
+    });
   }
 
   function openDefault() {
@@ -793,6 +829,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
     );
     const storedClock = row.clock?.[dayIndex] ?? null;
     setEditingRow(row);
+    setEditAttachment(row.attachments?.[dayIndex] ?? null);
     setEditInitial({
       mode: "daily",
       projectId: row.projectId,
@@ -810,8 +847,33 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
     setFormOpen(true);
   }
 
-  function handleSubmitEntry(value: TimeEntryFormValue) {
+  /**
+   * Aplica a intenção de anexo (melhoria #2) após o lançamento ser salvo.
+   * Reusa as server actions do fluxo de sobreaviso (upload em bucket privado +
+   * remoção). Retorna a mensagem de falha (ou null em sucesso/no-op).
+   */
+  async function applyAttachmentIntent(
+    entryId: string,
+    attachment: TimeEntryAttachmentIntent | undefined,
+  ): Promise<string | null> {
+    if (!attachment) return null;
+    if (attachment.kind === "upload") {
+      const fd = new FormData();
+      fd.set("id", entryId);
+      fd.set("file", attachment.file);
+      const result = await attachTimeEntryFile(fd);
+      return result.ok ? null : result.message;
+    }
+    const result = await removeTimeEntryAttachment({ id: entryId });
+    return result.ok ? null : result.message;
+  }
+
+  function handleSubmitEntry(
+    value: TimeEntryFormValue,
+    attachment?: TimeEntryAttachmentIntent,
+  ) {
     if (isDemo) {
+      // Demo não persiste nada: anexo é ignorado (sem storage).
       handleSubmitEntryDemo(value);
       return;
     }
@@ -876,14 +938,27 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
           });
       if (result.ok) {
         setFormOpen(false);
+        // Anexo é uma exceção opcional: aplicado APÓS o save, com o id retornado
+        // (create/update devolvem o id do lançamento — inclusive no merge).
+        const attachmentError = await applyAttachmentIntent(
+          result.data.id,
+          attachment,
+        );
         // A complete entry enters approval as soon as it is saved (Rodada 4.3).
         const correctedRejection = existingId && editingRow?.status === "REJECTED";
-        notify(
-          "success",
-          correctedRejection
-            ? "Lançamento corrigido e reenviado para aprovação."
-            : "Lançamento enviado para aprovação.",
-        );
+        if (attachmentError) {
+          notify(
+            "warning",
+            `Lançamento salvo, mas o anexo falhou: ${attachmentError}`,
+          );
+        } else {
+          notify(
+            "success",
+            correctedRejection
+              ? "Lançamento corrigido e reenviado para aprovação."
+              : "Lançamento enviado para aprovação.",
+          );
+        }
       } else {
         notify("warning", result.message);
       }
@@ -1313,6 +1388,10 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
                     days={week.days}
                     holidays={holidays}
                     onEdit={openEdit}
+                    canEditBillable={canEditBillable}
+                    onOpenAttachment={
+                      attachmentsAvailable ? openAttachment : undefined
+                    }
                   />
                 ))}
               </tbody>
@@ -1350,6 +1429,9 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
         onSubmit={handleSubmitEntry}
         onDelete={!isDemo && editingRow ? handleDeleteEntry : undefined}
         busy={isPending}
+        canEditBillable={canEditBillable}
+        attachmentsAvailable={attachmentsAvailable}
+        initialAttachment={editAttachment}
       />
 
       <Modal
@@ -1493,20 +1575,24 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
             />
           </div>
 
-          <label className="flex items-center gap-2 text-sm text-medium">
-            <input
-              type="checkbox"
-              checked={defaultValue.billable}
-              onChange={(event) =>
-                setDefaultValue((value) => ({
-                  ...value,
-                  billable: event.target.checked,
-                }))
-              }
-              className="size-4 rounded border-border text-brand focus:ring-brand"
-            />
-            Faturável
-          </label>
+          {/* "Faturável" do padrão semanal também é oculto para consultores
+              puros (Onda B); o valor segue no submit (default true). */}
+          {canEditBillable ? (
+            <label className="flex items-center gap-2 text-sm text-medium">
+              <input
+                type="checkbox"
+                checked={defaultValue.billable}
+                onChange={(event) =>
+                  setDefaultValue((value) => ({
+                    ...value,
+                    billable: event.target.checked,
+                  }))
+                }
+                className="size-4 rounded border-border text-brand focus:ring-brand"
+              />
+              Faturável
+            </label>
+          ) : null}
 
           <p className="text-xs text-soft">
             Prévia: {selectedDefaultOption()?.name ?? "alocação"} ·{" "}

@@ -256,6 +256,9 @@ export async function getWeekForConsultant(
       // budgetHours, costCenter) into the timesheet grid.
       include: {
         project: { select: { name: true, client: { select: { name: true } } } },
+        // Anexo opcional (melhoria #2): só o nome do arquivo para o rótulo/link
+        // da grade. O arquivo nunca é servido aqui — só por URL assinada.
+        attachment: { select: { fileName: true } },
       },
       orderBy: { date: "asc" },
     }),
@@ -284,6 +287,7 @@ export async function getWeekForConsultant(
         hours: [0, 0, 0, 0, 0, 0, 0],
         entryIds: [null, null, null, null, null, null, null],
         clock: [null, null, null, null, null, null, null],
+        attachments: [null, null, null, null, null, null, null],
       };
       rowsByKey.set(key, row);
     }
@@ -293,6 +297,11 @@ export async function getWeekForConsultant(
     if (dayIndex < 0 || dayIndex > 6) continue;
     row.hours[dayIndex] = Number(entry.hours);
     if (row.entryIds) row.entryIds[dayIndex] = entry.id;
+    if (row.attachments) {
+      row.attachments[dayIndex] = entry.attachment
+        ? { fileName: entry.attachment.fileName }
+        : null;
+    }
     if (row.clock) {
       row.clock[dayIndex] = {
         startTime: entry.startTime,
