@@ -8,6 +8,7 @@ import { requireUser } from "@/lib/auth/guards";
 import { hasRole } from "@/lib/auth/route-permissions";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import {
+  addDays,
   monthRangeOf,
   parseWeekParam,
 } from "@/lib/timesheet/week";
@@ -79,6 +80,7 @@ export default async function HorasPage({ searchParams }: HorasPageProps) {
   // Lazy import so Prisma is never loaded on code paths without a database.
   const {
     getConsultantForUser,
+    getHolidayLookup,
     getPeriodForConsultant,
     getWeekForConsultant,
     listAllowedProjects,
@@ -118,13 +120,17 @@ export default async function HorasPage({ searchParams }: HorasPageProps) {
     filter.endDate ??= defaultMonth.end;
     const periodStart = filter.startDate;
     const periodEnd = filter.endDate;
-    const [week, period, projects, defaultOptions] = await Promise.all([
+    // Project-aware holiday lookup for the visible week (Mon→Sun). Feeds the
+    // grid holiday markers and the "Dia Útil em feriado" confirmation.
+    const weekEnd = addDays(weekStart, 6);
+    const [week, period, projects, defaultOptions, holidays] = await Promise.all([
       getWeekForConsultant(consultant.id, weekStart, filter),
       getPeriodForConsultant(consultant.id, periodStart, periodEnd, filter),
       // The project dropdown lists the consultant's scope, narrowed by the
       // chosen project status so the options match the active filter.
       listAllowedProjects(consultant.id, weekStart, filter.projectStatus),
       listTimesheetDefaultOptions(consultant.id, weekStart),
+      getHolidayLookup(weekStart, weekEnd),
     ]);
     editor = (
       <TimesheetWeekView
@@ -133,6 +139,7 @@ export default async function HorasPage({ searchParams }: HorasPageProps) {
         period={period}
         projects={projects}
         defaultOptions={defaultOptions}
+        holidays={holidays}
         filter={filter}
         canExportCsv={canExportCsv}
       />

@@ -12,6 +12,12 @@ import {
   type ActivityType,
   type WeekDay,
 } from "@/lib/timesheet/types";
+import {
+  EMPTY_HOLIDAY_LOOKUP,
+  needsWorkdayHolidayConfirmation,
+  resolveProjectHoliday,
+  type HolidayLookup,
+} from "@/lib/timesheet/holidays";
 import { timeEntryEffectiveHours } from "@/lib/timesheet/effective-hours";
 import { formatHours } from "@/lib/format";
 import { isTranscriptionEnabled } from "@/lib/transcription/flags";
@@ -65,6 +71,12 @@ export interface TimeEntryFormProps {
   onClose: () => void;
   projects: TimeEntryFormProject[];
   days: WeekDay[];
+  /**
+   * Project-aware holiday lookup. Habilita o aviso e a CONFIRMAÇÃO ao lançar
+   * "Dia Útil" (WORKDAY) numa data que é feriado para o projeto selecionado.
+   * Ausente no modo demo → nenhum aviso/confirmação.
+   */
+  holidays?: HolidayLookup;
   /** Pre-filled values when editing an existing entry. */
   initial?: TimeEntryFormValue | null;
   onSubmit: (value: TimeEntryFormValue) => void;
@@ -119,6 +131,7 @@ export function TimeEntryForm({
   onClose,
   projects,
   days,
+  holidays = EMPTY_HOLIDAY_LOOKUP,
   initial,
   onSubmit,
   onDelete,
@@ -128,6 +141,9 @@ export function TimeEntryForm({
     initial ?? emptyValue(days),
   );
   const [showErrors, setShowErrors] = useState(false);
+  // Diálogo de confirmação "Dia Útil em feriado" (Onda A-ext). Aberto no submit
+  // quando a regra dispara; confirmar chama onSubmit, cancelar volta ao form.
+  const [confirmHoliday, setConfirmHoliday] = useState(false);
 
   // Re-initialize when the modal (re)opens for a different entry (new vs edit).
   // Render-time state adjustment — the React-recommended alternative to an
@@ -141,6 +157,7 @@ export function TimeEntryForm({
     if (open) {
       setValue(initial ?? emptyValue(days));
       setShowErrors(false);
+      setConfirmHoliday(false);
     }
   }
 
@@ -178,10 +195,20 @@ export function TimeEntryForm({
     value.multiplier > 0 ? value.multiplier : 0,
   );
 
-  // Feriado do dia selecionado (aviso não-bloqueante). Derivado de props/estado
-  // — sem efeito, sem setState.
-  const selectedHolidayName = days.find((d) => d.date === value.date)
-    ?.holidayName;
+  // Feriado do dia selecionado, PROJECT-AWARE (global OU vinculado ao projeto
+  // escolhido). Derivado de props/estado — sem efeito, sem setState.
+  const selectedHolidayName = resolveProjectHoliday(
+    holidays,
+    value.projectId,
+    value.date,
+  );
+
+  // Dispara a confirmação apenas no modo diário/edição (data concreta única) e
+  // só para "Dia Útil" (WORKDAY) em feriado. O modo semanal cria vários dias e
+  // não seleciona uma data — fica fora da confirmação (documentado).
+  const holidayConfirmRequired =
+    value.mode === "daily" &&
+    needsWorkdayHolidayConfirmation(value.activity, selectedHolidayName);
 
   const isEditing = Boolean(initial);
   // Flag de cliente (NEXT_PUBLIC_TRANSCRIPTION). Quando off, o mic some e o
@@ -208,6 +235,18 @@ export function TimeEntryForm({
       setShowErrors(true);
       return;
     }
+    // "Dia Útil" em feriado: pede confirmação antes de salvar (não bloqueia —
+    // confirmar salva normalmente).
+    if (holidayConfirmRequired) {
+      setConfirmHoliday(true);
+      return;
+    }
+    onSubmit(value);
+  }
+
+  /** Confirmação do "Dia Útil em feriado": salva de fato. */
+  function confirmAndSubmit() {
+    setConfirmHoliday(false);
     onSubmit(value);
   }
 
@@ -383,12 +422,19 @@ export function TimeEntryForm({
               }
               className={inputClass(false)}
             >
-              {days.map((day) => (
-                <option key={day.date} value={day.date}>
-                  {day.label} · {day.date.slice(8, 10)}/{day.date.slice(5, 7)}
-                  {day.holidayName ? " · Feriado" : ""}
-                </option>
-              ))}
+              {days.map((day) => {
+                const dayHoliday = resolveProjectHoliday(
+                  holidays,
+                  value.projectId,
+                  day.date,
+                );
+                return (
+                  <option key={day.date} value={day.date}>
+                    {day.label} · {day.date.slice(8, 10)}/{day.date.slice(5, 7)}
+                    {dayHoliday ? " · Feriado" : ""}
+                  </option>
+                );
+              })}
             </select>
           </div>
         </div>
@@ -530,6 +576,46 @@ export function TimeEntryForm({
           Faturável
         </label>
       </form>
+
+      {/* Confirmação "Dia Útil em feriado" (Onda A-ext). Segue o padrão de
+          Modal do design system (mesmo componente usado pelos demais fluxos de
+          Horas). Confirmar salva; cancelar mantém o formulário aberto. */}
+      <Modal
+        open={confirmHoliday}
+        onClose={() => setConfirmHoliday(false)}
+        title="Lançar em feriado?"
+        description="Confirme se realmente deseja apontar Dia Útil nesta data."
+        footer={
+          <>
+            <ActionButton
+              variant="secondary"
+              size="sm"
+              disabled={busy}
+              onClick={() => setConfirmHoliday(false)}
+            >
+              Cancelar
+            </ActionButton>
+            <ActionButton
+              variant="primary"
+              size="sm"
+              icon={Save}
+              disabled={busy}
+              onClick={confirmAndSubmit}
+            >
+              Lançar mesmo assim
+            </ActionButton>
+          </>
+        }
+      >
+        <div className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm font-medium text-warning">
+          <CalendarClock aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+          <span>
+            Esta data é feriado
+            {selectedHolidayName ? ` (${selectedHolidayName})` : ""}. Deseja
+            realmente lançar como Dia Útil?
+          </span>
+        </div>
+      </Modal>
     </Modal>
   );
 }

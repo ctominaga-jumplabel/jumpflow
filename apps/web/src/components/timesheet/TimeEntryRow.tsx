@@ -12,11 +12,21 @@ import {
   type WeekDay,
 } from "@/lib/timesheet/types";
 import { formatHours } from "@/lib/format";
+import {
+  EMPTY_HOLIDAY_LOOKUP,
+  resolveProjectHoliday,
+  type HolidayLookup,
+} from "@/lib/timesheet/holidays";
 import { TimeEntryStatusBadge } from "./TimeEntryStatusBadge";
 
 export interface TimeEntryRowProps {
   row: TimeEntryRowData;
   days: WeekDay[];
+  /**
+   * Project-aware holiday lookup. Uma célula só é marcada como feriado se o
+   * feriado for GLOBAL ou estiver vinculado ao projeto DESTA linha.
+   */
+  holidays?: HolidayLookup;
   /** Called to edit the row; only wired when the row is editable. */
   onEdit?: (row: TimeEntryRowData) => void;
 }
@@ -26,7 +36,12 @@ export interface TimeEntryRowProps {
  * REJECTED or SUBMITTED) expose an edit affordance; approved/closed rows render
  * as read-only so they never look editable to the consultant.
  */
-export function TimeEntryRow({ row, days, onEdit }: TimeEntryRowProps) {
+export function TimeEntryRow({
+  row,
+  days,
+  holidays = EMPTY_HOLIDAY_LOOKUP,
+  onEdit,
+}: TimeEntryRowProps) {
   const editable = isRowEditable(row) && Boolean(onEdit);
   const total = rowTotal(row);
   // Hover tooltip mirroring PeriodOverview's day cards: total hours of the row
@@ -72,14 +87,20 @@ export function TimeEntryRow({ row, days, onEdit }: TimeEntryRowProps) {
       </td>
       {days.map((day, index) => {
         const value = row.hours[index] ?? 0;
+        // Project-aware: global OU vinculado a ESTE projeto.
+        const holidayName = resolveProjectHoliday(
+          holidays,
+          row.projectId,
+          day.date,
+        );
         return (
           <td
             key={day.date}
-            title={day.holidayName ? `Feriado: ${day.holidayName}` : undefined}
+            title={holidayName ? `Feriado: ${holidayName}` : undefined}
             className={cn(
               "px-2 py-3 text-center align-middle tabular-nums",
               day.weekend && "bg-surface-muted/40",
-              day.holidayName && "bg-warning-soft/40",
+              holidayName && "bg-warning-soft/40",
               value > 0 ? "text-strong" : "text-soft",
             )}
           >

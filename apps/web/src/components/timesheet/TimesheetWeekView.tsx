@@ -59,6 +59,11 @@ import {
   type TimesheetFilter,
 } from "@/lib/timesheet/filters";
 import {
+  EMPTY_HOLIDAY_LOOKUP,
+  resolveGlobalHoliday,
+  type HolidayLookup,
+} from "@/lib/timesheet/holidays";
+import {
   activityLabelOf,
   activityLabels,
   activityOrder,
@@ -189,6 +194,13 @@ export interface TimesheetWeekViewProps {
   /** db mode: active allocations that can receive/apply a weekly default. */
   defaultOptions?: TimesheetDefaultOption[];
   /**
+   * db mode: project-aware holiday lookup for the visible week. Drives the
+   * holiday markers on the grid (global on the header, project-scoped on each
+   * row) and the "Dia Útil em feriado" confirmation in the entry form. Absent
+   * in demo mode (no database) → no markers/confirmation.
+   */
+  holidays?: HolidayLookup;
+  /**
    * Current filter values (Rodada 4.2). In db mode these are applied on the
    * server and reflected back in the filter form; in demo mode they seed the
    * client-side local filter state.
@@ -274,7 +286,6 @@ function deriveDemoPeriod(week: TimesheetWeek): TimesheetPeriodOverview {
       totalHours: entries.reduce((sum, entry) => sum + entry.hours, 0),
       statuses: entries.map((entry) => entry.status),
       entries,
-      ...(day.holidayName ? { holidayName: day.holidayName } : {}),
     };
   });
   const projectTotals = week.rows
@@ -576,6 +587,8 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
   );
   const dbProjects = props.projects ?? [];
   const defaultOptions = props.defaultOptions ?? [];
+  // Project-aware holiday lookup (empty in demo mode → no markers/confirmation).
+  const holidays = props.holidays ?? EMPTY_HOLIDAY_LOOKUP;
   const formProjects = isDemo ? demoProjects : dbProjects;
   // Demo project dropdown: narrow by the chosen project status (db mode gets the
   // already-narrowed list from the server via listAllowedProjects).
@@ -1244,29 +1257,35 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
                   >
                     Atividade
                   </th>
-                  {week.days.map((day) => (
-                    <th
-                      key={day.date}
-                      scope="col"
-                      title={
-                        day.holidayName
-                          ? `Feriado: ${day.holidayName}`
-                          : undefined
-                      }
-                      className={cn(
-                        "px-2 py-3 text-center text-xs font-semibold uppercase tracking-wide text-soft",
-                        day.weekend && "bg-surface-muted/40",
-                        day.holidayName && "bg-warning-soft/60",
-                      )}
-                    >
-                      {day.label}
-                      {day.holidayName ? (
-                        <span className="mt-0.5 block text-[10px] font-medium normal-case tracking-normal text-warning">
-                          Feriado
-                        </span>
-                      ) : null}
-                    </th>
-                  ))}
+                  {week.days.map((day) => {
+                    // Cabeçalho: só feriados GLOBAIS (valem para toda a coluna).
+                    // Feriados de projeto específico são marcados por célula.
+                    const globalHoliday = resolveGlobalHoliday(
+                      holidays,
+                      day.date,
+                    );
+                    return (
+                      <th
+                        key={day.date}
+                        scope="col"
+                        title={
+                          globalHoliday ? `Feriado: ${globalHoliday}` : undefined
+                        }
+                        className={cn(
+                          "px-2 py-3 text-center text-xs font-semibold uppercase tracking-wide text-soft",
+                          day.weekend && "bg-surface-muted/40",
+                          globalHoliday && "bg-warning-soft/60",
+                        )}
+                      >
+                        {day.label}
+                        {globalHoliday ? (
+                          <span className="mt-0.5 block text-[10px] font-medium normal-case tracking-normal text-warning">
+                            Feriado
+                          </span>
+                        ) : null}
+                      </th>
+                    );
+                  })}
                   <th
                     scope="col"
                     className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-soft"
@@ -1287,6 +1306,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
                     key={row.id}
                     row={row}
                     days={week.days}
+                    holidays={holidays}
                     onEdit={openEdit}
                   />
                 ))}
@@ -1320,6 +1340,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
         onClose={() => setFormOpen(false)}
         projects={formProjects}
         days={week.days}
+        holidays={holidays}
         initial={editInitial}
         onSubmit={handleSubmitEntry}
         onDelete={!isDemo && editingRow ? handleDeleteEntry : undefined}

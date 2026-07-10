@@ -15,6 +15,7 @@ import {
   type ProjectStatusFilter,
   type TimesheetFilter,
 } from "@/lib/timesheet/filters";
+import type { HolidayLookup } from "@/lib/timesheet/holidays";
 import {
   addDays,
   buildWeekDays,
@@ -53,39 +54,49 @@ export async function getConsultantForUser(user: AppUser) {
 }
 
 /**
- * Lookup de feriados no intervalo [start, end] (inclusivo), devolvendo um mapa
- * ISO `yyyy-mm-dd` -> nome do feriado. Usado para o AVISO NÃO-BLOQUEANTE ao
- * apontar horas em feriado (Onda A/3).
+ * Lookup PROJECT-AWARE de feriados no intervalo [start, end] (inclusivo), para o
+ * aviso/confirmação ao apontar horas em feriado (Onda A-ext/3).
  *
- * Semântica date-only: `Holiday.date` é `@db.Date` e o seed grava à meia-noite
- * UTC (mesma convenção de `TimeEntry.date`). Comparamos SEMPRE por
- * data-calendário via `toIsoDate` (campos UTC), nunca por timestamp, para não
- * errar o dia por fuso.
+ * Aplicabilidade (espelha `HolidayProject`): feriado SEM vínculo = GLOBAL (vale
+ * para todos os projetos); feriado COM >=1 vínculo = vale só para os projetos
+ * vinculados. O resultado separa `global` (date->nome) de `byProject`
+ * (projectId->date->nome); a UI resolve por (projeto, data) via
+ * `resolveProjectHoliday` / `resolveGlobalHoliday`.
  *
- * Escopo: por ora só feriados NACIONAIS (`scope = NATIONAL`). Feriados
- * regionais (STATE/CITY) existem no modelo mas são ignorados aqui até haver
- * vínculo de UF/município por consultor/projeto.
+ * Semântica date-only: `Holiday.date` é `@db.Date` gravada à meia-noite UTC
+ * (mesma convenção de `TimeEntry.date`). Comparamos SEMPRE por data-calendário
+ * via `toIsoDate` (campos UTC), nunca por timestamp, para não errar o dia por
+ * fuso. O filtro do intervalo normaliza os limites com `startOfUtcDay`.
  */
-export async function getHolidayMap(
+export async function getHolidayLookup(
   start: Date,
   end: Date,
-): Promise<Map<string, string>> {
+): Promise<HolidayLookup> {
   const holidays = await prisma.holiday.findMany({
     where: {
-      scope: "NATIONAL",
       date: { gte: startOfUtcDay(start), lte: startOfUtcDay(end) },
     },
-    select: { date: true, name: true },
+    select: {
+      date: true,
+      name: true,
+      projects: { select: { projectId: true } },
+    },
   });
-  const map = new Map<string, string>();
+  const global: Record<string, string> = {};
+  const byProject: Record<string, Record<string, string>> = {};
   for (const holiday of holidays) {
-    // Primeiro feriado vence em caso de colisão de data (não deve ocorrer para
-    // NATIONAL, cuja unicidade é [date, scope, region=null]).
-    if (!map.has(toIsoDate(holiday.date))) {
-      map.set(toIsoDate(holiday.date), holiday.name);
+    const iso = toIsoDate(holiday.date);
+    if (holiday.projects.length === 0) {
+      // Sem vínculo => global. Primeiro nome vence em caso de colisão de data.
+      if (!(iso in global)) global[iso] = holiday.name;
+    } else {
+      for (const link of holiday.projects) {
+        const map = (byProject[link.projectId] ??= {});
+        if (!(iso in map)) map[iso] = holiday.name;
+      }
     }
   }
-  return map;
+  return { global, byProject };
 }
 
 /**
@@ -225,7 +236,7 @@ export async function getWeekForConsultant(
   const start = weekStartOf(weekStart);
   const end = addDays(start, 6);
 
-  const [period, entries, holidayMap] = await Promise.all([
+  const [period, entries] = await Promise.all([
     prisma.timesheetPeriod.findUnique({
       where: {
         consultantId_startDate_endDate: {
@@ -248,9 +259,6 @@ export async function getWeekForConsultant(
       },
       orderBy: { date: "asc" },
     }),
-    // Reaproveita o mesmo intervalo já calculado (Seg→Dom) — não recalcula
-    // semana. Anexa o nome do feriado a cada dia da grade (aviso não-bloqueante).
-    getHolidayMap(start, end),
   ]);
 
   const rowsByKey = new Map<string, TimeEntryRow>();
@@ -321,10 +329,7 @@ export async function getWeekForConsultant(
     startDate: toIsoDate(start),
     endDate: toIsoDate(end),
     status: "DRAFT",
-    days: buildWeekDays(start).map((day) => {
-      const holidayName = holidayMap.get(day.date);
-      return holidayName ? { ...day, holidayName } : day;
-    }),
+    days: buildWeekDays(start),
     rows,
   };
   week.status = period
@@ -382,7 +387,7 @@ export async function getPeriodForConsultant(
   const maxEnd = addDays(start, MAX_PERIOD_OVERVIEW_DAYS - 1);
   const end = requestedEnd > maxEnd ? maxEnd : requestedEnd;
 
-  const [entries, holidayMap] = await Promise.all([
+  const [entries, holidays] = await Promise.all([
     prisma.timeEntry.findMany({
       where: {
         consultantId,
@@ -394,8 +399,11 @@ export async function getPeriodForConsultant(
       },
       orderBy: { date: "asc" },
     }),
-    // Mesmo intervalo do período já calculado: anexa feriado a cada dia.
-    getHolidayMap(start, end),
+    // Mesmo intervalo do período já calculado. O resumo do período é
+    // cross-projeto (agrega vários projetos por dia), então marcamos apenas
+    // feriados GLOBAIS aqui; feriados específicos de projeto são sinalizados na
+    // grade (project-aware), onde há a linha do projeto.
+    getHolidayLookup(start, end),
   ]);
 
   const daysByDate = new Map<string, PeriodCalendarDay>();
@@ -405,7 +413,7 @@ export async function getPeriodForConsultant(
     cursor = addDays(cursor, 1)
   ) {
     const iso = toIsoDate(cursor);
-    const holidayName = holidayMap.get(iso);
+    const holidayName = holidays.global[iso];
     daysByDate.set(iso, {
       date: iso,
       totalHours: 0,
