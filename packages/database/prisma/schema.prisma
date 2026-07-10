@@ -186,10 +186,15 @@ enum TimeOffKind {
   OTHER
 }
 
-/// Estado de uma ausencia agendada. PLANNED -> CONFIRMED, ou CANCELLED.
+/// Estado de uma ausencia (Onda D: vira fluxo com aprovacao). REQUESTED (pedido
+/// do consultor) -> CONFIRMED (aprovada, gera TimeEntry) ou REJECTED (negada).
+/// PLANNED mantido para lancamentos diretos por People/gestor (sem pedido);
+/// CANCELLED encerra. Transicoes aplicadas no servidor.
 enum TimeOffStatus {
   PLANNED
+  REQUESTED
   CONFIRMED
+  REJECTED
   CANCELLED
 }
 
@@ -352,6 +357,7 @@ enum ApprovableEntityType {
   CONSULTANT_SKILL
   CERTIFICATE
   EXPENSE
+  TIME_OFF
 }
 
 /// Single status chain for expenses (no separate payment enum). Flow:
@@ -973,6 +979,7 @@ model Consultant {
   cltInfo             ConsultantCltInfo?
   vacations           ConsultantVacation[]
   hourBankEntries     ConsultantHourBankEntry[]
+  adHocPayments       ConsultantAdHocPayment[]
   onCallEntries       OnCallEntry[]
   pjInfo              ConsultantPjInfo?
   legalRepresentative ConsultantLegalRepresentative?
@@ -1215,6 +1222,7 @@ model ConsultantVacation {
   takenDays          Int        @default(0)
   balanceDays        Int        @default(30)
   note               String?
+  timeOffs           ConsultantTimeOff[]
   createdAt          DateTime   @default(now())
   updatedAt          DateTime   @updatedAt
 
@@ -1235,6 +1243,57 @@ model ConsultantHourBankEntry {
   updatedAt    DateTime          @updatedAt
 
   @@index([consultantId, occurredAt])
+}
+
+/// Natureza de uma remuneracao pontual (Onda D). BONUS = premio/gratificacao;
+/// ADJUSTMENT = acerto/correcao de valor; OTHER = demais casos (default).
+enum AdHocPaymentKind {
+  BONUS
+  ADJUSTMENT
+  OTHER
+}
+
+/// Estado de uma remuneracao pontual (Onda D). PLANNED (prevista, entra na
+/// projecao de custo/margem) -> PAID (paga) ou CANCELLED (cancelada). Transicoes
+/// e reflexo na margem sao decididos na aplicacao.
+enum AdHocPaymentStatus {
+  PLANNED
+  PAID
+  CANCELLED
+}
+
+/// Remuneracao pontual do consultor (Onda D / decisao D2). Sempre VINCULADA a um
+/// projeto (obrigatorio): a pontual entra no custo/margem daquele projeto, por
+/// isso projectId nao e opcional e usa onDelete Restrict (nao apagar projeto com
+/// pontual atrelada; historico financeiro deve ser preservado). allocationId e
+/// opcional (SetNull) para permitir vincular a uma alocacao especifica sem
+/// perder o registro se a alocacao for removida. consultantId usa Cascade
+/// (segue o ciclo do consultor, alinhado a timeOffs/hourBankEntries). Dado
+/// financeiro: leitura/escrita restrita a perfis autorizados e alteracoes
+/// sensiveis (valor, status) devem gerar AuditEvent na aplicacao.
+model ConsultantAdHocPayment {
+  id              String             @id @default(cuid())
+  consultantId    String
+  consultant      Consultant         @relation(fields: [consultantId], references: [id], onDelete: Cascade)
+  projectId       String
+  project         Project            @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  allocationId    String?
+  allocation      Allocation?        @relation(fields: [allocationId], references: [id], onDelete: SetNull)
+  amount          Decimal            @db.Decimal(12, 2)
+  /// Data prevista de pagamento (date-only, mesma convencao de Expense/dueAt).
+  payAt           DateTime           @db.Date
+  reason          String
+  kind            AdHocPaymentKind   @default(OTHER)
+  status          AdHocPaymentStatus @default(PLANNED)
+  /// Referencia solta ao User que criou (padrao de managerUserId/closedByUserId):
+  /// sem FK, para nao acoplar auditoria ao ciclo de vida de User.
+  createdByUserId String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@index([consultantId])
+  @@index([projectId])
+  @@index([payAt])
 }
 
 /// @deprecated Melhoria #2: Sobreaviso passou a ser um TimeEntry (activityType
@@ -1429,6 +1488,7 @@ model Project {
   cases                       Case[]
   holidays                    HolidayProject[]
   receivables                 ProjectReceivableSchedule[]
+  adHocPayments               ConsultantAdHocPayment[]
   createdAt                   DateTime                     @default(now())
   updatedAt                   DateTime                     @updatedAt
 
@@ -1515,6 +1575,7 @@ model Allocation {
   costRates              ConsultantAllocationCostRate[]
   consultantPaymentLines ConsultantPaymentLine[]
   allocationSkills       AllocationSkill[]
+  adHocPayments          ConsultantAdHocPayment[]
   createdAt              DateTime                       @default(now())
   updatedAt              DateTime                       @updatedAt
 
@@ -1610,6 +1671,11 @@ model TimeEntry {
   project                Project                 @relation(fields: [projectId], references: [id])
   allocationId           String?
   allocation             Allocation?             @relation(fields: [allocationId], references: [id])
+  /// Onda D (fluxo de ausencia): vinculo soft ao ConsultantTimeOff que originou
+  /// este lancamento (materializado na aprovacao). SetNull: o lancamento
+  /// sobrevive se a ausencia for removida.
+  timeOffId              String?
+  timeOff                ConsultantTimeOff?      @relation(fields: [timeOffId], references: [id], onDelete: SetNull)
   date                   DateTime
   // `hours` e derivado e persistido a partir dos horarios de ponto
   // (Saida - Inicio - pausa). Mantido como Decimal porque revenue/payment leem
@@ -1643,6 +1709,7 @@ model TimeEntry {
   @@index([consultantId])
   @@index([projectId])
   @@index([allocationId])
+  @@index([timeOffId])
   @@index([consultantId, date, status])
   @@index([status, submittedAt])
   // Global admin/consolidated report: month range across all consultants and
@@ -2011,10 +2078,31 @@ model ConsultantTimeOff {
   endDate      DateTime
   status       TimeOffStatus @default(PLANNED)
   note         String?
+  /// Onda D (fluxo de ausencia). Ausencia REMUNERADA (true, default) vs nao
+  /// remunerada: orienta calculo de custo/pagamento na aplicacao.
+  paid         Boolean       @default(true)
+  /// Trilha do pedido/decisao. Referencias soltas ao User (padrao do projeto:
+  /// sem FK, para nao acoplar auditoria ao ciclo de vida de User).
+  requestedByUserId String?
+  requestedAt       DateTime?
+  approvedByUserId  String?
+  decidedAt         DateTime?
+  decisionComment   String?
+  /// Vinculo opcional com o saldo de ferias (SetNull: a ausencia sobrevive a
+  /// remocao do registro de ferias). Preenchido quando kind = ferias.
+  vacationId       String?
+  vacation         ConsultantVacation? @relation(fields: [vacationId], references: [id], onDelete: SetNull)
+  /// Dias uteis calculados (exclui fins de semana e feriados); base para gerar
+  /// os TimeEntry materializados na aprovacao.
+  workingDays      Int?
+  /// TimeEntry materializados a partir desta ausencia (FK soft em TimeEntry,
+  /// SetNull: os lancamentos sobrevivem se a ausencia for removida).
+  generatedEntries TimeEntry[]
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
   @@index([consultantId, startDate])
+  @@index([vacationId])
 }
 
 /// Pesquisa interna de clima/NPS (EP 7.1). createdBy e SetNull para preservar a
