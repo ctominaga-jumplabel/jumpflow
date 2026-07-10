@@ -1079,20 +1079,22 @@ function receivableData(
   };
 }
 
+// Dedupe SEMPRE no escopo de um projectId explícito (nunca o do payload no
+// update): rejeita parcela idêntica (mesma data + rótulo + valor) no projeto.
 async function ensureNoDuplicateReceivable(
-  input: ReceivableInput,
+  fields: { projectId: string; dueAt: string; label: string; amount: number },
   excludeId?: string,
 ): Promise<void> {
   const existing = await prisma.projectReceivableSchedule.findMany({
     where: {
-      projectId: input.projectId,
-      dueAt: toDate(input.dueAt),
-      label: input.label,
+      projectId: fields.projectId,
+      dueAt: toDate(fields.dueAt),
+      label: fields.label,
     },
     select: { id: true, amount: true },
   });
   const duplicate = existing.some(
-    (row) => row.id !== excludeId && Number(row.amount) === input.amount,
+    (row) => row.id !== excludeId && Number(row.amount) === fields.amount,
   );
   if (duplicate) {
     throw new ActionError(
@@ -1114,7 +1116,12 @@ export async function createReceivable(
       select: { id: true },
     });
     if (!project) throw new ActionError("NOT_FOUND", "Projeto nao encontrado.");
-    await ensureNoDuplicateReceivable(parsed);
+    await ensureNoDuplicateReceivable({
+      projectId: parsed.projectId,
+      dueAt: parsed.dueAt,
+      label: parsed.label,
+      amount: parsed.amount,
+    });
     const created = await prisma.projectReceivableSchedule.create({
       data: receivableData(parsed),
       select: { id: true },
@@ -1146,17 +1153,35 @@ export async function updateReceivable(
     if (!previous) {
       throw new ActionError("NOT_FOUND", "Recebimento nao encontrado.");
     }
-    await ensureNoDuplicateReceivable(parsed, parsed.id);
+    // NUNCA confia no projectId do payload no update: um recebível não muda de
+    // projeto. Dedupe e escrita ficam ancorados no projeto do registro existente
+    // (previous.projectId), impedindo reparent por payload forjado.
+    await ensureNoDuplicateReceivable(
+      {
+        projectId: previous.projectId,
+        dueAt: parsed.dueAt,
+        label: parsed.label,
+        amount: parsed.amount,
+      },
+      parsed.id,
+    );
     await prisma.projectReceivableSchedule.update({
       where: { id: parsed.id },
-      data: receivableData(parsed),
+      // projectId ausente de propósito: só campos mutáveis são escritos.
+      data: {
+        dueAt: toDate(parsed.dueAt),
+        amount: parsed.amount,
+        label: parsed.label,
+        status: parsed.status,
+        note: parsed.note ?? null,
+      },
     });
     await audit(
       "ProjectReceivableSchedule",
       parsed.id,
       "PROJECT_RECEIVABLE_UPDATED",
       previous,
-      parsed,
+      { ...parsed, projectId: previous.projectId },
     );
     revalidateProjectViews();
     return { ok: true, data: { id: parsed.id } };

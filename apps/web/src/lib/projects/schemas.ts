@@ -33,6 +33,23 @@ const optionalDate = z
   .optional()
   .transform((value) => (value ? value : undefined));
 
+// Data-only estrita (YYYY-MM-DD) que também precisa ser um dia de calendário
+// real (ex.: rejeita 2026-02-31). Evita vazar erro do Prisma como UNEXPECTED
+// quando o valor não é uma data válida.
+const strictDateOnly = z
+  .string()
+  .trim()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "Informe uma data no formato AAAA-MM-DD.")
+  .refine((value) => {
+    const [year, month, day] = value.split("-").map(Number);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    return (
+      date.getUTCFullYear() === year &&
+      date.getUTCMonth() === month - 1 &&
+      date.getUTCDate() === day
+    );
+  }, "Data invalida.");
+
 const optionalNumber = z.preprocess(
   (value) => (value === "" || value === null ? undefined : value),
   z.coerce.number().nonnegative().optional(),
@@ -113,7 +130,7 @@ export const projectAcceptanceTermSchema = z.object({ id: entityId });
 // SALE_RATE_ROLES/FINANCIAL_ROLES e auditado.
 export const receivableInputSchema = z.object({
   projectId: entityId,
-  dueAt: z.string().trim().min(10).max(10),
+  dueAt: strictDateOnly,
   amount: z.coerce.number().positive().max(9999999999.99),
   label: z.string().trim().min(1).max(120),
   status: z.enum(["FORECAST", "RECEIVED", "CANCELLED"]).default("FORECAST"),

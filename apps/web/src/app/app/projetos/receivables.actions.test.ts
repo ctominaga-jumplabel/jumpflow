@@ -215,6 +215,32 @@ describe("createReceivable", () => {
     if (!result.ok) expect(result.error).toBe("INVALID_INPUT");
   });
 
+  it("rejects a malformed dueAt (not YYYY-MM-DD) with INVALID_INPUT", async () => {
+    const result = await createReceivable({
+      projectId: "prj-1",
+      dueAt: "2026/08/10",
+      amount: 100,
+      label: "X",
+      status: "FORECAST",
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBe("INVALID_INPUT");
+    expect(h.store.receivables).toHaveLength(0);
+  });
+
+  it("rejects an impossible calendar date (2026-02-31) with INVALID_INPUT", async () => {
+    const result = await createReceivable({
+      projectId: "prj-1",
+      dueAt: "2026-02-31",
+      amount: 100,
+      label: "X",
+      status: "FORECAST",
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBe("INVALID_INPUT");
+    expect(h.store.receivables).toHaveLength(0);
+  });
+
   it("denies users without a commercial/financial role", async () => {
     h.store.currentUser.roles = ["CONSULTANT"];
     await expect(
@@ -286,6 +312,51 @@ describe("updateReceivable", () => {
       note: "com nota",
     });
     expect(result.ok).toBe(true);
+  });
+
+  it("ignores a forged projectId on update (never reparents the receivable)", async () => {
+    h.store.projects = [{ id: "prj-1" }, { id: "prj-2" }];
+    await createReceivable({
+      projectId: "prj-1",
+      dueAt: "2026-08-10",
+      amount: 100,
+      label: "X",
+      status: "FORECAST",
+    });
+    const id = h.store.receivables[0].id;
+    // Payload forjado tenta mover a parcela para prj-2.
+    const result = await updateReceivable({
+      id,
+      projectId: "prj-2",
+      dueAt: "2026-09-01",
+      amount: 250,
+      label: "Y",
+      status: "RECEIVED",
+    });
+    expect(result.ok).toBe(true);
+    // O projeto NUNCA muda; os demais campos sim.
+    expect(h.store.receivables[0].projectId).toBe("prj-1");
+    expect(h.store.receivables[0].amount).toBe(250);
+    expect(h.store.receivables[0].label).toBe("Y");
+    expect(h.store.receivables[0].status).toBe("RECEIVED");
+    // A auditoria registra o projeto real (do registro), não o do payload.
+    expect(h.store.audits.at(-1)).toMatchObject({
+      action: "PROJECT_RECEIVABLE_UPDATED",
+      after: { projectId: "prj-1" },
+    });
+  });
+
+  it("rejects an invalid dueAt (bad format) with INVALID_INPUT", async () => {
+    const result = await updateReceivable({
+      id: "any",
+      projectId: "prj-1",
+      dueAt: "10/08/2026",
+      amount: 100,
+      label: "X",
+      status: "FORECAST",
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBe("INVALID_INPUT");
   });
 
   it("returns NOT_FOUND for an unknown parcel", async () => {
