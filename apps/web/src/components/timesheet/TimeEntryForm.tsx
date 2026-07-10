@@ -27,6 +27,12 @@ import {
   resolveProjectHoliday,
   type HolidayLookup,
 } from "@/lib/timesheet/holidays";
+import {
+  EMPTY_TIME_OFF_LOOKUP,
+  resolveConfirmedTimeOff,
+  timeOffKindShortLabel,
+  type TimeOffLookup,
+} from "@/lib/timesheet/time-off";
 import { timeEntryEffectiveHours } from "@/lib/timesheet/effective-hours";
 import { formatHours } from "@/lib/format";
 import { isTranscriptionEnabled } from "@/lib/transcription/flags";
@@ -116,6 +122,12 @@ export interface TimeEntryFormProps {
    * Ausente no modo demo → nenhum aviso/confirmação.
    */
   holidays?: HolidayLookup;
+  /**
+   * Lookup de ausências (Onda D). Lançar "Dia Útil" (WORKDAY) num dia coberto
+   * por ausência CONFIRMED é BLOQUEADO no form (e recusado pelo servidor com
+   * TIME_OFF_CONFLICT). Ausente no modo demo → sem bloqueio.
+   */
+  timeOff?: TimeOffLookup;
   /** Pre-filled values when editing an existing entry. */
   initial?: TimeEntryFormValue | null;
   onSubmit: (
@@ -188,6 +200,7 @@ export function TimeEntryForm({
   projects,
   days,
   holidays = EMPTY_HOLIDAY_LOOKUP,
+  timeOff = EMPTY_TIME_OFF_LOOKUP,
   initial,
   onSubmit,
   onDelete,
@@ -299,6 +312,25 @@ export function TimeEntryForm({
     holidayHits[0]?.name,
   );
 
+  // BLOQUEIO (Onda D): lançar "Dia Útil" (WORKDAY) num dia coberto por ausência
+  // CONFIRMED. Diferente do feriado (que só confirma), aqui o servidor RECUSA
+  // com TIME_OFF_CONFLICT — antecipamos no form com um erro claro e impedimos o
+  // submit. Vale para o modo diário/edição (data única) e semanal (todas as
+  // datas efetivas). Derivado de props/estado — sem efeito, sem setState.
+  const effectiveDates =
+    value.mode === "weekly" ? weeklyEffectiveDates : value.date ? [value.date] : [];
+  const timeOffBlocks =
+    value.activity === "WORKDAY"
+      ? effectiveDates
+          .map((date) => ({ date, info: resolveConfirmedTimeOff(timeOff, date) }))
+          .filter(
+            (d): d is { date: string; info: NonNullable<typeof d.info> } =>
+              Boolean(d.info),
+          )
+          .map((d) => ({ date: d.date, label: timeOffKindShortLabel(d.info.kind) }))
+      : [];
+  const hasTimeOffBlock = timeOffBlocks.length > 0;
+
   const isEditing = Boolean(initial);
   // Flag de cliente (NEXT_PUBLIC_TRANSCRIPTION). Quando off, o mic some e o
   // fluxo de digitar manualmente segue intacto.
@@ -334,6 +366,12 @@ export function TimeEntryForm({
 
   function handleSubmit() {
     if (hasErrors) {
+      setShowErrors(true);
+      return;
+    }
+    // Ausência confirmada: lançar Dia Útil é bloqueado (o servidor recusaria).
+    // Mostra o erro inline e impede o submit.
+    if (hasTimeOffBlock) {
       setShowErrors(true);
       return;
     }
@@ -430,7 +468,7 @@ export function TimeEntryForm({
             variant="primary"
             size="sm"
             icon={Save}
-            disabled={busy}
+            disabled={busy || hasTimeOffBlock}
             onClick={handleSubmit}
           >
             Salvar
@@ -585,6 +623,37 @@ export function TimeEntryForm({
               Você está apontando em um feriado ({selectedHolidayName}). Você
               ainda pode salvar normalmente.
             </span>
+          </div>
+        ) : null}
+
+        {/* BLOQUEIO (Onda D): Dia Útil em dia de ausência confirmada. Diferente
+            do feriado, aqui o salvar é impedido (o servidor recusaria com
+            TIME_OFF_CONFLICT). */}
+        {hasTimeOffBlock ? (
+          <div
+            role="alert"
+            className="flex items-start gap-2 rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-sm font-medium text-danger"
+          >
+            <CalendarClock aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+            <div className="space-y-1">
+              <p>
+                {timeOffBlocks.length > 1
+                  ? "Você possui ausência confirmada nestas datas:"
+                  : "Você possui ausência confirmada nesta data:"}
+              </p>
+              <ul
+                className={timeOffBlocks.length > 1 ? "list-inside list-disc" : ""}
+              >
+                {timeOffBlocks.map((b) => (
+                  <li key={b.date}>
+                    {b.date.slice(8, 10)}/{b.date.slice(5, 7)} ({b.label})
+                  </li>
+                ))}
+              </ul>
+              <p>
+                Não é possível lançar Dia Útil aqui. Ajuste a data ou a atividade.
+              </p>
+            </div>
           </div>
         ) : null}
 

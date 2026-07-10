@@ -68,6 +68,12 @@ import {
   type HolidayLookup,
 } from "@/lib/timesheet/holidays";
 import {
+  EMPTY_TIME_OFF_LOOKUP,
+  resolveConfirmedTimeOff,
+  timeOffKindShortLabel,
+  type TimeOffLookup,
+} from "@/lib/timesheet/time-off";
+import {
   activityLabelOf,
   activityLabels,
   activityOrder,
@@ -205,6 +211,13 @@ export interface TimesheetWeekViewProps {
    * in demo mode (no database) → no markers/confirmation.
    */
   holidays?: HolidayLookup;
+  /**
+   * db mode: lookup de ausências (Onda D) do consultor na semana visível.
+   * Dias cobertos por ausência CONFIRMED ganham um selo (Férias/Licença/
+   * Ausência), a célula fica não-editável e o lançamento de Dia Útil é
+   * bloqueado (o servidor recusa com TIME_OFF_CONFLICT). Ausente em demo.
+   */
+  timeOff?: TimeOffLookup;
   /**
    * Current filter values (Rodada 4.2). In db mode these are applied on the
    * server and reflected back in the filter form; in demo mode they seed the
@@ -608,6 +621,8 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
   const defaultOptions = props.defaultOptions ?? [];
   // Project-aware holiday lookup (empty in demo mode → no markers/confirmation).
   const holidays = props.holidays ?? EMPTY_HOLIDAY_LOOKUP;
+  // Lookup de ausências (Onda D) — vazio em demo → nenhum selo/bloqueio.
+  const timeOff = props.timeOff ?? EMPTY_TIME_OFF_LOOKUP;
   // "Faturável" só é visível/editável para gestão (server-side); default true
   // preserva demo/gestão. Anexo depende de storage configurado (db only).
   const canEditBillable = props.canEditBillable ?? true;
@@ -1354,21 +1369,37 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
                       holidays,
                       day.date,
                     );
+                    // Ausência CONFIRMED cobre o dia inteiro (é por consultor,
+                    // não por projeto): marca a coluna toda, tem precedência
+                    // visual sobre o feriado.
+                    const offInfo = resolveConfirmedTimeOff(timeOff, day.date);
+                    const offLabel = offInfo
+                      ? timeOffKindShortLabel(offInfo.kind)
+                      : null;
                     return (
                       <th
                         key={day.date}
                         scope="col"
                         title={
-                          globalHoliday ? `Feriado: ${globalHoliday}` : undefined
+                          offLabel
+                            ? `${offLabel} (ausência confirmada)`
+                            : globalHoliday
+                              ? `Feriado: ${globalHoliday}`
+                              : undefined
                         }
                         className={cn(
                           "px-2 py-3 text-center text-xs font-semibold uppercase tracking-wide text-soft",
                           day.weekend && "bg-surface-muted/40",
-                          globalHoliday && "bg-warning-soft/60",
+                          globalHoliday && !offLabel && "bg-warning-soft/60",
+                          offLabel && "bg-info-soft/60",
                         )}
                       >
                         {day.label}
-                        {globalHoliday ? (
+                        {offLabel ? (
+                          <span className="mt-0.5 block text-[10px] font-medium normal-case tracking-normal text-brand-dark">
+                            {offLabel}
+                          </span>
+                        ) : globalHoliday ? (
                           <span className="mt-0.5 block text-[10px] font-medium normal-case tracking-normal text-warning">
                             Feriado
                           </span>
@@ -1397,6 +1428,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
                     row={row}
                     days={week.days}
                     holidays={holidays}
+                    timeOff={timeOff}
                     onEdit={openEdit}
                     canEditBillable={canEditBillable}
                     onOpenAttachment={
@@ -1435,6 +1467,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
         projects={formProjects}
         days={week.days}
         holidays={holidays}
+        timeOff={timeOff}
         initial={editInitial}
         onSubmit={handleSubmitEntry}
         onDelete={!isDemo && editingRow ? handleDeleteEntry : undefined}

@@ -160,6 +160,61 @@ describe("TimeEntryRow — anexo (melhoria #2)", () => {
   });
 });
 
+describe("TimeEntryRow — sinalização de ausência (Onda D)", () => {
+  it("marca a célula do dia com o selo do tipo quando há ausência CONFIRMED", () => {
+    // Sem horas no dia da ausência para o selo aparecer no lugar do "–".
+    render(
+      <table>
+        <tbody>
+          <TimeEntryRow
+            row={row({ hours: [0, 0, 0, 0, 0, 0, 0] })}
+            days={days}
+            timeOff={{
+              byDate: {
+                "2026-06-09": {
+                  timeOffId: "to1",
+                  kind: "VACATION",
+                  paid: true,
+                  status: "CONFIRMED",
+                },
+              },
+            }}
+          />
+        </tbody>
+      </table>,
+    );
+    // O selo curto "Férias" aparece na célula; o título traz o contexto.
+    expect(screen.getByText("Férias")).toBeInTheDocument();
+    expect(
+      screen.getByTitle(/Férias \(ausência confirmada\)/),
+    ).toBeInTheDocument();
+  });
+
+  it("não marca a célula quando a ausência está apenas REQUESTED", () => {
+    render(
+      <table>
+        <tbody>
+          <TimeEntryRow
+            row={row({ hours: [0, 0, 0, 0, 0, 0, 0] })}
+            days={days}
+            timeOff={{
+              byDate: {
+                "2026-06-09": {
+                  timeOffId: "to2",
+                  kind: "VACATION",
+                  paid: true,
+                  status: "REQUESTED",
+                },
+              },
+            }}
+          />
+        </tbody>
+      </table>,
+    );
+    expect(screen.queryByText("Férias")).not.toBeInTheDocument();
+  });
+});
+
 describe("TimeEntryRow hover tooltip", () => {
   it("sets a row title with total hours and the readable status", () => {
     renderRow(row({ status: "SUBMITTED", hours: [6, 6, 0, 0, 0, 0, 0] }));

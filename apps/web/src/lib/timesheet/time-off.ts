@@ -67,6 +67,22 @@ export function timeOffKindLabel(kind: TimeOffKind): string {
   return activityLabelOf(ACTIVITY_TYPE_BY_KIND[kind]);
 }
 
+/**
+ * Rótulo CURTO pt-BR do tipo de ausência, para selos compactos na grade/fila
+ * (a coluna do dia tem pouco espaço). VACATION → "Férias", LEAVE → "Licença",
+ * OTHER → "Ausência".
+ */
+export const TIME_OFF_KIND_SHORT_LABEL: Record<TimeOffKind, string> = {
+  VACATION: "Férias",
+  LEAVE: "Licença",
+  OTHER: "Ausência",
+};
+
+/** Rótulo curto do tipo de ausência (selo da grade). */
+export function timeOffKindShortLabel(kind: TimeOffKind): string {
+  return TIME_OFF_KIND_SHORT_LABEL[kind];
+}
+
 /** Sábado (6) ou domingo (0) em UTC. */
 export function isWeekendIso(iso: string): boolean {
   const date = parseIsoDateUtc(iso);
@@ -308,6 +324,32 @@ export function resolveTimeOff(
   isoDate: string,
 ): TimeOffDayInfo | undefined {
   return lookup?.byDate[isoDate];
+}
+
+/**
+ * Info da ausência CONFIRMED numa data — a única que marca a grade como
+ * não-editável e bloqueia o lançamento de Dia Útil. Ausência REQUESTED não
+ * bloqueia nada (ainda pode ser reprovada): esta função a ignora.
+ */
+export function resolveConfirmedTimeOff(
+  lookup: TimeOffLookup | undefined,
+  isoDate: string,
+): TimeOffDayInfo | undefined {
+  const info = resolveTimeOff(lookup, isoDate);
+  return info && info.status === "CONFIRMED" ? info : undefined;
+}
+
+/**
+ * O lançamento de Dia Útil (WORKDAY) está BLOQUEADO nesta data? Verdadeiro
+ * quando uma ausência CONFIRMED cobre o dia. Espelha a guarda server-side
+ * (`assertNoConfirmedTimeOff` em horas/actions), que recusa com
+ * `TIME_OFF_CONFLICT`. Pura e testável.
+ */
+export function isWorkdayBlockedByTimeOff(
+  lookup: TimeOffLookup | undefined,
+  isoDate: string,
+): boolean {
+  return Boolean(resolveConfirmedTimeOff(lookup, isoDate));
 }
 
 /**

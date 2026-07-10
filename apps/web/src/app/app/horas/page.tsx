@@ -130,15 +130,20 @@ export default async function HorasPage({ searchParams }: HorasPageProps) {
     // Project-aware holiday lookup for the visible week (Mon→Sun). Feeds the
     // grid holiday markers and the "Dia Útil em feriado" confirmation.
     const weekEnd = addDays(weekStart, 6);
-    const [week, period, projects, defaultOptions, holidays] = await Promise.all([
-      getWeekForConsultant(consultant.id, weekStart, filter),
-      getPeriodForConsultant(consultant.id, periodStart, periodEnd, filter),
-      // The project dropdown lists the consultant's scope, narrowed by the
-      // chosen project status so the options match the active filter.
-      listAllowedProjects(consultant.id, weekStart, filter.projectStatus),
-      listTimesheetDefaultOptions(consultant.id, weekStart),
-      getHolidayLookup(weekStart, weekEnd),
-    ]);
+    // Lookup de ausências da semana visível (Onda D): sinaliza os dias cobertos
+    // por ausência CONFIRMED na grade e bloqueia o lançamento de Dia Útil neles.
+    const { getTimeOffLookup } = await import("@/lib/db/time-off");
+    const [week, period, projects, defaultOptions, holidays, timeOff] =
+      await Promise.all([
+        getWeekForConsultant(consultant.id, weekStart, filter),
+        getPeriodForConsultant(consultant.id, periodStart, periodEnd, filter),
+        // The project dropdown lists the consultant's scope, narrowed by the
+        // chosen project status so the options match the active filter.
+        listAllowedProjects(consultant.id, weekStart, filter.projectStatus),
+        listTimesheetDefaultOptions(consultant.id, weekStart),
+        getHolidayLookup(weekStart, weekEnd),
+        getTimeOffLookup(consultant.id, weekStart, weekEnd),
+      ]);
     editor = (
       <TimesheetWeekView
         mode="db"
@@ -147,6 +152,7 @@ export default async function HorasPage({ searchParams }: HorasPageProps) {
         projects={projects}
         defaultOptions={defaultOptions}
         holidays={holidays}
+        timeOff={timeOff}
         filter={filter}
         canExportCsv={canExportCsv}
         canEditBillable={canEditBillable}

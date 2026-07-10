@@ -21,6 +21,7 @@ import {
   LayoutDashboard,
   MessageSquareHeart,
   MessagesSquare,
+  PlaneTakeoff,
   Receipt,
   ReceiptText,
   ShieldCheck,
@@ -117,6 +118,18 @@ const primaryNavigationRaw: NavItemDef[] = [
     permissionCode: "DESPESAS",
     icon: Receipt,
     description: "Lançamento de despesas, comprovantes e reembolsos.",
+  },
+  {
+    // Ausências (Onda D): o consultor solicita/cancela as próprias férias,
+    // licenças e outras ausências; ADMIN/PEOPLE decidem. Visível a todos com a
+    // permissão AUSENCIAS (inclui CONSULTANT, no allow-list); a decisão é
+    // enforced no servidor (requireRole ADMIN/PEOPLE). Discoverability, não a
+    // fronteira de segurança.
+    label: "Ausências",
+    href: "/app/ausencias",
+    permissionCode: "AUSENCIAS",
+    icon: PlaneTakeoff,
+    description: "Solicitação e aprovação de férias, licenças e ausências.",
   },
   {
     label: "Projetos",

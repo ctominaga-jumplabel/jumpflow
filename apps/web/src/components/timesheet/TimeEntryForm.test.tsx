@@ -258,3 +258,100 @@ describe("TimeEntryForm — anexo opcional (melhoria #2)", () => {
     expect(screen.queryByText("malware.exe")).toBeNull();
   });
 });
+
+describe("TimeEntryForm — conflito com ausência confirmada (Onda D)", () => {
+  // days[0] = 2026-06-08 (data default do form). Ausência CONFIRMED nesse dia.
+  const timeOff = {
+    byDate: {
+      "2026-06-08": {
+        timeOffId: "to1",
+        kind: "VACATION" as const,
+        paid: true,
+        status: "CONFIRMED" as const,
+      },
+    },
+  };
+
+  it("bloqueia o submit de Dia Útil num dia de ausência confirmada", () => {
+    const onSubmit = vi.fn();
+    render(
+      <TimeEntryForm
+        open
+        onClose={() => {}}
+        projects={projects}
+        days={days}
+        timeOff={timeOff}
+        onSubmit={onSubmit}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Projeto"), {
+      target: { value: "p1" },
+    });
+    fireEvent.change(screen.getByLabelText("Descrição"), {
+      target: { value: "Tentativa em férias" },
+    });
+    // Alerta de bloqueio visível e botão Salvar desabilitado.
+    expect(screen.getByRole("alert")).toHaveTextContent(/ausência confirmada/i);
+    const save = screen.getByRole("button", { name: "Salvar" });
+    expect(save).toBeDisabled();
+    fireEvent.click(save);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("não bloqueia quando a atividade não é Dia Útil (ex.: Férias)", () => {
+    const onSubmit = vi.fn();
+    render(
+      <TimeEntryForm
+        open
+        onClose={() => {}}
+        projects={projects}
+        days={days}
+        timeOff={timeOff}
+        onSubmit={onSubmit}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Projeto"), {
+      target: { value: "p1" },
+    });
+    fireEvent.change(screen.getByLabelText("Atividade"), {
+      target: { value: "VACATION" },
+    });
+    fireEvent.change(screen.getByLabelText("Descrição"), {
+      target: { value: "Férias" },
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+
+  it("não bloqueia quando a ausência está apenas REQUESTED", () => {
+    const onSubmit = vi.fn();
+    render(
+      <TimeEntryForm
+        open
+        onClose={() => {}}
+        projects={projects}
+        days={days}
+        timeOff={{
+          byDate: {
+            "2026-06-08": {
+              timeOffId: "to2",
+              kind: "VACATION" as const,
+              paid: true,
+              status: "REQUESTED" as const,
+            },
+          },
+        }}
+        onSubmit={onSubmit}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Projeto"), {
+      target: { value: "p1" },
+    });
+    fireEvent.change(screen.getByLabelText("Descrição"), {
+      target: { value: "Dia normal" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+});

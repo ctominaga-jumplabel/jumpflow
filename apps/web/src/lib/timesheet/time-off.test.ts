@@ -9,10 +9,13 @@ import {
   enumerateIsoDates,
   FALLBACK_HOURS_PER_DAY,
   isWeekendIso,
+  isWorkdayBlockedByTimeOff,
   PAID_BY_KIND,
+  resolveConfirmedTimeOff,
   resolveTimeOff,
   resolveTimeOffActivityType,
   resolveTimeOffPaid,
+  timeOffKindShortLabel,
   type AllocationForMaterialization,
   type TimeOffLookup,
 } from "./time-off";
@@ -256,5 +259,47 @@ describe("resolveTimeOff (lookup para a UI)", () => {
     expect(resolveTimeOff(lookup, "2026-07-06")?.kind).toBe("VACATION");
     expect(resolveTimeOff(lookup, "2026-07-07")).toBeUndefined();
     expect(resolveTimeOff(undefined, "2026-07-06")).toBeUndefined();
+  });
+});
+
+describe("resolveConfirmedTimeOff / isWorkdayBlockedByTimeOff (Onda D)", () => {
+  const lookup: TimeOffLookup = {
+    byDate: {
+      "2026-07-06": {
+        timeOffId: "to-confirmed",
+        kind: "VACATION",
+        paid: true,
+        status: "CONFIRMED",
+      },
+      "2026-07-07": {
+        timeOffId: "to-requested",
+        kind: "LEAVE",
+        paid: true,
+        status: "REQUESTED",
+      },
+    },
+  };
+
+  it("só resolve/bloqueia em ausência CONFIRMED", () => {
+    expect(resolveConfirmedTimeOff(lookup, "2026-07-06")?.kind).toBe("VACATION");
+    expect(isWorkdayBlockedByTimeOff(lookup, "2026-07-06")).toBe(true);
+  });
+
+  it("ignora ausência apenas REQUESTED", () => {
+    expect(resolveConfirmedTimeOff(lookup, "2026-07-07")).toBeUndefined();
+    expect(isWorkdayBlockedByTimeOff(lookup, "2026-07-07")).toBe(false);
+  });
+
+  it("data sem ausência não bloqueia", () => {
+    expect(isWorkdayBlockedByTimeOff(lookup, "2026-07-08")).toBe(false);
+    expect(isWorkdayBlockedByTimeOff(undefined, "2026-07-06")).toBe(false);
+  });
+});
+
+describe("timeOffKindShortLabel", () => {
+  it("mapeia os tipos para selos curtos pt-BR", () => {
+    expect(timeOffKindShortLabel("VACATION")).toBe("Férias");
+    expect(timeOffKindShortLabel("LEAVE")).toBe("Licença");
+    expect(timeOffKindShortLabel("OTHER")).toBe("Ausência");
   });
 });

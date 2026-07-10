@@ -17,6 +17,12 @@ import {
   resolveProjectHoliday,
   type HolidayLookup,
 } from "@/lib/timesheet/holidays";
+import {
+  EMPTY_TIME_OFF_LOOKUP,
+  resolveConfirmedTimeOff,
+  timeOffKindShortLabel,
+  type TimeOffLookup,
+} from "@/lib/timesheet/time-off";
 import { TimeEntryStatusBadge } from "./TimeEntryStatusBadge";
 
 export interface TimeEntryRowProps {
@@ -27,6 +33,12 @@ export interface TimeEntryRowProps {
    * feriado for GLOBAL ou estiver vinculado ao projeto DESTA linha.
    */
   holidays?: HolidayLookup;
+  /**
+   * Lookup de ausências (Onda D). Dias cobertos por ausência CONFIRMED ganham
+   * um selo na célula e ficam visualmente marcados (o lançamento de Dia Útil é
+   * bloqueado no form/servidor).
+   */
+  timeOff?: TimeOffLookup;
   /** Called to edit the row; only wired when the row is editable. */
   onEdit?: (row: TimeEntryRowData) => void;
   /**
@@ -51,6 +63,7 @@ export function TimeEntryRow({
   row,
   days,
   holidays = EMPTY_HOLIDAY_LOOKUP,
+  timeOff = EMPTY_TIME_OFF_LOOKUP,
   onEdit,
   canEditBillable = true,
   onOpenAttachment,
@@ -137,18 +150,37 @@ export function TimeEntryRow({
           row.projectId,
           day.date,
         );
+        // Ausência CONFIRMED cobre o dia inteiro (por consultor). Marca a
+        // célula com o selo do tipo e tem precedência visual sobre o feriado.
+        const offInfo = resolveConfirmedTimeOff(timeOff, day.date);
+        const offLabel = offInfo ? timeOffKindShortLabel(offInfo.kind) : null;
         return (
           <td
             key={day.date}
-            title={holidayName ? `Feriado: ${holidayName}` : undefined}
+            title={
+              offLabel
+                ? `${offLabel} (ausência confirmada)`
+                : holidayName
+                  ? `Feriado: ${holidayName}`
+                  : undefined
+            }
             className={cn(
               "px-2 py-3 text-center align-middle tabular-nums",
               day.weekend && "bg-surface-muted/40",
-              holidayName && "bg-warning-soft/40",
+              holidayName && !offLabel && "bg-warning-soft/40",
+              offLabel && "bg-info-soft/40",
               value > 0 ? "text-strong" : "text-soft",
             )}
           >
-            {value > 0 ? value.toLocaleString("pt-BR") : "–"}
+            {value > 0 ? (
+              value.toLocaleString("pt-BR")
+            ) : offLabel ? (
+              <span className="text-[10px] font-medium text-brand-dark">
+                {offLabel}
+              </span>
+            ) : (
+              "–"
+            )}
           </td>
         );
       })}

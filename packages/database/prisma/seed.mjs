@@ -1068,6 +1068,8 @@ const CONSULTANT_ALLOWED_CODES = new Set([
   "SKILLS",
   "UNIVERSIDADE",
   "CERTIFICADOS",
+  // Onda D: o consultor solicita/cancela as próprias ausências nesta tela.
+  "AUSENCIAS",
 ]);
 
 // Each entry: code, name, module (display group), parent code (hierarchy),
@@ -1085,6 +1087,10 @@ const PERMISSION_CATALOG = [
   { code: "DESPESAS_PAGAMENTO", name: "Status de pagamento", module: "Despesas", parent: "DESPESAS", sort: 21, view: FINANCIAL, edit: FINANCIAL },
 
   { code: "SOBREAVISO", name: "Sobreaviso", module: "Operação", sort: 22, view: ALL_ROLES, create: ALL_ROLES, edit: APPROVALS, del: ALL_ROLES },
+  // Ausências (Onda D): consultor solicita as próprias (create/view); a decisão
+  // (edit) e a visão da fila são de PEOPLE (ADMIN implícito). O CONSULTANT vê a
+  // tela via allow-list; a decisão é enforced no servidor (requireRole).
+  { code: "AUSENCIAS", name: "Ausências", module: "Operação", sort: 23, view: ["PEOPLE", "AREA_MANAGER", "PROJECT_MANAGER", "CONSULTANT"], create: ["PEOPLE", "CONSULTANT"], edit: PEOPLE_MANAGE, del: ["PEOPLE", "CONSULTANT"] },
   // Fechamento Operacional para o DP: leitura para gestão + FINANCE/PEOPLE; a
   // marcação/reabertura (edit) é dos papéis que tocam a operação do projeto.
   { code: "OPERACAO_FECHAMENTO", name: "Fechamento Operacional", module: "Operação", sort: 24, view: ["AREA_MANAGER", "PROJECT_MANAGER", "FINANCE", "PEOPLE"], edit: ["AREA_MANAGER", "PROJECT_MANAGER"] },
