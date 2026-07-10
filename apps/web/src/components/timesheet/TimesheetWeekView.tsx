@@ -681,13 +681,23 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
     setFormOpen(true);
   }
 
-  /** Abre o anexo de um lançamento em nova aba via URL assinada (melhoria #2). */
+  /**
+   * Abre o anexo de um lançamento em nova aba via URL assinada (melhoria #2).
+   * A aba é aberta SINCRONAMENTE no clique para escapar do popup blocker (a URL
+   * só é resolvida depois, no servidor). Gotcha: `window.open(..., "noopener")`
+   * retorna `null` nos navegadores, então mantemos a referência e cortamos o
+   * `opener` manualmente (equivalente a noopener, anti-tabnabbing).
+   */
   function openAttachment(entryId: string) {
+    const popup = window.open("about:blank", "_blank");
+    if (popup) popup.opener = null;
     startTransition(async () => {
       const result = await getTimeEntryAttachmentUrl({ id: entryId });
       if (result.ok) {
-        window.open(result.data.url, "_blank", "noopener,noreferrer");
+        if (popup) popup.location.href = result.data.url;
+        else window.open(result.data.url, "_blank", "noopener,noreferrer");
       } else {
+        if (popup) popup.close();
         notify("warning", result.message);
       }
     });

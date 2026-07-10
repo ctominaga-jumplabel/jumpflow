@@ -5,6 +5,7 @@ import { prisma, Prisma } from "@jumpflow/database";
 import { z, type ZodType } from "zod";
 import { isDevAuthEnabled } from "@/lib/auth/dev";
 import { requireRole, requireUser } from "@/lib/auth/guards";
+import { hasRole } from "@/lib/auth/route-permissions";
 import type { AppUser } from "@/lib/auth/types";
 import { buildAuditEventData } from "@/lib/db/audit";
 import { isDatabaseConfigured } from "@/lib/db/config";
@@ -81,6 +82,33 @@ function clockToData(input: ClockTimes) {
       breakEnd,
     }),
   };
+}
+
+/**
+ * Papéis de gestão que podem definir o campo financeiro `billable` livremente
+ * (mesmo conjunto de MANAGER_ROLES usado em horas/page.tsx).
+ */
+const BILLABLE_MANAGER_ROLES = [
+  "ADMIN",
+  "AREA_MANAGER",
+  "PROJECT_MANAGER",
+  "FINANCE",
+] as const;
+
+/**
+ * Enforcement server-side do campo financeiro `billable` (CLAUDE.md: proteger
+ * campo financeiro por papel). Gestão define livremente; um consultor puro NÃO
+ * dita `billable` — o servidor IGNORA o payload e deriva pela regra de negócio
+ * (Sobreaviso/ON_CALL = não faturável; demais atividades = faturável). Esconder
+ * o controle no client é apenas cosmético: a autoridade é esta função.
+ */
+function resolveBillable(
+  user: AppUser,
+  activityType: string,
+  requested: boolean,
+): boolean {
+  if (hasRole(user, [...BILLABLE_MANAGER_ROLES])) return requested;
+  return activityType !== "ON_CALL";
 }
 
 /**
@@ -251,6 +279,8 @@ export async function createTimeEntry(
 
     const description = parsed.description.trim();
     const clock = clockToData(parsed);
+    // Enforcement de campo financeiro por papel: consultor puro não dita billable.
+    const billable = resolveBillable(user, parsed.activityType, parsed.billable);
     const entry = await prisma.$transaction(async (tx) => {
       const period = await upsertOpenPeriod(tx, consultant.id, date);
       // A complete entry enters approval as soon as it is saved (Rodada 4.3):
@@ -284,7 +314,7 @@ export async function createTimeEntry(
           data: {
             ...clock,
             description,
-            billable: parsed.billable,
+            billable,
             multiplier: parsed.multiplier,
             status: "SUBMITTED",
             submittedAt: now,
@@ -303,7 +333,7 @@ export async function createTimeEntry(
             ...clock,
             activityType: parsed.activityType,
             description,
-            billable: parsed.billable,
+            billable,
             multiplier: parsed.multiplier,
             status: "SUBMITTED",
             submittedAt: now,
@@ -366,6 +396,8 @@ export async function createWeeklyTimeEntries(
     const weekdays = [...new Set(parsed.weekdays)].sort((a, b) => a - b);
     const description = parsed.description.trim();
     const clock = clockToData(parsed);
+    // Enforcement de campo financeiro por papel: consultor puro não dita billable.
+    const billable = resolveBillable(user, parsed.activityType, parsed.billable);
 
     const result = await prisma.$transaction(async (tx) => {
       let period = await tx.timesheetPeriod.findUnique({
@@ -428,7 +460,7 @@ export async function createWeeklyTimeEntries(
             ...clock,
             activityType: parsed.activityType,
             description,
-            billable: parsed.billable,
+            billable,
             multiplier: parsed.multiplier,
             status: "SUBMITTED",
             submittedAt,
@@ -556,7 +588,9 @@ export async function updateTimeEntry(
         data: {
           ...clockToData(parsed),
           description: parsed.description.trim(),
-          billable: parsed.billable,
+          // Enforcement por papel: consultor puro não dita billable — deriva-se
+          // pela atividade EXISTENTE do lançamento (a atividade não muda no edit).
+          billable: resolveBillable(user, entry.activityType, parsed.billable),
           multiplier: parsed.multiplier,
           date,
           allocationId,

@@ -618,6 +618,83 @@ describe("createTimeEntry — persistence", () => {
   });
 });
 
+// Onda B/fix: o campo financeiro `billable` é protegido por papel no SERVIDOR
+// (CLAUDE.md). Um consultor puro NÃO dita billable — o servidor o deriva pela
+// atividade (ON_CALL = não faturável; demais = faturável), ignorando o payload.
+// Gestão (ADMIN/AREA_MANAGER/PROJECT_MANAGER/FINANCE) continua livre.
+describe("billable — enforcement server-side por papel", () => {
+  it("consultor puro: billable=false num lançamento normal é ignorado → persiste true", async () => {
+    h.store.currentUser.roles = ["CONSULTANT"];
+    const result = await createTimeEntry({ ...baseInput, billable: false });
+    expect(result.ok).toBe(true);
+    expect(h.store.entries[0].billable).toBe(true);
+  });
+
+  it("consultor puro em ON_CALL: persiste false independentemente do payload", async () => {
+    h.store.currentUser.roles = ["CONSULTANT"];
+    const result = await createTimeEntry({
+      ...baseInput,
+      activityType: "ON_CALL",
+      multiplier: 0.33,
+      billable: true,
+    });
+    expect(result.ok).toBe(true);
+    expect(h.store.entries[0].billable).toBe(false);
+  });
+
+  it("gestor: consegue definir billable=false normalmente", async () => {
+    h.store.currentUser.roles = ["PROJECT_MANAGER"];
+    const result = await createTimeEntry({ ...baseInput, billable: false });
+    expect(result.ok).toBe(true);
+    expect(h.store.entries[0].billable).toBe(false);
+  });
+
+  it("consultor puro no lançamento semanal: billable=false é ignorado → persiste true", async () => {
+    h.store.currentUser.roles = ["CONSULTANT"];
+    const result = await createWeeklyTimeEntries({
+      projectId: "proj-1",
+      activityType: "WORKDAY",
+      weekStart: "2026-06-08",
+      ...clockFor(8),
+      weekdays: [1, 2],
+      description: "Semana",
+      billable: false,
+      multiplier: 1,
+    });
+    expect(result.ok).toBe(true);
+    expect(h.store.entries.length).toBeGreaterThan(0);
+    expect(h.store.entries.every((e) => e.billable === true)).toBe(true);
+  });
+
+  it("consultor puro no update: billable=false é ignorado → persiste true (atividade normal)", async () => {
+    h.store.currentUser.roles = ["CONSULTANT"];
+    seedCurrentPeriod();
+    const entry = seedEntry({ status: "DRAFT", billable: true });
+    const result = await updateTimeEntry({
+      id: entry.id,
+      ...clockFor(6),
+      description: "Ajuste",
+      billable: false,
+    });
+    expect(result.ok).toBe(true);
+    expect(h.store.entries[0].billable).toBe(true);
+  });
+
+  it("gestor no update: consegue definir billable=false", async () => {
+    h.store.currentUser.roles = ["AREA_MANAGER"];
+    seedCurrentPeriod();
+    const entry = seedEntry({ status: "DRAFT", billable: true });
+    const result = await updateTimeEntry({
+      id: entry.id,
+      ...clockFor(6),
+      description: "Ajuste",
+      billable: false,
+    });
+    expect(result.ok).toBe(true);
+    expect(h.store.entries[0].billable).toBe(false);
+  });
+});
+
 describe("createWeeklyTimeEntries", () => {
   it("creates selected weekdays, skips duplicates and dates outside allocation", async () => {
     seedCurrentPeriod();
