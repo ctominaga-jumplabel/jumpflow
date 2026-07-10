@@ -13,6 +13,7 @@ import {
   type WeekDay,
 } from "@/lib/timesheet/types";
 import {
+  collectProjectHolidays,
   EMPTY_HOLIDAY_LOOKUP,
   needsWorkdayHolidayConfirmation,
   resolveProjectHoliday,
@@ -196,19 +197,39 @@ export function TimeEntryForm({
   );
 
   // Feriado do dia selecionado, PROJECT-AWARE (global OU vinculado ao projeto
-  // escolhido). Derivado de props/estado — sem efeito, sem setState.
+  // escolhido). Derivado de props/estado — sem efeito, sem setState. Usado no
+  // aviso passivo e como base do gatilho no modo diário.
   const selectedHolidayName = resolveProjectHoliday(
     holidays,
     value.projectId,
     value.date,
   );
 
-  // Dispara a confirmação apenas no modo diário/edição (data concreta única) e
-  // só para "Dia Útil" (WORKDAY) em feriado. O modo semanal cria vários dias e
-  // não seleciona uma data — fica fora da confirmação (documentado).
-  const holidayConfirmRequired =
-    value.mode === "daily" &&
-    needsWorkdayHolidayConfirmation(value.activity, selectedHolidayName);
+  // Datas de feriado atingidas pelo lançamento, PROJECT-AWARE:
+  // - modo diário/edição: a data única selecionada;
+  // - modo semanal: TODAS as datas efetivas (dias-da-semana marcados mapeados
+  //   para as datas da semana visível — índice i => weekday i+1), de modo que um
+  //   feriado que caia em qualquer um dos dias gerados dispare a confirmação.
+  // Derivado de props/estado; a coleta pura vive em lib/timesheet/holidays.ts.
+  const weeklyEffectiveDates =
+    value.mode === "weekly"
+      ? days
+          .filter((_, index) => value.weekdays.includes(index + 1))
+          .map((day) => day.date)
+      : [];
+  const holidayHits =
+    value.mode === "weekly"
+      ? collectProjectHolidays(holidays, value.projectId, weeklyEffectiveDates)
+      : selectedHolidayName
+        ? [{ date: value.date, name: selectedHolidayName }]
+        : [];
+
+  // Dispara a confirmação para "Dia Útil" (WORKDAY) em feriado, tanto no modo
+  // diário quanto no semanal. Não bloqueia: confirmar salva normalmente.
+  const holidayConfirmRequired = needsWorkdayHolidayConfirmation(
+    value.activity,
+    holidayHits[0]?.name,
+  );
 
   const isEditing = Boolean(initial);
   // Flag de cliente (NEXT_PUBLIC_TRANSCRIPTION). Quando off, o mic some e o
@@ -584,7 +605,11 @@ export function TimeEntryForm({
         open={confirmHoliday}
         onClose={() => setConfirmHoliday(false)}
         title="Lançar em feriado?"
-        description="Confirme se realmente deseja apontar Dia Útil nesta data."
+        description={
+          holidayHits.length > 1
+            ? "Confirme se realmente deseja apontar Dia Útil nestas datas."
+            : "Confirme se realmente deseja apontar Dia Útil nesta data."
+        }
         footer={
           <>
             <ActionButton
@@ -609,11 +634,21 @@ export function TimeEntryForm({
       >
         <div className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm font-medium text-warning">
           <CalendarClock aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-          <span>
-            Esta data é feriado
-            {selectedHolidayName ? ` (${selectedHolidayName})` : ""}. Deseja
-            realmente lançar como Dia Útil?
-          </span>
+          <div className="space-y-1">
+            <p>
+              {holidayHits.length > 1
+                ? "As seguintes datas são feriado:"
+                : "Esta data é feriado:"}
+            </p>
+            <ul className={holidayHits.length > 1 ? "list-inside list-disc" : ""}>
+              {holidayHits.map((hit) => (
+                <li key={hit.date}>
+                  {hit.date.slice(8, 10)}/{hit.date.slice(5, 7)} ({hit.name})
+                </li>
+              ))}
+            </ul>
+            <p>Deseja lançar como Dia Útil mesmo assim?</p>
+          </div>
         </div>
       </Modal>
     </Modal>

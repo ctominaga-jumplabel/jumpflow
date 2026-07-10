@@ -68,3 +68,32 @@ export function needsWorkdayHolidayConfirmation(
 ): boolean {
   return activity === "WORKDAY" && Boolean(holidayName);
 }
+
+/** Uma data-feriado atingida por um lançamento (ISO + nome do feriado). */
+export interface HolidayHit {
+  /** ISO `yyyy-mm-dd`. */
+  date: string;
+  name: string;
+}
+
+/**
+ * Variante em LISTA de `resolveProjectHoliday`: dado um conjunto de datas
+ * (ex.: os dias efetivos de um lançamento SEMANAL), devolve apenas as que são
+ * feriado para o projeto, com o nome. Pura e testável (sem efeitos). As datas
+ * saem na ordem de entrada; datas repetidas são deduplicadas.
+ */
+export function collectProjectHolidays(
+  lookup: HolidayLookup | undefined,
+  projectId: string,
+  isoDates: string[],
+): HolidayHit[] {
+  const hits: HolidayHit[] = [];
+  const seen = new Set<string>();
+  for (const date of isoDates) {
+    if (seen.has(date)) continue;
+    seen.add(date);
+    const name = resolveProjectHoliday(lookup, projectId, date);
+    if (name) hits.push({ date, name });
+  }
+  return hits;
+}

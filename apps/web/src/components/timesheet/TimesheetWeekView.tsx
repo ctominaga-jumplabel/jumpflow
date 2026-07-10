@@ -740,6 +740,11 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
     });
   }
 
+  // Nota (Onda A-ext): a confirmação de "Dia Útil em feriado" vive no
+  // TimeEntryForm (lançamento diário e semanal). Os ATALHOS DE GRADE
+  // "Padrão da semana" (applyDefault) e "Copiar semana anterior"
+  // (confirmCopyPreviousWeek) NÃO disparam essa confirmação — são ações em lote
+  // que já explicitam o que criam/pulam nos toasts; ficam fora do escopo.
   function applyDefault() {
     const error = validateDefaultForm();
     if (error) {
