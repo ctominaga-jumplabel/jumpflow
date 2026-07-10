@@ -12,6 +12,7 @@ import {
   createPaymentForecast,
   generateConsultantPayments,
   sendConsultantPaymentForecast,
+  type GenerateConsultantPaymentsResult,
 } from "@/lib/db/payments";
 import { resolveDbUser } from "@/lib/db/users";
 import {
@@ -131,7 +132,7 @@ function parseDateTime(value: string): Date {
 export async function generateMonthlyConsultantPayments(input: {
   month: number;
   year: number;
-}): Promise<ActionResult<{ generated: number; skippedExisting: number }>> {
+}): Promise<ActionResult<GenerateConsultantPaymentsResult>> {
   try {
     ensureDatabase();
     const user = await requireRole(FINANCIAL_ROLES);

@@ -30,6 +30,32 @@ function toNumber(value: Prisma.Decimal | number | null | undefined): number {
   return Number(value);
 }
 
+function round2(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+/** Prefixo estavel das linhas de remuneracao pontual (usado para detectar
+ *  pontuais ja refletidas num pagamento existente — ver M2). */
+const AD_HOC_LINE_PREFIX = "Remuneracao pontual";
+
+/** Consultor pulado na geracao (ja tem pagamento do mes) cujas pontuais com
+ *  payAt no mes NAO estao refletidas no pagamento existente (M2). Visibilidade
+ *  sem regeneracao automatica. */
+export interface SkippedAdHocWarning {
+  consultantId: string;
+  /** Total das pontuais (nao canceladas) com payAt no mes. */
+  adHocTotal: number;
+  /** Total das pontuais ja refletidas no pagamento existente. */
+  reflectedAdHoc: number;
+}
+
+export interface GenerateConsultantPaymentsResult {
+  generated: number;
+  skippedExisting: number;
+  /** Pulados com pontuais nao refletidas — exige atencao do operador (M2). */
+  skippedWithUnreflectedAdHoc: SkippedAdHocWarning[];
+}
+
 function activeOn<T extends { startsAt: Date; endsAt: Date | null }>(
   rows: T[],
   date: Date,
@@ -195,7 +221,7 @@ export async function generateConsultantPayments(input: {
     entityId: string;
     action: string;
   };
-}): Promise<{ generated: number; skippedExisting: number }> {
+}): Promise<GenerateConsultantPaymentsResult> {
   const { start, end } = monthBounds(input.month, input.year);
   const entries = await prisma.timeEntry.findMany({
     where: {
@@ -264,9 +290,25 @@ export async function generateConsultantPayments(input: {
 
   let generated = 0;
   let skippedExisting = 0;
+  const skippedWithUnreflectedAdHoc: SkippedAdHocWarning[] = [];
   await prisma.$transaction(async (tx) => {
     for (const consultantId of allConsultantIds) {
       const consultantEntries = byConsultant.get(consultantId) ?? [];
+      // Linhas de remuneracao pontual (D2): uma por ConsultantAdHocPayment do
+      // mes, vinculada ao projeto (projectId sempre presente). hours=0 e
+      // unitRate=amount (valor cheio, nao horario). SOMAM SEMPRE por cima; nao
+      // passam pelos buckets de compensacao (CLT/PJ), pois nao derivam de horas
+      // nem de beneficio recorrente — sao acertos avulsos.
+      const adHocForConsultant = adHocByConsultant.get(consultantId) ?? [];
+      const adHocLines = adHocForConsultant.map((payment) => ({
+        projectId: payment.projectId,
+        description: `${AD_HOC_LINE_PREFIX} (${payment.kind}) - ${payment.project?.name ?? "projeto"}`,
+        hours: 0,
+        unitRate: toNumber(payment.amount),
+        amount: toNumber(payment.amount),
+      }));
+      const adHocTotal = adHocLines.reduce((sum, line) => sum + line.amount, 0);
+
       const existing = await tx.consultantPayment.findUnique({
         where: {
           consultantId_month_year: {
@@ -279,6 +321,29 @@ export async function generateConsultantPayments(input: {
       });
       if (existing) {
         skippedExisting += 1;
+        // M2: se ha pontuais no mes mas o pagamento existente NAO as reflete
+        // (foram cadastradas depois da geracao), sinaliza para o operador. Nao
+        // regeramos automaticamente — apenas damos visibilidade.
+        if (adHocForConsultant.length > 0) {
+          const reflectedLines = await tx.consultantPaymentLine.findMany({
+            where: {
+              consultantPaymentId: existing.id,
+              description: { startsWith: AD_HOC_LINE_PREFIX },
+            },
+            select: { amount: true },
+          });
+          const reflectedAdHoc = reflectedLines.reduce(
+            (sum, line) => sum + toNumber(line.amount),
+            0,
+          );
+          if (round2(adHocTotal) > round2(reflectedAdHoc) + 0.001) {
+            skippedWithUnreflectedAdHoc.push({
+              consultantId,
+              adHocTotal: round2(adHocTotal),
+              reflectedAdHoc: round2(reflectedAdHoc),
+            });
+          }
+        }
         continue;
       }
 
@@ -287,9 +352,19 @@ export async function generateConsultantPayments(input: {
       if (!consultantRecord) continue;
       const compensation = activeOn(consultantRecord.compensations, start);
       if (!compensation) continue;
-      const benefits = consultantRecord.benefits.filter(
-        (benefit) => benefit.startsAt <= start && (!benefit.endsAt || start < benefit.endsAt),
-      );
+
+      // C2 (folha): a BASE (salario CLT liquido / pjAmount fixo + beneficios) so
+      // compoe o pagamento quando ha HORAS APROVADAS no mes — comportamento
+      // anterior a pontual. Consultor SEM horas (so-pontual) recebe APENAS as
+      // linhas de pontual; nao entra na folha com salario integral.
+      const hasApprovedHours = consultantEntries.length > 0;
+
+      const benefits = hasApprovedHours
+        ? consultantRecord.benefits.filter(
+            (benefit) =>
+              benefit.startsAt <= start && (!benefit.endsAt || start < benefit.endsAt),
+          )
+        : [];
       const byProject = new Map<
         string,
         { projectName: string; hours: number; amount: number; unitRate: number }
@@ -324,13 +399,15 @@ export async function generateConsultantPayments(input: {
         amount: line.amount,
       }));
       const benefitLines = benefits.map((benefit) => ({
-        projectId: null,
+        projectId: null as string | null,
         description: `Beneficio ${benefit.type}`,
         hours: 0,
         unitRate: toNumber(benefit.amount),
         amount: toNumber(benefit.amount),
       }));
-      const benefitCardAmount = toNumber(compensation.benefitCardAmount);
+      const benefitCardAmount = hasApprovedHours
+        ? toNumber(compensation.benefitCardAmount)
+        : 0;
       if (benefitCardAmount > 0) {
         benefitLines.push({
           projectId: null,
@@ -340,33 +417,22 @@ export async function generateConsultantPayments(input: {
           amount: benefitCardAmount,
         });
       }
-      // Linhas de remuneracao pontual (D2): uma por ConsultantAdHocPayment do
-      // mes, vinculada ao projeto (projectId sempre presente). hours=0 e
-      // unitRate=amount (valor cheio, nao horario). Somam ao total sem passar
-      // pelos buckets de compensacao (CLT/PJ), pois nao derivam de horas nem de
-      // beneficio recorrente — sao acertos avulsos.
-      const adHocForConsultant = adHocByConsultant.get(consultantId) ?? [];
-      const adHocLines = adHocForConsultant.map((payment) => ({
-        projectId: payment.projectId,
-        description: `Remuneracao pontual (${payment.kind}) - ${payment.project?.name ?? "projeto"}`,
-        hours: 0,
-        unitRate: toNumber(payment.amount),
-        amount: toNumber(payment.amount),
-      }));
-      const adHocTotal = adHocLines.reduce((sum, line) => sum + line.amount, 0);
 
-      const amounts = buildConsultantPaymentAmounts(
-        {
-          contractType: compensation.contractType,
-          hourlyRate: toNumber(compensation.hourlyRate),
-          cltAmount: toNumber(compensation.cltAmount),
-          pjAmount: toNumber(compensation.pjAmount),
-          benefitCardAmount: toNumber(compensation.benefitCardAmount),
-          discountRules: compensation.discountRules as never,
-        },
-        benefits.map((benefit) => ({ amount: toNumber(benefit.amount) })),
-        projectLines,
-      );
+      // Base zerada quando nao ha horas: nada de salario/beneficios sem folha.
+      const baseAmounts = hasApprovedHours
+        ? buildConsultantPaymentAmounts(
+            {
+              contractType: compensation.contractType,
+              hourlyRate: toNumber(compensation.hourlyRate),
+              cltAmount: toNumber(compensation.cltAmount),
+              pjAmount: toNumber(compensation.pjAmount),
+              benefitCardAmount: toNumber(compensation.benefitCardAmount),
+              discountRules: compensation.discountRules as never,
+            },
+            benefits.map((benefit) => ({ amount: toNumber(benefit.amount) })),
+            projectLines,
+          )
+        : { cltNetAmount: 0, pjAmount: 0, benefitAmount: 0, totalAmount: 0 };
 
       const payment = await tx.consultantPayment.create({
         data: {
@@ -374,10 +440,10 @@ export async function generateConsultantPayments(input: {
           month: input.month,
           year: input.year,
           contractType: compensation.contractType,
-          cltNetAmount: amounts.cltNetAmount,
-          pjAmount: amounts.pjAmount,
-          benefitAmount: amounts.benefitAmount,
-          totalAmount: amounts.totalAmount + adHocTotal,
+          cltNetAmount: baseAmounts.cltNetAmount,
+          pjAmount: baseAmounts.pjAmount,
+          benefitAmount: baseAmounts.benefitAmount,
+          totalAmount: baseAmounts.totalAmount + adHocTotal,
         },
       });
       await tx.consultantPaymentLine.createMany({
@@ -396,13 +462,17 @@ export async function generateConsultantPayments(input: {
           entityId: input.audit.entityId,
           action: input.audit.action,
           before: Prisma.JsonNull,
-          after: { generated, skippedExisting },
+          after: {
+            generated,
+            skippedExisting,
+            skippedWithUnreflectedAdHoc: skippedWithUnreflectedAdHoc.length,
+          },
         },
       });
     }
   });
 
-  return { generated, skippedExisting };
+  return { generated, skippedExisting, skippedWithUnreflectedAdHoc };
 }
 
 export async function sendConsultantPaymentForecast(input: {

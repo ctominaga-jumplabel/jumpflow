@@ -81,6 +81,14 @@ const h = vi.hoisted(() => {
     defaults: [] as Record<string, unknown>[],
     approvals: [] as Record<string, unknown>[],
     audits: [] as Record<string, unknown>[],
+    // Ausências CONFIRMED que cobrem uma data (guarda C1 em copyPreviousWeek).
+    timeOffs: [] as {
+      consultantId: string;
+      startDate: Date;
+      endDate: Date;
+      status: string;
+      kind: string;
+    }[],
     currentUser: {
       id: "dev-user",
       name: "Ana Martins",
@@ -174,9 +182,19 @@ const h = vi.hoisted(() => {
         return project ? { ...project } : null;
       },
     },
-    // Guarda de ausência (Onda D): sem ausências confirmadas neste mock.
+    // Guarda de ausência (Onda D): honra o store.timeOffs por consultor/status/data
+    // (findConfirmedTimeOffCovering usa startDate<=dia && endDate>=dia).
     consultantTimeOff: {
-      findFirst: async () => null,
+      findFirst: async ({ where }: { where: Where }) => {
+        const found = store.timeOffs.find(
+          (t) =>
+            t.consultantId === where.consultantId &&
+            t.status === where.status &&
+            t.startDate.getTime() <= where.startDate.lte.getTime() &&
+            t.endDate.getTime() >= where.endDate.gte.getTime(),
+        );
+        return found ? { id: "timeoff-1", kind: found.kind } : null;
+      },
     },
     allocation: {
       findFirst: async ({
@@ -569,6 +587,7 @@ beforeEach(() => {
   h.store.defaults = [];
   h.store.approvals = [];
   h.store.audits = [];
+  h.store.timeOffs = [];
   storage.objects.clear();
   storage.configured.value = true;
   storage.provider.upload.mockClear();
@@ -1071,6 +1090,29 @@ describe("copyPreviousWeek", () => {
     );
     expect(destEntries).toHaveLength(1);
     expect(destEntries[0].projectId).toBe("proj-1");
+  });
+
+  it("C1: pula WORKDAY em dia com ausência CONFIRMED (senão paga/fatura em dobro)", async () => {
+    seedSourceWeek(); // WORKDAY APROVADO em 2026-06-03 -> destino 2026-06-10
+    // Ausência confirmada cobrindo o dia de destino (VACATION já materializada).
+    h.store.timeOffs.push({
+      consultantId: "con-1",
+      startDate: new Date("2026-06-08T00:00:00.000Z"),
+      endDate: new Date("2026-06-12T00:00:00.000Z"),
+      status: "CONFIRMED",
+      kind: "VACATION",
+    });
+
+    const result = await copyPreviousWeek({ weekStart: "2026-06-08" });
+    expect(result).toMatchObject({
+      ok: true,
+      data: { copied: 0, skippedExisting: 0, skippedIneligible: 1 },
+    });
+    // Nenhum WORKDAY foi criado sobre o dia de ausência.
+    const destEntries = h.store.entries.filter(
+      (e) => e.date.getTime() >= MONDAY.getTime(),
+    );
+    expect(destEntries).toHaveLength(0);
   });
 
   it("returns PERIOD_CLOSED when the source week is empty and the destination is closed (regression: early-return skipped the dest-period check)", async () => {

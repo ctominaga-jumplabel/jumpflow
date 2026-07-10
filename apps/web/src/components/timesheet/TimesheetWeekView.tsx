@@ -1154,7 +1154,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
         }
         if (skippedIneligible > 0) {
           parts.push(
-            `${skippedIneligible} sem alocação ativa ou com projeto encerrado`,
+            `${skippedIneligible} sem alocação ativa, com projeto encerrado ou em dia de ausência confirmada`,
           );
         }
         notify(copied > 0 ? "success" : "info", `${parts.join(" · ")}.`);

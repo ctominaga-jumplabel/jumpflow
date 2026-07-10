@@ -44,9 +44,21 @@ const timeEntryFindMany = vi.fn(async (): Promise<AnyRow[]> => [
   { allocationId: "a1", hours: 10, multiplier: 1, billable: true },
 ]);
 
-const adHocAggregate = vi.fn(async (): Promise<AnyRow> => ({
-  _sum: { amount: 300 },
-}));
+// Dataset de pontuais: 300 PAID + 500 PLANNED + 999 CANCELLED. O aggregate
+// honra o where para provar M3 (só PAID entra no custo REALIZADO).
+const adHocRows = [
+  { status: "PAID", amount: 300 },
+  { status: "PLANNED", amount: 500 },
+  { status: "CANCELLED", amount: 999 },
+];
+const adHocAggregate = vi.fn(
+  async ({ where }: { where: { status?: string } }): Promise<AnyRow> => {
+    const sum = adHocRows
+      .filter((r) => r.status === where.status)
+      .reduce((acc, r) => acc + r.amount, 0);
+    return { _sum: { amount: sum || null } };
+  },
+);
 
 vi.mock("@jumpflow/database", () => ({
   prisma: {
@@ -57,7 +69,9 @@ vi.mock("@jumpflow/database", () => ({
       count: async () => 0,
     },
     projectReceivableSchedule: { groupBy: async () => [] },
-    consultantAdHocPayment: { aggregate: () => adHocAggregate() },
+    consultantAdHocPayment: {
+      aggregate: (args: { where: { status?: string } }) => adHocAggregate(args),
+    },
   },
 }));
 
@@ -72,18 +86,22 @@ afterEach(() => {
 });
 
 describe("loadProjectTracking — remuneração pontual no custo realizado", () => {
-  it("soma o total das pontuais (não canceladas) ao custo realizado", async () => {
+  it("M3: só as pontuais PAID entram no custo realizado (PLANNED/CANCELLED fora)", async () => {
     const tracking = await loadProjectTracking("prj-1");
     expect(tracking).not.toBeNull();
     if (!tracking) return;
+    // A consulta filtra status PAID.
+    expect(adHocAggregate).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ status: "PAID" }) }),
+    );
     // Realizado por horas: receita 10x100=1000; custo por horas 10x50=500.
-    // + pontuais 300 => custo realizado 800, margem 200.
+    // + PAID 300 (PLANNED 500 e CANCELLED 999 ficam de fora) => custo 800.
     expect(tracking.realized.revenue).toBeCloseTo(1000, 6);
     expect(tracking.realized.cost).toBeCloseTo(800, 6);
     expect(tracking.realized.margin).toBeCloseTo(200, 6);
   });
 
-  it("não soma nada quando não há pontuais", async () => {
+  it("não soma nada quando não há pontuais PAID", async () => {
     adHocAggregate.mockResolvedValueOnce({ _sum: { amount: null } });
     const tracking = await loadProjectTracking("prj-1");
     expect(tracking?.realized.cost).toBeCloseTo(500, 6);

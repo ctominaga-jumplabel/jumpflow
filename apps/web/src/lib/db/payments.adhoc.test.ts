@@ -19,6 +19,7 @@ const timeEntryFindMany = vi.fn(async (): Promise<AnyRow[]> => []);
 const adHocFindMany = vi.fn(async (): Promise<AnyRow[]> => []);
 const consultantFindMany = vi.fn(async (): Promise<AnyRow[]> => []);
 const paymentFindUnique = vi.fn(async (): Promise<AnyRow | null> => null);
+const paymentLineFindMany = vi.fn(async (): Promise<AnyRow[]> => []);
 
 const created = {
   payments: [] as AnyRow[],
@@ -40,6 +41,7 @@ const txMock = {
       created.lines.push(...data);
       return { count: data.length };
     },
+    findMany: () => paymentLineFindMany(),
   },
   auditEvent: {
     create: async ({ data }: { data: AnyRow }) => {
@@ -115,6 +117,25 @@ function adHoc(opts: {
   };
 }
 
+/** PJ com valor FIXO mensal (sem hora): pjAmount > 0, hourlyRate null. */
+function pjFixedConsultant(pjAmount: number) {
+  return {
+    compensations: [
+      {
+        contractType: "PJ" as const,
+        hourlyRate: null,
+        cltAmount: 0,
+        pjAmount,
+        benefitCardAmount: 0,
+        discountRules: null,
+        startsAt: new Date(Date.UTC(2020, 0, 1)),
+        endsAt: null,
+      },
+    ],
+    benefits: [{ type: "MEAL_VOUCHER", amount: 300, startsAt: new Date(Date.UTC(2020, 0, 1)), endsAt: null }],
+  };
+}
+
 beforeEach(() => {
   created.payments.length = 0;
   created.lines.length = 0;
@@ -123,6 +144,7 @@ beforeEach(() => {
   adHocFindMany.mockResolvedValue([]);
   consultantFindMany.mockResolvedValue([]);
   paymentFindUnique.mockResolvedValue(null);
+  paymentLineFindMany.mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -192,5 +214,68 @@ describe("generateConsultantPayments — remuneração pontual (D2)", () => {
     )!;
     expect(line.amount).toBe(750);
     expect(created.payments[0]!.totalAmount).toBeCloseTo(750, 6);
+  });
+
+  it("C2: consultor SÓ com pontual NÃO recebe a base (salário/benefícios) sem horas", async () => {
+    timeEntryFindMany.mockResolvedValue([]); // sem horas aprovadas
+    adHocFindMany.mockResolvedValue([adHoc({ consultantId: "c3", amount: 750 })]);
+    // Base fixa robusta: pjAmount 5000 + VR 300. Sem o fix, pagaria 5000+300+750.
+    consultantFindMany.mockResolvedValue([{ id: "c3", ...pjFixedConsultant(5000) }]);
+
+    await generateConsultantPayments({ month: MONTH, year: YEAR });
+
+    const payment = created.payments[0]!;
+    // Só a pontual entra; a base não compõe a folha sem horas.
+    expect(payment.totalAmount).toBeCloseTo(750, 6);
+    expect(payment.pjAmount).toBeCloseTo(0, 6);
+    expect(payment.benefitAmount).toBeCloseTo(0, 6);
+    // Nenhuma linha de benefício foi criada; só a linha de pontual.
+    expect(
+      created.lines.some((l) => String(l.description).startsWith("Beneficio")),
+    ).toBe(false);
+    expect(
+      created.lines.filter((l) =>
+        String(l.description).startsWith("Remuneracao pontual"),
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("C2 (regressão): COM horas, a base volta a compor o pagamento + pontual", async () => {
+    timeEntryFindMany.mockResolvedValue([entry(4, 100, "c4")]); // 400 em horas
+    adHocFindMany.mockResolvedValue([adHoc({ consultantId: "c4", amount: 750 })]);
+
+    await generateConsultantPayments({ month: MONTH, year: YEAR });
+
+    // PJ por hora: 400 (horas) + 750 (pontual) = 1150.
+    expect(created.payments[0]!.totalAmount).toBeCloseTo(1150, 6);
+  });
+});
+
+describe("generateConsultantPayments — aviso pós-folha (M2)", () => {
+  it("sinaliza consultor pulado com pontual NÃO refletida no pagamento existente", async () => {
+    timeEntryFindMany.mockResolvedValue([]);
+    adHocFindMany.mockResolvedValue([adHoc({ consultantId: "c1", amount: 500 })]);
+    paymentFindUnique.mockResolvedValue({ id: "pay-existing" });
+    paymentLineFindMany.mockResolvedValue([]); // nada de pontual refletido
+
+    const result = await generateConsultantPayments({ month: MONTH, year: YEAR });
+
+    expect(result.skippedExisting).toBe(1);
+    expect(result.skippedWithUnreflectedAdHoc).toEqual([
+      { consultantId: "c1", adHocTotal: 500, reflectedAdHoc: 0 },
+    ]);
+    expect(created.payments).toHaveLength(0);
+  });
+
+  it("NÃO sinaliza quando a pontual já está refletida no pagamento existente", async () => {
+    timeEntryFindMany.mockResolvedValue([]);
+    adHocFindMany.mockResolvedValue([adHoc({ consultantId: "c1", amount: 500 })]);
+    paymentFindUnique.mockResolvedValue({ id: "pay-existing" });
+    paymentLineFindMany.mockResolvedValue([{ amount: 500 }]); // já refletida
+
+    const result = await generateConsultantPayments({ month: MONTH, year: YEAR });
+
+    expect(result.skippedExisting).toBe(1);
+    expect(result.skippedWithUnreflectedAdHoc).toEqual([]);
   });
 });

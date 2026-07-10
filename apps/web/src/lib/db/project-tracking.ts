@@ -162,12 +162,13 @@ export async function loadProjectTracking(
         where: { projectId },
         _sum: { amount: true },
       }),
-      // D2 (Onda D): custo das remunerações pontuais do projeto. Janela = TODO o
-      // histórico do projeto (não canceladas), coerente com a base CUMULATIVA do
-      // realizado (horas aprovadas + fechamentos são acumulados, sem filtro de
-      // mês). Cada pontual soma ao custo realizado da margem deste projeto.
+      // D2 (Onda D) + M3: custo REALIZADO das remunerações pontuais do projeto.
+      // Só conta o que foi de fato PAGO (status PAID) — PLANNED é previsto, não
+      // realizado, e não pode inflar o custo realizado. Janela = TODO o histórico
+      // do projeto, coerente com a base CUMULATIVA do realizado (horas aprovadas
+      // + fechamentos são acumulados, sem filtro de mês).
       prisma.consultantAdHocPayment.aggregate({
-        where: { projectId, status: { not: "CANCELLED" } },
+        where: { projectId, status: "PAID" },
         _sum: { amount: true },
       }),
     ]);
@@ -191,10 +192,10 @@ export async function loadProjectTracking(
     closingsCount: closingCount,
     receivablesForecast,
     receivablesReceived,
-    // D2 (Onda D): custo das remunerações pontuais REALIZADAS/PREVISTAS (status
-    // != CANCELLED) do projeto entra no custo realizado da margem, via o ponto
-    // de extensão `additionalRealizedCost` do builder puro. Janela: todo o
-    // histórico do projeto (base cumulativa do realizado).
+    // D2 (Onda D) + M3: custo das remunerações pontuais PAGAS (status PAID) do
+    // projeto entra no custo realizado da margem, via o ponto de extensão
+    // `additionalRealizedCost` do builder puro. PLANNED não conta como realizado.
+    // Janela: todo o histórico do projeto (base cumulativa do realizado).
     additionalRealizedCost: round2(num(adHocAgg._sum.amount)),
   });
 }

@@ -1082,6 +1082,18 @@ export async function copyPreviousWeek(
           counts.skippedIneligible += 1;
           continue;
         }
+        // C1: nunca copiar um WORKDAY sobre um dia com ausência CONFIRMED (já
+        // materializada como VACATION); senão o dia seria pago/faturado em
+        // dobro. É o mesmo invariante de assertNoConfirmedTimeOff, mas aqui
+        // pulamos silenciosamente (com contagem) em vez de abortar a cópia
+        // inteira. Fecha o 5º caminho de criação de WORKDAY.
+        if (
+          entry.activityType === "WORKDAY" &&
+          (await findConfirmedTimeOffCovering(tx, consultant.id, destDate))
+        ) {
+          counts.skippedIneligible += 1;
+          continue;
+        }
         const allocation = await findActiveAllocation(
           tx,
           consultant.id,
