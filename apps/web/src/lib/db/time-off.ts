@@ -7,6 +7,7 @@ import {
   type MaterializationPlan,
   type TimeOffKind,
   type TimeOffLookup,
+  type TimeOffStatus,
 } from "@/lib/timesheet/time-off";
 import { getHolidayLookup } from "./timesheet";
 import { addDays, startOfUtcDay, toIsoDate, weekStartOf } from "@/lib/timesheet/week";
@@ -180,6 +181,87 @@ export async function findConfirmedTimeOffCovering(
     select: { id: true, kind: true },
   });
   return found ? { id: found.id, kind: found.kind as TimeOffKind } : null;
+}
+
+/**
+ * Resolve a `ConsultantVacation` ativa do consultor para vincular a uma férias
+ * (débito de saldo). Critério (documentado): entre as com `balanceDays > 0`,
+ * ordenadas por `accrualPeriodStart` desc, prefere a cujo período aquisitivo
+ * COBRE a data de referência (hoje); senão, a mais recente com saldo. Retorna
+ * `null` quando não há nenhuma com saldo (a solicitação segue SEM vínculo).
+ */
+export async function resolveActiveVacation(
+  consultantId: string,
+  reference: Date = new Date(),
+): Promise<{ id: string; balanceDays: number } | null> {
+  const day = startOfUtcDay(reference);
+  const vacations = await prisma.consultantVacation.findMany({
+    where: { consultantId, balanceDays: { gt: 0 } },
+    orderBy: { accrualPeriodStart: "desc" },
+    select: {
+      id: true,
+      balanceDays: true,
+      accrualPeriodStart: true,
+      accrualPeriodEnd: true,
+    },
+  });
+  const covering = vacations.find(
+    (v) =>
+      startOfUtcDay(v.accrualPeriodStart).getTime() <= day.getTime() &&
+      startOfUtcDay(v.accrualPeriodEnd).getTime() >= day.getTime(),
+  );
+  const chosen = covering ?? vacations[0] ?? null;
+  return chosen ? { id: chosen.id, balanceDays: chosen.balanceDays } : null;
+}
+
+export interface OverlappingTimeOff {
+  id: string;
+  startDate: Date;
+  endDate: Date;
+  kind: TimeOffKind;
+  status: string;
+}
+
+/**
+ * Ausências do consultor cujo intervalo [startDate,endDate] SOBREPÕE [start,end],
+ * limitadas aos `statuses` informados. Sobreposição = começa até `end` E termina
+ * a partir de `start`. `excludeId` remove a própria ausência da checagem.
+ */
+export async function findOverlappingTimeOffs(
+  db: Db,
+  consultantId: string,
+  start: Date,
+  end: Date,
+  statuses: TimeOffStatus[],
+  excludeId?: string,
+): Promise<OverlappingTimeOff[]> {
+  const rows = await db.consultantTimeOff.findMany({
+    where: {
+      consultantId,
+      status: { in: statuses },
+      startDate: { lte: startOfUtcDay(end) },
+      endDate: { gte: startOfUtcDay(start) },
+      ...(excludeId ? { id: { not: excludeId } } : {}),
+    },
+    select: { id: true, startDate: true, endDate: true, kind: true, status: true },
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    startDate: r.startDate,
+    endDate: r.endDate,
+    kind: r.kind as TimeOffKind,
+    status: r.status,
+  }));
+}
+
+/** Formata os intervalos de conflito para mensagem pt-br (dd/mm/aaaa). */
+export function formatTimeOffConflicts(conflicts: OverlappingTimeOff[]): string {
+  const br = (d: Date) => {
+    const iso = toIsoDate(d);
+    const [y, m, dd] = iso.split("-");
+    return `${dd}/${m}/${y}`;
+  };
+  return conflicts.map((c) => `${br(c.startDate)}–${br(c.endDate)}`).join(", ");
 }
 
 /**

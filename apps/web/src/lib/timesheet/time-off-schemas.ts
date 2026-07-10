@@ -33,7 +33,9 @@ export const requestTimeOffSchema = z
       .max(500, "Observação deve ter no máximo 500 caracteres.")
       .optional()
       .transform((v) => (v && v.length > 0 ? v : null)),
-    vacationId: idSchema.optional(),
+    // `vacationId` NÃO é aceito do cliente (evita IDOR): o vínculo com o saldo de
+    // férias é resolvido no servidor a partir do próprio consultor. Chaves extras
+    // no payload são ignoradas pelo Zod (schema não-strict).
   })
   .refine(
     (v) => {

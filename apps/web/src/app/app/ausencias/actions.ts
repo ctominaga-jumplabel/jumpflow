@@ -17,12 +17,13 @@ import { resolveDbUser } from "@/lib/db/users";
 import {
   computeTimeOffWorkingDays,
   ensureOpenPeriodForDate,
+  findOverlappingTimeOffs,
   findWorkdayConflicts,
+  formatTimeOffConflicts,
   planTimeOffMaterialization,
+  resolveActiveVacation,
 } from "@/lib/db/time-off";
 import {
-  computeLedgerDebit,
-  computeLedgerReversal,
   resolveTimeOffPaid,
   timeOffKindLabel,
   type TimeOffKind,
@@ -134,7 +135,9 @@ async function requireDbUser(user: AppUser) {
 // ---------------------------------------------------------------------------
 export async function requestTimeOff(
   input: RequestTimeOffInput,
-): Promise<ActionResult<{ id: string; workingDays: number }>> {
+): Promise<
+  ActionResult<{ id: string; workingDays: number; vacationLinked: boolean }>
+> {
   try {
     ensureDatabase();
     const user = await requireUser();
@@ -152,8 +155,29 @@ export async function requestTimeOff(
       start,
       end,
     );
-    // vacationId só faz sentido em férias (débito de saldo).
-    const vacationId = kind === "VACATION" ? (parsed.vacationId ?? null) : null;
+
+    // Bloqueio de sobreposição: não permitir solicitar sobre um intervalo já
+    // REQUESTED/CONFIRMED do mesmo consultor (evita duplicidade desde a origem).
+    const overlaps = await findOverlappingTimeOffs(
+      prisma,
+      consultant.id,
+      start,
+      end,
+      ["REQUESTED", "CONFIRMED"],
+    );
+    if (overlaps.length > 0) {
+      throw new ActionError(
+        "TIME_OFF_CONFLICT",
+        `Você já possui ausência solicitada/confirmada no período: ${formatTimeOffConflicts(overlaps)}.`,
+      );
+    }
+
+    // C3/A2: o vínculo com o saldo de férias é resolvido NO SERVIDOR a partir do
+    // próprio consultor (nunca do payload) — evita IDOR e garante que a aprovação
+    // realmente debite o saldo. Sem saldo disponível: segue sem vínculo (aviso).
+    const vacation =
+      kind === "VACATION" ? await resolveActiveVacation(consultant.id) : null;
+    const vacationId = vacation?.id ?? null;
 
     const now = new Date();
     const created = await prisma.$transaction(async (tx) => {
@@ -184,11 +208,19 @@ export async function requestTimeOff(
             startDate: parsed.startDate,
             endDate: parsed.endDate,
             workingDays,
+            vacationId,
           },
         }),
       });
       return timeOff;
     });
+
+    // Aviso (não bloqueia): férias sem saldo vinculável. A UI (D/3b) pode exibir.
+    if (kind === "VACATION" && !vacationId) {
+      console.warn(
+        `[ausencias] férias ${created.id} sem ConsultantVacation com saldo para vincular (consultor ${consultant.id})`,
+      );
+    }
 
     // GANCHO DE NOTIFICAÇÃO (best-effort): avisar People do novo pedido. Exige um
     // novo evento (ex.: "TIME_OFF_REQUESTED") + NotificationRule semeada; como
@@ -196,7 +228,10 @@ export async function requestTimeOff(
     // await notifyTimeOffRequested(created.id);
 
     revalidatePath(AUSENCIAS_PATH);
-    return { ok: true, data: { id: created.id, workingDays } };
+    return {
+      ok: true,
+      data: { id: created.id, workingDays, vacationLinked: Boolean(vacationId) },
+    };
   } catch (error) {
     return toFailure(error);
   }
@@ -318,21 +353,34 @@ export async function decideTimeOff(
       );
     }
 
-    // Ledger de férias: bloquear se dias > saldo. Só quando há vínculo de saldo.
-    const debitVacation =
-      timeOff.kind === "VACATION" && timeOff.vacation ? timeOff.vacation : null;
-    if (debitVacation) {
-      const debit = computeLedgerDebit(
-        debitVacation.balanceDays,
-        debitVacation.takenDays,
-        workingDays,
+    // A1: bloquear se já existe ausência CONFIRMED do mesmo consultor sobreposta
+    // (senão materializaria/debitaria em dobro). Exclui a própria da checagem.
+    const overlaps = await findOverlappingTimeOffs(
+      prisma,
+      timeOff.consultantId,
+      start,
+      end,
+      ["CONFIRMED"],
+      timeOff.id,
+    );
+    if (overlaps.length > 0) {
+      throw new ActionError(
+        "TIME_OFF_CONFLICT",
+        `Já existe ausência confirmada sobreposta no período: ${formatTimeOffConflicts(overlaps)}.`,
       );
-      if (!debit.ok) {
-        throw new ActionError(
-          "INSUFFICIENT_BALANCE",
-          `Saldo de férias insuficiente: ${workingDays} dia(s) úteis solicitados, ${debitVacation.balanceDays} disponível(is).`,
-        );
-      }
+    }
+
+    // Vínculo de saldo (resolvido na solicitação). O débito é ATÔMICO na tx (M1).
+    const debitVacationId =
+      timeOff.kind === "VACATION" && timeOff.vacationId
+        ? timeOff.vacationId
+        : null;
+    // Pré-check amigável (autoridade é o débito atômico dentro da tx).
+    if (debitVacationId && timeOff.vacation && workingDays > timeOff.vacation.balanceDays) {
+      throw new ActionError(
+        "INSUFFICIENT_BALANCE",
+        `Saldo de férias insuficiente: ${workingDays} dia(s) úteis solicitados, ${timeOff.vacation.balanceDays} disponível(is).`,
+      );
     }
 
     // Plano de materialização (apenas ausência REMUNERADA gera lançamento).
@@ -371,6 +419,34 @@ export async function decideTimeOff(
           isAutomatic: false,
         },
       });
+
+      // M1: débito ATÔMICO do saldo (antes de materializar). A guarda
+      // `balanceDays >= workingDays` no próprio UPDATE evita lost-update de
+      // aprovações concorrentes; count===0 => saldo insuficiente (rollback).
+      if (debitVacationId) {
+        const debited = await tx.consultantVacation.updateMany({
+          where: { id: debitVacationId, balanceDays: { gte: workingDays } },
+          data: {
+            balanceDays: { decrement: workingDays },
+            takenDays: { increment: workingDays },
+          },
+        });
+        if (debited.count !== 1) {
+          throw new ActionError(
+            "INSUFFICIENT_BALANCE",
+            "Saldo de férias insuficiente para aprovar esta ausência.",
+          );
+        }
+        await tx.auditEvent.create({
+          data: buildAuditEventData({
+            actorUserId: dbUser.id,
+            entityType: "ConsultantVacation",
+            entityId: debitVacationId,
+            action: "VACATION_BALANCE_DEBITED",
+            after: { debitedDays: workingDays },
+          }),
+        });
+      }
 
       // Materialização: 1 TimeEntry APPROVED por (dia útil, alocação), com
       // multiplier 1.00, timeOffId setado, billable = billDuringVacation.
@@ -430,38 +506,6 @@ export async function decideTimeOff(
       }
       for (const periodId of touchedPeriods) {
         await recomputePeriodStatus(tx, periodId);
-      }
-
-      // Débito do saldo de férias (na MESMA transação da confirmação).
-      if (debitVacation) {
-        const debit = computeLedgerDebit(
-          debitVacation.balanceDays,
-          debitVacation.takenDays,
-          workingDays,
-        );
-        if (!debit.ok) {
-          throw new ActionError(
-            "INSUFFICIENT_BALANCE",
-            "Saldo de férias insuficiente.",
-          );
-        }
-        await tx.consultantVacation.update({
-          where: { id: debitVacation.id },
-          data: { balanceDays: debit.balanceDays, takenDays: debit.takenDays },
-        });
-        await tx.auditEvent.create({
-          data: buildAuditEventData({
-            actorUserId: dbUser.id,
-            entityType: "ConsultantVacation",
-            entityId: debitVacation.id,
-            action: "VACATION_BALANCE_DEBITED",
-            before: {
-              balanceDays: debitVacation.balanceDays,
-              takenDays: debitVacation.takenDays,
-            },
-            after: { balanceDays: debit.balanceDays, takenDays: debit.takenDays },
-          }),
-        });
       }
 
       await tx.auditEvent.create({
@@ -594,18 +638,14 @@ export async function cancelTimeOff(
       }
 
       // Estorno do saldo de férias (só se foi debitado, i.e. estava CONFIRMED).
+      // Increment/decrement ATÔMICO (M1): devolve os dias sem ler valor stale.
       if (wasConfirmed && timeOff.kind === "VACATION" && timeOff.vacation) {
         const workingDays = timeOff.workingDays ?? 0;
-        const reversal = computeLedgerReversal(
-          timeOff.vacation.balanceDays,
-          timeOff.vacation.takenDays,
-          workingDays,
-        );
         await tx.consultantVacation.update({
           where: { id: timeOff.vacation.id },
           data: {
-            balanceDays: reversal.balanceDays,
-            takenDays: reversal.takenDays,
+            balanceDays: { increment: workingDays },
+            takenDays: { decrement: workingDays },
           },
         });
         await tx.auditEvent.create({
@@ -614,14 +654,7 @@ export async function cancelTimeOff(
             entityType: "ConsultantVacation",
             entityId: timeOff.vacation.id,
             action: "VACATION_BALANCE_REVERSED",
-            before: {
-              balanceDays: timeOff.vacation.balanceDays,
-              takenDays: timeOff.vacation.takenDays,
-            },
-            after: {
-              balanceDays: reversal.balanceDays,
-              takenDays: reversal.takenDays,
-            },
+            after: { reversedDays: workingDays },
           }),
         });
       }

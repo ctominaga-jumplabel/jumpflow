@@ -80,6 +80,8 @@ const h = vi.hoisted(() => {
       consultantId: string;
       balanceDays: number;
       takenDays: number;
+      accrualPeriodStart: Date;
+      accrualPeriodEnd: Date;
     }[],
     approvals: [] as Where[],
     audits: [] as Where[],
@@ -95,6 +97,21 @@ const h = vi.hoisted(() => {
   const nextId = (p: string) => `${p}-${++store.seq}`;
   const day = (d: Date) =>
     new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+
+  // Aplica um patch honrando os operadores {increment}/{decrement} do Prisma.
+  function applyOps(rec: Record<string, unknown>, data: Where) {
+    for (const [k, v] of Object.entries(data)) {
+      if (v && typeof v === "object" && ("increment" in v || "decrement" in v)) {
+        const cur = Number(rec[k] ?? 0);
+        rec[k] =
+          "increment" in v
+            ? cur + Number((v as Where).increment)
+            : cur - Number((v as Where).decrement);
+      } else {
+        rec[k] = v;
+      }
+    }
+  }
 
   function allocMatches(a: AllocRec, where: Where): boolean {
     if (where.consultantId && a.consultantId !== where.consultantId) return false;
@@ -306,11 +323,55 @@ const h = vi.hoisted(() => {
         }
         return { count };
       },
+      findMany: async ({ where }: { where: Where }) => {
+        return store.timeOffs
+          .filter((t) => {
+            if (where.consultantId && t.consultantId !== where.consultantId)
+              return false;
+            if (where.status?.in && !where.status.in.includes(t.status))
+              return false;
+            if (where.startDate?.lte && t.startDate.getTime() > where.startDate.lte.getTime())
+              return false;
+            if (where.endDate?.gte && t.endDate.getTime() < where.endDate.gte.getTime())
+              return false;
+            if (where.id?.not && t.id === where.id.not) return false;
+            return true;
+          })
+          .map((t) => ({ ...t }));
+      },
     },
     consultantVacation: {
+      findMany: async ({ where }: { where: Where }) => {
+        let rows = store.vacations.filter((v) => {
+          if (where.consultantId && v.consultantId !== where.consultantId)
+            return false;
+          if (where.balanceDays?.gt !== undefined && !(v.balanceDays > where.balanceDays.gt))
+            return false;
+          return true;
+        });
+        rows = [...rows].sort(
+          (a, b) => b.accrualPeriodStart.getTime() - a.accrualPeriodStart.getTime(),
+        );
+        return rows.map((v) => ({ ...v }));
+      },
+      updateMany: async ({ where, data }: { where: Where; data: Where }) => {
+        let count = 0;
+        for (const v of store.vacations) {
+          if (v.id !== where.id) continue;
+          if (
+            where.balanceDays?.gte !== undefined &&
+            !(v.balanceDays >= where.balanceDays.gte)
+          ) {
+            continue;
+          }
+          applyOps(v as unknown as Record<string, unknown>, data);
+          count += 1;
+        }
+        return { count };
+      },
       update: async ({ where, data }: { where: Where; data: Where }) => {
         const v = store.vacations.find((x) => x.id === where.id)!;
-        Object.assign(v, data);
+        applyOps(v as unknown as Record<string, unknown>, data);
         return { ...v };
       },
     },
@@ -471,7 +532,15 @@ function seedBase() {
     allocationPercent: 100,
     hoursPerDay: 8,
   });
-  s.vacations.push({ id: "v1", consultantId: "c1", balanceDays: 30, takenDays: 0 });
+  s.vacations.push({
+    id: "v1",
+    consultantId: "c1",
+    balanceDays: 30,
+    takenDays: 0,
+    // Período aquisitivo vigente (janela ampla p/ cobrir "hoje" real do runner).
+    accrualPeriodStart: utc("2020-01-01"),
+    accrualPeriodEnd: utc("2100-12-31"),
+  });
 }
 
 function asConsultant() {
@@ -497,16 +566,71 @@ const RANGE = { startDate: "2026-07-06", endDate: "2026-07-08" };
 describe("requestTimeOff", () => {
   beforeEach(seedBase);
 
-  it("cria REQUESTED com paid derivado e workingDays (exclui fim de semana)", async () => {
+  it("cria REQUESTED com paid derivado, workingDays e VÍNCULO de saldo resolvido no servidor (C3)", async () => {
     asConsultant();
     const res = await requestTimeOff({ kind: "VACATION", ...RANGE });
     expect(res.ok).toBe(true);
     if (!res.ok) return;
     expect(res.data.workingDays).toBe(3);
+    expect(res.data.vacationLinked).toBe(true);
     const to = h.store.timeOffs[0];
     expect(to.status).toBe("REQUESTED");
     expect(to.paid).toBe(true);
     expect(to.requestedByUserId).toBe("u-consultant");
+    // O servidor vinculou a ConsultantVacation própria, sem depender da UI.
+    expect(to.vacationId).toBe("v1");
+  });
+
+  it("A2: vacationId alheio no payload é IGNORADO (resolve sempre o próprio)", async () => {
+    // Saldo de OUTRO consultor — jamais deve ser vinculado.
+    h.store.consultants.push({
+      id: "c2",
+      userId: "u-other",
+      email: "o@x.com",
+      name: "Outro",
+    });
+    h.store.vacations.push({
+      id: "v-alien",
+      consultantId: "c2",
+      balanceDays: 30,
+      takenDays: 0,
+      accrualPeriodStart: utc("2020-01-01"),
+      accrualPeriodEnd: utc("2100-12-31"),
+    });
+    asConsultant();
+    const res = await requestTimeOff({
+      kind: "VACATION",
+      ...RANGE,
+      // Chave extra maliciosa; Zod (não-strict) descarta e o servidor ignora.
+      vacationId: "v-alien",
+    } as unknown as Parameters<typeof requestTimeOff>[0]);
+    expect(res.ok).toBe(true);
+    expect(h.store.timeOffs[0].vacationId).toBe("v1"); // o próprio, nunca v-alien
+  });
+
+  it("C3: férias sem ConsultantVacation com saldo segue SEM vínculo (aviso)", async () => {
+    h.store.vacations[0].balanceDays = 0; // sem saldo vinculável
+    asConsultant();
+    const res = await requestTimeOff({ kind: "VACATION", ...RANGE });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.data.vacationLinked).toBe(false);
+    expect(h.store.timeOffs[0].vacationId).toBeNull();
+  });
+
+  it("A1: recusa solicitar sobre intervalo já solicitado/confirmado (sobreposição)", async () => {
+    asConsultant();
+    const first = await requestTimeOff({ kind: "VACATION", ...RANGE });
+    expect(first.ok).toBe(true);
+    const dup = await requestTimeOff({
+      kind: "LEAVE",
+      startDate: "2026-07-07",
+      endDate: "2026-07-09",
+    });
+    expect(dup.ok).toBe(false);
+    if (dup.ok) return;
+    expect(dup.error).toBe("TIME_OFF_CONFLICT");
+    expect(h.store.timeOffs).toHaveLength(1);
   });
 
   it("recusa intervalo invertido", async () => {
@@ -527,11 +651,8 @@ describe("decideTimeOff — aprovação materializa + debita ledger", () => {
 
   async function requestAsConsultant(kind: "VACATION" | "LEAVE" | "OTHER") {
     asConsultant();
-    const r = await requestTimeOff({
-      kind,
-      ...RANGE,
-      vacationId: kind === "VACATION" ? "v1" : undefined,
-    });
+    // Sem vacationId no payload: o servidor resolve o saldo (C3).
+    const r = await requestTimeOff({ kind, ...RANGE });
     if (!r.ok) throw new Error("request failed");
     return r.data.id;
   }
@@ -645,6 +766,64 @@ describe("decideTimeOff — aprovação materializa + debita ledger", () => {
     expect(h.store.entries).toHaveLength(0);
   });
 
+  it("M1: débito atômico consome exatamente o saldo e nunca fica negativo", async () => {
+    h.store.vacations[0].balanceDays = 3; // igual aos 3 dias úteis
+    const id = await requestAsConsultant("VACATION");
+    asPeople();
+    const res = await decideTimeOff({ id, approve: true });
+    expect(res.ok).toBe(true);
+    expect(h.store.vacations[0].balanceDays).toBe(0);
+    expect(h.store.vacations[0].takenDays).toBe(3);
+  });
+
+  it("A1: bloqueia aprovação com ausência CONFIRMED sobreposta", async () => {
+    // Uma ausência já confirmada cobrindo 07..09.
+    h.store.timeOffs.push({
+      id: "to-confirmed",
+      consultantId: "c1",
+      kind: "VACATION",
+      startDate: utc("2026-07-07"),
+      endDate: utc("2026-07-09"),
+      status: "CONFIRMED",
+      note: null,
+      paid: true,
+      requestedByUserId: null,
+      requestedAt: null,
+      approvedByUserId: null,
+      decidedAt: null,
+      decisionComment: null,
+      vacationId: null,
+      workingDays: 3,
+    });
+    // Uma solicitação REQUESTED sobreposta (inserida direto, simulando pré-C3).
+    h.store.timeOffs.push({
+      id: "to-pending",
+      consultantId: "c1",
+      kind: "LEAVE",
+      startDate: utc("2026-07-06"),
+      endDate: utc("2026-07-08"),
+      status: "REQUESTED",
+      note: null,
+      paid: true,
+      requestedByUserId: "u-consultant",
+      requestedAt: new Date(),
+      approvedByUserId: null,
+      decidedAt: null,
+      decisionComment: null,
+      vacationId: null,
+      workingDays: 3,
+    });
+    asPeople();
+    const res = await decideTimeOff({ id: "to-pending", approve: true });
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.error).toBe("TIME_OFF_CONFLICT");
+    expect(h.store.entries).toHaveLength(0);
+    expect(h.store.timeOffs.find((t) => t.id === "to-pending")!.status).toBe(
+      "REQUESTED",
+    );
+  });
+
   it("reprovação exige comentário e grava REJECTED", async () => {
     const id = await requestAsConsultant("VACATION");
     asPeople();
@@ -664,7 +843,7 @@ describe("cancelTimeOff — reverte materialização e estorna ledger", () => {
 
   it("cancela CONFIRMED: apaga entries geradas e estorna o saldo", async () => {
     asConsultant();
-    const r = await requestTimeOff({ kind: "VACATION", ...RANGE, vacationId: "v1" });
+    const r = await requestTimeOff({ kind: "VACATION", ...RANGE });
     if (!r.ok) throw new Error("request failed");
     asPeople();
     await decideTimeOff({ id: r.data.id, approve: true });
