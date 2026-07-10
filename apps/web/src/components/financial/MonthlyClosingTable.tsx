@@ -19,6 +19,8 @@ import { FeedbackBanner, useFeedback } from "@/components/ui/Feedback";
 import { Modal } from "@/components/ui/Modal";
 import { SectionPanel } from "@/components/ui/SectionPanel";
 import { StatusBadge, type StatusTone } from "@/components/ui/StatusBadge";
+import { focusRingInput } from "@/lib/styles";
+import { cn } from "@/lib/utils";
 import { formatCurrency, formatCurrencyPrecise, formatHours } from "@/lib/format";
 import {
   fiscalDocumentStatusLabels,
@@ -72,6 +74,56 @@ export function MonthlyClosingTable({
     downloadUrl: string | null;
     stored: boolean;
   } | null>(null);
+  // D4 (Onda B): liberar o faturamento para o financeiro (transição CLOSE) exige
+  // justificativa. Capturamos num diálogo do design system (nunca window.confirm).
+  const [closeDialog, setCloseDialog] = useState<{ id: string } | null>(null);
+  const [justification, setJustification] = useState("");
+  const [justificationError, setJustificationError] = useState<string | null>(
+    null,
+  );
+
+  function openCloseDialog(id: string) {
+    if (isDemo) {
+      notify("info", "Transicao local simulada.");
+      return;
+    }
+    setJustification("");
+    setJustificationError(null);
+    setCloseDialog({ id });
+  }
+
+  function dismissCloseDialog() {
+    setCloseDialog(null);
+    setJustification("");
+    setJustificationError(null);
+  }
+
+  function handleConfirmClose() {
+    if (!closeDialog) return;
+    const text = justification.trim();
+    if (!text) {
+      setJustificationError(
+        "Informe uma justificativa para liberar o faturamento para o financeiro.",
+      );
+      return;
+    }
+    const id = closeDialog.id;
+    startTransition(async () => {
+      const result = await advanceRevenueClosing({
+        id,
+        action: "CLOSE",
+        justification: text,
+      });
+      if (result.ok) {
+        notify("success", "Faturamento liberado para o financeiro.");
+        setCloseDialog(null);
+        setJustification("");
+        setJustificationError(null);
+      } else {
+        setJustificationError(result.message);
+      }
+    });
+  }
 
   function handlePreInvoice(id: string) {
     if (isDemo) {
@@ -316,9 +368,9 @@ export function MonthlyClosingTable({
                 variant="primary"
                 icon={Lock}
                 disabled={isPending}
-                onClick={() => handleAdvance(r.id, "CLOSE")}
+                onClick={() => openCloseDialog(r.id)}
               >
-                Fechar
+                Liberar faturamento
               </ActionButton>
               <ActionButton
                 size="sm"
@@ -475,6 +527,65 @@ export function MonthlyClosingTable({
             srcDoc={preview.html}
             className="h-[60vh] w-full rounded-md border border-border bg-white"
           />
+        ) : null}
+      </Modal>
+
+      <Modal
+        open={closeDialog != null}
+        onClose={dismissCloseDialog}
+        title="Liberar faturamento para o financeiro"
+        description="Fecha o fechamento de receita e o entrega ao financeiro (libera pre-fatura e NFS-e). A justificativa fica registrada na trilha de auditoria."
+        footer={
+          <>
+            <ActionButton
+              size="sm"
+              variant="secondary"
+              disabled={isPending}
+              onClick={dismissCloseDialog}
+            >
+              Cancelar
+            </ActionButton>
+            <ActionButton
+              size="sm"
+              variant="primary"
+              icon={Lock}
+              disabled={isPending}
+              onClick={handleConfirmClose}
+            >
+              Liberar faturamento
+            </ActionButton>
+          </>
+        }
+      >
+        <label
+          htmlFor="closing-justification"
+          className="mb-1 block text-xs font-semibold text-medium"
+        >
+          Justificativa{" "}
+          <span className="font-normal text-soft">(obrigatoria)</span>
+        </label>
+        <textarea
+          id="closing-justification"
+          value={justification}
+          onChange={(e) => {
+            setJustification(e.target.value);
+            if (justificationError && e.target.value.trim().length > 0) {
+              setJustificationError(null);
+            }
+          }}
+          rows={4}
+          aria-invalid={justificationError != null}
+          placeholder="Ex.: Horas conferidas e aprovadas; valores conferem com o contrato."
+          className={cn(
+            "w-full resize-y rounded-md border border-border bg-surface px-3 py-2 text-sm text-strong placeholder:text-soft",
+            focusRingInput,
+            justificationError && "border-danger",
+          )}
+        />
+        {justificationError ? (
+          <p className="mt-1 text-xs font-medium text-danger">
+            {justificationError}
+          </p>
         ) : null}
       </Modal>
     </div>

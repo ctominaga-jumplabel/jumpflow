@@ -68,7 +68,26 @@ const advanceInputSchema = z.object({
     "REVERT_TO_REVIEW",
     "REOPEN",
   ]),
+  // D4 (Onda B): justificativa da liberação do faturamento para o financeiro.
+  // Opcional no schema (as demais transições não a exigem); a obrigatoriedade da
+  // transição CLOSE é validada abaixo, na action.
+  justification: z.string().trim().max(2000).optional(),
 });
+
+/**
+ * Append a timestamped, labeled line to a RevenueClosing.notes column without
+ * discarding the engine-generated notes already there. Keeps a human-auditable
+ * trail inline with the closing (the canonical trail is the AuditEvent).
+ */
+function appendClosingNote(
+  existing: string | null,
+  label: string,
+  text: string,
+): string {
+  const stamp = new Date().toISOString().slice(0, 10);
+  const line = `[${label} ${stamp}] ${text}`;
+  return existing && existing.trim().length > 0 ? `${existing}\n${line}` : line;
+}
 
 const closingIdInputSchema = z.object({
   closingId: z.string().min(1),
@@ -146,6 +165,7 @@ export async function generateMonthlyRevenueClosings(input: {
 export async function advanceRevenueClosing(input: {
   id: string;
   action: RevenueClosingAdvanceAction;
+  justification?: string;
 }): Promise<ActionResult<{ id: string; status: string }>> {
   try {
     ensureDatabase();
@@ -154,9 +174,23 @@ export async function advanceRevenueClosing(input: {
     const transition = revenueClosingTransitions[parsed.action];
     const dbUser = await resolveDbUser(user);
 
+    // D4 (Onda B): "liberar o faturamento para o financeiro" é a transição CLOSE
+    // (READY_TO_CLOSE -> CLOSED). Ela entrega o fechamento ao financeiro (destrava
+    // pré-fatura + NFS-e) e dispara notifyHoursReleased (PEOPLE + FINANCE), então
+    // exige uma justificativa registrada em notes + AuditEvent. As demais
+    // transições (revisar, pronto, voltar, reabrir, faturar) NÃO a exigem.
+    const justification =
+      parsed.action === "CLOSE" ? (parsed.justification ?? "").trim() : undefined;
+    if (parsed.action === "CLOSE" && !justification) {
+      throw new ActionError(
+        "INVALID_INPUT",
+        "Informe uma justificativa para liberar o faturamento para o financeiro.",
+      );
+    }
+
     const closing = await prisma.revenueClosing.findUnique({
       where: { id: parsed.id },
-      select: { id: true, status: true, totalAmount: true },
+      select: { id: true, status: true, totalAmount: true, notes: true },
     });
     if (!closing) {
       throw new ActionError("NOT_FOUND", "Fechamento nao encontrado.");
@@ -195,6 +229,11 @@ export async function advanceRevenueClosing(input: {
       };
       if (parsed.action === "CLOSE") {
         updateData.closedAt = new Date();
+        updateData.notes = appendClosingNote(
+          closing.notes,
+          "Liberacao faturamento",
+          justification as string,
+        );
       }
       if (parsed.action === "REOPEN") {
         updateData.closedAt = null;
@@ -216,7 +255,11 @@ export async function advanceRevenueClosing(input: {
           entityId: parsed.id,
           action: transition.auditAction,
           before: { status: closing.status },
-          after: { status: transition.next, totalAmount: Number(closing.totalAmount) },
+          after: {
+            status: transition.next,
+            totalAmount: Number(closing.totalAmount),
+            ...(justification ? { justification } : {}),
+          },
         }),
       });
     });
