@@ -33,11 +33,13 @@ import {
 } from "@/lib/consultants/curriculum";
 import {
   addressSchema,
+  adHocPaymentSchema,
   bankAccountSchema,
   benefitSchema,
   companyInfoSchema,
   compensationSchema,
   consultantDocumentDeleteSchema,
+  deleteAdHocPaymentSchema,
   curriculumBioSchema,
   generateCurriculumSnapshotSchema,
   consultantDocumentUploadSchema,
@@ -59,6 +61,9 @@ import {
   voucherBenefitsSchema,
   VOUCHER_TYPE_BY_KEY,
   type AddressInput,
+  type AdHocPaymentInput,
+  type AdHocPaymentKind,
+  type AdHocPaymentStatus,
   type BankAccountInput,
   type BenefitInput,
   type CltInfoInput,
@@ -1437,6 +1442,185 @@ export async function generateCurriculumSnapshot(
     );
     revalidatePath(CONSULTORES_PATH);
     return { ok: true, data: { id: snapshot.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Remuneracoes pontuais (Onda D / decisao D2)
+// ---------------------------------------------------------------------------
+// DADO FINANCEIRO SENSIVEL: cobranca do cliente e remuneracao do consultor sao
+// coisas distintas. A remuneracao pontual (bonus/acerto) e SEMPRE vinculada a um
+// projeto e entra no CUSTO REALIZADO da margem daquele projeto (aba
+// Acompanhamento). Fonte de verdade do valor: ConsultantAdHocPayment.amount.
+// RBAC server-side FINANCIAL_ROLES para ler e escrever; toda escrita gera
+// AuditEvent (create/update/delete).
+
+export interface AdHocPaymentView {
+  id: string;
+  consultantId: string;
+  projectId: string;
+  projectName: string;
+  allocationId: string | null;
+  amount: number;
+  payAt: string;
+  reason: string;
+  kind: AdHocPaymentKind;
+  status: AdHocPaymentStatus;
+}
+
+export interface AdHocPaymentProjectOption {
+  id: string;
+  name: string;
+  clientName: string;
+}
+
+export interface AdHocPaymentsView {
+  payments: AdHocPaymentView[];
+  projects: AdHocPaymentProjectOption[];
+}
+
+function adHocPaymentView(row: {
+  id: string;
+  consultantId: string;
+  projectId: string;
+  project: { name: string } | null;
+  allocationId: string | null;
+  amount: Prisma.Decimal;
+  payAt: Date;
+  reason: string;
+  kind: AdHocPaymentKind;
+  status: AdHocPaymentStatus;
+}): AdHocPaymentView {
+  return {
+    id: row.id,
+    consultantId: row.consultantId,
+    projectId: row.projectId,
+    projectName: row.project?.name ?? "Projeto",
+    allocationId: row.allocationId,
+    amount: Number(row.amount),
+    payAt: row.payAt.toISOString().slice(0, 10),
+    reason: row.reason,
+    kind: row.kind,
+    status: row.status,
+  };
+}
+
+/**
+ * Carrega as remuneracoes pontuais do consultor + a lista de projetos elegiveis
+ * para o seletor (obrigatorio no cadastro). Leitura financeira: FINANCIAL_ROLES.
+ */
+export async function loadConsultantAdHocPayments(
+  consultantId: string,
+): Promise<ActionResult<AdHocPaymentsView>> {
+  try {
+    ensureDatabase();
+    await requireRole(FINANCIAL_ROLES);
+    const [rows, projects] = await Promise.all([
+      prisma.consultantAdHocPayment.findMany({
+        where: { consultantId },
+        include: { project: { select: { name: true } } },
+        orderBy: [{ payAt: "desc" }, { createdAt: "desc" }],
+      }),
+      // Seletor de projeto (obrigatorio): lista todos os projetos, inclusive
+      // CLOSED, para permitir acertos pontuais retroativos de historico.
+      prisma.project.findMany({
+        select: { id: true, name: true, client: { select: { name: true } } },
+        orderBy: [{ status: "asc" }, { name: "asc" }],
+      }),
+    ]);
+    return {
+      ok: true,
+      data: {
+        payments: rows.map(adHocPaymentView),
+        projects: projects.map((p) => ({
+          id: p.id,
+          name: p.name,
+          clientName: p.client.name,
+        })),
+      },
+    };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/** Cria ou atualiza uma remuneracao pontual do consultor. FINANCIAL_ROLES, auditado. */
+export async function saveConsultantAdHocPayment(
+  input: AdHocPaymentInput,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(FINANCIAL_ROLES);
+    const parsed = parseInput(adHocPaymentSchema, input);
+    const data = {
+      consultantId: parsed.consultantId,
+      projectId: parsed.projectId,
+      allocationId: parsed.allocationId ?? null,
+      amount: parsed.amount,
+      payAt: new Date(`${parsed.payAt}T00:00:00.000Z`),
+      reason: parsed.reason,
+      kind: parsed.kind,
+      status: parsed.status,
+    };
+    const previous = parsed.id
+      ? await prisma.consultantAdHocPayment.findUnique({ where: { id: parsed.id } })
+      : null;
+    if (parsed.id && !previous) {
+      throw new ActionError("NOT_FOUND", "Remuneracao pontual nao encontrada.");
+    }
+    let row;
+    if (parsed.id) {
+      row = await prisma.consultantAdHocPayment.update({
+        where: { id: parsed.id },
+        data,
+      });
+    } else {
+      const user = await requireUser();
+      const dbUser = await resolveDbUser(user);
+      row = await prisma.consultantAdHocPayment.create({
+        data: { ...data, createdByUserId: dbUser?.id ?? null },
+      });
+    }
+    await audit(
+      "ConsultantAdHocPayment",
+      row.id,
+      previous ? "CONSULTANT_ADHOC_PAYMENT_UPDATED" : "CONSULTANT_ADHOC_PAYMENT_CREATED",
+      previous,
+      { ...data, amount: parsed.amount },
+    );
+    revalidatePath(CONSULTORES_PATH);
+    return { ok: true, data: { id: row.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/** Remove uma remuneracao pontual. FINANCIAL_ROLES, auditado. */
+export async function deleteConsultantAdHocPayment(
+  input: { id: string },
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(FINANCIAL_ROLES);
+    const parsed = parseInput(deleteAdHocPaymentSchema, input);
+    const previous = await prisma.consultantAdHocPayment.findUnique({
+      where: { id: parsed.id },
+    });
+    if (!previous) {
+      throw new ActionError("NOT_FOUND", "Remuneracao pontual nao encontrada.");
+    }
+    await prisma.consultantAdHocPayment.delete({ where: { id: parsed.id } });
+    await audit(
+      "ConsultantAdHocPayment",
+      parsed.id,
+      "CONSULTANT_ADHOC_PAYMENT_DELETED",
+      previous,
+      null,
+    );
+    revalidatePath(CONSULTORES_PATH);
+    return { ok: true, data: { id: parsed.id } };
   } catch (error) {
     return toFailure(error);
   }

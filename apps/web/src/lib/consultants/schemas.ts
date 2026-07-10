@@ -373,6 +373,34 @@ export const voucherBenefitsSchema = z.object({
   vt: optionalNumber,
 });
 
+export const AD_HOC_PAYMENT_KINDS = ["BONUS", "ADJUSTMENT", "OTHER"] as const;
+export const AD_HOC_PAYMENT_STATUSES = [
+  "PLANNED",
+  "PAID",
+  "CANCELLED",
+] as const;
+
+/**
+ * Remuneracao pontual do consultor (Onda D / decisao D2). Sempre vinculada a UM
+ * projeto (projectId obrigatorio): a pontual entra no custo/margem realizada
+ * daquele projeto. `allocationId` e opcional (vinculo fino a uma alocacao).
+ * `payAt` e date-only (YYYY-MM-DD), mesma convencao de Expense/Benefit. Dado
+ * financeiro: escrita restrita a FINANCIAL_ROLES e sempre auditada.
+ */
+export const adHocPaymentSchema = z.object({
+  id: optionalText(80),
+  consultantId: entityId,
+  projectId: entityId,
+  allocationId: optionalText(80),
+  amount: z.coerce.number().positive().max(9_999_999.99),
+  payAt: z.string().trim().min(10).max(10),
+  reason: z.string().trim().min(1, "Informe o motivo.").max(300),
+  kind: z.enum(AD_HOC_PAYMENT_KINDS),
+  status: z.enum(AD_HOC_PAYMENT_STATUSES),
+});
+
+export const deleteAdHocPaymentSchema = z.object({ id: entityId });
+
 export const lookupInputSchema = z.object({
   consultantId: entityId,
   value: z.string().trim().min(8).max(20),
@@ -420,6 +448,9 @@ export type BankAccountInput = z.infer<typeof bankAccountSchema>;
 export type CompensationInput = z.infer<typeof compensationSchema>;
 export type BenefitInput = z.infer<typeof benefitSchema>;
 export type VoucherBenefitsInput = z.infer<typeof voucherBenefitsSchema>;
+export type AdHocPaymentInput = z.infer<typeof adHocPaymentSchema>;
+export type AdHocPaymentKind = (typeof AD_HOC_PAYMENT_KINDS)[number];
+export type AdHocPaymentStatus = (typeof AD_HOC_PAYMENT_STATUSES)[number];
 export type CurriculumBioInput = z.infer<typeof curriculumBioSchema>;
 export type GenerateCurriculumSnapshotInput = z.infer<
   typeof generateCurriculumSnapshotSchema

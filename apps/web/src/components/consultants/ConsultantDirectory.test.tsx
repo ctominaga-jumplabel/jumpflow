@@ -7,6 +7,18 @@ vi.mock("@/app/app/consultores/actions", () => ({
   saveBankAccount: vi.fn(async () => ({ ok: true, data: { id: "bank-1" } })),
   saveCompensation: vi.fn(async () => ({ ok: true, data: { id: "comp-1" } })),
   saveConsultantIdentity: vi.fn(async () => ({ ok: true, data: { id: "con-1" } })),
+  loadConsultantAdHocPayments: vi.fn(async () => ({
+    ok: true,
+    data: { payments: [], projects: [] },
+  })),
+  saveConsultantAdHocPayment: vi.fn(async () => ({
+    ok: true,
+    data: { id: "adhoc-1" },
+  })),
+  deleteConsultantAdHocPayment: vi.fn(async () => ({
+    ok: true,
+    data: { id: "adhoc-1" },
+  })),
 }));
 
 describe("ConsultantDirectory", () => {

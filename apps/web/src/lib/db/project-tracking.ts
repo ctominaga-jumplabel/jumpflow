@@ -148,20 +148,29 @@ export async function loadProjectTracking(
   });
 
   // Faturamento fechado (complementar): soma de RevenueClosing não cancelados.
-  const [closingAgg, closingCount, receivableGroups] = await Promise.all([
-    prisma.revenueClosing.aggregate({
-      where: { projectId, status: { not: "CANCELLED" } },
-      _sum: { totalAmount: true, totalHours: true },
-    }),
-    prisma.revenueClosing.count({
-      where: { projectId, status: { not: "CANCELLED" } },
-    }),
-    prisma.projectReceivableSchedule.groupBy({
-      by: ["status"],
-      where: { projectId },
-      _sum: { amount: true },
-    }),
-  ]);
+  const [closingAgg, closingCount, receivableGroups, adHocAgg] =
+    await Promise.all([
+      prisma.revenueClosing.aggregate({
+        where: { projectId, status: { not: "CANCELLED" } },
+        _sum: { totalAmount: true, totalHours: true },
+      }),
+      prisma.revenueClosing.count({
+        where: { projectId, status: { not: "CANCELLED" } },
+      }),
+      prisma.projectReceivableSchedule.groupBy({
+        by: ["status"],
+        where: { projectId },
+        _sum: { amount: true },
+      }),
+      // D2 (Onda D): custo das remunerações pontuais do projeto. Janela = TODO o
+      // histórico do projeto (não canceladas), coerente com a base CUMULATIVA do
+      // realizado (horas aprovadas + fechamentos são acumulados, sem filtro de
+      // mês). Cada pontual soma ao custo realizado da margem deste projeto.
+      prisma.consultantAdHocPayment.aggregate({
+        where: { projectId, status: { not: "CANCELLED" } },
+        _sum: { amount: true },
+      }),
+    ]);
   const receivablesForecast = num(
     receivableGroups.find((g) => g.status === "FORECAST")?._sum.amount,
   );
@@ -182,9 +191,10 @@ export async function loadProjectTracking(
     closingsCount: closingCount,
     receivablesForecast,
     receivablesReceived,
-    // D2 (Onda D): quando ConsultantAdHocPayment existir, somar aqui o custo dos
-    // pagamentos pontuais REALIZADOS do projeto (ponto de extensão preparado no
-    // builder puro via `additionalRealizedCost`). Modelo NÃO criado nesta onda.
-    additionalRealizedCost: 0,
+    // D2 (Onda D): custo das remunerações pontuais REALIZADAS/PREVISTAS (status
+    // != CANCELLED) do projeto entra no custo realizado da margem, via o ponto
+    // de extensão `additionalRealizedCost` do builder puro. Janela: todo o
+    // histórico do projeto (base cumulativa do realizado).
+    additionalRealizedCost: round2(num(adHocAgg._sum.amount)),
   });
 }

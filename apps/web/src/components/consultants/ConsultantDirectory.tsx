@@ -1,7 +1,17 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { BadgeDollarSign, Building2, CreditCard, Edit, UserPlus, Users } from "lucide-react";
+import {
+  BadgeDollarSign,
+  Building2,
+  CreditCard,
+  Edit,
+  Gift,
+  Plus,
+  Trash2,
+  UserPlus,
+  Users,
+} from "lucide-react";
 import { ActionButton } from "@/components/ui/ActionButton";
 import { DataToolbar } from "@/components/ui/DataToolbar";
 import { FilterChip } from "@/components/ui/FilterChip";
@@ -19,14 +29,24 @@ import {
   type Seniority,
 } from "@/lib/mock-data/consultants";
 import {
+  deleteConsultantAdHocPayment,
+  loadConsultantAdHocPayments,
   loadConsultantProfile,
   saveBankAccount,
   saveCompensation,
+  saveConsultantAdHocPayment,
   saveConsultantIdentity,
   saveVoucherBenefits,
+  type AdHocPaymentsView,
+  type AdHocPaymentView,
 } from "@/app/app/consultores/actions";
 import {
+  AD_HOC_PAYMENT_KINDS,
+  AD_HOC_PAYMENT_STATUSES,
   CONTRACT_TYPES,
+  type AdHocPaymentInput,
+  type AdHocPaymentKind,
+  type AdHocPaymentStatus,
   type BankAccountInput,
   type CompensationInput,
   type ConsultantIdentityInput,
@@ -72,6 +92,7 @@ export function ConsultantDirectory({
   const [selected, setSelected] = useState<Consultant | null>(null);
   const [profile, setProfile] = useState<ConsultantProfile | null>(null);
   const [loadingProfile, setLoadingProfile] = useState(false);
+  const [adHoc, setAdHoc] = useState<AdHocPaymentsView | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
   // Carrega o perfil completo sob demanda (evita puxar todos os perfis na
@@ -79,7 +100,15 @@ export function ConsultantDirectory({
   async function openDetails(consultant: Consultant) {
     setSelected(consultant);
     setProfile(null);
+    setAdHoc(null);
     setMessage(null);
+    // Remuneracoes pontuais sao dado financeiro: carregadas sob demanda para
+    // quem pode gerenciar valores (independe de People). Leitura tambem gated
+    // server-side em loadConsultantAdHocPayments.
+    if (canManageFinancials) {
+      const adHocResult = await loadConsultantAdHocPayments(consultant.id);
+      if (adHocResult.ok) setAdHoc(adHocResult.data);
+    }
     // O perfil (dados pessoais/documentos) so e visivel/gerenciavel por People.
     // Usuarios apenas-financeiro ainda editam compensacao/VA-VR-VT abaixo.
     if (!canManagePeople) return;
@@ -96,9 +125,16 @@ export function ConsultantDirectory({
     if (result.ok) setProfile(result.data);
   }
 
+  async function reloadAdHoc() {
+    if (!selected || !canManageFinancials) return;
+    const result = await loadConsultantAdHocPayments(selected.id);
+    if (result.ok) setAdHoc(result.data);
+  }
+
   function closeDetails() {
     setSelected(null);
     setProfile(null);
+    setAdHoc(null);
   }
 
   const skillOptions = useMemo(
@@ -215,11 +251,13 @@ export function ConsultantDirectory({
         consultant={selected}
         profile={profile}
         loadingProfile={loadingProfile}
+        adHoc={adHoc}
         canManagePeople={canManagePeople}
         canManageFinancials={canManageFinancials}
         message={message}
         onMessage={setMessage}
         onReload={reloadProfile}
+        onReloadAdHoc={reloadAdHoc}
         onClose={closeDetails}
       />
     </div>
@@ -230,21 +268,25 @@ function ConsultantDetailModal({
   consultant,
   profile,
   loadingProfile,
+  adHoc,
   canManagePeople,
   canManageFinancials,
   message,
   onMessage,
   onReload,
+  onReloadAdHoc,
   onClose,
 }: {
   consultant: Consultant | null;
   profile: ConsultantProfile | null;
   loadingProfile: boolean;
+  adHoc: AdHocPaymentsView | null;
   canManagePeople: boolean;
   canManageFinancials: boolean;
   message: string | null;
   onMessage: (message: string | null) => void;
   onReload: () => void;
+  onReloadAdHoc: () => void;
   onClose: () => void;
 }) {
   const [identity, setIdentity] = useState<ConsultantIdentityInput | null>(null);
@@ -583,8 +625,374 @@ function ConsultantDetailModal({
             </ActionButton>
           </div>
         </section>
+
+        {canManageFinancials ? (
+          <section className="space-y-3 rounded-md border border-border p-3">
+            <div className="flex items-center gap-2 text-sm font-semibold text-strong">
+              <Gift aria-hidden="true" className="size-4" />
+              Remuneracoes pontuais
+            </div>
+            <p className="text-xs text-soft">
+              Bonus, acertos e outros pagamentos avulsos. Cada pontual e
+              vinculada a um projeto e entra no custo realizado da margem daquele
+              projeto (aba Acompanhamento).
+            </p>
+            <AdHocPaymentsSection
+              consultantId={consultantId}
+              data={adHoc}
+              onMessage={onMessage}
+              onReload={onReloadAdHoc}
+            />
+          </section>
+        ) : null}
       </div>
     </Modal>
+  );
+}
+
+const ADHOC_KIND_LABELS: Record<AdHocPaymentKind, string> = {
+  BONUS: "Bonus",
+  ADJUSTMENT: "Acerto",
+  OTHER: "Outro",
+};
+
+const ADHOC_STATUS_LABELS: Record<AdHocPaymentStatus, string> = {
+  PLANNED: "Prevista",
+  PAID: "Paga",
+  CANCELLED: "Cancelada",
+};
+
+const ADHOC_STATUS_TONE: Record<
+  AdHocPaymentStatus,
+  "info" | "success" | "neutral"
+> = {
+  PLANNED: "info",
+  PAID: "success",
+  CANCELLED: "neutral",
+};
+
+function todayIso() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function emptyAdHocDraft(consultantId: string): AdHocPaymentInput {
+  return {
+    id: undefined,
+    consultantId,
+    projectId: "",
+    allocationId: undefined,
+    amount: 0,
+    payAt: todayIso(),
+    reason: "",
+    kind: "BONUS",
+    status: "PLANNED",
+  };
+}
+
+/**
+ * Remuneracoes pontuais do consultor (Onda D / D2). Lista as pontuais existentes
+ * e um formulario para criar/editar (seletor de projeto OBRIGATORIO). Exclusao
+ * confirmada por Modal do design system (nunca window.confirm). Toda escrita
+ * passa por Server Action com RBAC financeiro + AuditEvent.
+ */
+function AdHocPaymentsSection({
+  consultantId,
+  data,
+  onMessage,
+  onReload,
+}: {
+  consultantId: string;
+  data: AdHocPaymentsView | null;
+  onMessage: (message: string | null) => void;
+  onReload: () => void;
+}) {
+  const [draft, setDraft] = useState<AdHocPaymentInput | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<AdHocPaymentView | null>(
+    null,
+  );
+  const [deleting, setDeleting] = useState(false);
+
+  if (!data) {
+    return (
+      <p className="rounded-md border border-border bg-surface-muted px-3 py-2 text-sm text-medium">
+        Carregando remuneracoes pontuais...
+      </p>
+    );
+  }
+
+  const projects = data.projects;
+
+  function startCreate() {
+    onMessage(null);
+    setDraft(emptyAdHocDraft(consultantId));
+  }
+
+  function startEdit(payment: AdHocPaymentView) {
+    onMessage(null);
+    setDraft({
+      id: payment.id,
+      consultantId,
+      projectId: payment.projectId,
+      allocationId: payment.allocationId ?? undefined,
+      amount: payment.amount,
+      payAt: payment.payAt,
+      reason: payment.reason,
+      kind: payment.kind,
+      status: payment.status,
+    });
+  }
+
+  async function save() {
+    if (!draft) return;
+    if (!draft.projectId) {
+      onMessage("Selecione o projeto da remuneracao pontual.");
+      return;
+    }
+    if (!(draft.amount > 0)) {
+      onMessage("Informe um valor maior que zero.");
+      return;
+    }
+    if (draft.reason.trim() === "") {
+      onMessage("Informe o motivo da remuneracao pontual.");
+      return;
+    }
+    setSaving(true);
+    const result = await saveConsultantAdHocPayment(draft);
+    setSaving(false);
+    if (result.ok) {
+      setDraft(null);
+      onMessage("Remuneracao pontual salva.");
+      onReload();
+    } else {
+      onMessage(result.message);
+    }
+  }
+
+  async function confirmDelete() {
+    if (!pendingDelete) return;
+    setDeleting(true);
+    const result = await deleteConsultantAdHocPayment({ id: pendingDelete.id });
+    setDeleting(false);
+    setPendingDelete(null);
+    if (result.ok) {
+      onMessage("Remuneracao pontual excluida.");
+      onReload();
+    } else {
+      onMessage(result.message);
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      {data.payments.length === 0 ? (
+        <p className="rounded-md border border-border bg-surface-muted px-3 py-2 text-sm text-medium">
+          Nenhuma remuneracao pontual registrada.
+        </p>
+      ) : (
+        <ul className="space-y-2">
+          {data.payments.map((payment) => (
+            <li
+              key={payment.id}
+              className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-surface-muted/40 px-3 py-2"
+            >
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-semibold text-strong">
+                    {formatBRL(payment.amount)}
+                  </span>
+                  <StatusBadge tone="neutral">
+                    {ADHOC_KIND_LABELS[payment.kind]}
+                  </StatusBadge>
+                  <StatusBadge tone={ADHOC_STATUS_TONE[payment.status]}>
+                    {ADHOC_STATUS_LABELS[payment.status]}
+                  </StatusBadge>
+                </div>
+                <p className="truncate text-xs text-soft">
+                  {payment.projectName} · {payment.payAt} · {payment.reason}
+                </p>
+              </div>
+              <div className="flex shrink-0 gap-2">
+                <ActionButton
+                  size="sm"
+                  variant="secondary"
+                  icon={Edit}
+                  onClick={() => startEdit(payment)}
+                >
+                  Editar
+                </ActionButton>
+                <ActionButton
+                  size="sm"
+                  variant="danger"
+                  icon={Trash2}
+                  onClick={() => {
+                    onMessage(null);
+                    setPendingDelete(payment);
+                  }}
+                >
+                  Excluir
+                </ActionButton>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {draft ? (
+        <div className="space-y-3 rounded-md border border-border p-3">
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="space-y-1 text-sm font-medium text-medium">
+              Projeto
+              <select
+                aria-label="Projeto da remuneracao pontual"
+                value={draft.projectId}
+                onChange={(event) =>
+                  setDraft({ ...draft, projectId: event.target.value })
+                }
+                className={fieldClass()}
+              >
+                <option value="">Selecione o projeto</option>
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.name} ({project.clientName})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <NumberInput
+              label="Valor (R$)"
+              value={draft.amount || undefined}
+              onChange={(value) => setDraft({ ...draft, amount: value ?? 0 })}
+            />
+            <label className="space-y-1 text-sm font-medium text-medium">
+              Data de pagamento
+              <input
+                type="date"
+                aria-label="Data de pagamento"
+                value={draft.payAt}
+                onChange={(event) =>
+                  setDraft({ ...draft, payAt: event.target.value })
+                }
+                className={fieldClass()}
+              />
+            </label>
+            <label className="space-y-1 text-sm font-medium text-medium">
+              Natureza
+              <select
+                aria-label="Natureza"
+                value={draft.kind}
+                onChange={(event) =>
+                  setDraft({
+                    ...draft,
+                    kind: event.target.value as AdHocPaymentKind,
+                  })
+                }
+                className={fieldClass()}
+              >
+                {AD_HOC_PAYMENT_KINDS.map((kind) => (
+                  <option key={kind} value={kind}>
+                    {ADHOC_KIND_LABELS[kind]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="space-y-1 text-sm font-medium text-medium">
+              Status
+              <select
+                aria-label="Status"
+                value={draft.status}
+                onChange={(event) =>
+                  setDraft({
+                    ...draft,
+                    status: event.target.value as AdHocPaymentStatus,
+                  })
+                }
+                className={fieldClass()}
+              >
+                {AD_HOC_PAYMENT_STATUSES.map((status) => (
+                  <option key={status} value={status}>
+                    {ADHOC_STATUS_LABELS[status]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="space-y-1 text-sm font-medium text-medium md:col-span-2">
+              Motivo
+              <input
+                aria-label="Motivo"
+                value={draft.reason}
+                onChange={(event) =>
+                  setDraft({ ...draft, reason: event.target.value })
+                }
+                className={fieldClass()}
+              />
+            </label>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <ActionButton
+              size="sm"
+              icon={BadgeDollarSign}
+              disabled={saving}
+              onClick={save}
+            >
+              {draft.id ? "Salvar alteracoes" : "Adicionar pontual"}
+            </ActionButton>
+            <ActionButton
+              size="sm"
+              variant="secondary"
+              disabled={saving}
+              onClick={() => setDraft(null)}
+            >
+              Cancelar
+            </ActionButton>
+          </div>
+        </div>
+      ) : (
+        <ActionButton size="sm" icon={Plus} onClick={startCreate}>
+          Adicionar remuneracao pontual
+        </ActionButton>
+      )}
+
+      <Modal
+        open={pendingDelete !== null}
+        onClose={() => (deleting ? undefined : setPendingDelete(null))}
+        title="Excluir remuneracao pontual"
+        description="Esta acao remove o registro financeiro e sera auditada."
+        footer={
+          <>
+            <ActionButton
+              variant="secondary"
+              disabled={deleting}
+              onClick={() => setPendingDelete(null)}
+            >
+              Cancelar
+            </ActionButton>
+            <ActionButton
+              variant="danger"
+              icon={Trash2}
+              disabled={deleting}
+              onClick={confirmDelete}
+            >
+              Excluir
+            </ActionButton>
+          </>
+        }
+      >
+        {pendingDelete ? (
+          <p className="text-sm text-medium">
+            Confirmar a exclusao de{" "}
+            <span className="font-semibold text-strong">
+              {formatBRL(pendingDelete.amount)}
+            </span>{" "}
+            ({ADHOC_KIND_LABELS[pendingDelete.kind]}) vinculada a{" "}
+            <span className="font-semibold text-strong">
+              {pendingDelete.projectName}
+            </span>
+            ?
+          </p>
+        ) : null}
+      </Modal>
+    </div>
   );
 }
 

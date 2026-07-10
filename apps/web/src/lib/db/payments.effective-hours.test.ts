@@ -54,6 +54,9 @@ vi.mock("@jumpflow/database", () => ({
   prisma: {
     timeEntry: { findMany: () => timeEntryFindMany() },
     consultantPayment: { findUnique: () => paymentFindUnique() },
+    // Onda D: sem pontuais nestes cenários (regressão do fluxo por horas).
+    consultantAdHocPayment: { findMany: async () => [] },
+    consultant: { findMany: async () => [] },
     $transaction: (cb: (tx: unknown) => unknown) => transaction(cb),
   },
   Prisma: { JsonNull: "__JsonNull__" },

@@ -213,6 +213,20 @@ export async function generateConsultantPayments(input: {
     },
   });
 
+  // Remuneracoes pontuais (Onda D / D2) cujo payAt cai no mes fechado. Regra de
+  // inclusao: entram no pagamento do mes as pontuais com status != CANCELLED
+  // (PLANNED + PAID). Cada uma vira uma LINHA extra do ConsultantPayment,
+  // vinculada ao projeto (projectId sempre presente), e SOMA ao total. A
+  // idempotencia segue o mesmo skip por consultor: se ja existe ConsultantPayment
+  // do mes, nada e regerado (as pontuais tampouco duplicam).
+  const adHocPayments = await prisma.consultantAdHocPayment.findMany({
+    where: {
+      status: { not: "CANCELLED" },
+      payAt: { gte: start, lt: end },
+    },
+    include: { project: { select: { name: true } } },
+  });
+
   const byConsultant = new Map<string, typeof entries>();
   for (const entry of entries) {
     const list = byConsultant.get(entry.consultantId) ?? [];
@@ -220,10 +234,39 @@ export async function generateConsultantPayments(input: {
     byConsultant.set(entry.consultantId, list);
   }
 
+  const adHocByConsultant = new Map<string, typeof adHocPayments>();
+  for (const payment of adHocPayments) {
+    const list = adHocByConsultant.get(payment.consultantId) ?? [];
+    list.push(payment);
+    adHocByConsultant.set(payment.consultantId, list);
+  }
+
+  // Consultores que so tem pontuais no mes (sem horas aprovadas) tambem devem
+  // ser pagos: buscamos a compensacao/beneficios deles a parte.
+  const adHocOnlyIds = [...adHocByConsultant.keys()].filter(
+    (id) => !byConsultant.has(id),
+  );
+  const adHocOnlyConsultants =
+    adHocOnlyIds.length > 0
+      ? await prisma.consultant.findMany({
+          where: { id: { in: adHocOnlyIds } },
+          include: { compensations: true, benefits: true },
+        })
+      : [];
+  const consultantById = new Map(
+    adHocOnlyConsultants.map((consultant) => [consultant.id, consultant]),
+  );
+
+  const allConsultantIds = new Set<string>([
+    ...byConsultant.keys(),
+    ...adHocByConsultant.keys(),
+  ]);
+
   let generated = 0;
   let skippedExisting = 0;
   await prisma.$transaction(async (tx) => {
-    for (const [consultantId, consultantEntries] of byConsultant) {
+    for (const consultantId of allConsultantIds) {
+      const consultantEntries = byConsultant.get(consultantId) ?? [];
       const existing = await tx.consultantPayment.findUnique({
         where: {
           consultantId_month_year: {
@@ -239,10 +282,12 @@ export async function generateConsultantPayments(input: {
         continue;
       }
 
-      const first = consultantEntries[0]!;
-      const compensation = activeOn(first.consultant.compensations, start);
+      const consultantRecord =
+        consultantEntries[0]?.consultant ?? consultantById.get(consultantId);
+      if (!consultantRecord) continue;
+      const compensation = activeOn(consultantRecord.compensations, start);
       if (!compensation) continue;
-      const benefits = first.consultant.benefits.filter(
+      const benefits = consultantRecord.benefits.filter(
         (benefit) => benefit.startsAt <= start && (!benefit.endsAt || start < benefit.endsAt),
       );
       const byProject = new Map<
@@ -295,6 +340,21 @@ export async function generateConsultantPayments(input: {
           amount: benefitCardAmount,
         });
       }
+      // Linhas de remuneracao pontual (D2): uma por ConsultantAdHocPayment do
+      // mes, vinculada ao projeto (projectId sempre presente). hours=0 e
+      // unitRate=amount (valor cheio, nao horario). Somam ao total sem passar
+      // pelos buckets de compensacao (CLT/PJ), pois nao derivam de horas nem de
+      // beneficio recorrente — sao acertos avulsos.
+      const adHocForConsultant = adHocByConsultant.get(consultantId) ?? [];
+      const adHocLines = adHocForConsultant.map((payment) => ({
+        projectId: payment.projectId,
+        description: `Remuneracao pontual (${payment.kind}) - ${payment.project?.name ?? "projeto"}`,
+        hours: 0,
+        unitRate: toNumber(payment.amount),
+        amount: toNumber(payment.amount),
+      }));
+      const adHocTotal = adHocLines.reduce((sum, line) => sum + line.amount, 0);
+
       const amounts = buildConsultantPaymentAmounts(
         {
           contractType: compensation.contractType,
@@ -317,11 +377,11 @@ export async function generateConsultantPayments(input: {
           cltNetAmount: amounts.cltNetAmount,
           pjAmount: amounts.pjAmount,
           benefitAmount: amounts.benefitAmount,
-          totalAmount: amounts.totalAmount,
+          totalAmount: amounts.totalAmount + adHocTotal,
         },
       });
       await tx.consultantPaymentLine.createMany({
-        data: [...projectLines, ...benefitLines].map((line) => ({
+        data: [...projectLines, ...benefitLines, ...adHocLines].map((line) => ({
           consultantPaymentId: payment.id,
           ...line,
         })),
