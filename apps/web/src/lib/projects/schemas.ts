@@ -128,6 +128,13 @@ export const receivableUpdateSchema = receivableInputSchema.extend({
 
 export const receivableRemoveSchema = z.object({ id: entityId });
 
+// Acompanhamento do projeto (Onda C): leitura de margem/custo/receita de um
+// projeto. Só o id do projeto entra; o RBAC/escopo (D5) é aplicado na action.
+export const projectTrackingInputSchema = z.object({ projectId: entityId });
+export type ProjectTrackingRequestInput = z.infer<
+  typeof projectTrackingInputSchema
+>;
+
 export type ProjectPaymentTypeInput = z.infer<typeof projectPaymentTypeSchema>;
 export type ProjectAcceptanceTermInput = z.infer<
   typeof projectAcceptanceTermSchema

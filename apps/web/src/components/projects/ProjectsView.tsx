@@ -35,7 +35,9 @@ import {
   updateProjectPaymentType,
   updateReceivable,
   upsertProjectBillingConfig,
+  getProjectTracking,
 } from "@/app/app/projetos/actions";
+import type { ProjectTracking } from "@/lib/projects/tracking";
 import type {
   AllocationInput,
   AllocationSkillInput,
@@ -79,6 +81,7 @@ import {
 import { cn } from "@/lib/utils";
 import { focusRingInput } from "@/lib/styles";
 import { ProjectStatusBadge, projectStatusLabels } from "./ProjectStatusBadge";
+import { ProjectTrackingPanel } from "./ProjectTrackingPanel";
 import {
   billingConfigToForm,
   formToBillingConfigItem,
@@ -100,7 +103,8 @@ type DetailTab =
   | "RATES"
   | "RECEIVABLES"
   | "BILLING"
-  | "APPROVAL";
+  | "APPROVAL"
+  | "TRACKING";
 
 /** Rótulos pt-BR dos tipos de pagamento do cliente (comercial). */
 const paymentTypeLabels: Record<ProjectPaymentType, string> = {
@@ -123,6 +127,15 @@ interface ProjectsViewProps {
   canManageSaleRates: boolean;
   canEditBillingConfig: boolean;
   canManageReceivables: boolean;
+  /** D5: usuário pode ver o Acompanhamento (Financeiro/Comercial/PM). */
+  canViewTracking?: boolean;
+  /**
+   * Quando definido, restringe a aba de Acompanhamento aos projetos onde
+   * managerUserId === este id (caso PROJECT_MANAGER sem papel amplo). Null =
+   * vê todos os projetos no escopo. O servidor revalida esse escopo de qualquer
+   * forma na server action.
+   */
+  trackingManagerUserId?: string | null;
 }
 
 const statusFilters: (ProjectStatus | "ALL")[] = [
@@ -212,6 +225,8 @@ export function ProjectsView({
   canManageSaleRates,
   canEditBillingConfig,
   canManageReceivables,
+  canViewTracking = false,
+  trackingManagerUserId = null,
 }: ProjectsViewProps) {
   // Single optimistic copy of the list, seeded from server props. It re-seeds
   // whenever the server sends fresh data (e.g. after a revalidatePath from a
@@ -238,6 +253,12 @@ export function ProjectsView({
   const [detailTab, setDetailTab] = useState<DetailTab>("ALLOCATIONS");
   const [billingForm, setBillingForm] =
     useState<ProjectBillingConfigInput | null>(null);
+  // Acompanhamento (D5): carregado sob demanda pela server action ao abrir a
+  // aba (nunca em useEffect — evita set-state-in-effect). O RBAC/escopo é
+  // reavaliado no servidor a cada chamada.
+  const [tracking, setTracking] = useState<ProjectTracking | null>(null);
+  const [trackingLoading, setTrackingLoading] = useState(false);
+  const [trackingError, setTrackingError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -313,10 +334,7 @@ export function ProjectsView({
         <button
           type="button"
           className="rounded-md px-2 py-1 tabular-nums hover:bg-surface-muted"
-          onClick={() => {
-            setDetailProjectId(project.id);
-            setDetailTab("ALLOCATIONS");
-          }}
+          onClick={() => openDetail(project.id)}
         >
           {project.allocatedConsultants}
         </button>
@@ -331,7 +349,7 @@ export function ProjectsView({
           <button
             type="button"
             aria-label={`Vínculos e valores de ${project.name}`}
-            onClick={() => setDetailProjectId(project.id)}
+            onClick={() => openDetail(project.id)}
             className="rounded-md p-2 text-medium hover:bg-surface-muted"
           >
             <Link2 aria-hidden="true" className="size-4" />
@@ -402,11 +420,40 @@ export function ProjectsView({
     });
   }
 
+  // Reset the on-demand tracking cache whenever the open project changes, so a
+  // stale snapshot from another project never flashes in the new modal.
+  function openDetail(projectId: string, tab: DetailTab = "ALLOCATIONS") {
+    setTracking(null);
+    setTrackingError(null);
+    setTrackingLoading(false);
+    setDetailProjectId(projectId);
+    setDetailTab(tab);
+  }
+
+  function loadTracking(projectId: string) {
+    setTracking(null);
+    setTrackingError(null);
+    setTrackingLoading(true);
+    startTransition(async () => {
+      const result = await getProjectTracking({ projectId });
+      if (result.ok) {
+        setTracking(result.data);
+      } else {
+        setTrackingError(result.message);
+      }
+      setTrackingLoading(false);
+    });
+  }
+
   // Initialize the billing form lazily when the Cobrança tab is opened (avoids
   // setState-in-effect; the form holds the user's edits across data refreshes).
   function handleDetailTabChange(next: DetailTab) {
     if (next === "BILLING" && detailProject) {
       setBillingForm(billingConfigToForm(detailProject));
+    }
+    // Acompanhamento: busca sob demanda na troca de aba (event handler).
+    if (next === "TRACKING" && detailProject) {
+      loadTracking(detailProject.id);
     }
     setDetailTab(next);
   }
@@ -927,10 +974,20 @@ export function ProjectsView({
         canManageSaleRates={canManageSaleRates}
         canEditBillingConfig={canEditBillingConfig}
         canManageReceivables={canManageReceivables}
+        canViewTracking={canViewTracking && mode === "db"}
+        trackingManagerUserId={trackingManagerUserId}
+        tracking={tracking}
+        trackingLoading={trackingLoading}
+        trackingError={trackingError}
         billingForm={billingForm}
         isPending={isPending}
         onTabChange={handleDetailTabChange}
-        onClose={() => setDetailProjectId(null)}
+        onClose={() => {
+          setDetailProjectId(null);
+          setTracking(null);
+          setTrackingError(null);
+          setTrackingLoading(false);
+        }}
         onAddAllocation={addAllocation}
         onEditAllocation={editAllocation}
         onRemoveAllocation={deleteAllocation}
@@ -1118,6 +1175,11 @@ function ProjectDetailModal({
   canManageSaleRates,
   canEditBillingConfig,
   canManageReceivables,
+  canViewTracking,
+  trackingManagerUserId,
+  tracking,
+  trackingLoading,
+  trackingError,
   billingForm,
   isPending,
   onTabChange,
@@ -1145,6 +1207,11 @@ function ProjectDetailModal({
   canManageSaleRates: boolean;
   canEditBillingConfig: boolean;
   canManageReceivables: boolean;
+  canViewTracking: boolean;
+  trackingManagerUserId: string | null;
+  tracking: ProjectTracking | null;
+  trackingLoading: boolean;
+  trackingError: string | null;
   billingForm: ProjectBillingConfigInput | null;
   isPending: boolean;
   onTabChange: (tab: DetailTab) => void;
@@ -1181,6 +1248,13 @@ function ProjectDetailModal({
     id: item.id,
     label: `${item.consultantName} - ${item.role}`,
   }));
+  // D5: a aba de Acompanhamento aparece para Financeiro/Comercial (todos os
+  // projetos) e para o PROJECT_MANAGER APENAS nos próprios projetos. O servidor
+  // reforça o mesmo escopo na server action (defesa em profundidade).
+  const showTracking =
+    canViewTracking &&
+    (trackingManagerUserId == null ||
+      project.managerUserId === trackingManagerUserId);
 
   return (
     <Modal
@@ -1327,6 +1401,13 @@ function ProjectDetailModal({
             label="Cobrança"
             active={tab === "BILLING"}
             onClick={() => onTabChange("BILLING")}
+          />
+        ) : null}
+        {showTracking ? (
+          <FilterChip
+            label="Acompanhamento"
+            active={tab === "TRACKING"}
+            onClick={() => onTabChange("TRACKING")}
           />
         ) : null}
       </div>
@@ -1586,6 +1667,18 @@ function ProjectDetailModal({
           project={project}
           canManageProjects={canManageProjects}
         />
+      ) : tab === "TRACKING" ? (
+        showTracking ? (
+          <ProjectTrackingPanel
+            tracking={tracking}
+            loading={trackingLoading}
+            error={trackingError}
+          />
+        ) : (
+          <p className="rounded-md border border-border bg-surface-muted px-3 py-2 text-sm text-soft">
+            Acompanhamento financeiro restrito por perfil.
+          </p>
+        )
       ) : canEditBillingConfig && billingForm ? (
         <BillingConfigPanel
           chargeType={project.billingChargeType}

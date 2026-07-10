@@ -8,6 +8,7 @@ import { requireRole, requireUser } from "@/lib/auth/guards";
 import {
   FINANCIAL_ROLES,
   hasRole,
+  PROJECT_TRACKING_BROAD_ROLES,
   PROJECT_WRITE_ROLES,
   SALE_RATE_ROLES,
 } from "@/lib/auth/route-permissions";
@@ -37,6 +38,7 @@ import {
   saleRateUpdateSchema,
   projectPaymentTypeSchema,
   projectAcceptanceTermSchema,
+  projectTrackingInputSchema,
   receivableInputSchema,
   receivableUpdateSchema,
   receivableRemoveSchema,
@@ -73,6 +75,8 @@ import {
   rangesOverlap,
   type SaleRateRange,
 } from "@/lib/projects/rates";
+import { loadProjectTracking } from "@/lib/db/project-tracking";
+import type { ProjectTracking } from "@/lib/projects/tracking";
 
 // A single Project is the source of truth behind three surfaces (Operação,
 // Comercial, Financeiro). A change in any one must refresh all three so none
@@ -1435,6 +1439,58 @@ export async function removeAllocationSkill(
     );
     revalidateProjectViews();
     return { ok: true, data: { id: parsed.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/**
+ * Acompanhamento do projeto (Onda C) — PREVISTO × REALIZADO de margem/custo/
+ * receita, com VALORES ABSOLUTOS. RBAC D5 aplicado no SERVIDOR (defesa em
+ * profundidade, mesmo que o cliente esconda a aba):
+ * - Papéis permitidos: FINANCEIRO ∪ COMERCIAL (PROJECT_TRACKING_BROAD_ROLES) veem
+ *   qualquer projeto; PROJECT_MANAGER só os PRÓPRIOS (managerUserId === seu id,
+ *   mesmo escopo usado nas Aprovações). Consultor e demais: FORBIDDEN.
+ * - Leitura pura: não muta nada, logo não gera AuditEvent.
+ */
+export async function getProjectTracking(input: {
+  projectId: string;
+}): Promise<ActionResult<ProjectTracking>> {
+  try {
+    ensureDatabase();
+    const parsed = parseInput(projectTrackingInputSchema, input);
+    const user = await requireUser();
+    const broad = hasRole(user, PROJECT_TRACKING_BROAD_ROLES);
+    const isProjectManager = hasRole(user, "PROJECT_MANAGER");
+    if (!broad && !isProjectManager) {
+      throw new ActionError(
+        "FORBIDDEN",
+        "Acompanhamento financeiro restrito ao gestor do projeto, Financeiro e Comercial.",
+      );
+    }
+    const project = await prisma.project.findUnique({
+      where: { id: parsed.projectId },
+      select: { managerUserId: true },
+    });
+    if (!project) {
+      throw new ActionError("NOT_FOUND", "Projeto nao encontrado.");
+    }
+    // PROJECT_MANAGER sem papel amplo: só os projetos que gerencia. Resolve o id
+    // REAL do usuário (sessão dev nunca casa com o banco) e compara com o gestor.
+    if (!broad && isProjectManager) {
+      const dbUser = await resolveDbUser(user);
+      if (!dbUser || project.managerUserId !== dbUser.id) {
+        throw new ActionError(
+          "FORBIDDEN",
+          "Voce so acompanha os projetos que gerencia.",
+        );
+      }
+    }
+    const tracking = await loadProjectTracking(parsed.projectId);
+    if (!tracking) {
+      throw new ActionError("NOT_FOUND", "Projeto nao encontrado.");
+    }
+    return { ok: true, data: tracking };
   } catch (error) {
     return toFailure(error);
   }

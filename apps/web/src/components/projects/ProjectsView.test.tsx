@@ -18,6 +18,7 @@ vi.mock("@/app/app/projetos/actions", () => ({
   addAllocationSkill: vi.fn(),
   removeAllocationSkill: vi.fn(),
   updateAllocationSkill: vi.fn(),
+  getProjectTracking: vi.fn(),
 }));
 
 function dbProject(managerName: string): ProjectItem {
