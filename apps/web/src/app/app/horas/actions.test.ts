@@ -174,6 +174,10 @@ const h = vi.hoisted(() => {
         return project ? { ...project } : null;
       },
     },
+    // Guarda de ausência (Onda D): sem ausências confirmadas neste mock.
+    consultantTimeOff: {
+      findFirst: async () => null,
+    },
     allocation: {
       findFirst: async ({
         where,

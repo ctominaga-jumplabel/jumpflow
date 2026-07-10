@@ -14,6 +14,7 @@ import {
   getConsultantForUser,
   recomputePeriodStatus,
 } from "@/lib/db/timesheet";
+import { findConfirmedTimeOffCovering } from "@/lib/db/time-off";
 import { resolveDbUser } from "@/lib/db/users";
 import { transcribeAudio } from "@/lib/transcription/transcribe";
 import {
@@ -60,6 +61,7 @@ import {
 import {
   addDays,
   parseIsoDateUtc,
+  toIsoDate,
   weekStartOf,
 } from "@/lib/timesheet/week";
 
@@ -243,6 +245,28 @@ async function ensureActiveAllocation(
   return allocation;
 }
 
+/**
+ * Guarda server-side (Onda D): recusa o POST de um lançamento de DIA ÚTIL
+ * (WORKDAY) numa data já coberta por ausência CONFIRMED do consultor. Só WORKDAY
+ * dispara — atividades de ausência (Férias/Licença/Ausência Remunerada) são
+ * exatamente o que a ausência materializa. Sem efeito para as demais atividades.
+ */
+async function assertNoConfirmedTimeOff(
+  db: Db,
+  consultantId: string,
+  activityType: string,
+  date: Date,
+): Promise<void> {
+  if (activityType !== "WORKDAY") return;
+  const off = await findConfirmedTimeOffCovering(db, consultantId, date);
+  if (off) {
+    throw new ActionError(
+      "TIME_OFF_CONFLICT",
+      `Você possui ausência confirmada em ${toIsoDate(date)}. Não é possível lançar Dia Útil nesta data.`,
+    );
+  }
+}
+
 export async function createTimeEntry(
   input: TimeEntryInput,
 ): Promise<ActionResult<{ id: string }>> {
@@ -270,6 +294,13 @@ export async function createTimeEntry(
       prisma,
       consultant.id,
       project.id,
+      date,
+    );
+    // Guarda de ausência: WORKDAY em data com ausência confirmada é recusado.
+    await assertNoConfirmedTimeOff(
+      prisma,
+      consultant.id,
+      parsed.activityType,
       date,
     );
 
@@ -449,6 +480,13 @@ export async function createWeeklyTimeEntries(
           counts.skippedOutOfAllocation += 1;
           continue;
         }
+        // Guarda de ausência: recusa WORKDAY em data com ausência confirmada.
+        await assertNoConfirmedTimeOff(
+          tx,
+          consultant.id,
+          parsed.activityType,
+          date,
+        );
         period ??= await upsertOpenPeriod(tx, consultant.id, weekStart);
         const created = await tx.timeEntry.create({
           data: {
@@ -574,6 +612,15 @@ export async function updateTimeEntry(
       date = newDate;
       allocationId = allocation.id;
     }
+
+    // Guarda de ausência: WORKDAY (atividade não muda no edit) em data coberta
+    // por ausência confirmada é recusado — inclusive ao mover a data.
+    await assertNoConfirmedTimeOff(
+      prisma,
+      consultant.id,
+      entry.activityType,
+      date,
+    );
 
     // Resolve the REAL db user BEFORE the transaction (audit FK).
     const dbUser = await requireDbUser(user);
@@ -879,6 +926,14 @@ export async function applyTimesheetDefault(
           counts.skippedExisting += 1;
           continue;
         }
+        // Guarda de ausência: um padrão WORKDAY não materializa em data com
+        // ausência confirmada.
+        await assertNoConfirmedTimeOff(
+          tx,
+          consultant.id,
+          allocation.timesheetDefault!.activityType,
+          date,
+        );
         const def = allocation.timesheetDefault!;
         const created = await tx.timeEntry.create({
           data: {

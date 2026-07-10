@@ -28,6 +28,11 @@ export type ErrorCode =
   | "FILE_TOO_LARGE"
   | "ATTACHMENT_LOCKED"
   | "SELF_APPROVAL"
+  // Fluxo de ausência (Onda D): saldo de férias, conflito com dia útil e
+  // guarda de lançamento em data coberta por ausência confirmada.
+  | "INSUFFICIENT_BALANCE"
+  | "WORKDAY_CONFLICT"
+  | "TIME_OFF_CONFLICT"
   // Access management (Round 5): invitations + roles/status.
   | "LAST_ADMIN"
   | "ALREADY_HAS_ACCESS"
