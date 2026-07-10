@@ -1144,6 +1144,8 @@ const PERMISSION_CATALOG = [
   { code: "ADMIN_ACESSOS", name: "Acessos (usuários e convites)", module: "Administração", sort: 120, view: ADMIN_ONLY, create: ADMIN_ONLY, edit: ADMIN_ONLY, del: ADMIN_ONLY },
   { code: "CONFIGURACOES_PERMISSOES", name: "Matriz de Permissões", module: "Administração", sort: 121, view: ADMIN_ONLY, edit: ADMIN_ONLY },
   { code: "CONFIGURACOES_NOTIFICACOES", name: "Regras de Notificação", module: "Administração", sort: 122, view: ADMIN_ONLY, create: ADMIN_ONLY, edit: ADMIN_ONLY, del: ADMIN_ONLY },
+  // Feriados (Onda A-ext): calendário operacional gerido por ADMIN + PEOPLE (DP).
+  { code: "CONFIGURACOES_FERIADOS", name: "Feriados", module: "Administração", sort: 123, view: PEOPLE_MANAGE, create: PEOPLE_MANAGE, edit: PEOPLE_MANAGE, del: PEOPLE_MANAGE },
 ];
 
 async function seedPermissions() {

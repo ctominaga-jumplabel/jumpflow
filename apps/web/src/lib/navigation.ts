@@ -7,6 +7,7 @@ import {
   BookOpen,
   Building2,
   CalendarCheck,
+  CalendarDays,
   CalendarRange,
   ClipboardCheck,
   Clock,
@@ -464,6 +465,19 @@ export const adminNavigation: NavItemDef[] = [
     description:
       "Define, por evento, quem é notificado e por qual canal (e-mail ou Teams).",
     requiredRoles: ["ADMIN"],
+  },
+  {
+    // Calendário de feriados (Onda A-ext). Cadastro com aplicabilidade por
+    // projeto: sem vínculo = global; com vínculo = só os projetos. Gerido por
+    // ADMIN + PEOPLE (calendário operacional/DP); a escrita é enforced no
+    // servidor (requireRole) e a visibilidade pela matriz (view).
+    label: "Feriados",
+    href: "/app/admin/feriados",
+    permissionCode: "CONFIGURACOES_FERIADOS",
+    icon: CalendarDays,
+    description:
+      "Calendário de feriados nacionais, estaduais e municipais, com aplicabilidade por projeto.",
+    requiredRoles: ["ADMIN", "PEOPLE"],
   },
 ];
 
