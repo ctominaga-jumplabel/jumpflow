@@ -54,6 +54,13 @@ function firstIssue(error: z.ZodError): string {
   return error.issues[0]?.message ?? "Dados inválidos.";
 }
 
+/** pt-br message for a project-aware duplicate (global vs project conflict). */
+function duplicateMessage(conflictProjectName?: string): string {
+  return conflictProjectName
+    ? `Já existe um feriado nesta data para o projeto "${conflictProjectName}".`
+    : "Já existe um feriado global nesta data (mesma abrangência e região).";
+}
+
 export async function createHolidayAction(
   input: HolidayFormInput,
 ): Promise<ActionResult<{ id: string }>> {
@@ -67,17 +74,17 @@ export async function createHolidayAction(
     const { findDuplicateHoliday, createHoliday } = await import(
       "@/lib/db/holidays"
     );
-    const duplicate = await findDuplicateHoliday({
+    const dup = await findDuplicateHoliday({
       date: parsed.data.date,
       scope: parsed.data.scope,
       region: parsed.data.region,
+      projectIds: parsed.data.projectIds,
     });
-    if (duplicate) {
+    if (dup.duplicate) {
       return {
         ok: false,
         error: "DUPLICATE_ENTRY",
-        message:
-          "Já existe um feriado com a mesma data, abrangência e região.",
+        message: duplicateMessage(dup.conflictProjectName),
       };
     }
     const created = await createHoliday({
@@ -125,18 +132,18 @@ export async function updateHolidayAction(
     const { findDuplicateHoliday, updateHoliday } = await import(
       "@/lib/db/holidays"
     );
-    const duplicate = await findDuplicateHoliday({
+    const dup = await findDuplicateHoliday({
       date: parsed.data.date,
       scope: parsed.data.scope,
       region: parsed.data.region,
+      projectIds: parsed.data.projectIds,
       excludeId: parsed.data.id,
     });
-    if (duplicate) {
+    if (dup.duplicate) {
       return {
         ok: false,
         error: "DUPLICATE_ENTRY",
-        message:
-          "Já existe um feriado com a mesma data, abrangência e região.",
+        message: duplicateMessage(dup.conflictProjectName),
       };
     }
     const updated = await updateHoliday(parsed.data.id, {
@@ -179,13 +186,24 @@ export async function deleteHolidayAction(
     return { ok: false, error: "INVALID_INPUT", message: "Dados inválidos." };
   }
   try {
-    const { deleteHoliday } = await import("@/lib/db/holidays");
+    const { getHolidayById, deleteHoliday } = await import("@/lib/db/holidays");
+    // Snapshot BEFORE the delete so the audit trail can reconstruct it (N3).
+    const before = await getHolidayById(parsed.data.id);
     await deleteHoliday(parsed.data.id);
     await recordAuditEvent({
       actorUserId: actor?.id ?? null,
       entityType: "Holiday",
       entityId: parsed.data.id,
       action: "HOLIDAY_DELETED",
+      before: before
+        ? {
+            date: before.date,
+            name: before.name,
+            scope: before.scope,
+            region: before.region,
+            projectIds: before.projects.map((p) => p.id),
+          }
+        : undefined,
     });
     revalidatePath(ROUTE);
     return { ok: true, data: parsed.data };

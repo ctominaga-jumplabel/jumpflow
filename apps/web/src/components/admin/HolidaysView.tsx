@@ -2,14 +2,17 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarPlus, Check, Pencil, Search, Trash2, X } from "lucide-react";
+import { CalendarPlus, Pencil, Search, Trash2 } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
+import { ActionButton } from "@/components/ui/ActionButton";
 import {
   createHolidayAction,
   deleteHolidayAction,
   updateHolidayAction,
 } from "@/app/app/admin/feriados/actions";
 import type { HolidayScopeKey, HolidayView } from "@/lib/db/holidays";
+import { cn } from "@/lib/utils";
+import { focusRingInput } from "@/lib/styles";
 
 const SCOPE_LABELS: Record<HolidayScopeKey, string> = {
   NATIONAL: "Nacional",
@@ -18,12 +21,10 @@ const SCOPE_LABELS: Record<HolidayScopeKey, string> = {
 };
 const SCOPES = Object.keys(SCOPE_LABELS) as HolidayScopeKey[];
 
-const inputCls =
-  "rounded-md border border-[#d7d8cf] bg-white px-2.5 py-1.5 text-sm text-ink";
-const btnPrimary =
-  "inline-flex items-center gap-1.5 rounded-md border-2 border-ink bg-[#2457ff] px-3 py-1.5 text-sm font-bold text-white shadow-[3px_3px_0_#111814] disabled:opacity-60";
-const btnGhost =
-  "inline-flex items-center gap-1.5 rounded-md border border-ink bg-white px-2.5 py-1.5 text-sm font-semibold text-ink disabled:opacity-60";
+const inputCls = cn(
+  "rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm text-strong",
+  focusRingInput,
+);
 
 function formatDate(iso: string): string {
   const [y, m, d] = iso.split("-");
@@ -49,28 +50,28 @@ export function HolidaysView({
   const router = useRouter();
   const [editing, setEditing] = useState<HolidayView | null>(null);
   const [creating, setCreating] = useState(false);
+  const [toDelete, setToDelete] = useState<HolidayView | null>(null);
   const [pending, start] = useTransition();
   const [rowError, setRowError] = useState<string | null>(null);
 
   function handleYearChange(value: string) {
-    router.push(value ? `/app/admin/feriados?ano=${value}` : "/app/admin/feriados");
+    router.push(
+      value ? `/app/admin/feriados?ano=${value}` : "/app/admin/feriados",
+    );
   }
 
-  function handleDelete(holiday: HolidayView) {
-    if (
-      !window.confirm(
-        `Remover o feriado "${holiday.name}" (${formatDate(holiday.date)})?`,
-      )
-    ) {
-      return;
-    }
+  function confirmDelete() {
+    if (!toDelete) return;
+    const id = toDelete.id;
     setRowError(null);
     start(async () => {
-      const r = await deleteHolidayAction({ id: holiday.id });
+      const r = await deleteHolidayAction({ id });
       if (r.ok) {
+        setToDelete(null);
         router.refresh();
       } else {
         setRowError(r.message);
+        setToDelete(null);
       }
     });
   }
@@ -79,7 +80,7 @@ export function HolidaysView({
     <div className="space-y-6">
       {/* Toolbar */}
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <label className="flex flex-col gap-1 text-xs text-[#6d756f]">
+        <label className="flex flex-col gap-1 text-xs text-soft">
           Ano
           <select
             className={inputCls}
@@ -94,27 +95,27 @@ export function HolidaysView({
             ))}
           </select>
         </label>
-        <button
-          type="button"
-          className={btnPrimary}
+        <ActionButton
+          size="sm"
+          icon={CalendarPlus}
           onClick={() => setCreating(true)}
         >
-          <CalendarPlus size={16} /> Novo feriado
-        </button>
+          Novo feriado
+        </ActionButton>
       </div>
 
-      {rowError && <p className="text-sm text-[#b91c1c]">{rowError}</p>}
+      {rowError && <p className="text-sm text-danger">{rowError}</p>}
 
       {/* List */}
       {holidays.length === 0 ? (
-        <p className="text-sm text-[#6d756f]">
+        <p className="text-sm text-medium">
           Nenhum feriado cadastrado{selectedYear ? ` em ${selectedYear}` : ""}.
           Cadastre o primeiro em &ldquo;Novo feriado&rdquo;.
         </p>
       ) : (
-        <div className="overflow-hidden rounded-md border-2 border-ink bg-white shadow-[4px_4px_0_#111814]">
+        <div className="overflow-hidden rounded-[var(--radius-card)] border-2 border-ink bg-surface shadow-[4px_4px_0_0_var(--color-ink)]">
           <table className="w-full text-left text-sm">
-            <thead className="border-b-2 border-ink bg-[#f4f5f0] text-xs uppercase tracking-wide text-[#6d756f]">
+            <thead className="border-b-2 border-ink bg-surface-muted text-xs uppercase tracking-wide text-soft">
               <tr>
                 <th className="px-4 py-2.5 font-semibold">Data</th>
                 <th className="px-4 py-2.5 font-semibold">Feriado</th>
@@ -125,20 +126,20 @@ export function HolidaysView({
             </thead>
             <tbody>
               {holidays.map((h) => (
-                <tr key={h.id} className="border-b border-[#eceff3] last:border-0">
-                  <td className="whitespace-nowrap px-4 py-2.5 font-medium text-ink">
+                <tr key={h.id} className="border-b border-border last:border-0">
+                  <td className="whitespace-nowrap px-4 py-2.5 font-medium text-strong">
                     {formatDate(h.date)}
                   </td>
-                  <td className="px-4 py-2.5 text-ink">{h.name}</td>
-                  <td className="px-4 py-2.5 text-[#42524a]">
+                  <td className="px-4 py-2.5 text-strong">{h.name}</td>
+                  <td className="px-4 py-2.5 text-medium">
                     <Badge>{SCOPE_LABELS[h.scope]}</Badge>
                     {h.region && (
-                      <span className="ml-1.5 text-xs text-[#6d756f]">
+                      <span className="ml-1.5 text-xs text-soft">
                         {h.region}
                       </span>
                     )}
                   </td>
-                  <td className="px-4 py-2.5 text-[#42524a]">
+                  <td className="px-4 py-2.5 text-medium">
                     {h.projects.length === 0 ? (
                       <Badge>Global (todos os projetos)</Badge>
                     ) : (
@@ -152,21 +153,23 @@ export function HolidaysView({
                   <td className="whitespace-nowrap px-4 py-2.5 text-right">
                     <button
                       type="button"
-                      className="mr-2 text-ink"
+                      className="mr-3 text-medium transition-colors hover:text-strong disabled:opacity-50"
                       title="Editar feriado"
+                      aria-label={`Editar ${h.name}`}
                       disabled={pending}
                       onClick={() => setEditing(h)}
                     >
-                      <Pencil size={16} />
+                      <Pencil aria-hidden="true" className="size-4" />
                     </button>
                     <button
                       type="button"
-                      className="text-[#b91c1c]"
+                      className="text-danger transition-colors hover:opacity-80 disabled:opacity-50"
                       title="Remover feriado"
+                      aria-label={`Remover ${h.name}`}
                       disabled={pending}
-                      onClick={() => handleDelete(h)}
+                      onClick={() => setToDelete(h)}
                     >
-                      <Trash2 size={16} />
+                      <Trash2 aria-hidden="true" className="size-4" />
                     </button>
                   </td>
                 </tr>
@@ -192,6 +195,43 @@ export function HolidaysView({
           }}
         />
       )}
+
+      {/* Delete confirmation — design-system Modal (mesmo padrão do TimeEntryForm). */}
+      <Modal
+        open={toDelete !== null}
+        onClose={() => setToDelete(null)}
+        title="Remover feriado?"
+        description="Os vínculos com projetos serão removidos junto. Esta ação não pode ser desfeita."
+        footer={
+          <>
+            <ActionButton
+              variant="secondary"
+              size="sm"
+              disabled={pending}
+              onClick={() => setToDelete(null)}
+            >
+              Cancelar
+            </ActionButton>
+            <ActionButton
+              variant="danger"
+              size="sm"
+              icon={Trash2}
+              disabled={pending}
+              onClick={confirmDelete}
+            >
+              Remover
+            </ActionButton>
+          </>
+        }
+      >
+        {toDelete && (
+          <p className="text-sm text-medium">
+            Remover{" "}
+            <strong className="text-strong">{toDelete.name}</strong> (
+            {formatDate(toDelete.date)})?
+          </p>
+        )}
+      </Modal>
     </div>
   );
 }
@@ -221,11 +261,21 @@ function HolidayFormModal({
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
+  // N5: the active-projects list may not include a project already linked to
+  // this holiday (e.g. it was closed). Merge the linked projects in so they can
+  // be unchecked. Dedup by id, sorted by name.
+  const options = useMemo<ProjectOption[]>(() => {
+    const byId = new Map<string, ProjectOption>();
+    for (const p of projects) byId.set(p.id, p);
+    for (const p of holiday?.projects ?? []) if (!byId.has(p.id)) byId.set(p.id, p);
+    return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+  }, [projects, holiday]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return projects;
-    return projects.filter((p) => p.name.toLowerCase().includes(q));
-  }, [projects, search]);
+    if (!q) return options;
+    return options.filter((p) => p.name.toLowerCase().includes(q));
+  }, [options, search]);
 
   function toggle(id: string) {
     setSelected((prev) => {
@@ -263,23 +313,28 @@ function HolidayFormModal({
       description="Sem projetos selecionados, o feriado vale para todos (global)."
       footer={
         <>
-          <button type="button" className={btnGhost} onClick={onClose} disabled={pending}>
-            <X size={16} /> Cancelar
-          </button>
-          <button
-            type="button"
-            className={btnPrimary}
-            onClick={handleSubmit}
+          <ActionButton
+            variant="secondary"
+            size="sm"
             disabled={pending}
+            onClick={onClose}
           >
-            <Check size={16} /> {isEdit ? "Salvar" : "Cadastrar"}
-          </button>
+            Cancelar
+          </ActionButton>
+          <ActionButton
+            variant="primary"
+            size="sm"
+            disabled={pending}
+            onClick={handleSubmit}
+          >
+            {isEdit ? "Salvar" : "Cadastrar"}
+          </ActionButton>
         </>
       }
     >
       <div className="space-y-4">
         <div className="grid grid-cols-2 gap-3">
-          <label className="flex flex-col gap-1 text-xs text-[#6d756f]">
+          <label className="flex flex-col gap-1 text-xs text-soft">
             Data
             <input
               type="date"
@@ -288,7 +343,7 @@ function HolidayFormModal({
               onChange={(e) => setDate(e.target.value)}
             />
           </label>
-          <label className="flex flex-col gap-1 text-xs text-[#6d756f]">
+          <label className="flex flex-col gap-1 text-xs text-soft">
             Abrangência
             <select
               className={inputCls}
@@ -304,7 +359,7 @@ function HolidayFormModal({
           </label>
         </div>
 
-        <label className="flex flex-col gap-1 text-xs text-[#6d756f]">
+        <label className="flex flex-col gap-1 text-xs text-soft">
           Nome do feriado
           <input
             className={inputCls}
@@ -315,7 +370,7 @@ function HolidayFormModal({
         </label>
 
         {scope !== "NATIONAL" && (
-          <label className="flex flex-col gap-1 text-xs text-[#6d756f]">
+          <label className="flex flex-col gap-1 text-xs text-soft">
             {scope === "STATE" ? "UF (estado)" : "Município"}
             <input
               className={inputCls}
@@ -327,15 +382,19 @@ function HolidayFormModal({
         )}
 
         {/* Projects multi-select with search */}
-        <div className="flex flex-col gap-1.5 text-xs text-[#6d756f]">
+        <div className="flex flex-col gap-1.5 text-xs text-soft">
           <span>
-            Projetos ({selected.size === 0 ? "global" : `${selected.size} selecionado(s)`})
+            Projetos (
+            {selected.size === 0
+              ? "global"
+              : `${selected.size} selecionado(s)`}
+            )
           </span>
-          <div className="rounded-md border border-[#d7d8cf] bg-white">
-            <div className="flex items-center gap-2 border-b border-[#eceff3] px-2.5 py-1.5">
-              <Search size={14} className="text-[#6d756f]" />
+          <div className="rounded-md border border-border bg-surface">
+            <div className="flex items-center gap-2 border-b border-border px-2.5 py-1.5">
+              <Search aria-hidden="true" className="size-3.5 text-soft" />
               <input
-                className="w-full bg-transparent text-sm text-ink outline-none"
+                className="w-full bg-transparent text-sm text-strong outline-none"
                 placeholder="Buscar projeto…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -343,13 +402,13 @@ function HolidayFormModal({
             </div>
             <ul className="max-h-44 overflow-y-auto py-1">
               {filtered.length === 0 ? (
-                <li className="px-3 py-2 text-sm text-[#6d756f]">
+                <li className="px-3 py-2 text-sm text-soft">
                   Nenhum projeto encontrado.
                 </li>
               ) : (
                 filtered.map((p) => (
                   <li key={p.id}>
-                    <label className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm text-ink hover:bg-[#f4f5f0]">
+                    <label className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm text-strong hover:bg-surface-muted">
                       <input
                         type="checkbox"
                         checked={selected.has(p.id)}
@@ -362,12 +421,12 @@ function HolidayFormModal({
               )}
             </ul>
           </div>
-          <p className="text-[11px] text-[#6d756f]">
+          <p className="text-[11px] text-soft">
             Sem projetos selecionados = vale para todos os projetos (global).
           </p>
         </div>
 
-        {error && <p className="text-sm text-[#b91c1c]">{error}</p>}
+        {error && <p className="text-sm text-danger">{error}</p>}
       </div>
     </Modal>
   );
@@ -375,7 +434,7 @@ function HolidayFormModal({
 
 function Badge({ children }: { children: React.ReactNode }) {
   return (
-    <span className="rounded bg-[#eceff3] px-2 py-0.5 text-xs font-medium text-[#42524a]">
+    <span className="rounded bg-surface-muted px-2 py-0.5 text-xs font-medium text-medium">
       {children}
     </span>
   );

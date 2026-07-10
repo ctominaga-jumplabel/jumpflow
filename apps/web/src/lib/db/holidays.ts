@@ -42,11 +42,56 @@ function fromDbDate(value: Date): string {
   return value.toISOString().slice(0, 10);
 }
 
-/** Normalize a region: national holidays carry no region. */
-function normalizeRegion(scope: HolidayScopeKey, region?: string | null): string | null {
+/**
+ * Normalize a region: national holidays carry no region. For STATE/CITY the
+ * value is trimmed AND upper-cased so "sp" / " SP " never escape the duplicate
+ * check as distinct regions (N4).
+ */
+export function normalizeRegion(
+  scope: HolidayScopeKey,
+  region?: string | null,
+): string | null {
   if (scope === "NATIONAL") return null;
-  const trimmed = region?.trim();
+  const trimmed = region?.trim().toUpperCase();
   return trimmed ? trimmed : null;
+}
+
+/** Outcome of the project-aware duplicate check. */
+export interface HolidayDuplicate {
+  duplicate: boolean;
+  /** For a project conflict, the name of the shared project (pt-br message). */
+  conflictProjectName?: string;
+}
+
+/**
+ * Pure, project-aware duplicate rule (R1 fix). Given the OTHER holidays that
+ * already share the same (date, scope, region) and the desired set of linked
+ * projects, decide whether the new/edited holiday collides.
+ *
+ * - GLOBAL (no desired projects): collides only with another GLOBAL holiday on
+ *   the same key. Two distinct global holidays on the same day are a duplicate.
+ * - PROJECT-scoped: collides only if some candidate shares at least one linked
+ *   project (same project booked twice that day). Disjoint project sets are
+ *   allowed — e.g. "Folga Cliente A"→X and "Folga Cliente B"→Y on the same date.
+ *
+ * A global candidate never conflicts with a project-scoped request (and vice
+ * versa) because they share no project id; that overlap is legitimate.
+ * Pure (no I/O), so it is unit-testable without a database.
+ */
+export function detectHolidayDuplicate(
+  candidates: ReadonlyArray<{ projects: ReadonlyArray<{ id: string; name: string }> }>,
+  desiredProjectIds: readonly string[],
+): HolidayDuplicate {
+  const desired = new Set(desiredProjectIds);
+  if (desired.size === 0) {
+    // New/edited holiday is GLOBAL: only another GLOBAL holiday is a duplicate.
+    return { duplicate: candidates.some((c) => c.projects.length === 0) };
+  }
+  for (const candidate of candidates) {
+    const shared = candidate.projects.find((p) => desired.has(p.id));
+    if (shared) return { duplicate: true, conflictProjectName: shared.name };
+  }
+  return { duplicate: false };
 }
 
 /** List holidays ordered by date, optionally filtered by year, with linked projects. */
@@ -95,28 +140,39 @@ export async function listProjectsForHolidays(): Promise<HolidayProjectView[]> {
 }
 
 /**
- * Whether a holiday with the same (date, scope, region) already exists. This is
- * the safety net that replaces the old DB unique index (R1): in Postgres NULLs
- * are distinct, so national holidays (region NULL) slipped past a unique index.
- * `excludeId` lets an update ignore itself. Region is normalized first.
+ * Project-aware duplicate check (R1 fix). This is the safety net that replaces
+ * the old DB unique index: in Postgres NULLs are distinct, so national holidays
+ * (region NULL) slipped past a unique index. It fetches every OTHER holiday on
+ * the same (date, scope, normalized region) and delegates the decision to the
+ * pure {@link detectHolidayDuplicate}. `excludeId` lets an update ignore itself.
  */
 export async function findDuplicateHoliday(input: {
   date: string;
   scope: HolidayScopeKey;
   region?: string | null;
+  projectIds: string[];
   excludeId?: string;
-}): Promise<boolean> {
+}): Promise<HolidayDuplicate> {
   const region = normalizeRegion(input.scope, input.region);
-  const existing = await prisma.holiday.findFirst({
+  const candidates = await prisma.holiday.findMany({
     where: {
       date: toUtcDate(input.date),
       scope: input.scope,
       region,
       ...(input.excludeId ? { id: { not: input.excludeId } } : {}),
     },
-    select: { id: true },
+    select: {
+      id: true,
+      projects: { select: { project: { select: { id: true, name: true } } } },
+    },
   });
-  return existing !== null;
+  const normalized = candidates.map((c) => ({
+    projects: c.projects.map((link) => ({
+      id: link.project.id,
+      name: link.project.name,
+    })),
+  }));
+  return detectHolidayDuplicate(normalized, [...new Set(input.projectIds)]);
 }
 
 export interface HolidayWriteInput {
@@ -199,6 +255,32 @@ export async function updateHoliday(
     }
     return { id };
   });
+}
+
+/** Fetch a single holiday view by id (used to snapshot `before` on delete). */
+export async function getHolidayById(id: string): Promise<HolidayView | null> {
+  const h = await prisma.holiday.findUnique({
+    where: { id },
+    include: {
+      projects: {
+        include: { project: { select: { id: true, name: true } } },
+        orderBy: { createdAt: "asc" },
+      },
+    },
+  });
+  if (!h) return null;
+  return {
+    id: h.id,
+    date: fromDbDate(h.date),
+    name: h.name,
+    scope: h.scope as HolidayScopeKey,
+    region: h.region,
+    year: h.year,
+    projects: h.projects.map((link) => ({
+      id: link.project.id,
+      name: link.project.name,
+    })),
+  };
 }
 
 /** Delete a holiday. HolidayProject links cascade (onDelete: Cascade). */
