@@ -13,6 +13,7 @@ import {
   type InvitationErrorCode,
 } from "@/lib/db/invitations";
 import { getEmailTransport } from "@/lib/automation/email-transport";
+import { buildAccessInviteEmail } from "@/lib/automation/email/templates";
 
 /**
  * Server actions for the admin access screen (`/app/admin/acessos`).
@@ -135,10 +136,15 @@ export async function inviteUser(
 
     if (hasRealEmailProvider()) {
       try {
+        const inviteEmail = buildAccessInviteEmail({
+          link,
+          recipientName: parsed.data.name,
+        });
         await getEmailTransport().send({
           to: [result.invitation.email],
-          subject: "Convite de acesso à plataforma Jump",
-          text: `Você foi convidado a acessar a plataforma. Defina sua senha em:\n\n${link}\n\nO link expira em breve. Se não reconhece este convite, ignore esta mensagem.`,
+          subject: inviteEmail.subject,
+          text: inviteEmail.text,
+          html: inviteEmail.html,
         });
         revalidatePath(ROUTE);
         return {
@@ -230,10 +236,12 @@ export async function regenerateInvite(input: {
 
     if (hasRealEmailProvider()) {
       try {
+        const regenEmail = buildAccessInviteEmail({ link, regenerated: true });
         await getEmailTransport().send({
           to: [result.invitation.email],
-          subject: "Novo link de acesso à plataforma Jump",
-          text: `Seu link de acesso foi regenerado. Defina sua senha em:\n\n${link}\n\nO link anterior não funciona mais.`,
+          subject: regenEmail.subject,
+          text: regenEmail.text,
+          html: regenEmail.html,
         });
         revalidatePath(ROUTE);
         return {

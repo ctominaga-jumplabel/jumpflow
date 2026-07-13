@@ -32,8 +32,11 @@ import {
   preInvoiceReferenceKey,
   preInvoiceStorageKey,
   renderPreInvoiceHtml,
-  renderPreInvoiceText,
 } from "@/lib/billing/pre-invoice";
+import {
+  buildNfseEmail,
+  buildPreInvoiceEmail,
+} from "@/lib/automation/email/templates";
 import {
   getStorageProvider,
   isStorageConfigured,
@@ -749,8 +752,7 @@ export async function sendPreInvoiceEmail(input: {
       lines: data.lines,
       generatedAt: new Date(),
     });
-    const body = renderPreInvoiceText(preInvoice);
-    const subject = `Pre-fatura ${data.client.name} — ${preInvoice.competence}`;
+    const preInvoiceEmail = buildPreInvoiceEmail({ preInvoice });
 
     let status: "SENT" | "FAILED" = "SENT";
     let error: string | null = null;
@@ -759,8 +761,9 @@ export async function sendPreInvoiceEmail(input: {
     try {
       const sent = await getEmailTransport().send({
         to: [contactEmail],
-        subject,
-        text: body,
+        subject: preInvoiceEmail.subject,
+        text: preInvoiceEmail.text,
+        html: preInvoiceEmail.html,
       });
       messageId = sent.id;
       provider = sent.provider;
@@ -875,17 +878,12 @@ export async function sendNfseIssuedEmail(input: {
     }
 
     const competenceLabel = `${String(document.revenueClosing.month).padStart(2, "0")}/${document.revenueClosing.year}`;
-    const subject = `NFS-e ${document.client.name} — ${competenceLabel}`;
-    const bodyLines = [
-      `Ola,`,
-      ``,
-      `A NFS-e referente a competencia ${competenceLabel} foi emitida.`,
-      document.invoiceNumber ? `Numero da NFS-e: ${document.invoiceNumber}` : "",
-      document.protocol ? `Protocolo: ${document.protocol}` : "",
-      ``,
-      `Os documentos (XML/PDF) ficam disponiveis na plataforma.`,
-    ].filter((line) => line.length > 0 || line === "");
-    const body = bodyLines.join("\n");
+    const nfseEmail = buildNfseEmail({
+      clientName: document.client.name,
+      competenceLabel,
+      invoiceNumber: document.invoiceNumber,
+      protocol: document.protocol,
+    });
 
     let status: "SENT" | "FAILED" = "SENT";
     let error: string | null = null;
@@ -894,8 +892,9 @@ export async function sendNfseIssuedEmail(input: {
     try {
       const sent = await getEmailTransport().send({
         to: [contactEmail],
-        subject,
-        text: body,
+        subject: nfseEmail.subject,
+        text: nfseEmail.text,
+        html: nfseEmail.html,
       });
       messageId = sent.id;
       provider = sent.provider;
