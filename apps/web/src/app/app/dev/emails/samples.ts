@@ -4,12 +4,17 @@
  * you SEND. Pure data — no DB, safe to import on server.
  */
 import {
+  buildAccessInviteEmail,
   buildAlertaHoraExtraEmail,
   buildApuracaoClienteEmail,
   buildContratoAusenteEmail,
   buildFaturamentoPendenteEmail,
   buildFechamentoOperacaoEmail,
   buildLiberacaoEmail,
+  buildMissingTimesheetEmail,
+  buildNfseEmail,
+  buildPaymentForecastEmail,
+  buildPreInvoiceEmail,
   buildProjetoCriadoEmail,
   type BuiltEmail,
 } from "@/lib/automation/email/templates";
@@ -153,6 +158,96 @@ export const SAMPLE_EMAILS: SampleEmail[] = [
         projectName: "Data Lake Corporativo",
         clientName: "Banco Beta",
         projectUrl: "https://jumpflow.example/app/comercial/123",
+      }),
+  },
+  {
+    key: "ausencia-lancamento",
+    label: "Ausência de lançamento (relatório)",
+    build: () =>
+      buildMissingTimesheetEmail({
+        periodStart: new Date("2026-07-06T00:00:00Z"),
+        periodEnd: new Date("2026-07-13T00:00:00Z"),
+        rowCount: 6,
+      }),
+  },
+  {
+    key: "convite-acesso",
+    label: "Convite de acesso",
+    build: (name) =>
+      buildAccessInviteEmail({
+        link: "https://jumpflow.example/convite/abc123",
+        recipientName: name,
+      }),
+  },
+  {
+    key: "pre-fatura",
+    label: "Pré-fatura (cliente · Jump)",
+    build: () =>
+      buildPreInvoiceEmail({
+        contactName: "Sr. Roberto",
+        preInvoice: {
+          closingId: "seed-closing-1",
+          competence: "junho/2026",
+          clientName: "ACME S.A.",
+          clientDocument: "12.345.678/0001-90",
+          municipality: "São Paulo",
+          issRate: 5,
+          lines: [
+            {
+              projectId: "p1",
+              projectName: "Portal de Atendimento",
+              hours: 120,
+              unitRate: 300,
+              amount: 36000,
+            },
+            {
+              projectId: "p2",
+              projectName: "App Mobile",
+              hours: 66,
+              unitRate: 300,
+              amount: 19800,
+            },
+          ],
+          servicesSubtotal: 55800,
+          adjustmentAmount: 0,
+          netServices: 55800,
+          estimatedIss: 2790,
+          total: 55800,
+          generatedAt: "2026-07-01",
+        },
+      }),
+  },
+  {
+    key: "nfse-emitida",
+    label: "NFS-e emitida (cliente · Jump)",
+    build: () =>
+      buildNfseEmail({
+        clientName: "ACME S.A.",
+        competenceLabel: "06/2026",
+        invoiceNumber: "2026/000123",
+        protocol: "SP-987654321",
+        contactName: "Sr. Roberto",
+      }),
+  },
+  {
+    key: "previsao-pagamento",
+    label: "Previsão de pagamento (consultor)",
+    build: (name) =>
+      buildPaymentForecastEmail({
+        consultantName: name,
+        month: 6,
+        year: 2026,
+        totalAmount: 21600,
+        expectedPaymentAt: "2026-07-05",
+        responseDeadlineAt: "2026-07-02",
+        projectLines: [
+          {
+            projectName: "Portal de Atendimento",
+            hours: 72,
+            unitRate: 300,
+            amount: 21600,
+          },
+        ],
       }),
   },
 ];

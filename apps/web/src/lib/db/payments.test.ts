@@ -144,7 +144,8 @@ describe("sendConsultantPaymentForecast email breakdown", () => {
       projectId: { not: null },
     });
     const body = send.mock.calls[0]![0].text as string;
-    expect(body).toContain("Abertura por projeto:");
+    // Branded template renders the breakdown as a table (Projeto | Horas | ...).
+    expect(body).toContain("Valor unit.");
     expect(body).toContain("Alpha");
     expect(body).toContain("Beta");
   });
@@ -162,7 +163,7 @@ describe("sendConsultantPaymentForecast email breakdown", () => {
     await sendConsultantPaymentForecast({ ...baseInput, paymentId: "p2" });
 
     const body = send.mock.calls[0]![0].text as string;
-    expect(body).not.toContain("Abertura por projeto:");
-    expect(body).toContain("Previsao de pagamento");
+    expect(body).not.toContain("Valor unit.");
+    expect(body).toContain("Previsão de pagamento");
   });
 });

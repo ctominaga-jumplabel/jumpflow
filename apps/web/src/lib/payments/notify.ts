@@ -1,5 +1,5 @@
 import { getEmailTransport } from "@/lib/automation/email-transport";
-import { formatCurrency, formatDate, formatHours } from "@/lib/format";
+import { buildPaymentForecastEmail } from "@/lib/automation/email/templates";
 
 export interface PaymentForecastEmailProjectLine {
   projectName: string;
@@ -24,37 +24,21 @@ export interface PaymentForecastEmailInput {
   projectLines?: PaymentForecastEmailProjectLine[];
 }
 
-function buildProjectBreakdown(
-  lines: PaymentForecastEmailProjectLine[],
-): string[] {
-  return [
-    "Abertura por projeto:",
-    ...lines.map(
-      (line) =>
-        `- ${line.projectName}: ${formatHours(line.hours)} x ${formatCurrency(line.unitRate)} = ${formatCurrency(line.amount)}`,
-    ),
-    "",
-  ];
-}
-
 export async function sendPaymentForecastEmail(input: PaymentForecastEmailInput) {
-  const projectLines = input.projectLines ?? [];
-  const breakdown =
-    projectLines.length > 0 ? buildProjectBreakdown(projectLines) : [];
+  const email = buildPaymentForecastEmail({
+    consultantName: input.consultantName,
+    month: input.month,
+    year: input.year,
+    totalAmount: input.totalAmount,
+    expectedPaymentAt: input.expectedPaymentAt,
+    responseDeadlineAt: input.responseDeadlineAt,
+    projectLines: input.projectLines,
+  });
 
   return getEmailTransport().send({
     to: [input.consultantEmail],
-    subject: `Previsao de pagamento - ${input.month}/${input.year}`,
-    text: [
-      `Ola, ${input.consultantName}.`,
-      "",
-      `Previsao de pagamento da competencia ${input.month}/${input.year}: ${formatCurrency(input.totalAmount)}.`,
-      "",
-      ...breakdown,
-      `Data prevista de pagamento: ${formatDate(input.expectedPaymentAt)}.`,
-      `Prazo para retorno: ${formatDate(input.responseDeadlineAt)}.`,
-      "",
-      "Responda este email caso haja divergencia nos valores.",
-    ].join("\n"),
+    subject: email.subject,
+    text: email.text,
+    html: email.html,
   });
 }

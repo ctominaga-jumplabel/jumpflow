@@ -9,6 +9,7 @@ import {
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { loadAutomationConfig } from "./config";
 import { getEmailTransport } from "./email-transport";
+import { buildMissingTimesheetEmail } from "./email/templates";
 
 export interface MissingTimesheetResult {
   skipped: boolean;
@@ -262,12 +263,16 @@ export async function runMissingTimesheetReport(params: {
   let provider: string | null = null;
 
   try {
+    const email = buildMissingTimesheetEmail({
+      periodStart,
+      periodEnd,
+      rowCount: rows.length,
+    });
     const sent = await getEmailTransport().send({
       to: recipients,
-      subject: `JumpFlow — Ausência de lançamento por projeto (${referenceKey})`,
-      text:
-        `Relatório semanal de ausência de lançamento por projeto ` +
-        `(${referenceKey}). Linhas: ${rows.length}. CSV em anexo.`,
+      subject: email.subject,
+      text: email.text,
+      html: email.html,
       attachments: [
         {
           filename: `ausencia-lancamento-${referenceKey}.csv`,

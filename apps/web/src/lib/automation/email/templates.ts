@@ -11,7 +11,8 @@
  * all operational mail stays brand-consistent and centrally maintained.
  */
 import { appConfig } from "@/config/app";
-import { formatCurrency, formatHours } from "@/lib/format";
+import type { PreInvoice } from "@/lib/billing/pre-invoice";
+import { formatCurrency, formatDate, formatHours } from "@/lib/format";
 import {
   button,
   callout,
@@ -620,6 +621,265 @@ export function buildContratosAusentesEmail(input: {
 
   return {
     subject: `${app()} · Contratos comerciais ausentes (${input.projects.length})`,
+    html,
+    text,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Relatório semanal — ausência de lançamento de horas por projeto (interno).
+// O CSV detalhado segue como anexo, adicionado pelo chamador.
+// ---------------------------------------------------------------------------
+function formatUtcDate(d: Date): string {
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  const month = String(d.getUTCMonth() + 1).padStart(2, "0");
+  return `${day}/${month}/${d.getUTCFullYear()}`;
+}
+
+export function buildMissingTimesheetEmail(input: {
+  periodStart: Date;
+  periodEnd: Date;
+  rowCount: number;
+}): BuiltEmail {
+  const periodLabel = `${formatUtcDate(input.periodStart)} a ${formatUtcDate(
+    input.periodEnd,
+  )}`;
+  const blocks: EmailBlock[] = [
+    paragraph(
+      `Segue o relatório semanal de ausência de lançamento de horas por projeto.`,
+    ),
+    callout(
+      `Foram identificados ${input.rowCount} registro(s) de ausência de lançamento no período.`,
+      "warning",
+    ),
+    keyValueList([
+      { label: "Período", value: periodLabel },
+      { label: "Registros", value: String(input.rowCount) },
+    ]),
+    paragraph(
+      `O detalhamento por consultor e projeto está na planilha CSV em anexo.`,
+    ),
+  ];
+
+  const { html, text } = renderEmail({
+    preheader: `Ausência de lançamento por projeto — ${periodLabel}`,
+    title: "Ausência de lançamento por projeto",
+    blocks,
+    signoff: `Equipe ${app()}`,
+  });
+
+  return {
+    subject: `${app()} · Ausência de lançamento por projeto (${periodLabel})`,
+    html,
+    text,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Convite de acesso à plataforma (interno, novo usuário / regeneração).
+// ---------------------------------------------------------------------------
+export function buildAccessInviteEmail(input: {
+  link: string;
+  regenerated?: boolean;
+  recipientName?: string;
+}): BuiltEmail {
+  const regen = input.regenerated ?? false;
+  const blocks: EmailBlock[] = [
+    paragraph(input.recipientName ? `Olá, ${input.recipientName}.` : "Olá."),
+    paragraph(
+      regen
+        ? `Seu link de acesso ao ${app()} foi regenerado. Use o botão abaixo para definir seu acesso.`
+        : `Você foi convidado(a) a acessar o ${app()}. Use o botão abaixo para definir seu acesso.`,
+    ),
+    button("Definir acesso", input.link),
+    paragraph(
+      regen
+        ? `O link anterior não funciona mais. Se não reconhece esta mensagem, ignore-a.`
+        : `O link expira em breve. Se não reconhece este convite, ignore esta mensagem.`,
+    ),
+  ];
+
+  const { html, text } = renderEmail({
+    preheader: regen
+      ? `Novo link de acesso ao ${app()}`
+      : `Convite de acesso ao ${app()}`,
+    title: regen ? "Novo link de acesso" : "Convite de acesso",
+    blocks,
+    signoff: `Equipe ${app()}`,
+  });
+
+  return {
+    subject: regen
+      ? `${app()} · Novo link de acesso`
+      : `${app()} · Convite de acesso`,
+    html,
+    text,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Pré-fatura ao cliente (client-facing → marca da empresa Jump).
+// ---------------------------------------------------------------------------
+export function buildPreInvoiceEmail(input: {
+  preInvoice: PreInvoice;
+  contactName?: string;
+}): BuiltEmail {
+  const p = input.preInvoice;
+  const blocks: EmailBlock[] = [
+    paragraph(
+      input.contactName ? `Prezado(a) ${input.contactName},` : "Prezado(a),",
+    ),
+    paragraph(
+      `Segue a pré-fatura de serviços referente à competência de ${p.competence}.`,
+    ),
+    dataTable(
+      ["Projeto", "Horas", "Valor unit.", "Valor"],
+      p.lines.map((l) => [
+        l.projectName,
+        formatHours(l.hours),
+        formatCurrency(l.unitRate),
+        formatCurrency(l.amount),
+      ]),
+      { alignRight: [1, 2, 3] },
+    ),
+    keyValueList([
+      { label: "Subtotal de serviços", value: formatCurrency(p.servicesSubtotal) },
+      ...(p.adjustmentAmount
+        ? [{ label: "Ajuste", value: formatCurrency(p.adjustmentAmount) }]
+        : []),
+      { label: "Total faturável", value: formatCurrency(p.total) },
+      ...(p.estimatedIss
+        ? [
+            {
+              label: `ISS estimado (${p.issRate}%)`,
+              value: formatCurrency(p.estimatedIss),
+            },
+          ]
+        : []),
+    ]),
+    paragraph(
+      `Em caso de divergência, responda a este e-mail antes da emissão da nota fiscal.`,
+    ),
+  ];
+
+  const { html, text } = renderEmail({
+    brand: "company",
+    preheader: `Pré-fatura ${p.competence} — ${p.clientName}`,
+    title: `Pré-fatura — ${p.competence}`,
+    blocks,
+    signoff: `Atenciosamente,\nEquipe ${company()}`,
+  });
+
+  return {
+    subject: `${company()} · Pré-fatura ${p.competence} — ${p.clientName}`,
+    html,
+    text,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// NFS-e emitida (client-facing → marca da empresa Jump).
+// ---------------------------------------------------------------------------
+export function buildNfseEmail(input: {
+  clientName: string;
+  competenceLabel: string;
+  invoiceNumber?: string | null;
+  protocol?: string | null;
+  contactName?: string;
+}): BuiltEmail {
+  const blocks: EmailBlock[] = [
+    paragraph(
+      input.contactName ? `Prezado(a) ${input.contactName},` : "Prezado(a),",
+    ),
+    paragraph(
+      `A NFS-e referente à competência de ${input.competenceLabel} foi emitida.`,
+    ),
+    keyValueList([
+      ...(input.invoiceNumber
+        ? [{ label: "Número da NFS-e", value: input.invoiceNumber }]
+        : []),
+      ...(input.protocol ? [{ label: "Protocolo", value: input.protocol }] : []),
+      { label: "Competência", value: input.competenceLabel },
+    ]),
+    paragraph(`Os documentos (XML e PDF) ficam disponíveis na plataforma.`),
+  ];
+
+  const { html, text } = renderEmail({
+    brand: "company",
+    preheader: `NFS-e emitida ${input.competenceLabel} — ${input.clientName}`,
+    title: `NFS-e emitida — ${input.competenceLabel}`,
+    blocks,
+    signoff: `Atenciosamente,\nEquipe ${company()}`,
+  });
+
+  return {
+    subject: `${company()} · NFS-e ${input.competenceLabel} — ${input.clientName}`,
+    html,
+    text,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Previsão de pagamento ao consultor (interno → marca JumpFlow).
+// ---------------------------------------------------------------------------
+export function buildPaymentForecastEmail(input: {
+  consultantName: string;
+  month: number;
+  year: number;
+  totalAmount: number;
+  expectedPaymentAt: string;
+  responseDeadlineAt: string;
+  projectLines?: Array<{
+    projectName: string;
+    hours: number;
+    unitRate: number;
+    amount: number;
+  }>;
+}): BuiltEmail {
+  const competenceLabel = `${String(input.month).padStart(2, "0")}/${input.year}`;
+  const blocks: EmailBlock[] = [
+    paragraph(`Olá, ${input.consultantName}.`),
+    paragraph(
+      `Segue a previsão de pagamento referente à competência ${competenceLabel}.`,
+    ),
+    kpi("Total previsto", formatCurrency(input.totalAmount), "info"),
+  ];
+
+  if (input.projectLines && input.projectLines.length > 0) {
+    blocks.push(
+      dataTable(
+        ["Projeto", "Horas", "Valor unit.", "Valor"],
+        input.projectLines.map((l) => [
+          l.projectName,
+          formatHours(l.hours),
+          formatCurrency(l.unitRate),
+          formatCurrency(l.amount),
+        ]),
+        { alignRight: [1, 2, 3] },
+      ),
+    );
+  }
+
+  blocks.push(
+    keyValueList([
+      {
+        label: "Data prevista de pagamento",
+        value: formatDate(input.expectedPaymentAt),
+      },
+      { label: "Prazo para retorno", value: formatDate(input.responseDeadlineAt) },
+    ]),
+    paragraph(`Responda a este e-mail caso haja divergência nos valores.`),
+  );
+
+  const { html, text } = renderEmail({
+    preheader: `Previsão de pagamento ${competenceLabel}`,
+    title: "Previsão de pagamento",
+    blocks,
+    signoff: `Equipe ${app()}`,
+  });
+
+  return {
+    subject: `${app()} · Previsão de pagamento — ${competenceLabel}`,
     html,
     text,
   };
