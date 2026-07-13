@@ -10,6 +10,7 @@ import {
   notifyClientBillingSummary,
   notifyHoursReleased,
 } from "@/lib/automation/notifications/events";
+import { resolveEventDelivery } from "@/lib/automation/notifications/event-delivery";
 import { buildAuditEventData } from "@/lib/db/audit";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import {
@@ -754,13 +755,25 @@ export async function sendPreInvoiceEmail(input: {
     });
     const preInvoiceEmail = buildPreInvoiceEmail({ preInvoice });
 
+    // PRE_INVOICE_ISSUED rule (/app/admin/notificacoes): recipients default to
+    // the client contact (CLIENT_CONTACT). If the admin turned the event off,
+    // do not send and do not log SENT (so re-enabling lets it send later).
+    const delivery = await resolveEventDelivery("PRE_INVOICE_ISSUED", {
+      context: { clientId: data.client.id },
+      targets: [{ email: contactEmail, name: data.client.name }],
+    });
+    if (delivery.skip || delivery.emails.length === 0) {
+      return { ok: true, data: { emailed: false, alreadySent: false } };
+    }
+    const toEmails = delivery.emails;
+
     let status: "SENT" | "FAILED" = "SENT";
     let error: string | null = null;
     let messageId: string | null = null;
     let provider: string | null = null;
     try {
       const sent = await getEmailTransport().send({
-        to: [contactEmail],
+        to: toEmails,
         subject: preInvoiceEmail.subject,
         text: preInvoiceEmail.text,
         html: preInvoiceEmail.html,
@@ -885,13 +898,24 @@ export async function sendNfseIssuedEmail(input: {
       protocol: document.protocol,
     });
 
+    // NFSE_ISSUED rule (/app/admin/notificacoes): recipients default to the
+    // client contact. Off → do not send and do not log SENT.
+    const delivery = await resolveEventDelivery("NFSE_ISSUED", {
+      context: { clientId: document.clientId },
+      targets: [{ email: contactEmail, name: document.client.name }],
+    });
+    if (delivery.skip || delivery.emails.length === 0) {
+      return { ok: true, data: { emailed: false, alreadySent: false } };
+    }
+    const toEmails = delivery.emails;
+
     let status: "SENT" | "FAILED" = "SENT";
     let error: string | null = null;
     let messageId: string | null = null;
     let provider: string | null = null;
     try {
       const sent = await getEmailTransport().send({
-        to: [contactEmail],
+        to: toEmails,
         subject: nfseEmail.subject,
         text: nfseEmail.text,
         html: nfseEmail.html,

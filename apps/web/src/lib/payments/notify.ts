@@ -1,5 +1,6 @@
 import { getEmailTransport } from "@/lib/automation/email-transport";
 import { buildPaymentForecastEmail } from "@/lib/automation/email/templates";
+import { resolveEventDelivery } from "@/lib/automation/notifications/event-delivery";
 
 export interface PaymentForecastEmailProjectLine {
   projectName: string;
@@ -35,8 +36,17 @@ export async function sendPaymentForecastEmail(input: PaymentForecastEmailInput)
     projectLines: input.projectLines,
   });
 
+  // PAYMENT_FORECAST rule (/app/admin/notificacoes) can turn this off or add
+  // recipients; the consultant is the EVENT_TARGET.
+  const delivery = await resolveEventDelivery("PAYMENT_FORECAST", {
+    targets: [{ email: input.consultantEmail, name: input.consultantName }],
+  });
+  if (delivery.skip || delivery.emails.length === 0) {
+    return { id: "", provider: "skipped" };
+  }
+
   return getEmailTransport().send({
-    to: [input.consultantEmail],
+    to: delivery.emails,
     subject: email.subject,
     text: email.text,
     html: email.html,

@@ -10,6 +10,7 @@ import { isDatabaseConfigured } from "@/lib/db/config";
 import { loadAutomationConfig } from "./config";
 import { getEmailTransport } from "./email-transport";
 import { buildMissingTimesheetEmail } from "./email/templates";
+import { resolveEventDelivery } from "./notifications/event-delivery";
 
 export interface MissingTimesheetResult {
   skipped: boolean;
@@ -109,8 +110,14 @@ export async function runMissingTimesheetReport(params: {
   }
 
   // Read the effective recipient list ONCE and reuse it throughout the run.
+  // The configured report list is the event's natural target; the
+  // MISSING_TIMESHEET_REPORT rule (/app/admin/notificacoes) can turn it off or
+  // add extra recipients (ROLE/STATIC) on top of the EVENT_TARGET list.
   const config = await loadAutomationConfig();
-  const recipients = config.reportRecipients;
+  const delivery = await resolveEventDelivery("MISSING_TIMESHEET_REPORT", {
+    targets: config.reportRecipients.map((email) => ({ email })),
+  });
+  const recipients = delivery.skip ? [] : delivery.emails;
   if (recipients.length === 0) {
     return {
       skipped: true,
