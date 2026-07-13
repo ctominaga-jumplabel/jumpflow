@@ -1068,6 +1068,8 @@ const CONSULTANT_ALLOWED_CODES = new Set([
   "SKILLS",
   "UNIVERSIDADE",
   "CERTIFICADOS",
+  // Onda D: o consultor solicita/cancela as próprias ausências nesta tela.
+  "AUSENCIAS",
 ]);
 
 // Each entry: code, name, module (display group), parent code (hierarchy),
@@ -1085,6 +1087,10 @@ const PERMISSION_CATALOG = [
   { code: "DESPESAS_PAGAMENTO", name: "Status de pagamento", module: "Despesas", parent: "DESPESAS", sort: 21, view: FINANCIAL, edit: FINANCIAL },
 
   { code: "SOBREAVISO", name: "Sobreaviso", module: "Operação", sort: 22, view: ALL_ROLES, create: ALL_ROLES, edit: APPROVALS, del: ALL_ROLES },
+  // Ausências (Onda D): consultor solicita as próprias (create/view); a decisão
+  // (edit) e a visão da fila são de PEOPLE (ADMIN implícito). O CONSULTANT vê a
+  // tela via allow-list; a decisão é enforced no servidor (requireRole).
+  { code: "AUSENCIAS", name: "Ausências", module: "Operação", sort: 23, view: ["PEOPLE", "AREA_MANAGER", "PROJECT_MANAGER", "CONSULTANT"], create: ["PEOPLE", "CONSULTANT"], edit: PEOPLE_MANAGE, del: ["PEOPLE", "CONSULTANT"] },
   // Fechamento Operacional para o DP: leitura para gestão + FINANCE/PEOPLE; a
   // marcação/reabertura (edit) é dos papéis que tocam a operação do projeto.
   { code: "OPERACAO_FECHAMENTO", name: "Fechamento Operacional", module: "Operação", sort: 24, view: ["AREA_MANAGER", "PROJECT_MANAGER", "FINANCE", "PEOPLE"], edit: ["AREA_MANAGER", "PROJECT_MANAGER"] },
@@ -1144,6 +1150,8 @@ const PERMISSION_CATALOG = [
   { code: "ADMIN_ACESSOS", name: "Acessos (usuários e convites)", module: "Administração", sort: 120, view: ADMIN_ONLY, create: ADMIN_ONLY, edit: ADMIN_ONLY, del: ADMIN_ONLY },
   { code: "CONFIGURACOES_PERMISSOES", name: "Matriz de Permissões", module: "Administração", sort: 121, view: ADMIN_ONLY, edit: ADMIN_ONLY },
   { code: "CONFIGURACOES_NOTIFICACOES", name: "Regras de Notificação", module: "Administração", sort: 122, view: ADMIN_ONLY, create: ADMIN_ONLY, edit: ADMIN_ONLY, del: ADMIN_ONLY },
+  // Feriados (Onda A-ext): calendário operacional gerido por ADMIN + PEOPLE (DP).
+  { code: "CONFIGURACOES_FERIADOS", name: "Feriados", module: "Administração", sort: 123, view: PEOPLE_MANAGE, create: PEOPLE_MANAGE, edit: PEOPLE_MANAGE, del: PEOPLE_MANAGE },
 ];
 
 async function seedPermissions() {
@@ -1293,6 +1301,77 @@ async function seedNotificationDefaults() {
     [],
     "FEED_MENTIONED (toggle; destinatário = usuário mencionado)",
   );
+
+  // Feriado próximo (Onda A/2) → DP/People planeja escalas e apontamento. Regra
+  // GLOBAL por padrão; regras adicionais scope=PROJECT podem ser criadas na
+  // admin para notificação por projeto (o motor casa por escopo).
+  await ensureNotificationRule(
+    "HOLIDAY_UPCOMING",
+    [{ type: "ROLE", channel: "EMAIL", address: "PEOPLE", name: "DP / People" }],
+    "HOLIDAY_UPCOMING → ROLE PEOPLE (EMAIL)",
+  );
+}
+
+// Feriados nacionais brasileiros. Datas oficiais fixas + móveis (Sexta-feira
+// Santa) já calculadas por ano. Consciência Negra é feriado NACIONAL desde 2024.
+// Fonte de dados da Onda A (notificação de feriado + aviso ao apontar horas em
+// feriado). scope = NATIONAL, region = null para todos.
+const NATIONAL_HOLIDAYS = [
+  // 2026
+  { date: "2026-01-01", name: "Confraternização Universal" },
+  { date: "2026-04-03", name: "Sexta-feira Santa" },
+  { date: "2026-04-21", name: "Tiradentes" },
+  { date: "2026-05-01", name: "Dia do Trabalho" },
+  { date: "2026-09-07", name: "Independência do Brasil" },
+  { date: "2026-10-12", name: "Nossa Senhora Aparecida" },
+  { date: "2026-11-02", name: "Finados" },
+  { date: "2026-11-15", name: "Proclamação da República" },
+  { date: "2026-11-20", name: "Consciência Negra" },
+  { date: "2026-12-25", name: "Natal" },
+  // 2027
+  { date: "2027-01-01", name: "Confraternização Universal" },
+  { date: "2027-03-26", name: "Sexta-feira Santa" },
+  { date: "2027-04-21", name: "Tiradentes" },
+  { date: "2027-05-01", name: "Dia do Trabalho" },
+  { date: "2027-09-07", name: "Independência do Brasil" },
+  { date: "2027-10-12", name: "Nossa Senhora Aparecida" },
+  { date: "2027-11-02", name: "Finados" },
+  { date: "2027-11-15", name: "Proclamação da República" },
+  { date: "2027-11-20", name: "Consciência Negra" },
+  { date: "2027-12-25", name: "Natal" },
+];
+
+async function ensureHoliday({ date, name, scope = "NATIONAL", region = null }) {
+  // `date` é uma string YYYY-MM-DD; new Date interpreta como UTC midnight, o que
+  // casa com a semântica date-only de @db.Date.
+  const dateValue = new Date(`${date}T00:00:00.000Z`);
+  const year = dateValue.getUTCFullYear();
+  // O unique composto [date, scope, region] foi removido (era falsa garantia no
+  // Postgres: region NULL torna as linhas distintas). Idempotência do seed passa
+  // a ser findFirst+create/update sobre (date, scope, region), espelhando a
+  // colisão que a Server Action de CRUD valida. Feriados nacionais permanecem
+  // GLOBAIS: nenhum vínculo em HolidayProject é criado aqui.
+  const existing = await prisma.holiday.findFirst({
+    where: { date: dateValue, scope, region },
+    select: { id: true },
+  });
+  if (existing) {
+    await prisma.holiday.update({
+      where: { id: existing.id },
+      data: { name, year },
+    });
+  } else {
+    await prisma.holiday.create({
+      data: { date: dateValue, name, scope, region, year },
+    });
+  }
+}
+
+async function seedHolidayDefaults() {
+  for (const holiday of NATIONAL_HOLIDAYS) {
+    await ensureHoliday(holiday);
+  }
+  console.log(`Seeded ${NATIONAL_HOLIDAYS.length} national holidays (2026–2027).`);
 }
 
 async function main() {
@@ -1300,6 +1379,7 @@ async function main() {
   await seedPermissions();
   await seedRolePermissions();
   await seedNotificationDefaults();
+  await seedHolidayDefaults();
   await seedBootstrapAdmin();
   await seedBillingTypes();
   await seedDevUser();

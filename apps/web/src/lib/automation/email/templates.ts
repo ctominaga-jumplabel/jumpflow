@@ -484,6 +484,75 @@ export function buildFeedDigestEmail(input: {
 }
 
 // ---------------------------------------------------------------------------
+// Onda A/2 — Notificação de feriado próximo (job agendado varre o calendário)
+// ---------------------------------------------------------------------------
+export interface FeriadoProximoLine {
+  /** Data já formatada em pt-BR (dd/mm/aaaa). */
+  dateLabel: string;
+  name: string;
+  /** Abrangência legível ("Nacional", "SP", "São Paulo"). Opcional. */
+  scopeLabel?: string;
+}
+
+export function buildFeriadoProximoEmail(input: {
+  recipientName: string;
+  holidays: FeriadoProximoLine[];
+  /** Janela do alerta em dias (usada só na cópia). */
+  daysAhead?: number;
+  appUrl?: string;
+}): BuiltEmail {
+  const count = input.holidays.length;
+  const single = count === 1;
+  const showScope = input.holidays.some((h) => h.scopeLabel);
+
+  const headers = showScope
+    ? ["Data", "Feriado", "Abrangência"]
+    : ["Data", "Feriado"];
+  const rows = input.holidays.map((h) =>
+    showScope
+      ? [h.dateLabel, h.name, h.scopeLabel ?? "—"]
+      : [h.dateLabel, h.name],
+  );
+
+  const janela = input.daysAhead
+    ? ` nos próximos ${input.daysAhead} dias`
+    : "";
+
+  const blocks: EmailBlock[] = [
+    paragraph(`Olá, ${input.recipientName}.`),
+    callout(
+      single
+        ? `Atenção: há um feriado se aproximando${janela}. Planeje escalas, apontamento de horas e prazos.`
+        : `Atenção: há ${count} feriados se aproximando${janela}. Planeje escalas, apontamento de horas e prazos.`,
+      "info",
+    ),
+    dataTable(headers, rows),
+  ];
+
+  if (input.appUrl) {
+    blocks.push(button("Abrir calendário", input.appUrl));
+  }
+
+  const title = single ? "Feriado próximo" : "Feriados próximos";
+  const { html, text } = renderEmail({
+    preheader: single
+      ? `Feriado próximo: ${input.holidays[0]?.name ?? ""} (${input.holidays[0]?.dateLabel ?? ""})`
+      : `${count} feriados próximos`,
+    title,
+    blocks,
+    signoff: `Equipe ${app()}`,
+  });
+
+  return {
+    subject: single
+      ? `${app()} · Feriado próximo — ${input.holidays[0]?.name ?? ""} (${input.holidays[0]?.dateLabel ?? ""})`
+      : `${app()} · ${count} feriados próximos`,
+    html,
+    text,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Tema 6.2 — Alerta de contrato comercial ausente
 // ---------------------------------------------------------------------------
 export function buildContratoAusenteEmail(input: {

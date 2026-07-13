@@ -19,11 +19,14 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { FeedbackBanner, useFeedback } from "@/components/ui/Feedback";
 import { formatHours } from "@/lib/format";
 import {
+  attachTimeEntryFile,
   copyPreviousWeek as copyPreviousWeekAction,
   applyTimesheetDefault as applyTimesheetDefaultAction,
   createWeeklyTimeEntries,
   createTimeEntry,
   deleteTimeEntry,
+  getTimeEntryAttachmentUrl,
+  removeTimeEntryAttachment,
   saveTimesheetDefault as saveTimesheetDefaultAction,
   updateTimeEntry,
 } from "@/app/app/horas/actions";
@@ -43,6 +46,7 @@ import {
   timeEntryStatusLabels,
   weekTotal,
   type DayClock,
+  type TimeEntryAttachmentMeta,
   type TimeEntryRow as TimeEntryRowData,
   type TimeEntryStatus,
   type TimesheetWeek,
@@ -59,6 +63,17 @@ import {
   type TimesheetFilter,
 } from "@/lib/timesheet/filters";
 import {
+  EMPTY_HOLIDAY_LOOKUP,
+  resolveGlobalHoliday,
+  type HolidayLookup,
+} from "@/lib/timesheet/holidays";
+import {
+  EMPTY_TIME_OFF_LOOKUP,
+  resolveConfirmedTimeOff,
+  timeOffKindShortLabel,
+  type TimeOffLookup,
+} from "@/lib/timesheet/time-off";
+import {
   activityLabelOf,
   activityLabels,
   activityOrder,
@@ -71,6 +86,7 @@ import { TimeEntryStatusBadge } from "./TimeEntryStatusBadge";
 import { TimesheetFilters } from "./TimesheetFilters";
 import {
   TimeEntryForm,
+  type TimeEntryAttachmentIntent,
   type TimeEntryFormProject,
   type TimeEntryFormValue,
 } from "./TimeEntryForm";
@@ -189,6 +205,20 @@ export interface TimesheetWeekViewProps {
   /** db mode: active allocations that can receive/apply a weekly default. */
   defaultOptions?: TimesheetDefaultOption[];
   /**
+   * db mode: project-aware holiday lookup for the visible week. Drives the
+   * holiday markers on the grid (global on the header, project-scoped on each
+   * row) and the "Dia Útil em feriado" confirmation in the entry form. Absent
+   * in demo mode (no database) → no markers/confirmation.
+   */
+  holidays?: HolidayLookup;
+  /**
+   * db mode: lookup de ausências (Onda D) do consultor na semana visível.
+   * Dias cobertos por ausência CONFIRMED ganham um selo (Férias/Licença/
+   * Ausência), a célula fica não-editável e o lançamento de Dia Útil é
+   * bloqueado (o servidor recusa com TIME_OFF_CONFLICT). Ausente em demo.
+   */
+  timeOff?: TimeOffLookup;
+  /**
    * Current filter values (Rodada 4.2). In db mode these are applied on the
    * server and reflected back in the filter form; in demo mode they seed the
    * client-side local filter state.
@@ -203,6 +233,17 @@ export interface TimesheetWeekViewProps {
    * consultant-only users (no role beyond CONSULTANT).
    */
   canExportCsv?: boolean;
+  /**
+   * Whether the user may see/edit "Faturável" (Onda B). Determined server-side
+   * (papel de gestão). Consultores puros não veem o controle nem o rótulo
+   * "(não faturável)". Default `true` (demo/gestão) preserva o comportamento.
+   */
+  canEditBillable?: boolean;
+  /**
+   * db mode: object storage está configurado, habilitando o anexo opcional do
+   * lançamento (melhoria #2). Default `false` (demo/sem storage).
+   */
+  attachmentsAvailable?: boolean;
 }
 
 export interface TimesheetDefaultOption extends TimeEntryFormProject {
@@ -465,7 +506,7 @@ function PeriodOverview({
         <div className="grid grid-cols-7 gap-1">
           {period.days.map((day) => {
             const dominant = day.entries[0]?.status ?? "DRAFT";
-            const title =
+            const entriesTitle =
               day.entries.length > 0
                 ? day.entries
                     .map(
@@ -474,6 +515,9 @@ function PeriodOverview({
                     )
                     .join("\n")
                 : "Sem lançamentos";
+            const title = day.holidayName
+              ? `Feriado: ${day.holidayName}\n${entriesTitle}`
+              : entriesTitle;
             return (
               <div
                 key={day.date}
@@ -483,6 +527,7 @@ function PeriodOverview({
                   day.totalHours > 0
                     ? statusToneClass[dominant]
                     : "border-border bg-surface text-soft",
+                  day.holidayName && "ring-1 ring-inset ring-warning/40",
                 )}
               >
                 <div className="flex items-center justify-between gap-1">
@@ -491,6 +536,11 @@ function PeriodOverview({
                     {day.totalHours > 0 ? formatHours(day.totalHours) : "-"}
                   </span>
                 </div>
+                {day.holidayName ? (
+                  <p className="mt-1 truncate text-[10px] font-medium text-warning">
+                    Feriado
+                  </p>
+                ) : null}
                 {day.entries.length > 0 ? (
                   <p className="mt-1 truncate text-[11px]">
                     {day.entries[0].projectName}
@@ -545,6 +595,9 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
   const [copyDescription, setCopyDescription] = useState("");
   const [editingRow, setEditingRow] = useState<TimeEntryRowData | null>(null);
   const [editInitial, setEditInitial] = useState<TimeEntryFormValue | null>(null);
+  // Anexo persistido do lançamento sendo editado (melhoria #2), passado ao form.
+  const [editAttachment, setEditAttachment] =
+    useState<TimeEntryAttachmentMeta | null>(null);
   const [defaultValue, setDefaultValue] = useState<TimesheetDefaultFormValue>(() =>
     defaultFormValue(props.defaultOptions ?? []),
   );
@@ -566,6 +619,14 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
   );
   const dbProjects = props.projects ?? [];
   const defaultOptions = props.defaultOptions ?? [];
+  // Project-aware holiday lookup (empty in demo mode → no markers/confirmation).
+  const holidays = props.holidays ?? EMPTY_HOLIDAY_LOOKUP;
+  // Lookup de ausências (Onda D) — vazio em demo → nenhum selo/bloqueio.
+  const timeOff = props.timeOff ?? EMPTY_TIME_OFF_LOOKUP;
+  // "Faturável" só é visível/editável para gestão (server-side); default true
+  // preserva demo/gestão. Anexo depende de storage configurado (db only).
+  const canEditBillable = props.canEditBillable ?? true;
+  const attachmentsAvailable = !isDemo && (props.attachmentsAvailable ?? false);
   const formProjects = isDemo ? demoProjects : dbProjects;
   // Demo project dropdown: narrow by the chosen project status (db mode gets the
   // already-narrowed list from the server via listAllowedProjects).
@@ -631,7 +692,30 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
   function openNew() {
     setEditingRow(null);
     setEditInitial(null);
+    setEditAttachment(null);
     setFormOpen(true);
+  }
+
+  /**
+   * Abre o anexo de um lançamento em nova aba via URL assinada (melhoria #2).
+   * A aba é aberta SINCRONAMENTE no clique para escapar do popup blocker (a URL
+   * só é resolvida depois, no servidor). Gotcha: `window.open(..., "noopener")`
+   * retorna `null` nos navegadores, então mantemos a referência e cortamos o
+   * `opener` manualmente (equivalente a noopener, anti-tabnabbing).
+   */
+  function openAttachment(entryId: string) {
+    const popup = window.open("about:blank", "_blank");
+    if (popup) popup.opener = null;
+    startTransition(async () => {
+      const result = await getTimeEntryAttachmentUrl({ id: entryId });
+      if (result.ok) {
+        if (popup) popup.location.href = result.data.url;
+        else window.open(result.data.url, "_blank", "noopener,noreferrer");
+      } else {
+        if (popup) popup.close();
+        notify("warning", result.message);
+      }
+    });
   }
 
   function openDefault() {
@@ -717,6 +801,11 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
     });
   }
 
+  // Nota (Onda A-ext): a confirmação de "Dia Útil em feriado" vive no
+  // TimeEntryForm (lançamento diário e semanal). Os ATALHOS DE GRADE
+  // "Padrão da semana" (applyDefault) e "Copiar semana anterior"
+  // (confirmCopyPreviousWeek) NÃO disparam essa confirmação — são ações em lote
+  // que já explicitam o que criam/pulam nos toasts; ficam fora do escopo.
   function applyDefault() {
     const error = validateDefaultForm();
     if (error) {
@@ -765,6 +854,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
     );
     const storedClock = row.clock?.[dayIndex] ?? null;
     setEditingRow(row);
+    setEditAttachment(row.attachments?.[dayIndex] ?? null);
     setEditInitial({
       mode: "daily",
       projectId: row.projectId,
@@ -782,8 +872,33 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
     setFormOpen(true);
   }
 
-  function handleSubmitEntry(value: TimeEntryFormValue) {
+  /**
+   * Aplica a intenção de anexo (melhoria #2) após o lançamento ser salvo.
+   * Reusa as server actions do fluxo de sobreaviso (upload em bucket privado +
+   * remoção). Retorna a mensagem de falha (ou null em sucesso/no-op).
+   */
+  async function applyAttachmentIntent(
+    entryId: string,
+    attachment: TimeEntryAttachmentIntent | undefined,
+  ): Promise<string | null> {
+    if (!attachment) return null;
+    if (attachment.kind === "upload") {
+      const fd = new FormData();
+      fd.set("id", entryId);
+      fd.set("file", attachment.file);
+      const result = await attachTimeEntryFile(fd);
+      return result.ok ? null : result.message;
+    }
+    const result = await removeTimeEntryAttachment({ id: entryId });
+    return result.ok ? null : result.message;
+  }
+
+  function handleSubmitEntry(
+    value: TimeEntryFormValue,
+    attachment?: TimeEntryAttachmentIntent,
+  ) {
     if (isDemo) {
+      // Demo não persiste nada: anexo é ignorado (sem storage).
       handleSubmitEntryDemo(value);
       return;
     }
@@ -848,14 +963,27 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
           });
       if (result.ok) {
         setFormOpen(false);
+        // Anexo é uma exceção opcional: aplicado APÓS o save, com o id retornado
+        // (create/update devolvem o id do lançamento — inclusive no merge).
+        const attachmentError = await applyAttachmentIntent(
+          result.data.id,
+          attachment,
+        );
         // A complete entry enters approval as soon as it is saved (Rodada 4.3).
         const correctedRejection = existingId && editingRow?.status === "REJECTED";
-        notify(
-          "success",
-          correctedRejection
-            ? "Lançamento corrigido e reenviado para aprovação."
-            : "Lançamento enviado para aprovação.",
-        );
+        if (attachmentError) {
+          notify(
+            "warning",
+            `Lançamento salvo, mas o anexo falhou: ${attachmentError}`,
+          );
+        } else {
+          notify(
+            "success",
+            correctedRejection
+              ? "Lançamento corrigido e reenviado para aprovação."
+              : "Lançamento enviado para aprovação.",
+          );
+        }
       } else {
         notify("warning", result.message);
       }
@@ -1026,7 +1154,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
         }
         if (skippedIneligible > 0) {
           parts.push(
-            `${skippedIneligible} sem alocação ativa ou com projeto encerrado`,
+            `${skippedIneligible} sem alocação ativa, com projeto encerrado ou em dia de ausência confirmada`,
           );
         }
         notify(copied > 0 ? "success" : "info", `${parts.join(" · ")}.`);
@@ -1234,18 +1362,51 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
                   >
                     Atividade
                   </th>
-                  {week.days.map((day) => (
-                    <th
-                      key={day.date}
-                      scope="col"
-                      className={cn(
-                        "px-2 py-3 text-center text-xs font-semibold uppercase tracking-wide text-soft",
-                        day.weekend && "bg-surface-muted/40",
-                      )}
-                    >
-                      {day.label}
-                    </th>
-                  ))}
+                  {week.days.map((day) => {
+                    // Cabeçalho: só feriados GLOBAIS (valem para toda a coluna).
+                    // Feriados de projeto específico são marcados por célula.
+                    const globalHoliday = resolveGlobalHoliday(
+                      holidays,
+                      day.date,
+                    );
+                    // Ausência CONFIRMED cobre o dia inteiro (é por consultor,
+                    // não por projeto): marca a coluna toda, tem precedência
+                    // visual sobre o feriado.
+                    const offInfo = resolveConfirmedTimeOff(timeOff, day.date);
+                    const offLabel = offInfo
+                      ? timeOffKindShortLabel(offInfo.kind)
+                      : null;
+                    return (
+                      <th
+                        key={day.date}
+                        scope="col"
+                        title={
+                          offLabel
+                            ? `${offLabel} (ausência confirmada)`
+                            : globalHoliday
+                              ? `Feriado: ${globalHoliday}`
+                              : undefined
+                        }
+                        className={cn(
+                          "px-2 py-3 text-center text-xs font-semibold uppercase tracking-wide text-soft",
+                          day.weekend && "bg-surface-muted/40",
+                          globalHoliday && !offLabel && "bg-warning-soft/60",
+                          offLabel && "bg-info-soft/60",
+                        )}
+                      >
+                        {day.label}
+                        {offLabel ? (
+                          <span className="mt-0.5 block text-[10px] font-medium normal-case tracking-normal text-brand-dark">
+                            {offLabel}
+                          </span>
+                        ) : globalHoliday ? (
+                          <span className="mt-0.5 block text-[10px] font-medium normal-case tracking-normal text-warning">
+                            Feriado
+                          </span>
+                        ) : null}
+                      </th>
+                    );
+                  })}
                   <th
                     scope="col"
                     className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-soft"
@@ -1266,7 +1427,13 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
                     key={row.id}
                     row={row}
                     days={week.days}
+                    holidays={holidays}
+                    timeOff={timeOff}
                     onEdit={openEdit}
+                    canEditBillable={canEditBillable}
+                    onOpenAttachment={
+                      attachmentsAvailable ? openAttachment : undefined
+                    }
                   />
                 ))}
               </tbody>
@@ -1299,10 +1466,15 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
         onClose={() => setFormOpen(false)}
         projects={formProjects}
         days={week.days}
+        holidays={holidays}
+        timeOff={timeOff}
         initial={editInitial}
         onSubmit={handleSubmitEntry}
         onDelete={!isDemo && editingRow ? handleDeleteEntry : undefined}
         busy={isPending}
+        canEditBillable={canEditBillable}
+        attachmentsAvailable={attachmentsAvailable}
+        initialAttachment={editAttachment}
       />
 
       <Modal
@@ -1446,20 +1618,24 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
             />
           </div>
 
-          <label className="flex items-center gap-2 text-sm text-medium">
-            <input
-              type="checkbox"
-              checked={defaultValue.billable}
-              onChange={(event) =>
-                setDefaultValue((value) => ({
-                  ...value,
-                  billable: event.target.checked,
-                }))
-              }
-              className="size-4 rounded border-border text-brand focus:ring-brand"
-            />
-            Faturável
-          </label>
+          {/* "Faturável" do padrão semanal também é oculto para consultores
+              puros (Onda B); o valor segue no submit (default true). */}
+          {canEditBillable ? (
+            <label className="flex items-center gap-2 text-sm text-medium">
+              <input
+                type="checkbox"
+                checked={defaultValue.billable}
+                onChange={(event) =>
+                  setDefaultValue((value) => ({
+                    ...value,
+                    billable: event.target.checked,
+                  }))
+                }
+                className="size-4 rounded border-border text-brand focus:ring-brand"
+              />
+              Faturável
+            </label>
+          ) : null}
 
           <p className="text-xs text-soft">
             Prévia: {selectedDefaultOption()?.name ?? "alocação"} ·{" "}

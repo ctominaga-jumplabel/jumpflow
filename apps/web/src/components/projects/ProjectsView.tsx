@@ -2,6 +2,8 @@
 
 import { useMemo, useState, useTransition } from "react";
 import {
+  CalendarClock,
+  CheckCircle2,
   Edit,
   FolderKanban,
   Link2,
@@ -22,19 +24,27 @@ import {
   addAllocationSkill,
   createAllocation,
   createProject,
+  createReceivable,
   createSaleRate,
+  deleteReceivable,
+  markProjectAcceptanceAccepted,
   removeAllocation,
   removeAllocationSkill,
   updateAllocation,
   updateProject,
+  updateProjectPaymentType,
+  updateReceivable,
   upsertProjectBillingConfig,
+  getProjectTracking,
 } from "@/app/app/projetos/actions";
+import type { ProjectTracking } from "@/lib/projects/tracking";
 import type {
   AllocationInput,
   AllocationSkillInput,
   AllocationSkillRemoveInput,
   ProjectBillingConfigInput,
   ProjectInput,
+  ReceivableInput,
   SaleRateInput,
 } from "@/lib/projects/schemas";
 import {
@@ -56,6 +66,8 @@ import type {
   ProjectConsultantOption,
   ProjectItem,
   ProjectManagerOption,
+  ProjectPaymentType,
+  ProjectReceivableItem,
   ProjectSkillOption,
   ProjectStatus,
   SkillLevel,
@@ -69,6 +81,7 @@ import {
 import { cn } from "@/lib/utils";
 import { focusRingInput } from "@/lib/styles";
 import { ProjectStatusBadge, projectStatusLabels } from "./ProjectStatusBadge";
+import { ProjectTrackingPanel } from "./ProjectTrackingPanel";
 import {
   billingConfigToForm,
   formToBillingConfigItem,
@@ -78,9 +91,28 @@ import { AutoApprovalConfigPanel } from "./shared/AutoApprovalConfigPanel";
 import { DateField, NumberField, fieldClass } from "./shared/fields";
 import { allocationStatusLabels, skillLevelLabels } from "./shared/labels";
 import { SaleRateModal } from "./shared/SaleRateModal";
+import {
+  ReceivableModal,
+  receivableStatusLabels,
+} from "./shared/ReceivableModal";
 
 type Mode = "demo" | "db";
-type DetailTab = "ALLOCATIONS" | "SKILLS" | "RATES" | "BILLING" | "APPROVAL";
+type DetailTab =
+  | "ALLOCATIONS"
+  | "SKILLS"
+  | "RATES"
+  | "RECEIVABLES"
+  | "BILLING"
+  | "APPROVAL"
+  | "TRACKING";
+
+/** Rótulos pt-BR dos tipos de pagamento do cliente (comercial). */
+const paymentTypeLabels: Record<ProjectPaymentType, string> = {
+  ONE_TIME: "À vista",
+  INSTALLMENTS: "Parcelado",
+  MONTHLY: "Mensal",
+  ON_MILESTONE: "Por marco",
+};
 
 interface ProjectsViewProps {
   mode: Mode;
@@ -94,6 +126,16 @@ interface ProjectsViewProps {
   canViewCommercials: boolean;
   canManageSaleRates: boolean;
   canEditBillingConfig: boolean;
+  canManageReceivables: boolean;
+  /** D5: usuário pode ver o Acompanhamento (Financeiro/Comercial/PM). */
+  canViewTracking?: boolean;
+  /**
+   * Quando definido, restringe a aba de Acompanhamento aos projetos onde
+   * managerUserId === este id (caso PROJECT_MANAGER sem papel amplo). Null =
+   * vê todos os projetos no escopo. O servidor revalida esse escopo de qualquer
+   * forma na server action.
+   */
+  trackingManagerUserId?: string | null;
 }
 
 const statusFilters: (ProjectStatus | "ALL")[] = [
@@ -116,6 +158,7 @@ const emptyProject: ProjectInput = {
   billingHourlyRate: undefined,
   budgetHours: undefined,
   costCenter: "",
+  requiresAcceptanceTerm: false,
 };
 
 function projectToInput(project: ProjectItem): ProjectInput {
@@ -133,6 +176,7 @@ function projectToInput(project: ProjectItem): ProjectInput {
     billingHourlyRate: project.billingHourlyRate,
     budgetHours: project.budgetHours,
     costCenter: project.costCenter ?? "",
+    requiresAcceptanceTerm: project.requiresAcceptanceTerm ?? false,
   };
 }
 
@@ -140,7 +184,12 @@ function projectToInput(project: ProjectItem): ProjectInput {
 function ProjectPendingBadges({ project }: { project: ProjectItem }) {
   const missingSale = isMissingSaleRate(project);
   const missingBilling = isMissingBillingConfig(project);
-  if (!missingSale && !missingBilling) {
+  // Aceite pendente: flag informativa (não bloqueia nada) — exige termo e ainda
+  // não foi marcado como aceito.
+  const acceptancePending = Boolean(
+    project.requiresAcceptanceTerm && !project.acceptanceTermAcceptedAt,
+  );
+  if (!missingSale && !missingBilling && !acceptancePending) {
     return <span className="text-xs text-soft">-</span>;
   }
   return (
@@ -153,6 +202,11 @@ function ProjectPendingBadges({ project }: { project: ProjectItem }) {
       {missingBilling ? (
         <span className="rounded-full border border-warning/30 bg-warning-soft px-2 py-0.5 text-[11px] font-medium text-warning">
           Sem regra de cobrança
+        </span>
+      ) : null}
+      {acceptancePending ? (
+        <span className="rounded-full border border-warning/30 bg-warning-soft px-2 py-0.5 text-[11px] font-medium text-warning">
+          Aceite pendente
         </span>
       ) : null}
     </div>
@@ -170,6 +224,9 @@ export function ProjectsView({
   canViewCommercials,
   canManageSaleRates,
   canEditBillingConfig,
+  canManageReceivables,
+  canViewTracking = false,
+  trackingManagerUserId = null,
 }: ProjectsViewProps) {
   // Single optimistic copy of the list, seeded from server props. It re-seeds
   // whenever the server sends fresh data (e.g. after a revalidatePath from a
@@ -196,6 +253,12 @@ export function ProjectsView({
   const [detailTab, setDetailTab] = useState<DetailTab>("ALLOCATIONS");
   const [billingForm, setBillingForm] =
     useState<ProjectBillingConfigInput | null>(null);
+  // Acompanhamento (D5): carregado sob demanda pela server action ao abrir a
+  // aba (nunca em useEffect — evita set-state-in-effect). O RBAC/escopo é
+  // reavaliado no servidor a cada chamada.
+  const [tracking, setTracking] = useState<ProjectTracking | null>(null);
+  const [trackingLoading, setTrackingLoading] = useState(false);
+  const [trackingError, setTrackingError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -271,10 +334,7 @@ export function ProjectsView({
         <button
           type="button"
           className="rounded-md px-2 py-1 tabular-nums hover:bg-surface-muted"
-          onClick={() => {
-            setDetailProjectId(project.id);
-            setDetailTab("ALLOCATIONS");
-          }}
+          onClick={() => openDetail(project.id)}
         >
           {project.allocatedConsultants}
         </button>
@@ -289,7 +349,7 @@ export function ProjectsView({
           <button
             type="button"
             aria-label={`Vínculos e valores de ${project.name}`}
-            onClick={() => setDetailProjectId(project.id)}
+            onClick={() => openDetail(project.id)}
             className="rounded-md p-2 text-medium hover:bg-surface-muted"
           >
             <Link2 aria-hidden="true" className="size-4" />
@@ -360,11 +420,40 @@ export function ProjectsView({
     });
   }
 
+  // Reset the on-demand tracking cache whenever the open project changes, so a
+  // stale snapshot from another project never flashes in the new modal.
+  function openDetail(projectId: string, tab: DetailTab = "ALLOCATIONS") {
+    setTracking(null);
+    setTrackingError(null);
+    setTrackingLoading(false);
+    setDetailProjectId(projectId);
+    setDetailTab(tab);
+  }
+
+  function loadTracking(projectId: string) {
+    setTracking(null);
+    setTrackingError(null);
+    setTrackingLoading(true);
+    startTransition(async () => {
+      const result = await getProjectTracking({ projectId });
+      if (result.ok) {
+        setTracking(result.data);
+      } else {
+        setTrackingError(result.message);
+      }
+      setTrackingLoading(false);
+    });
+  }
+
   // Initialize the billing form lazily when the Cobrança tab is opened (avoids
   // setState-in-effect; the form holds the user's edits across data refreshes).
   function handleDetailTabChange(next: DetailTab) {
     if (next === "BILLING" && detailProject) {
       setBillingForm(billingConfigToForm(detailProject));
+    }
+    // Acompanhamento: busca sob demanda na troca de aba (event handler).
+    if (next === "TRACKING" && detailProject) {
+      loadTracking(detailProject.id);
     }
     setDetailTab(next);
   }
@@ -542,6 +631,162 @@ export function ProjectsView({
     startTransition(async () => {
       const result = await createSaleRate(value);
       if (result.ok) setFeedback("Valor de venda salvo.");
+      else {
+        setFeedback(result.message);
+        setItems(projects);
+      }
+    });
+  }
+
+  // Sort receivables by dueAt (ISO date compares chronologically as string).
+  function sortReceivables(list: ProjectReceivableItem[]): ProjectReceivableItem[] {
+    return [...list].sort((a, b) => a.dueAt.localeCompare(b.dueAt));
+  }
+
+  function addReceivable(value: ReceivableInput) {
+    const next: ProjectReceivableItem = {
+      id: `receivable-local-${Date.now()}`,
+      projectId: value.projectId,
+      dueAt: value.dueAt,
+      amount: value.amount,
+      label: value.label,
+      status: value.status,
+      note: value.note,
+    };
+    setItems((current) =>
+      current.map((project) =>
+        project.id === value.projectId
+          ? {
+              ...project,
+              receivables: sortReceivables([
+                ...(project.receivables ?? []),
+                next,
+              ]),
+            }
+          : project,
+      ),
+    );
+    if (mode === "demo") {
+      setFeedback("Recebimento salvo localmente.");
+      return;
+    }
+    startTransition(async () => {
+      const result = await createReceivable(value);
+      if (result.ok) setFeedback("Recebimento salvo.");
+      else {
+        setFeedback(result.message);
+        setItems(projects);
+      }
+    });
+  }
+
+  function editReceivable(id: string, value: ReceivableInput) {
+    setItems((current) =>
+      current.map((project) =>
+        project.id === value.projectId
+          ? {
+              ...project,
+              receivables: sortReceivables(
+                (project.receivables ?? []).map((item) =>
+                  item.id === id
+                    ? {
+                        ...item,
+                        dueAt: value.dueAt,
+                        amount: value.amount,
+                        label: value.label,
+                        status: value.status,
+                        note: value.note,
+                      }
+                    : item,
+                ),
+              ),
+            }
+          : project,
+      ),
+    );
+    if (mode === "demo") {
+      setFeedback("Recebimento atualizado localmente.");
+      return;
+    }
+    startTransition(async () => {
+      const result = await updateReceivable({ id, ...value });
+      if (result.ok) setFeedback("Recebimento atualizado.");
+      else {
+        setFeedback(result.message);
+        setItems(projects);
+      }
+    });
+  }
+
+  function removeReceivable(receivable: ProjectReceivableItem) {
+    setItems((current) =>
+      current.map((project) =>
+        project.id === receivable.projectId
+          ? {
+              ...project,
+              receivables: (project.receivables ?? []).filter(
+                (item) => item.id !== receivable.id,
+              ),
+            }
+          : project,
+      ),
+    );
+    if (mode === "demo") {
+      setFeedback("Recebimento removido localmente.");
+      return;
+    }
+    startTransition(async () => {
+      const result = await deleteReceivable({ id: receivable.id });
+      if (result.ok) setFeedback("Recebimento removido.");
+      else {
+        setFeedback(result.message);
+        setItems(projects);
+      }
+    });
+  }
+
+  function changePaymentType(
+    projectId: string,
+    paymentType: ProjectPaymentType | undefined,
+  ) {
+    setItems((current) =>
+      current.map((project) =>
+        project.id === projectId ? { ...project, paymentType } : project,
+      ),
+    );
+    if (mode === "demo") {
+      setFeedback("Tipo de pagamento salvo localmente.");
+      return;
+    }
+    startTransition(async () => {
+      const result = await updateProjectPaymentType({
+        id: projectId,
+        paymentType,
+      });
+      if (result.ok) setFeedback("Tipo de pagamento salvo.");
+      else {
+        setFeedback(result.message);
+        setItems(projects);
+      }
+    });
+  }
+
+  function acceptTerm(projectId: string) {
+    const acceptedAt = new Date().toISOString();
+    setItems((current) =>
+      current.map((project) =>
+        project.id === projectId
+          ? { ...project, acceptanceTermAcceptedAt: acceptedAt }
+          : project,
+      ),
+    );
+    if (mode === "demo") {
+      setFeedback("Termo de aceite registrado localmente.");
+      return;
+    }
+    startTransition(async () => {
+      const result = await markProjectAcceptanceAccepted({ id: projectId });
+      if (result.ok) setFeedback("Termo de aceite registrado.");
       else {
         setFeedback(result.message);
         setItems(projects);
@@ -728,14 +973,30 @@ export function ProjectsView({
         canManageProjects={canManageProjects}
         canManageSaleRates={canManageSaleRates}
         canEditBillingConfig={canEditBillingConfig}
+        canManageReceivables={canManageReceivables}
+        canViewTracking={canViewTracking && mode === "db"}
+        trackingManagerUserId={trackingManagerUserId}
+        tracking={tracking}
+        trackingLoading={trackingLoading}
+        trackingError={trackingError}
         billingForm={billingForm}
         isPending={isPending}
         onTabChange={handleDetailTabChange}
-        onClose={() => setDetailProjectId(null)}
+        onClose={() => {
+          setDetailProjectId(null);
+          setTracking(null);
+          setTrackingError(null);
+          setTrackingLoading(false);
+        }}
         onAddAllocation={addAllocation}
         onEditAllocation={editAllocation}
         onRemoveAllocation={deleteAllocation}
         onAddSaleRate={addSaleRate}
+        onAddReceivable={addReceivable}
+        onEditReceivable={editReceivable}
+        onRemoveReceivable={removeReceivable}
+        onChangePaymentType={changePaymentType}
+        onAcceptTerm={acceptTerm}
         onAddSkill={addSkill}
         onRemoveSkill={removeSkill}
         onBillingChange={setBillingForm}
@@ -876,6 +1137,23 @@ function ProjectModal({
             className={cn(fieldClass(), "min-h-24 py-2")}
           />
         </label>
+        <label className="flex items-start gap-2 text-sm font-medium text-medium md:col-span-2">
+          <input
+            type="checkbox"
+            checked={value.requiresAcceptanceTerm ?? false}
+            onChange={(event) =>
+              onChange({ ...value, requiresAcceptanceTerm: event.target.checked })
+            }
+            className="mt-0.5 size-4 rounded border-border"
+          />
+          <span>
+            Exige termo de aceite
+            <span className="block text-xs font-normal text-soft">
+              Informativo: sinaliza pendência até o aceite, mas não bloqueia
+              lançamento nem faturamento.
+            </span>
+          </span>
+        </label>
       </form>
     </Modal>
   );
@@ -896,6 +1174,12 @@ function ProjectDetailModal({
   canManageProjects,
   canManageSaleRates,
   canEditBillingConfig,
+  canManageReceivables,
+  canViewTracking,
+  trackingManagerUserId,
+  tracking,
+  trackingLoading,
+  trackingError,
   billingForm,
   isPending,
   onTabChange,
@@ -904,6 +1188,11 @@ function ProjectDetailModal({
   onEditAllocation,
   onRemoveAllocation,
   onAddSaleRate,
+  onAddReceivable,
+  onEditReceivable,
+  onRemoveReceivable,
+  onChangePaymentType,
+  onAcceptTerm,
   onAddSkill,
   onRemoveSkill,
   onBillingChange,
@@ -917,6 +1206,12 @@ function ProjectDetailModal({
   canManageProjects: boolean;
   canManageSaleRates: boolean;
   canEditBillingConfig: boolean;
+  canManageReceivables: boolean;
+  canViewTracking: boolean;
+  trackingManagerUserId: string | null;
+  tracking: ProjectTracking | null;
+  trackingLoading: boolean;
+  trackingError: string | null;
   billingForm: ProjectBillingConfigInput | null;
   isPending: boolean;
   onTabChange: (tab: DetailTab) => void;
@@ -925,6 +1220,14 @@ function ProjectDetailModal({
   onEditAllocation: (id: string, value: AllocationInput) => void;
   onRemoveAllocation: (allocation: ProjectAllocationItem) => void;
   onAddSaleRate: (value: SaleRateInput) => void;
+  onAddReceivable: (value: ReceivableInput) => void;
+  onEditReceivable: (id: string, value: ReceivableInput) => void;
+  onRemoveReceivable: (receivable: ProjectReceivableItem) => void;
+  onChangePaymentType: (
+    projectId: string,
+    paymentType: ProjectPaymentType | undefined,
+  ) => void;
+  onAcceptTerm: (projectId: string) => void;
   onAddSkill: (value: AllocationSkillInput) => void;
   onRemoveSkill: (value: AllocationSkillRemoveInput) => void;
   onBillingChange: (value: ProjectBillingConfigInput) => void;
@@ -934,6 +1237,10 @@ function ProjectDetailModal({
   // When set, the allocation modal is in edit mode for this allocation id.
   const [allocationEditId, setAllocationEditId] = useState<string | null>(null);
   const [rate, setRate] = useState<SaleRateInput | null>(null);
+  const [receivable, setReceivable] = useState<ReceivableInput | null>(null);
+  const [receivableEditId, setReceivableEditId] = useState<string | null>(null);
+  const [receivableToDelete, setReceivableToDelete] =
+    useState<ProjectReceivableItem | null>(null);
   const [skillFor, setSkillFor] = useState<ProjectAllocationItem | null>(null);
 
   if (!project) return null;
@@ -941,6 +1248,13 @@ function ProjectDetailModal({
     id: item.id,
     label: `${item.consultantName} - ${item.role}`,
   }));
+  // D5: a aba de Acompanhamento aparece para Financeiro/Comercial (todos os
+  // projetos) e para o PROJECT_MANAGER APENAS nos próprios projetos. O servidor
+  // reforça o mesmo escopo na server action (defesa em profundidade).
+  const showTracking =
+    canViewTracking &&
+    (trackingManagerUserId == null ||
+      project.managerUserId === trackingManagerUserId);
 
   return (
     <Modal
@@ -994,6 +1308,23 @@ function ProjectDetailModal({
             >
               Novo valor
             </ActionButton>
+          ) : tab === "RECEIVABLES" && canManageReceivables ? (
+            <ActionButton
+              icon={CalendarClock}
+              onClick={() => {
+                setReceivableEditId(null);
+                setReceivable({
+                  projectId: project.id,
+                  dueAt: project.startDate,
+                  amount: 0,
+                  label: "",
+                  status: "FORECAST",
+                  note: "",
+                });
+              }}
+            >
+              Novo recebimento
+            </ActionButton>
           ) : tab === "BILLING" && canEditBillingConfig ? (
             <ActionButton
               icon={ReceiptText}
@@ -1006,6 +1337,39 @@ function ProjectDetailModal({
         </>
       }
     >
+      {project.requiresAcceptanceTerm ? (
+        <div
+          className={cn(
+            "mb-4 flex flex-wrap items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm",
+            project.acceptanceTermAcceptedAt
+              ? "border-success/30 bg-success-soft text-success"
+              : "border-warning/30 bg-warning-soft text-warning",
+          )}
+        >
+          <span className="flex items-center gap-2 font-medium">
+            {project.acceptanceTermAcceptedAt ? (
+              <>
+                <CheckCircle2 aria-hidden="true" className="size-4" />
+                Termo de aceite registrado em{" "}
+                {formatDate(project.acceptanceTermAcceptedAt.slice(0, 10))}.
+              </>
+            ) : (
+              <>Termo de aceite pendente.</>
+            )}
+          </span>
+          {!project.acceptanceTermAcceptedAt && canManageProjects ? (
+            <ActionButton
+              size="sm"
+              variant="secondary"
+              icon={CheckCircle2}
+              disabled={isPending}
+              onClick={() => onAcceptTerm(project.id)}
+            >
+              Marcar como aceito
+            </ActionButton>
+          ) : null}
+        </div>
+      ) : null}
       <div className="mb-4 flex flex-wrap gap-2">
         <FilterChip
           label="Vínculos"
@@ -1027,11 +1391,23 @@ function ProjectDetailModal({
           active={tab === "RATES"}
           onClick={() => onTabChange("RATES")}
         />
+        <FilterChip
+          label="Recebimentos previstos"
+          active={tab === "RECEIVABLES"}
+          onClick={() => onTabChange("RECEIVABLES")}
+        />
         {canEditBillingConfig ? (
           <FilterChip
             label="Cobrança"
             active={tab === "BILLING"}
             onClick={() => onTabChange("BILLING")}
+          />
+        ) : null}
+        {showTracking ? (
+          <FilterChip
+            label="Acompanhamento"
+            active={tab === "TRACKING"}
+            onClick={() => onTabChange("TRACKING")}
           />
         ) : null}
       </div>
@@ -1131,36 +1507,155 @@ function ProjectDetailModal({
         />
       ) : tab === "RATES" ? (
         canViewCommercials ? (
+          <div className="space-y-4">
+            <label className="flex flex-col gap-1 text-sm font-medium text-medium sm:max-w-xs">
+              Tipo de pagamento
+              <select
+                value={project.paymentType ?? ""}
+                disabled={!canManageSaleRates}
+                onChange={(event) =>
+                  onChangePaymentType(
+                    project.id,
+                    (event.target.value as ProjectPaymentType) || undefined,
+                  )
+                }
+                className={cn(
+                  fieldClass(),
+                  !canManageSaleRates && "opacity-70",
+                )}
+              >
+                <option value="">Não definido</option>
+                {(
+                  [
+                    "ONE_TIME",
+                    "INSTALLMENTS",
+                    "MONTHLY",
+                    "ON_MILESTONE",
+                  ] as ProjectPaymentType[]
+                ).map((item) => (
+                  <option key={item} value={item}>
+                    {paymentTypeLabels[item]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <DataTable
+              columns={[
+                {
+                  key: "scope",
+                  header: "Escopo",
+                  cell: (item) =>
+                    item.allocationLabel ?? item.consultantName ?? "Projeto",
+                },
+                {
+                  key: "period",
+                  header: "Vigência",
+                  cell: (item) =>
+                    `${formatDate(item.startsAt)} - ${
+                      item.endsAt ? formatDate(item.endsAt) : "em aberto"
+                    }`,
+                },
+                {
+                  key: "rate",
+                  header: "Valor",
+                  align: "right",
+                  cell: (item) =>
+                    item.hourlyRate === undefined
+                      ? MASKED_VALUE
+                      : formatCurrencyPrecise(item.hourlyRate),
+                },
+                { key: "note", header: "Nota", cell: (item) => item.note ?? "-" },
+              ]}
+              rows={project.saleRates}
+              rowKey={(item) => item.id}
+              empty={<p className="text-center text-sm text-soft">Sem valores.</p>}
+            />
+          </div>
+        ) : (
+          <p className="rounded-md border border-border bg-surface-muted px-3 py-2 text-sm text-soft">
+            Valores comerciais restritos por perfil.
+          </p>
+        )
+      ) : tab === "RECEIVABLES" ? (
+        canViewCommercials ? (
           <DataTable
             columns={[
               {
-                key: "scope",
-                header: "Escopo",
-                cell: (item) =>
-                  item.allocationLabel ?? item.consultantName ?? "Projeto",
+                key: "dueAt",
+                header: "Data",
+                cell: (item) => (
+                  <span className="tabular-nums">{formatDate(item.dueAt)}</span>
+                ),
               },
               {
-                key: "period",
-                header: "Vigência",
-                cell: (item) =>
-                  `${formatDate(item.startsAt)} - ${
-                    item.endsAt ? formatDate(item.endsAt) : "em aberto"
-                  }`,
+                key: "label",
+                header: "Rótulo",
+                cell: (item) => item.label,
               },
               {
-                key: "rate",
+                key: "amount",
                 header: "Valor",
                 align: "right",
-                cell: (item) =>
-                  item.hourlyRate === undefined
-                    ? MASKED_VALUE
-                    : formatCurrencyPrecise(item.hourlyRate),
+                cell: (item) => (
+                  <span className="tabular-nums">
+                    {item.amount === undefined
+                      ? MASKED_VALUE
+                      : formatCurrencyPrecise(item.amount)}
+                  </span>
+                ),
               },
-              { key: "note", header: "Nota", cell: (item) => item.note ?? "-" },
+              {
+                key: "status",
+                header: "Situação",
+                cell: (item) => receivableStatusLabels[item.status],
+              },
+              {
+                key: "actions",
+                header: "Ações",
+                align: "right",
+                cell: (item) => (
+                  <div className="flex justify-end gap-1">
+                    <ActionButton
+                      size="sm"
+                      variant="secondary"
+                      icon={Edit}
+                      disabled={!canManageReceivables}
+                      aria-label={`Editar recebimento ${item.label}`}
+                      onClick={() => {
+                        setReceivableEditId(item.id);
+                        setReceivable({
+                          projectId: item.projectId,
+                          dueAt: item.dueAt,
+                          amount: item.amount ?? 0,
+                          label: item.label,
+                          status: item.status,
+                          note: item.note ?? "",
+                        });
+                      }}
+                    >
+                      Editar
+                    </ActionButton>
+                    <ActionButton
+                      size="sm"
+                      variant="danger"
+                      icon={Trash2}
+                      disabled={!canManageReceivables}
+                      aria-label={`Remover recebimento ${item.label}`}
+                      onClick={() => setReceivableToDelete(item)}
+                    >
+                      Remover
+                    </ActionButton>
+                  </div>
+                ),
+              },
             ]}
-            rows={project.saleRates}
+            rows={project.receivables ?? []}
             rowKey={(item) => item.id}
-            empty={<p className="text-center text-sm text-soft">Sem valores.</p>}
+            empty={
+              <p className="text-center text-sm text-soft">
+                Sem recebimentos previstos.
+              </p>
+            }
           />
         ) : (
           <p className="rounded-md border border-border bg-surface-muted px-3 py-2 text-sm text-soft">
@@ -1172,6 +1667,18 @@ function ProjectDetailModal({
           project={project}
           canManageProjects={canManageProjects}
         />
+      ) : tab === "TRACKING" ? (
+        showTracking ? (
+          <ProjectTrackingPanel
+            tracking={tracking}
+            loading={trackingLoading}
+            error={trackingError}
+          />
+        ) : (
+          <p className="rounded-md border border-border bg-surface-muted px-3 py-2 text-sm text-soft">
+            Acompanhamento financeiro restrito por perfil.
+          </p>
+        )
       ) : canEditBillingConfig && billingForm ? (
         <BillingConfigPanel
           chargeType={project.billingChargeType}
@@ -1219,6 +1726,62 @@ function ProjectDetailModal({
             setRate(null);
           }}
         />
+      ) : null}
+      {receivable ? (
+        <ReceivableModal
+          value={receivable}
+          isEditing={receivableEditId !== null}
+          isPending={isPending}
+          onChange={setReceivable}
+          onClose={() => {
+            setReceivable(null);
+            setReceivableEditId(null);
+          }}
+          onSave={() => {
+            if (receivableEditId) {
+              onEditReceivable(receivableEditId, receivable);
+            } else {
+              onAddReceivable(receivable);
+            }
+            setReceivable(null);
+            setReceivableEditId(null);
+          }}
+        />
+      ) : null}
+      {receivableToDelete ? (
+        <Modal
+          open
+          onClose={() => setReceivableToDelete(null)}
+          title="Remover recebimento"
+          description={`Remover a parcela "${receivableToDelete.label}" de ${formatDate(receivableToDelete.dueAt)}? Esta ação não pode ser desfeita.`}
+          footer={
+            <>
+              <ActionButton
+                variant="secondary"
+                onClick={() => setReceivableToDelete(null)}
+              >
+                Cancelar
+              </ActionButton>
+              <ActionButton
+                variant="danger"
+                disabled={isPending}
+                onClick={() => {
+                  onRemoveReceivable(receivableToDelete);
+                  setReceivableToDelete(null);
+                }}
+              >
+                Remover
+              </ActionButton>
+            </>
+          }
+        >
+          <p className="text-sm text-medium">
+            {receivableToDelete.amount === undefined
+              ? MASKED_VALUE
+              : formatCurrencyPrecise(receivableToDelete.amount)}{" "}
+            — {receivableStatusLabels[receivableToDelete.status]}
+          </p>
+        </Modal>
       ) : null}
       {skillFor ? (
         <AllocationSkillModal

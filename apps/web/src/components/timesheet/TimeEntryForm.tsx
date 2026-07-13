@@ -1,17 +1,38 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Save, Trash2 } from "lucide-react";
+import { useId, useMemo, useRef, useState } from "react";
+import {
+  CalendarClock,
+  FileText,
+  Paperclip,
+  Save,
+  Trash2,
+  X,
+} from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import { ActionButton } from "@/components/ui/ActionButton";
 import { cn } from "@/lib/utils";
-import { focusRingInput } from "@/lib/styles";
+import { focusRing, focusRingInput } from "@/lib/styles";
 import {
   activityLabels,
   activityOrder,
   type ActivityType,
+  type TimeEntryAttachmentMeta,
   type WeekDay,
 } from "@/lib/timesheet/types";
+import {
+  collectProjectHolidays,
+  EMPTY_HOLIDAY_LOOKUP,
+  needsWorkdayHolidayConfirmation,
+  resolveProjectHoliday,
+  type HolidayLookup,
+} from "@/lib/timesheet/holidays";
+import {
+  EMPTY_TIME_OFF_LOOKUP,
+  resolveConfirmedTimeOff,
+  timeOffKindShortLabel,
+  type TimeOffLookup,
+} from "@/lib/timesheet/time-off";
 import { timeEntryEffectiveHours } from "@/lib/timesheet/effective-hours";
 import { formatHours } from "@/lib/format";
 import { isTranscriptionEnabled } from "@/lib/transcription/flags";
@@ -60,14 +81,59 @@ export interface TimeEntryFormProject {
   clientName: string;
 }
 
+/**
+ * Intenção de anexo emitida no submit (melhoria #2). O parent (TimesheetWeekView)
+ * é quem persiste: `upload` chama a server action de anexo com o id retornado
+ * pelo save; `remove` remove o anexo existente. `undefined` = não mexeu no anexo.
+ */
+export type TimeEntryAttachmentIntent =
+  | { kind: "upload"; file: File }
+  | { kind: "remove" };
+
+/**
+ * Pré-checagem client-side do anexo (o SERVIDOR é a autoridade —
+ * lib/storage/file-validation.ts): mesma whitelist e teto de 10 MB de Despesas.
+ */
+const ATTACH_ACCEPT = ".pdf,.jpg,.jpeg,.png,.webp";
+const ATTACH_ACCEPTED_TYPES = [
+  "application/pdf",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+];
+const ATTACH_ACCEPTED_EXTENSIONS = [".pdf", ".jpg", ".jpeg", ".png", ".webp"];
+const ATTACH_MAX_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
+
+function isAcceptedAttachment(file: File): boolean {
+  if (file.type) return ATTACH_ACCEPTED_TYPES.includes(file.type);
+  const dot = file.name.lastIndexOf(".");
+  const ext = dot >= 0 ? file.name.slice(dot).toLowerCase() : "";
+  return ATTACH_ACCEPTED_EXTENSIONS.includes(ext);
+}
+
 export interface TimeEntryFormProps {
   open: boolean;
   onClose: () => void;
   projects: TimeEntryFormProject[];
   days: WeekDay[];
+  /**
+   * Project-aware holiday lookup. Habilita o aviso e a CONFIRMAÇÃO ao lançar
+   * "Dia Útil" (WORKDAY) numa data que é feriado para o projeto selecionado.
+   * Ausente no modo demo → nenhum aviso/confirmação.
+   */
+  holidays?: HolidayLookup;
+  /**
+   * Lookup de ausências (Onda D). Lançar "Dia Útil" (WORKDAY) num dia coberto
+   * por ausência CONFIRMED é BLOQUEADO no form (e recusado pelo servidor com
+   * TIME_OFF_CONFLICT). Ausente no modo demo → sem bloqueio.
+   */
+  timeOff?: TimeOffLookup;
   /** Pre-filled values when editing an existing entry. */
   initial?: TimeEntryFormValue | null;
-  onSubmit: (value: TimeEntryFormValue) => void;
+  onSubmit: (
+    value: TimeEntryFormValue,
+    attachment?: TimeEntryAttachmentIntent,
+  ) => void;
   /**
    * Delete the entry behind the currently selected day (db mode only). The
    * view resolves which persisted entry the value points at.
@@ -75,6 +141,20 @@ export interface TimeEntryFormProps {
   onDelete?: (value: TimeEntryFormValue) => void;
   /** Disable actions while a server action is in flight. */
   busy?: boolean;
+  /**
+   * Whether the current user may see/edit "Faturável" (melhoria Onda B). Hidden
+   * for consultores puros (sem papel de gestão); default `true` mantém o
+   * comportamento antigo (gestor/admin/finance/demo). Quando oculto, o valor
+   * segue no submit (default `true`, ou `false` automático para ON_CALL).
+   */
+  canEditBillable?: boolean;
+  /**
+   * db mode: object storage está configurado, então o anexo opcional pode ser
+   * oferecido. `false` (demo/sem storage) esconde o campo (degrade honesto).
+   */
+  attachmentsAvailable?: boolean;
+  /** Anexo já persistido do lançamento sendo editado (nome do arquivo). */
+  initialAttachment?: TimeEntryAttachmentMeta | null;
 }
 
 const inputClass = (invalid: boolean) =>
@@ -119,15 +199,30 @@ export function TimeEntryForm({
   onClose,
   projects,
   days,
+  holidays = EMPTY_HOLIDAY_LOOKUP,
+  timeOff = EMPTY_TIME_OFF_LOOKUP,
   initial,
   onSubmit,
   onDelete,
   busy = false,
+  canEditBillable = true,
+  attachmentsAvailable = false,
+  initialAttachment = null,
 }: TimeEntryFormProps) {
   const [value, setValue] = useState<TimeEntryFormValue>(
     initial ?? emptyValue(days),
   );
   const [showErrors, setShowErrors] = useState(false);
+  // Anexo opcional (melhoria #2): arquivo recém-escolhido (ainda não enviado),
+  // flag de remoção do anexo persistido e erro de pré-checagem client-side.
+  const [attachFile, setAttachFile] = useState<File | null>(null);
+  const [removeAttachment, setRemoveAttachment] = useState(false);
+  const [attachError, setAttachError] = useState<string | null>(null);
+  const attachInputRef = useRef<HTMLInputElement>(null);
+  const attachInputId = useId();
+  // Diálogo de confirmação "Dia Útil em feriado" (Onda A-ext). Aberto no submit
+  // quando a regra dispara; confirmar chama onSubmit, cancelar volta ao form.
+  const [confirmHoliday, setConfirmHoliday] = useState(false);
 
   // Re-initialize when the modal (re)opens for a different entry (new vs edit).
   // Render-time state adjustment — the React-recommended alternative to an
@@ -141,6 +236,10 @@ export function TimeEntryForm({
     if (open) {
       setValue(initial ?? emptyValue(days));
       setShowErrors(false);
+      setConfirmHoliday(false);
+      setAttachFile(null);
+      setRemoveAttachment(false);
+      setAttachError(null);
     }
   }
 
@@ -178,6 +277,60 @@ export function TimeEntryForm({
     value.multiplier > 0 ? value.multiplier : 0,
   );
 
+  // Feriado do dia selecionado, PROJECT-AWARE (global OU vinculado ao projeto
+  // escolhido). Derivado de props/estado — sem efeito, sem setState. Usado no
+  // aviso passivo e como base do gatilho no modo diário.
+  const selectedHolidayName = resolveProjectHoliday(
+    holidays,
+    value.projectId,
+    value.date,
+  );
+
+  // Datas de feriado atingidas pelo lançamento, PROJECT-AWARE:
+  // - modo diário/edição: a data única selecionada;
+  // - modo semanal: TODAS as datas efetivas (dias-da-semana marcados mapeados
+  //   para as datas da semana visível — índice i => weekday i+1), de modo que um
+  //   feriado que caia em qualquer um dos dias gerados dispare a confirmação.
+  // Derivado de props/estado; a coleta pura vive em lib/timesheet/holidays.ts.
+  const weeklyEffectiveDates =
+    value.mode === "weekly"
+      ? days
+          .filter((_, index) => value.weekdays.includes(index + 1))
+          .map((day) => day.date)
+      : [];
+  const holidayHits =
+    value.mode === "weekly"
+      ? collectProjectHolidays(holidays, value.projectId, weeklyEffectiveDates)
+      : selectedHolidayName
+        ? [{ date: value.date, name: selectedHolidayName }]
+        : [];
+
+  // Dispara a confirmação para "Dia Útil" (WORKDAY) em feriado, tanto no modo
+  // diário quanto no semanal. Não bloqueia: confirmar salva normalmente.
+  const holidayConfirmRequired = needsWorkdayHolidayConfirmation(
+    value.activity,
+    holidayHits[0]?.name,
+  );
+
+  // BLOQUEIO (Onda D): lançar "Dia Útil" (WORKDAY) num dia coberto por ausência
+  // CONFIRMED. Diferente do feriado (que só confirma), aqui o servidor RECUSA
+  // com TIME_OFF_CONFLICT — antecipamos no form com um erro claro e impedimos o
+  // submit. Vale para o modo diário/edição (data única) e semanal (todas as
+  // datas efetivas). Derivado de props/estado — sem efeito, sem setState.
+  const effectiveDates =
+    value.mode === "weekly" ? weeklyEffectiveDates : value.date ? [value.date] : [];
+  const timeOffBlocks =
+    value.activity === "WORKDAY"
+      ? effectiveDates
+          .map((date) => ({ date, info: resolveConfirmedTimeOff(timeOff, date) }))
+          .filter(
+            (d): d is { date: string; info: NonNullable<typeof d.info> } =>
+              Boolean(d.info),
+          )
+          .map((d) => ({ date: d.date, label: timeOffKindShortLabel(d.info.kind) }))
+      : [];
+  const hasTimeOffBlock = timeOffBlocks.length > 0;
+
   const isEditing = Boolean(initial);
   // Flag de cliente (NEXT_PUBLIC_TRANSCRIPTION). Quando off, o mic some e o
   // fluxo de digitar manualmente segue intacto.
@@ -198,12 +351,75 @@ export function TimeEntryForm({
     });
   }
 
+  // O anexo só faz sentido num lançamento único (diário/edição): o modo semanal
+  // gera vários lançamentos e o anexo é 1:1 com um TimeEntry. Também depende de
+  // storage configurado (degrade honesto quando ausente).
+  const attachmentFieldVisible = attachmentsAvailable && value.mode === "daily";
+
+  /** Intenção de anexo a enviar no submit; `undefined` = não mexeu no anexo. */
+  function attachmentIntent(): TimeEntryAttachmentIntent | undefined {
+    if (!attachmentFieldVisible) return undefined;
+    if (attachFile) return { kind: "upload", file: attachFile };
+    if (removeAttachment && initialAttachment) return { kind: "remove" };
+    return undefined;
+  }
+
   function handleSubmit() {
     if (hasErrors) {
       setShowErrors(true);
       return;
     }
-    onSubmit(value);
+    // Ausência confirmada: lançar Dia Útil é bloqueado (o servidor recusaria).
+    // Mostra o erro inline e impede o submit.
+    if (hasTimeOffBlock) {
+      setShowErrors(true);
+      return;
+    }
+    // "Dia Útil" em feriado: pede confirmação antes de salvar (não bloqueia —
+    // confirmar salva normalmente).
+    if (holidayConfirmRequired) {
+      setConfirmHoliday(true);
+      return;
+    }
+    onSubmit(value, attachmentIntent());
+  }
+
+  /** Confirmação do "Dia Útil em feriado": salva de fato. */
+  function confirmAndSubmit() {
+    setConfirmHoliday(false);
+    onSubmit(value, attachmentIntent());
+  }
+
+  /** Pré-checagem do arquivo escolhido (tipo/tamanho) antes de aceitar. */
+  function handleAttachFiles(files: FileList | null) {
+    const file = files?.[0];
+    if (!file) return;
+    if (!isAcceptedAttachment(file)) {
+      setAttachError("Formato não aceito. Use PDF, JPG, PNG ou WEBP.");
+      return;
+    }
+    if (file.size > ATTACH_MAX_SIZE_BYTES) {
+      setAttachError("Arquivo acima de 10 MB.");
+      return;
+    }
+    setAttachError(null);
+    setRemoveAttachment(false);
+    setAttachFile(file);
+  }
+
+  /** Limpa o arquivo recém-escolhido, voltando ao anexo persistido (se houver). */
+  function clearPickedAttachment() {
+    setAttachFile(null);
+    setAttachError(null);
+    if (attachInputRef.current) attachInputRef.current.value = "";
+  }
+
+  /** Marca o anexo persistido para remoção no submit. */
+  function markAttachmentForRemoval() {
+    setAttachFile(null);
+    setRemoveAttachment(true);
+    setAttachError(null);
+    if (attachInputRef.current) attachInputRef.current.value = "";
   }
 
   function toggleWeekday(day: number) {
@@ -252,7 +468,7 @@ export function TimeEntryForm({
             variant="primary"
             size="sm"
             icon={Save}
-            disabled={busy}
+            disabled={busy || hasTimeOffBlock}
             onClick={handleSubmit}
           >
             Salvar
@@ -378,14 +594,68 @@ export function TimeEntryForm({
               }
               className={inputClass(false)}
             >
-              {days.map((day) => (
-                <option key={day.date} value={day.date}>
-                  {day.label} · {day.date.slice(8, 10)}/{day.date.slice(5, 7)}
-                </option>
-              ))}
+              {days.map((day) => {
+                const dayHoliday = resolveProjectHoliday(
+                  holidays,
+                  value.projectId,
+                  day.date,
+                );
+                return (
+                  <option key={day.date} value={day.date}>
+                    {day.label} · {day.date.slice(8, 10)}/{day.date.slice(5, 7)}
+                    {dayHoliday ? " · Feriado" : ""}
+                  </option>
+                );
+              })}
             </select>
           </div>
         </div>
+
+        {/* Aviso NÃO-BLOQUEANTE: o dia escolhido é feriado. Não impede o
+            submit — apenas sinaliza. */}
+        {selectedHolidayName ? (
+          <div
+            role="status"
+            className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm font-medium text-warning"
+          >
+            <CalendarClock aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+            <span>
+              Você está apontando em um feriado ({selectedHolidayName}). Você
+              ainda pode salvar normalmente.
+            </span>
+          </div>
+        ) : null}
+
+        {/* BLOQUEIO (Onda D): Dia Útil em dia de ausência confirmada. Diferente
+            do feriado, aqui o salvar é impedido (o servidor recusaria com
+            TIME_OFF_CONFLICT). */}
+        {hasTimeOffBlock ? (
+          <div
+            role="alert"
+            className="flex items-start gap-2 rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-sm font-medium text-danger"
+          >
+            <CalendarClock aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+            <div className="space-y-1">
+              <p>
+                {timeOffBlocks.length > 1
+                  ? "Você possui ausência confirmada nestas datas:"
+                  : "Você possui ausência confirmada nesta data:"}
+              </p>
+              <ul
+                className={timeOffBlocks.length > 1 ? "list-inside list-disc" : ""}
+              >
+                {timeOffBlocks.map((b) => (
+                  <li key={b.date}>
+                    {b.date.slice(8, 10)}/{b.date.slice(5, 7)} ({b.label})
+                  </li>
+                ))}
+              </ul>
+              <p>
+                Não é possível lançar Dia Útil aqui. Ajuste a data ou a atividade.
+              </p>
+            </div>
+          </div>
+        ) : null}
 
         {value.mode === "weekly" && !isEditing ? (
           <fieldset>
@@ -497,18 +767,166 @@ export function TimeEntryForm({
           ) : null}
         </div>
 
-        <label className="flex items-center gap-2 text-sm text-medium">
-          <input
-            type="checkbox"
-            checked={value.billable}
-            onChange={(e) =>
-              setValue((v) => ({ ...v, billable: e.target.checked }))
-            }
-            className="size-4 rounded border-border text-brand focus:ring-brand"
-          />
-          Faturável
-        </label>
+        {/* "Faturável" é oculto para consultores puros (Onda B): o valor segue
+            no submit (default true, ou false automático para ON_CALL), mas só
+            gestão/admin/finance vê e edita o controle. */}
+        {canEditBillable ? (
+          <label className="flex items-center gap-2 text-sm text-medium">
+            <input
+              type="checkbox"
+              checked={value.billable}
+              onChange={(e) =>
+                setValue((v) => ({ ...v, billable: e.target.checked }))
+              }
+              className="size-4 rounded border-border text-brand focus:ring-brand"
+            />
+            Faturável
+          </label>
+        ) : null}
+
+        {/* Anexo opcional (melhoria #2): exceção disponível em qualquer
+            lançamento diário. Enviado após salvar, com o id retornado. */}
+        {attachmentFieldVisible ? (
+          <div>
+            <span className="mb-1 block text-xs font-semibold text-medium">
+              Anexo{" "}
+              <span className="font-normal text-soft">
+                (opcional · PDF, JPG, PNG ou WEBP, até 10 MB)
+              </span>
+            </span>
+            {attachFile ? (
+              <div className="flex items-center gap-3 rounded-md border border-border bg-surface-muted/50 px-3 py-2">
+                <FileText
+                  aria-hidden="true"
+                  className="size-4 shrink-0 text-medium"
+                />
+                <p className="min-w-0 flex-1 truncate text-sm font-medium text-strong">
+                  {attachFile.name}
+                </p>
+                <button
+                  type="button"
+                  onClick={clearPickedAttachment}
+                  aria-label="Remover arquivo selecionado"
+                  className={cn(
+                    "grid size-7 shrink-0 place-items-center rounded-md text-medium transition-colors hover:bg-surface hover:text-strong",
+                    focusRing,
+                  )}
+                >
+                  <X aria-hidden="true" className="size-4" />
+                </button>
+              </div>
+            ) : initialAttachment && !removeAttachment ? (
+              <div className="flex items-center gap-3 rounded-md border border-border bg-surface-muted/50 px-3 py-2">
+                <FileText
+                  aria-hidden="true"
+                  className="size-4 shrink-0 text-medium"
+                />
+                <p className="min-w-0 flex-1 truncate text-sm font-medium text-strong">
+                  {initialAttachment.fileName}
+                </p>
+                <label
+                  htmlFor={attachInputId}
+                  className={cn(
+                    "shrink-0 cursor-pointer rounded-md px-2 py-1 text-xs font-semibold text-brand transition-colors hover:bg-surface",
+                    focusRing,
+                  )}
+                >
+                  Substituir
+                </label>
+                <button
+                  type="button"
+                  onClick={markAttachmentForRemoval}
+                  aria-label="Remover anexo"
+                  className={cn(
+                    "grid size-7 shrink-0 place-items-center rounded-md text-medium transition-colors hover:bg-surface hover:text-strong",
+                    focusRing,
+                  )}
+                >
+                  <X aria-hidden="true" className="size-4" />
+                </button>
+              </div>
+            ) : (
+              <label
+                htmlFor={attachInputId}
+                className={cn(
+                  "flex cursor-pointer items-center gap-2 rounded-md border border-dashed border-border bg-surface px-3 py-2.5 text-sm text-medium transition-colors hover:border-brand hover:text-strong",
+                  focusRing,
+                )}
+              >
+                <Paperclip aria-hidden="true" className="size-4" />
+                Anexar arquivo
+              </label>
+            )}
+            <input
+              ref={attachInputRef}
+              id={attachInputId}
+              type="file"
+              accept={ATTACH_ACCEPT}
+              className="sr-only"
+              onChange={(e) => handleAttachFiles(e.target.files)}
+            />
+            {attachError ? (
+              <p role="alert" className="mt-1 text-xs font-medium text-danger">
+                {attachError}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
       </form>
+
+      {/* Confirmação "Dia Útil em feriado" (Onda A-ext). Segue o padrão de
+          Modal do design system (mesmo componente usado pelos demais fluxos de
+          Horas). Confirmar salva; cancelar mantém o formulário aberto. */}
+      <Modal
+        open={confirmHoliday}
+        onClose={() => setConfirmHoliday(false)}
+        title="Lançar em feriado?"
+        description={
+          holidayHits.length > 1
+            ? "Confirme se realmente deseja apontar Dia Útil nestas datas."
+            : "Confirme se realmente deseja apontar Dia Útil nesta data."
+        }
+        footer={
+          <>
+            <ActionButton
+              variant="secondary"
+              size="sm"
+              disabled={busy}
+              onClick={() => setConfirmHoliday(false)}
+            >
+              Cancelar
+            </ActionButton>
+            <ActionButton
+              variant="primary"
+              size="sm"
+              icon={Save}
+              disabled={busy}
+              onClick={confirmAndSubmit}
+            >
+              Lançar mesmo assim
+            </ActionButton>
+          </>
+        }
+      >
+        <div className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm font-medium text-warning">
+          <CalendarClock aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+          <div className="space-y-1">
+            <p>
+              {holidayHits.length > 1
+                ? "As seguintes datas são feriado:"
+                : "Esta data é feriado:"}
+            </p>
+            <ul className={holidayHits.length > 1 ? "list-inside list-disc" : ""}>
+              {holidayHits.map((hit) => (
+                <li key={hit.date}>
+                  {hit.date.slice(8, 10)}/{hit.date.slice(5, 7)} ({hit.name})
+                </li>
+              ))}
+            </ul>
+            <p>Deseja lançar como Dia Útil mesmo assim?</p>
+          </div>
+        </div>
+      </Modal>
     </Modal>
   );
 }

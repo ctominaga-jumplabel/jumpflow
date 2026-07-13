@@ -10,9 +10,15 @@ vi.mock("@/app/app/projetos/actions", () => ({
   updateAllocation: vi.fn(),
   createSaleRate: vi.fn(),
   updateSaleRate: vi.fn(),
+  createReceivable: vi.fn(),
+  updateReceivable: vi.fn(),
+  deleteReceivable: vi.fn(),
+  updateProjectPaymentType: vi.fn(),
+  markProjectAcceptanceAccepted: vi.fn(),
   addAllocationSkill: vi.fn(),
   removeAllocationSkill: vi.fn(),
   updateAllocationSkill: vi.fn(),
+  getProjectTracking: vi.fn(),
 }));
 
 function dbProject(managerName: string): ProjectItem {
@@ -42,6 +48,7 @@ function renderDemo(canViewCommercials = true) {
       canViewCommercials={canViewCommercials}
       canManageSaleRates={canViewCommercials}
       canEditBillingConfig={canViewCommercials}
+      canManageReceivables={canViewCommercials}
     />,
   );
 }
@@ -137,6 +144,84 @@ describe("ProjectsView", () => {
     ).toBeInTheDocument();
   });
 
+  it("flags a project that requires acceptance and hides the chip once accepted", () => {
+    const pending: ProjectItem = {
+      ...dbProject("Ana Martins"),
+      requiresAcceptanceTerm: true,
+    };
+    const { rerender } = render(
+      <ProjectsView
+        mode="db"
+        projects={[pending]}
+        canManageProjects
+        canViewCommercials
+        canManageSaleRates
+        canEditBillingConfig
+        canManageReceivables
+      />,
+    );
+    expect(screen.getByText("Aceite pendente")).toBeInTheDocument();
+
+    // Once accepted, the pending chip disappears.
+    rerender(
+      <ProjectsView
+        mode="db"
+        projects={[
+          {
+            ...pending,
+            acceptanceTermAcceptedAt: "2026-07-10T12:00:00.000Z",
+          },
+        ]}
+        canManageProjects
+        canViewCommercials
+        canManageSaleRates
+        canEditBillingConfig
+        canManageReceivables
+      />,
+    );
+    expect(screen.queryByText("Aceite pendente")).not.toBeInTheDocument();
+  });
+
+  it("restricts the Recebimentos previstos tab when unauthorized", () => {
+    renderDemo(false);
+    fireEvent.click(
+      screen.getByRole("button", { name: /Vínculos e valores de Atlas/ }),
+    );
+    const detail = screen.getByRole("dialog");
+    fireEvent.click(
+      within(detail).getByRole("button", { name: "Recebimentos previstos" }),
+    );
+    expect(
+      within(detail).getByText("Valores comerciais restritos por perfil."),
+    ).toBeInTheDocument();
+  });
+
+  it("adds a local receivable in the project detail", () => {
+    renderDemo();
+    fireEvent.click(
+      screen.getByRole("button", { name: /Vínculos e valores de Atlas/ }),
+    );
+    let detail = screen.getByRole("dialog");
+    fireEvent.click(
+      within(detail).getByRole("button", { name: "Recebimentos previstos" }),
+    );
+    fireEvent.click(within(detail).getByRole("button", { name: /Novo recebimento/ }));
+    const dialogs = screen.getAllByRole("dialog");
+    const modal = dialogs[dialogs.length - 1];
+    fireEvent.change(within(modal).getByLabelText("Rótulo"), {
+      target: { value: "Entrada 40%" },
+    });
+    fireEvent.change(within(modal).getByLabelText("Valor"), {
+      target: { value: "12000" },
+    });
+    fireEvent.click(within(modal).getByRole("button", { name: "Salvar" }));
+    detail = screen.getByRole("dialog");
+    expect(within(detail).getByText("Entrada 40%")).toBeInTheDocument();
+    expect(
+      screen.getByText("Recebimento salvo localmente."),
+    ).toBeInTheDocument();
+  });
+
   it("re-syncs the table when revalidated props change in db mode", () => {
     const { rerender } = render(
       <ProjectsView
@@ -146,6 +231,7 @@ describe("ProjectsView", () => {
         canViewCommercials
         canManageSaleRates
         canEditBillingConfig
+        canManageReceivables
       />,
     );
     expect(screen.getByText("Ana Martins")).toBeInTheDocument();
@@ -159,6 +245,7 @@ describe("ProjectsView", () => {
         canViewCommercials
         canManageSaleRates
         canEditBillingConfig
+        canManageReceivables
       />,
     );
     expect(screen.getByText("Christopher Tominaga")).toBeInTheDocument();

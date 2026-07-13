@@ -33,6 +33,23 @@ const optionalDate = z
   .optional()
   .transform((value) => (value ? value : undefined));
 
+// Data-only estrita (YYYY-MM-DD) que também precisa ser um dia de calendário
+// real (ex.: rejeita 2026-02-31). Evita vazar erro do Prisma como UNEXPECTED
+// quando o valor não é uma data válida.
+const strictDateOnly = z
+  .string()
+  .trim()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "Informe uma data no formato AAAA-MM-DD.")
+  .refine((value) => {
+    const [year, month, day] = value.split("-").map(Number);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    return (
+      date.getUTCFullYear() === year &&
+      date.getUTCMonth() === month - 1 &&
+      date.getUTCDate() === day
+    );
+  }, "Data invalida.");
+
 const optionalNumber = z.preprocess(
   (value) => (value === "" || value === null ? undefined : value),
   z.coerce.number().nonnegative().optional(),
@@ -61,6 +78,9 @@ export const projectInputSchema = z
     billingHourlyRate: optionalNumber,
     budgetHours: optionalNumber,
     costCenter: optionalText(80),
+    // Flag INFORMATIVA de termo de aceite (operacional). Default false mantém a
+    // chave opcional no tipo inferido; nunca bloqueia lançamento/faturamento.
+    requiresAcceptanceTerm: z.boolean().default(false),
   })
   .refine((value) => !value.endDate || value.endDate >= value.startDate, {
     message: "Data final deve ser maior ou igual ao inicio.",
@@ -89,6 +109,55 @@ export const projectBillingTypeSchema = z.object({
   id: entityId,
   billingTypeId: optionalCuid,
 });
+
+// Tipo/condição de pagamento do cliente (prazo/arranjo). Campo comercial,
+// isolado para não tocar os demais campos do projeto. Opcional: "" → undefined
+// (grava null no banco). Gated por SALE_RATE_ROLES na action.
+export const projectPaymentTypeSchema = z.object({
+  id: entityId,
+  paymentType: z.preprocess(
+    (value) => (value === "" || value === null ? undefined : value),
+    z.enum(["ONE_TIME", "INSTALLMENTS", "MONTHLY", "ON_MILESTONE"]).optional(),
+  ),
+});
+
+// Marca o termo de aceite (INFORMATIVO) como aceito. Operacional
+// (PROJECT_WRITE_ROLES); grava data + usuário atual. Não bloqueia nada.
+export const projectAcceptanceTermSchema = z.object({ id: entityId });
+
+// Recebimento previsto do cliente (ProjectReceivableSchedule — lado receita).
+// Data (date-only), valor, rótulo e situação. Dado financeiro: gated por
+// SALE_RATE_ROLES/FINANCIAL_ROLES e auditado.
+export const receivableInputSchema = z.object({
+  projectId: entityId,
+  dueAt: strictDateOnly,
+  amount: z.coerce.number().positive().max(9999999999.99),
+  label: z.string().trim().min(1).max(120),
+  status: z.enum(["FORECAST", "RECEIVED", "CANCELLED"]).default("FORECAST"),
+  // `.optional()` extra mantém a chave opcional no tipo inferido (o transform de
+  // optionalText, sozinho, a tornaria obrigatória com valor string|undefined).
+  note: optionalText(300).optional(),
+});
+
+export const receivableUpdateSchema = receivableInputSchema.extend({
+  id: entityId,
+});
+
+export const receivableRemoveSchema = z.object({ id: entityId });
+
+// Acompanhamento do projeto (Onda C): leitura de margem/custo/receita de um
+// projeto. Só o id do projeto entra; o RBAC/escopo (D5) é aplicado na action.
+export const projectTrackingInputSchema = z.object({ projectId: entityId });
+export type ProjectTrackingRequestInput = z.infer<
+  typeof projectTrackingInputSchema
+>;
+
+export type ProjectPaymentTypeInput = z.infer<typeof projectPaymentTypeSchema>;
+export type ProjectAcceptanceTermInput = z.infer<
+  typeof projectAcceptanceTermSchema
+>;
+export type ReceivableInput = z.infer<typeof receivableInputSchema>;
+export type ReceivableUpdateInput = z.infer<typeof receivableUpdateSchema>;
 
 // Configuracao de cobranca por projeto (motor de regras parametrizavel).
 // Editada pelo Financeiro. Todos os parametros numericos sao opcionais: cada

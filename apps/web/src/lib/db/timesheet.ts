@@ -15,10 +15,12 @@ import {
   type ProjectStatusFilter,
   type TimesheetFilter,
 } from "@/lib/timesheet/filters";
+import type { HolidayLookup } from "@/lib/timesheet/holidays";
 import {
   addDays,
   buildWeekDays,
   parseIsoDateUtc,
+  startOfUtcDay,
   toIsoDate,
   weekLabel,
   weekStartOf,
@@ -49,6 +51,52 @@ export async function getConsultantForUser(user: AppUser) {
   if (byUserId) return byUserId;
   if (!isDevAuthEnabled()) return null;
   return prisma.consultant.findUnique({ where: { email: user.email } });
+}
+
+/**
+ * Lookup PROJECT-AWARE de feriados no intervalo [start, end] (inclusivo), para o
+ * aviso/confirmação ao apontar horas em feriado (Onda A-ext/3).
+ *
+ * Aplicabilidade (espelha `HolidayProject`): feriado SEM vínculo = GLOBAL (vale
+ * para todos os projetos); feriado COM >=1 vínculo = vale só para os projetos
+ * vinculados. O resultado separa `global` (date->nome) de `byProject`
+ * (projectId->date->nome); a UI resolve por (projeto, data) via
+ * `resolveProjectHoliday` / `resolveGlobalHoliday`.
+ *
+ * Semântica date-only: `Holiday.date` é `@db.Date` gravada à meia-noite UTC
+ * (mesma convenção de `TimeEntry.date`). Comparamos SEMPRE por data-calendário
+ * via `toIsoDate` (campos UTC), nunca por timestamp, para não errar o dia por
+ * fuso. O filtro do intervalo normaliza os limites com `startOfUtcDay`.
+ */
+export async function getHolidayLookup(
+  start: Date,
+  end: Date,
+): Promise<HolidayLookup> {
+  const holidays = await prisma.holiday.findMany({
+    where: {
+      date: { gte: startOfUtcDay(start), lte: startOfUtcDay(end) },
+    },
+    select: {
+      date: true,
+      name: true,
+      projects: { select: { projectId: true } },
+    },
+  });
+  const global: Record<string, string> = {};
+  const byProject: Record<string, Record<string, string>> = {};
+  for (const holiday of holidays) {
+    const iso = toIsoDate(holiday.date);
+    if (holiday.projects.length === 0) {
+      // Sem vínculo => global. Primeiro nome vence em caso de colisão de data.
+      if (!(iso in global)) global[iso] = holiday.name;
+    } else {
+      for (const link of holiday.projects) {
+        const map = (byProject[link.projectId] ??= {});
+        if (!(iso in map)) map[iso] = holiday.name;
+      }
+    }
+  }
+  return { global, byProject };
 }
 
 /**
@@ -208,6 +256,9 @@ export async function getWeekForConsultant(
       // budgetHours, costCenter) into the timesheet grid.
       include: {
         project: { select: { name: true, client: { select: { name: true } } } },
+        // Anexo opcional (melhoria #2): só o nome do arquivo para o rótulo/link
+        // da grade. O arquivo nunca é servido aqui — só por URL assinada.
+        attachment: { select: { fileName: true } },
       },
       orderBy: { date: "asc" },
     }),
@@ -236,6 +287,7 @@ export async function getWeekForConsultant(
         hours: [0, 0, 0, 0, 0, 0, 0],
         entryIds: [null, null, null, null, null, null, null],
         clock: [null, null, null, null, null, null, null],
+        attachments: [null, null, null, null, null, null, null],
       };
       rowsByKey.set(key, row);
     }
@@ -245,6 +297,11 @@ export async function getWeekForConsultant(
     if (dayIndex < 0 || dayIndex > 6) continue;
     row.hours[dayIndex] = Number(entry.hours);
     if (row.entryIds) row.entryIds[dayIndex] = entry.id;
+    if (row.attachments) {
+      row.attachments[dayIndex] = entry.attachment
+        ? { fileName: entry.attachment.fileName }
+        : null;
+    }
     if (row.clock) {
       row.clock[dayIndex] = {
         startTime: entry.startTime,
@@ -311,6 +368,11 @@ export interface PeriodCalendarDay {
   totalHours: number;
   statuses: TimeEntryStatus[];
   entries: PeriodCalendarEntry[];
+  /**
+   * Nome do feriado NACIONAL nesta data, quando houver (Onda A/3). Só para
+   * sinalização no resumo do período; nunca bloqueia lançamento.
+   */
+  holidayName?: string;
 }
 
 export interface TimesheetPeriodOverview {
@@ -334,17 +396,24 @@ export async function getPeriodForConsultant(
   const maxEnd = addDays(start, MAX_PERIOD_OVERVIEW_DAYS - 1);
   const end = requestedEnd > maxEnd ? maxEnd : requestedEnd;
 
-  const entries = await prisma.timeEntry.findMany({
-    where: {
-      consultantId,
-      date: { gte: start, lte: end },
-      ...entryFilterWhere(filter),
-    },
-    include: {
-      project: { select: { name: true, client: { select: { name: true } } } },
-    },
-    orderBy: { date: "asc" },
-  });
+  const [entries, holidays] = await Promise.all([
+    prisma.timeEntry.findMany({
+      where: {
+        consultantId,
+        date: { gte: start, lte: end },
+        ...entryFilterWhere(filter),
+      },
+      include: {
+        project: { select: { name: true, client: { select: { name: true } } } },
+      },
+      orderBy: { date: "asc" },
+    }),
+    // Mesmo intervalo do período já calculado. O resumo do período é
+    // cross-projeto (agrega vários projetos por dia), então marcamos apenas
+    // feriados GLOBAIS aqui; feriados específicos de projeto são sinalizados na
+    // grade (project-aware), onde há a linha do projeto.
+    getHolidayLookup(start, end),
+  ]);
 
   const daysByDate = new Map<string, PeriodCalendarDay>();
   for (
@@ -353,11 +422,13 @@ export async function getPeriodForConsultant(
     cursor = addDays(cursor, 1)
   ) {
     const iso = toIsoDate(cursor);
+    const holidayName = holidays.global[iso];
     daysByDate.set(iso, {
       date: iso,
       totalHours: 0,
       statuses: [],
       entries: [],
+      ...(holidayName ? { holidayName } : {}),
     });
   }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { TimeEntryRow } from "./TimeEntryRow";
 import type {
   TimeEntryRow as TimeEntryRowData,
@@ -76,6 +76,142 @@ describe("TimeEntryRow activity label", () => {
   it("marks a non-billable row in the activity cell", () => {
     const { container } = renderRow(row({ billable: false }));
     expect(within(container).getByText(/não faturável/)).toBeInTheDocument();
+  });
+});
+
+describe("TimeEntryRow — Faturável oculto do consultor (Onda B)", () => {
+  it("esconde o rótulo (não faturável) quando canEditBillable=false", () => {
+    render(
+      <table>
+        <tbody>
+          <TimeEntryRow
+            row={row({ billable: false })}
+            days={days}
+            canEditBillable={false}
+          />
+        </tbody>
+      </table>,
+    );
+    expect(screen.queryByText(/não faturável/)).not.toBeInTheDocument();
+  });
+
+  it("mostra o rótulo (não faturável) para gestão (default)", () => {
+    renderRow(row({ billable: false }));
+    expect(screen.getByText(/não faturável/)).toBeInTheDocument();
+  });
+});
+
+describe("TimeEntryRow — anexo (melhoria #2)", () => {
+  const withAttachment = row({
+    entryIds: ["te-1", null, null, null, null, null, null],
+    attachments: [{ fileName: "ok.pdf" }, null, null, null, null, null, null],
+  });
+
+  it("renderiza um link de anexo que abre em nova aba (aria-label)", () => {
+    const onOpenAttachment = vi.fn();
+    render(
+      <table>
+        <tbody>
+          <TimeEntryRow
+            row={withAttachment}
+            days={days}
+            onOpenAttachment={onOpenAttachment}
+          />
+        </tbody>
+      </table>,
+    );
+    const link = screen.getByRole("button", {
+      name: /Abrir anexo ok\.pdf em nova aba/i,
+    });
+    expect(link).toBeInTheDocument();
+    fireEvent.click(link);
+    expect(onOpenAttachment).toHaveBeenCalledWith("te-1");
+  });
+
+  it("não renderiza link quando não há handler de anexo", () => {
+    render(
+      <table>
+        <tbody>
+          <TimeEntryRow row={withAttachment} days={days} />
+        </tbody>
+      </table>,
+    );
+    expect(
+      screen.queryByRole("button", { name: /Abrir anexo/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("não renderiza link quando o lançamento não tem anexo", () => {
+    const onOpenAttachment = vi.fn();
+    render(
+      <table>
+        <tbody>
+          <TimeEntryRow
+            row={row()}
+            days={days}
+            onOpenAttachment={onOpenAttachment}
+          />
+        </tbody>
+      </table>,
+    );
+    expect(
+      screen.queryByRole("button", { name: /Abrir anexo/i }),
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe("TimeEntryRow — sinalização de ausência (Onda D)", () => {
+  it("marca a célula do dia com o selo do tipo quando há ausência CONFIRMED", () => {
+    // Sem horas no dia da ausência para o selo aparecer no lugar do "–".
+    render(
+      <table>
+        <tbody>
+          <TimeEntryRow
+            row={row({ hours: [0, 0, 0, 0, 0, 0, 0] })}
+            days={days}
+            timeOff={{
+              byDate: {
+                "2026-06-09": {
+                  timeOffId: "to1",
+                  kind: "VACATION",
+                  paid: true,
+                  status: "CONFIRMED",
+                },
+              },
+            }}
+          />
+        </tbody>
+      </table>,
+    );
+    // O selo curto "Férias" aparece na célula; o título traz o contexto.
+    expect(screen.getByText("Férias")).toBeInTheDocument();
+    expect(
+      screen.getByTitle(/Férias \(ausência confirmada\)/),
+    ).toBeInTheDocument();
+  });
+
+  it("não marca a célula quando a ausência está apenas REQUESTED", () => {
+    render(
+      <table>
+        <tbody>
+          <TimeEntryRow
+            row={row({ hours: [0, 0, 0, 0, 0, 0, 0] })}
+            days={days}
+            timeOff={{
+              byDate: {
+                "2026-06-09": {
+                  timeOffId: "to2",
+                  kind: "VACATION",
+                  paid: true,
+                  status: "REQUESTED",
+                },
+              },
+            }}
+          />
+        </tbody>
+      </table>,
+    );
+    expect(screen.queryByText("Férias")).not.toBeInTheDocument();
   });
 });
 

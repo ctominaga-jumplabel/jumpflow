@@ -8,8 +8,11 @@ import type {
   ProjectConsultantOption,
   ProjectItem,
   ProjectManagerOption,
+  ProjectPaymentType,
+  ProjectReceivableItem,
   ProjectSaleRateItem,
   ProjectSkillOption,
+  ReceivableStatus,
   SkillLevel,
 } from "@/lib/projects/types";
 import { projectHasSaleValue } from "@/lib/projects/pending";
@@ -96,6 +99,16 @@ type ProjectSaleRateWithNames = {
   endsAt: Date | null;
   hourlyRate: Prisma.Decimal;
   currency: string;
+  note: string | null;
+};
+
+type ProjectReceivableRow = {
+  id: string;
+  projectId: string;
+  dueAt: Date;
+  amount: Prisma.Decimal;
+  label: string;
+  status: string;
   note: string | null;
 };
 
@@ -187,6 +200,11 @@ export async function listProjects(options?: {
           }
         : false,
       timeEntries: { select: { hours: true, status: true } },
+      // Recebimentos previstos são VALORES DE RECEITA (D1): só carregam para
+      // quem pode ver os valores comerciais (mesmo gate dos valores de venda).
+      receivables: includeFinancials
+        ? { orderBy: [{ dueAt: "asc" }] }
+        : false,
       // Aprovação automática é dado operacional (não financeiro): sempre carregado.
       autoApprovalRule: true,
       autoApprovalConsultantRules: {
@@ -287,6 +305,18 @@ export async function listProjects(options?: {
           currency: item.currency,
           note: item.note ?? undefined,
         }));
+    const receivableRows = includeFinancials
+      ? ((row as { receivables?: ProjectReceivableRow[] }).receivables ?? [])
+      : [];
+    const receivables: ProjectReceivableItem[] = receivableRows.map((item) => ({
+      id: item.id,
+      projectId: item.projectId,
+      dueAt: dateToIso(item.dueAt),
+      amount: Number(item.amount),
+      label: item.label,
+      status: item.status as ReceivableStatus,
+      note: item.note ?? undefined,
+    }));
     const consumedHours = row.timeEntries
       .filter((entry) => entry.status !== "REJECTED")
       .reduce((sum, entry) => sum + Number(entry.hours), 0);
@@ -324,6 +354,18 @@ export async function listProjects(options?: {
       // sensível), então é retornado a qualquer perfil que veja o projeto.
       costCenter: row.costCenter ?? undefined,
       commercialContractRef: row.commercialContractRef ?? undefined,
+      // Tipo de pagamento é comercial (como billingType): mascarado por gate.
+      paymentType: includeFinancials
+        ? ((row.paymentType as ProjectPaymentType | null) ?? undefined)
+        : undefined,
+      // Termo de aceite é INFORMATIVO/operacional: sempre retornado.
+      requiresAcceptanceTerm: row.requiresAcceptanceTerm,
+      acceptanceTermAcceptedAt: row.acceptanceTermAcceptedAt
+        ? row.acceptanceTermAcceptedAt.toISOString()
+        : undefined,
+      acceptanceTermAcceptedByUserId:
+        row.acceptanceTermAcceptedByUserId ?? undefined,
+      receivables,
       consumedHours,
       allocatedConsultants: allocations.filter((item) => item.status === "ACTIVE")
         .length,

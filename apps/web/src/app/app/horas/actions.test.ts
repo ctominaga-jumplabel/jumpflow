@@ -78,8 +78,17 @@ const h = vi.hoisted(() => {
     periods: [] as PeriodRec[],
     entries: [] as EntryRec[],
     attachments: [] as AttachmentRec[],
+    defaults: [] as Record<string, unknown>[],
     approvals: [] as Record<string, unknown>[],
     audits: [] as Record<string, unknown>[],
+    // Ausências CONFIRMED que cobrem uma data (guarda C1 em copyPreviousWeek).
+    timeOffs: [] as {
+      consultantId: string;
+      startDate: Date;
+      endDate: Date;
+      status: string;
+      kind: string;
+    }[],
     currentUser: {
       id: "dev-user",
       name: "Ana Martins",
@@ -173,18 +182,62 @@ const h = vi.hoisted(() => {
         return project ? { ...project } : null;
       },
     },
-    allocation: {
+    // Guarda de ausência (Onda D): honra o store.timeOffs por consultor/status/data
+    // (findConfirmedTimeOffCovering usa startDate<=dia && endDate>=dia).
+    consultantTimeOff: {
       findFirst: async ({ where }: { where: Where }) => {
-        const date: Date = where.startDate.lte;
+        const found = store.timeOffs.find(
+          (t) =>
+            t.consultantId === where.consultantId &&
+            t.status === where.status &&
+            t.startDate.getTime() <= where.startDate.lte.getTime() &&
+            t.endDate.getTime() >= where.endDate.gte.getTime(),
+        );
+        return found ? { id: "timeoff-1", kind: found.kind } : null;
+      },
+    },
+    allocation: {
+      findFirst: async ({
+        where,
+        include,
+      }: {
+        where: Where;
+        include?: Where;
+      }) => {
+        // Shape A — findActiveAllocation: filtra por consultor/projeto/data.
+        if (where.startDate?.lte) {
+          const date: Date = where.startDate.lte;
+          const found = store.allocations.find(
+            (a) =>
+              a.consultantId === where.consultantId &&
+              a.projectId === where.projectId &&
+              a.status === where.status &&
+              a.startDate.getTime() <= date.getTime() &&
+              (a.endDate === null || a.endDate.getTime() >= date.getTime()),
+          );
+          return found ? { ...found } : null;
+        }
+        // Shape B — por id (requireOwnedActiveAllocation / applyTimesheetDefault),
+        // com includes opcionais de project e timesheetDefault.
         const found = store.allocations.find(
           (a) =>
+            a.id === where.id &&
             a.consultantId === where.consultantId &&
-            a.projectId === where.projectId &&
-            a.status === where.status &&
-            a.startDate.getTime() <= date.getTime() &&
-            (a.endDate === null || a.endDate.getTime() >= date.getTime()),
+            a.status === where.status,
         );
-        return found ? { ...found } : null;
+        if (!found) return null;
+        const out: Record<string, unknown> = { ...found };
+        if (include?.project) {
+          const project = store.projects.find((p) => p.id === found.projectId);
+          out.project = project
+            ? { id: project.id, status: project.status }
+            : null;
+        }
+        if (include?.timesheetDefault) {
+          const def = store.defaults.find((d) => d.allocationId === found.id);
+          out.timesheetDefault = def ? { ...def } : null;
+        }
+        return out;
       },
     },
     timesheetPeriod: {
@@ -336,6 +389,31 @@ const h = vi.hoisted(() => {
         return removed;
       },
     },
+    timesheetDefault: {
+      upsert: async ({
+        where,
+        update,
+        create,
+      }: {
+        where: Where;
+        update: Where;
+        create: Where;
+      }) => {
+        const existing = store.defaults.find(
+          (d) => d.allocationId === where.allocationId,
+        );
+        if (existing) {
+          Object.assign(existing, update);
+          return { ...existing };
+        }
+        const rec: Record<string, unknown> = {
+          id: nextId("def"),
+          ...create,
+        };
+        store.defaults.push(rec);
+        return { ...rec };
+      },
+    },
     approval: {
       create: async ({ data }: { data: Record<string, unknown> }) => {
         store.approvals.push(data);
@@ -393,6 +471,7 @@ vi.mock("@/lib/storage/provider", async (importOriginal) => {
 });
 
 import {
+  applyTimesheetDefault,
   attachTimeEntryFile,
   copyPreviousWeek,
   createTimeEntry,
@@ -505,8 +584,10 @@ beforeEach(() => {
   h.store.periods = [];
   h.store.entries = [];
   h.store.attachments = [];
+  h.store.defaults = [];
   h.store.approvals = [];
   h.store.audits = [];
+  h.store.timeOffs = [];
   storage.objects.clear();
   storage.configured.value = true;
   storage.provider.upload.mockClear();
@@ -615,6 +696,83 @@ describe("createTimeEntry — persistence", () => {
     seedCurrentPeriod("CLOSED");
     const result = await createTimeEntry(baseInput);
     expect(result).toMatchObject({ ok: false, error: "PERIOD_CLOSED" });
+  });
+});
+
+// Onda B/fix: o campo financeiro `billable` é protegido por papel no SERVIDOR
+// (CLAUDE.md). Um consultor puro NÃO dita billable — o servidor o deriva pela
+// atividade (ON_CALL = não faturável; demais = faturável), ignorando o payload.
+// Gestão (ADMIN/AREA_MANAGER/PROJECT_MANAGER/FINANCE) continua livre.
+describe("billable — enforcement server-side por papel", () => {
+  it("consultor puro: billable=false num lançamento normal é ignorado → persiste true", async () => {
+    h.store.currentUser.roles = ["CONSULTANT"];
+    const result = await createTimeEntry({ ...baseInput, billable: false });
+    expect(result.ok).toBe(true);
+    expect(h.store.entries[0].billable).toBe(true);
+  });
+
+  it("consultor puro em ON_CALL: persiste false independentemente do payload", async () => {
+    h.store.currentUser.roles = ["CONSULTANT"];
+    const result = await createTimeEntry({
+      ...baseInput,
+      activityType: "ON_CALL",
+      multiplier: 0.33,
+      billable: true,
+    });
+    expect(result.ok).toBe(true);
+    expect(h.store.entries[0].billable).toBe(false);
+  });
+
+  it("gestor: consegue definir billable=false normalmente", async () => {
+    h.store.currentUser.roles = ["PROJECT_MANAGER"];
+    const result = await createTimeEntry({ ...baseInput, billable: false });
+    expect(result.ok).toBe(true);
+    expect(h.store.entries[0].billable).toBe(false);
+  });
+
+  it("consultor puro no lançamento semanal: billable=false é ignorado → persiste true", async () => {
+    h.store.currentUser.roles = ["CONSULTANT"];
+    const result = await createWeeklyTimeEntries({
+      projectId: "proj-1",
+      activityType: "WORKDAY",
+      weekStart: "2026-06-08",
+      ...clockFor(8),
+      weekdays: [1, 2],
+      description: "Semana",
+      billable: false,
+      multiplier: 1,
+    });
+    expect(result.ok).toBe(true);
+    expect(h.store.entries.length).toBeGreaterThan(0);
+    expect(h.store.entries.every((e) => e.billable === true)).toBe(true);
+  });
+
+  it("consultor puro no update: billable=false é ignorado → persiste true (atividade normal)", async () => {
+    h.store.currentUser.roles = ["CONSULTANT"];
+    seedCurrentPeriod();
+    const entry = seedEntry({ status: "DRAFT", billable: true });
+    const result = await updateTimeEntry({
+      id: entry.id,
+      ...clockFor(6),
+      description: "Ajuste",
+      billable: false,
+    });
+    expect(result.ok).toBe(true);
+    expect(h.store.entries[0].billable).toBe(true);
+  });
+
+  it("gestor no update: consegue definir billable=false", async () => {
+    h.store.currentUser.roles = ["AREA_MANAGER"];
+    seedCurrentPeriod();
+    const entry = seedEntry({ status: "DRAFT", billable: true });
+    const result = await updateTimeEntry({
+      id: entry.id,
+      ...clockFor(6),
+      description: "Ajuste",
+      billable: false,
+    });
+    expect(result.ok).toBe(true);
+    expect(h.store.entries[0].billable).toBe(false);
   });
 });
 
@@ -934,6 +1092,29 @@ describe("copyPreviousWeek", () => {
     expect(destEntries[0].projectId).toBe("proj-1");
   });
 
+  it("C1: pula WORKDAY em dia com ausência CONFIRMED (senão paga/fatura em dobro)", async () => {
+    seedSourceWeek(); // WORKDAY APROVADO em 2026-06-03 -> destino 2026-06-10
+    // Ausência confirmada cobrindo o dia de destino (VACATION já materializada).
+    h.store.timeOffs.push({
+      consultantId: "con-1",
+      startDate: new Date("2026-06-08T00:00:00.000Z"),
+      endDate: new Date("2026-06-12T00:00:00.000Z"),
+      status: "CONFIRMED",
+      kind: "VACATION",
+    });
+
+    const result = await copyPreviousWeek({ weekStart: "2026-06-08" });
+    expect(result).toMatchObject({
+      ok: true,
+      data: { copied: 0, skippedExisting: 0, skippedIneligible: 1 },
+    });
+    // Nenhum WORKDAY foi criado sobre o dia de ausência.
+    const destEntries = h.store.entries.filter(
+      (e) => e.date.getTime() >= MONDAY.getTime(),
+    );
+    expect(destEntries).toHaveLength(0);
+  });
+
   it("returns PERIOD_CLOSED when the source week is empty and the destination is closed (regression: early-return skipped the dest-period check)", async () => {
     // No seedSourceWeek(): the previous week has zero eligible entries, which
     // used to short-circuit into a misleading { ok: true, copied: 0 } even
@@ -1012,6 +1193,65 @@ describe("saveTimesheetDefault — Sobreaviso não pode ser padrão semanal (A2)
     expect(result.ok ? null : result.message).toMatch(/Sobreaviso/i);
     // A recusa acontece logo após a validação, sem auditar nem persistir nada.
     expect(h.store.audits).toHaveLength(0);
+  });
+});
+
+// Onda B/fix2: fechar o bypass do padrão semanal. `billable` no padrão também é
+// protegido por papel: um consultor puro não sub-fatura salvando/aplicando um
+// default com billable=false.
+describe("billable — enforcement no padrão semanal", () => {
+  it("consultor puro salvando padrão com billable=false → persiste true (WORKDAY)", async () => {
+    h.store.currentUser.roles = ["CONSULTANT"];
+    const result = await saveTimesheetDefault({
+      allocationId: "alloc-1",
+      activityType: "WORKDAY",
+      ...clockFor(8),
+      weekdays: [1, 2, 3, 4, 5],
+      description: "Padrão",
+      billable: false,
+    });
+    expect(result.ok).toBe(true);
+    expect(h.store.defaults).toHaveLength(1);
+    expect(h.store.defaults[0].billable).toBe(true);
+  });
+
+  it("gestor salvando padrão com billable=false → persiste false", async () => {
+    h.store.currentUser.roles = ["PROJECT_MANAGER"];
+    const result = await saveTimesheetDefault({
+      allocationId: "alloc-1",
+      activityType: "WORKDAY",
+      ...clockFor(8),
+      weekdays: [1, 2, 3, 4, 5],
+      description: "Padrão",
+      billable: false,
+    });
+    expect(result.ok).toBe(true);
+    expect(h.store.defaults[0].billable).toBe(false);
+  });
+
+  it("consultor puro aplicando um default billable=false → lançamentos billable=true", async () => {
+    h.store.currentUser.roles = ["CONSULTANT"];
+    // Default legado/adulterado guardando billable=false diretamente no store.
+    h.store.defaults.push({
+      id: "def-legacy",
+      allocationId: "alloc-1",
+      activityType: "WORKDAY",
+      hoursPerDay: 8,
+      startTime: "09:00",
+      breakStart: null,
+      breakEnd: null,
+      endTime: "17:00",
+      weekdays: [1, 2],
+      billable: false,
+      description: "Legado",
+    });
+    const result = await applyTimesheetDefault({
+      allocationId: "alloc-1",
+      weekStart: "2026-06-08",
+    });
+    expect(result.ok).toBe(true);
+    expect(h.store.entries.length).toBeGreaterThan(0);
+    expect(h.store.entries.every((e) => e.billable === true)).toBe(true);
   });
 });
 

@@ -5,6 +5,7 @@ import { prisma, Prisma } from "@jumpflow/database";
 import { z, type ZodType } from "zod";
 import { isDevAuthEnabled } from "@/lib/auth/dev";
 import { requireRole, requireUser } from "@/lib/auth/guards";
+import { hasRole } from "@/lib/auth/route-permissions";
 import type { AppUser } from "@/lib/auth/types";
 import { buildAuditEventData } from "@/lib/db/audit";
 import { isDatabaseConfigured } from "@/lib/db/config";
@@ -13,6 +14,7 @@ import {
   getConsultantForUser,
   recomputePeriodStatus,
 } from "@/lib/db/timesheet";
+import { findConfirmedTimeOffCovering } from "@/lib/db/time-off";
 import { resolveDbUser } from "@/lib/db/users";
 import { transcribeAudio } from "@/lib/transcription/transcribe";
 import {
@@ -59,6 +61,7 @@ import {
 import {
   addDays,
   parseIsoDateUtc,
+  toIsoDate,
   weekStartOf,
 } from "@/lib/timesheet/week";
 
@@ -81,6 +84,33 @@ function clockToData(input: ClockTimes) {
       breakEnd,
     }),
   };
+}
+
+/**
+ * Papéis de gestão que podem definir o campo financeiro `billable` livremente
+ * (mesmo conjunto de MANAGER_ROLES usado em horas/page.tsx).
+ */
+const BILLABLE_MANAGER_ROLES = [
+  "ADMIN",
+  "AREA_MANAGER",
+  "PROJECT_MANAGER",
+  "FINANCE",
+] as const;
+
+/**
+ * Enforcement server-side do campo financeiro `billable` (CLAUDE.md: proteger
+ * campo financeiro por papel). Gestão define livremente; um consultor puro NÃO
+ * dita `billable` — o servidor IGNORA o payload e deriva pela regra de negócio
+ * (Sobreaviso/ON_CALL = não faturável; demais atividades = faturável). Esconder
+ * o controle no client é apenas cosmético: a autoridade é esta função.
+ */
+function resolveBillable(
+  user: AppUser,
+  activityType: string,
+  requested: boolean,
+): boolean {
+  if (hasRole(user, [...BILLABLE_MANAGER_ROLES])) return requested;
+  return activityType !== "ON_CALL";
 }
 
 /**
@@ -215,6 +245,28 @@ async function ensureActiveAllocation(
   return allocation;
 }
 
+/**
+ * Guarda server-side (Onda D): recusa o POST de um lançamento de DIA ÚTIL
+ * (WORKDAY) numa data já coberta por ausência CONFIRMED do consultor. Só WORKDAY
+ * dispara — atividades de ausência (Férias/Licença/Ausência Remunerada) são
+ * exatamente o que a ausência materializa. Sem efeito para as demais atividades.
+ */
+async function assertNoConfirmedTimeOff(
+  db: Db,
+  consultantId: string,
+  activityType: string,
+  date: Date,
+): Promise<void> {
+  if (activityType !== "WORKDAY") return;
+  const off = await findConfirmedTimeOffCovering(db, consultantId, date);
+  if (off) {
+    throw new ActionError(
+      "TIME_OFF_CONFLICT",
+      `Você possui ausência confirmada em ${toIsoDate(date)}. Não é possível lançar Dia Útil nesta data.`,
+    );
+  }
+}
+
 export async function createTimeEntry(
   input: TimeEntryInput,
 ): Promise<ActionResult<{ id: string }>> {
@@ -244,6 +296,13 @@ export async function createTimeEntry(
       project.id,
       date,
     );
+    // Guarda de ausência: WORKDAY em data com ausência confirmada é recusado.
+    await assertNoConfirmedTimeOff(
+      prisma,
+      consultant.id,
+      parsed.activityType,
+      date,
+    );
 
     // Resolve the REAL db user BEFORE the transaction (the audit FK cannot use
     // the synthetic dev session id).
@@ -251,6 +310,8 @@ export async function createTimeEntry(
 
     const description = parsed.description.trim();
     const clock = clockToData(parsed);
+    // Enforcement de campo financeiro por papel: consultor puro não dita billable.
+    const billable = resolveBillable(user, parsed.activityType, parsed.billable);
     const entry = await prisma.$transaction(async (tx) => {
       const period = await upsertOpenPeriod(tx, consultant.id, date);
       // A complete entry enters approval as soon as it is saved (Rodada 4.3):
@@ -284,7 +345,7 @@ export async function createTimeEntry(
           data: {
             ...clock,
             description,
-            billable: parsed.billable,
+            billable,
             multiplier: parsed.multiplier,
             status: "SUBMITTED",
             submittedAt: now,
@@ -303,7 +364,7 @@ export async function createTimeEntry(
             ...clock,
             activityType: parsed.activityType,
             description,
-            billable: parsed.billable,
+            billable,
             multiplier: parsed.multiplier,
             status: "SUBMITTED",
             submittedAt: now,
@@ -366,6 +427,8 @@ export async function createWeeklyTimeEntries(
     const weekdays = [...new Set(parsed.weekdays)].sort((a, b) => a - b);
     const description = parsed.description.trim();
     const clock = clockToData(parsed);
+    // Enforcement de campo financeiro por papel: consultor puro não dita billable.
+    const billable = resolveBillable(user, parsed.activityType, parsed.billable);
 
     const result = await prisma.$transaction(async (tx) => {
       let period = await tx.timesheetPeriod.findUnique({
@@ -417,6 +480,13 @@ export async function createWeeklyTimeEntries(
           counts.skippedOutOfAllocation += 1;
           continue;
         }
+        // Guarda de ausência: recusa WORKDAY em data com ausência confirmada.
+        await assertNoConfirmedTimeOff(
+          tx,
+          consultant.id,
+          parsed.activityType,
+          date,
+        );
         period ??= await upsertOpenPeriod(tx, consultant.id, weekStart);
         const created = await tx.timeEntry.create({
           data: {
@@ -428,7 +498,7 @@ export async function createWeeklyTimeEntries(
             ...clock,
             activityType: parsed.activityType,
             description,
-            billable: parsed.billable,
+            billable,
             multiplier: parsed.multiplier,
             status: "SUBMITTED",
             submittedAt,
@@ -543,6 +613,15 @@ export async function updateTimeEntry(
       allocationId = allocation.id;
     }
 
+    // Guarda de ausência: WORKDAY (atividade não muda no edit) em data coberta
+    // por ausência confirmada é recusado — inclusive ao mover a data.
+    await assertNoConfirmedTimeOff(
+      prisma,
+      consultant.id,
+      entry.activityType,
+      date,
+    );
+
     // Resolve the REAL db user BEFORE the transaction (audit FK).
     const dbUser = await requireDbUser(user);
 
@@ -556,7 +635,9 @@ export async function updateTimeEntry(
         data: {
           ...clockToData(parsed),
           description: parsed.description.trim(),
-          billable: parsed.billable,
+          // Enforcement por papel: consultor puro não dita billable — deriva-se
+          // pela atividade EXISTENTE do lançamento (a atividade não muda no edit).
+          billable: resolveBillable(user, entry.activityType, parsed.billable),
           multiplier: parsed.multiplier,
           date,
           allocationId,
@@ -716,7 +797,10 @@ export async function saveTimesheetDefault(
       breakEnd: clock.breakEnd,
       endTime: clock.endTime,
       weekdays,
-      billable: parsed.billable,
+      // Enforcement de campo financeiro por papel: um consultor puro não dita
+      // billable nem via padrão semanal — deriva-se pela atividade (ON_CALL já é
+      // rejeitado acima, então não-gestão sempre grava true aqui).
+      billable: resolveBillable(user, parsed.activityType, parsed.billable),
       description: parsed.description.trim(),
     };
 
@@ -842,6 +926,14 @@ export async function applyTimesheetDefault(
           counts.skippedExisting += 1;
           continue;
         }
+        // Guarda de ausência: um padrão WORKDAY não materializa em data com
+        // ausência confirmada.
+        await assertNoConfirmedTimeOff(
+          tx,
+          consultant.id,
+          allocation.timesheetDefault!.activityType,
+          date,
+        );
         const def = allocation.timesheetDefault!;
         const created = await tx.timeEntry.create({
           data: {
@@ -857,7 +949,10 @@ export async function applyTimesheetDefault(
             endTime: def.endTime,
             activityType: def.activityType,
             description: def.description ?? "",
-            billable: def.billable,
+            // Defesa-em-profundidade: mesmo que um default legado guarde
+            // billable=false, um consultor puro aplicando-o gera lançamentos
+            // faturáveis (ON_CALL nunca é padrão). Gestão aplica o que está no def.
+            billable: resolveBillable(user, def.activityType, def.billable),
             status: "SUBMITTED",
             submittedAt,
           },
@@ -984,6 +1079,18 @@ export async function copyPreviousWeek(
           continue;
         }
         if (entry.project.status === "CLOSED") {
+          counts.skippedIneligible += 1;
+          continue;
+        }
+        // C1: nunca copiar um WORKDAY sobre um dia com ausência CONFIRMED (já
+        // materializada como VACATION); senão o dia seria pago/faturado em
+        // dobro. É o mesmo invariante de assertNoConfirmedTimeOff, mas aqui
+        // pulamos silenciosamente (com contagem) em vez de abortar a cópia
+        // inteira. Fecha o 5º caminho de criação de WORKDAY.
+        if (
+          entry.activityType === "WORKDAY" &&
+          (await findConfirmedTimeOffCovering(tx, consultant.id, destDate))
+        ) {
           counts.skippedIneligible += 1;
           continue;
         }

@@ -51,6 +51,14 @@ interface EntryRec {
   status: string;
   submittedAt: Date | null;
 }
+interface HolidayRec {
+  date: Date;
+  name: string;
+  scope: string;
+  region: string | null;
+  /** Linked project ids. Empty => GLOBAL (applies to every project). */
+  projectIds: string[];
+}
 interface ApprovalRec {
   id: string;
   entityType: string;
@@ -76,6 +84,7 @@ const h = vi.hoisted(() => {
     periods: [] as PeriodRec[],
     entries: [] as EntryRec[],
     approvals: [] as ApprovalRec[],
+    holidays: [] as HolidayRec[],
   };
 
   const projectOf = (projectId: string) =>
@@ -249,6 +258,32 @@ const h = vi.hoisted(() => {
         }));
       },
     },
+    holiday: {
+      findMany: async ({ where }: { where: Where }) => {
+        return store.holidays
+          .filter((holiday) => {
+            if (
+              where.date?.gte &&
+              holiday.date.getTime() < where.date.gte.getTime()
+            ) {
+              return false;
+            }
+            if (
+              where.date?.lte &&
+              holiday.date.getTime() > where.date.lte.getTime()
+            ) {
+              return false;
+            }
+            return true;
+          })
+          .map((holiday) => ({
+            date: holiday.date,
+            name: holiday.name,
+            // getHolidayLookup seleciona `projects: { select: { projectId } }`.
+            projects: holiday.projectIds.map((projectId) => ({ projectId })),
+          }));
+      },
+    },
     approval: {
       findMany: async ({
         where,
@@ -292,6 +327,7 @@ vi.mock("@jumpflow/database", () => ({
 import type { AppUser } from "@/lib/auth/types";
 import {
   getConsultantForUser,
+  getHolidayLookup,
   getPeriodForConsultant,
   getWeekForConsultant,
   listAllowedProjects,
@@ -390,6 +426,7 @@ beforeEach(() => {
   h.store.periods = [];
   h.store.entries = [];
   h.store.approvals = [];
+  h.store.holidays = [];
 });
 
 describe("getConsultantForUser", () => {
@@ -522,6 +559,104 @@ describe("getPeriodForConsultant", () => {
     expect(period.startDate).toBe("2026-01-01");
     expect(period.endDate).toBe("2026-04-03");
     expect(period.days).toHaveLength(93);
+  });
+});
+
+describe("getHolidayLookup (project-aware, Onda A-ext/3)", () => {
+  const WED = new Date("2026-06-10T00:00:00.000Z");
+
+  it("classifies an unlinked holiday as GLOBAL (applies to every project)", async () => {
+    h.store.holidays.push({
+      date: WED,
+      name: "Feriado Nacional",
+      scope: "NATIONAL",
+      region: null,
+      projectIds: [],
+    });
+
+    const lookup = await getHolidayLookup(MONDAY, SUNDAY);
+
+    expect(lookup.global["2026-06-10"]).toBe("Feriado Nacional");
+    expect(lookup.byProject).toEqual({});
+  });
+
+  it("scopes a linked holiday to ONLY the linked projects", async () => {
+    h.store.holidays.push({
+      date: WED,
+      name: "Folga do Cliente",
+      scope: "CITY",
+      region: null,
+      projectIds: ["proj-atlas"],
+    });
+
+    const lookup = await getHolidayLookup(MONDAY, SUNDAY);
+
+    // Não vira global; só marca o projeto vinculado.
+    expect(lookup.global).toEqual({});
+    expect(lookup.byProject["proj-atlas"]["2026-06-10"]).toBe("Folga do Cliente");
+    expect(lookup.byProject["proj-orion"]).toBeUndefined();
+  });
+
+  it("compares by calendar date (UTC), not timestamp, and bounds the range", async () => {
+    h.store.holidays.push({
+      date: WED,
+      name: "Dentro da semana",
+      scope: "NATIONAL",
+      region: null,
+      projectIds: [],
+    });
+    // Um dia fora do intervalo (segunda seguinte) não deve entrar.
+    h.store.holidays.push({
+      date: new Date("2026-06-15T00:00:00.000Z"),
+      name: "Fora da semana",
+      scope: "NATIONAL",
+      region: null,
+      projectIds: [],
+    });
+
+    const lookup = await getHolidayLookup(MONDAY, SUNDAY);
+
+    expect(Object.keys(lookup.global)).toEqual(["2026-06-10"]);
+  });
+});
+
+describe("getPeriodForConsultant — holiday marking (global only)", () => {
+  it("marks a period day with a GLOBAL holiday name", async () => {
+    h.store.holidays.push({
+      date: new Date("2026-06-10T00:00:00.000Z"),
+      name: "Feriado de Teste",
+      scope: "NATIONAL",
+      region: null,
+      projectIds: [],
+    });
+
+    const period = await getPeriodForConsultant(
+      "con-1",
+      "2026-06-08",
+      "2026-06-14",
+    );
+
+    const day = period.days.find((d) => d.date === "2026-06-10");
+    expect(day?.holidayName).toBe("Feriado de Teste");
+  });
+
+  it("does NOT mark a period day for a project-scoped holiday (cross-project view)", async () => {
+    h.store.holidays.push({
+      date: new Date("2026-06-10T00:00:00.000Z"),
+      name: "Folga do Cliente",
+      scope: "CITY",
+      region: null,
+      projectIds: ["proj-atlas"],
+    });
+
+    const period = await getPeriodForConsultant(
+      "con-1",
+      "2026-06-08",
+      "2026-06-14",
+    );
+
+    const day = period.days.find((d) => d.date === "2026-06-10");
+    expect(day?.holidayName).toBeUndefined();
   });
 });
 

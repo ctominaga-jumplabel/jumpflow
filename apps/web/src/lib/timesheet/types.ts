@@ -102,6 +102,15 @@ export interface DayClock {
   breakEnd: string | null;
 }
 
+/**
+ * Metadata do anexo opcional de um lançamento (melhoria #2). Só carrega o nome
+ * do arquivo (para rótulo/tooltip). O arquivo em si vive em storage privado e só
+ * é acessível por URL assinada de vida curta — nunca embutida na grade.
+ */
+export interface TimeEntryAttachmentMeta {
+  fileName: string;
+}
+
 export interface TimeEntryRow {
   id: string;
   projectId: string;
@@ -137,6 +146,12 @@ export interface TimeEntryRow {
    * legacy entries with no recorded times.
    */
   clock?: (DayClock | null)[];
+  /**
+   * Anexo opcional por dia (melhoria #2), aligned with `entryIds`. `null` quando
+   * o lançamento daquele dia não tem anexo. O link da grade usa `entryIds[i]`
+   * para pedir a URL assinada no servidor.
+   */
+  attachments?: (TimeEntryAttachmentMeta | null)[];
 }
 
 export interface TimesheetWeek {
@@ -161,6 +176,9 @@ export function cloneWeek(week: TimesheetWeek): TimesheetWeek {
       entryIds: r.entryIds ? [...r.entryIds] : undefined,
       clock: r.clock
         ? r.clock.map((cell) => (cell ? { ...cell } : null))
+        : undefined,
+      attachments: r.attachments
+        ? r.attachments.map((cell) => (cell ? { ...cell } : null))
         : undefined,
     })),
   };

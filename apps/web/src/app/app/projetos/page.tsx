@@ -6,10 +6,13 @@ import { getCurrentUser } from "@/lib/auth/current-user";
 import {
   FINANCIAL_ROLES,
   hasRole,
+  PROJECT_TRACKING_BROAD_ROLES,
+  PROJECT_TRACKING_VIEW_ROLES,
   PROJECT_WRITE_ROLES,
   SALE_RATE_ROLES,
 } from "@/lib/auth/route-permissions";
 import { isDatabaseConfigured } from "@/lib/db/config";
+import { resolveDbUser } from "@/lib/db/users";
 import { listBillingTypes } from "@/lib/db/clients";
 import {
   listProjectClients,
@@ -37,6 +40,24 @@ export default async function ProjetosPage() {
   const canManageSaleRates = hasRole(user, SALE_RATE_ROLES);
   // A configuracao de cobranca (motor de regras) e editada pelo Financeiro.
   const canEditBillingConfig = hasRole(user, FINANCIAL_ROLES);
+  // Recebimentos previstos são valores de receita: escrita para o Comercial ou
+  // o Financeiro (mesmo gate/mascaramento dos valores de venda).
+  const canManageReceivables =
+    hasRole(user, SALE_RATE_ROLES) || hasRole(user, FINANCIAL_ROLES);
+  // Acompanhamento (D5): visível a Financeiro/Comercial (todos os projetos) e ao
+  // PROJECT_MANAGER (só os próprios). Quando o usuário é PM sem papel amplo,
+  // resolvemos o id REAL para restringir a aba aos projetos que ele gerencia; o
+  // servidor revalida esse escopo na server action de qualquer forma.
+  const canViewTracking = hasRole(user, PROJECT_TRACKING_VIEW_ROLES);
+  const trackingBroad = hasRole(user, PROJECT_TRACKING_BROAD_ROLES);
+  const trackingManagerUserId =
+    databaseReady &&
+    canViewTracking &&
+    !trackingBroad &&
+    hasRole(user, "PROJECT_MANAGER") &&
+    user
+      ? ((await resolveDbUser(user))?.id ?? "__no-manager__")
+      : null;
   const [projects, clients, consultants, managers, skills, billingTypeItems] =
     databaseReady
       ? await Promise.all([
@@ -84,6 +105,9 @@ export default async function ProjetosPage() {
         canViewCommercials={canViewCommercials}
         canManageSaleRates={canManageSaleRates}
         canEditBillingConfig={canEditBillingConfig}
+        canManageReceivables={canManageReceivables}
+        canViewTracking={canViewTracking}
+        trackingManagerUserId={trackingManagerUserId}
       />
     </div>
   );

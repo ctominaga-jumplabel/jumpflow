@@ -74,6 +74,20 @@ export const SALE_RATE_ROLES: RoleName[] = [
 ];
 
 /**
+ * Acompanhamento do projeto (margem/custo/receita com VALORES ABSOLUTOS) —
+ * Decisão D5. Visível ao GERENTE DO PROJETO, ao FINANCEIRO e ao COMERCIAL; o
+ * Consultor NUNCA vê. O PROJECT_MANAGER é restrito aos PRÓPRIOS projetos — esse
+ * escopo por linha é aplicado no servidor (server action), não pela lista de
+ * papéis. Os demais papéis (broad) veem todos os projetos.
+ */
+export const PROJECT_TRACKING_BROAD_ROLES: RoleName[] = [
+  ...new Set<RoleName>([...FINANCIAL_ROLES, ...SALE_RATE_ROLES]),
+];
+export const PROJECT_TRACKING_VIEW_ROLES: RoleName[] = [
+  ...new Set<RoleName>([...PROJECT_TRACKING_BROAD_ROLES, "PROJECT_MANAGER"]),
+];
+
+/**
  * Roles that may WRITE the skill catalog and competency profiles (criar/editar/
  * inativar skill, perfis e itens). PEOPLE owns talent management; ADMIN is the
  * platform owner. Single source of truth shared by the `/app/competencias`
