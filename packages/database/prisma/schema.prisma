@@ -2633,6 +2633,11 @@ enum NotificationEvent {
   FEED_CONTENT_REACTED // melhoria #5: reacoes ao seu post/comentario (digest agregado)
   FEED_MENTIONED // melhoria #5: voce foi mencionado (@) num post/comentario
   HOLIDAY_UPCOMING // Onda A/2: feriado proximo (job agendado varre o calendario)
+  MISSING_TIMESHEET_REPORT // relatorio semanal de ausencia de lancamento (CSV)
+  ACCESS_INVITE // convite de acesso / novo link (destinatario = convidado)
+  PRE_INVOICE_ISSUED // pre-fatura enviada ao contato do cliente
+  NFSE_ISSUED // NFS-e emitida, e-mail ao contato do cliente
+  PAYMENT_FORECAST // previsao de pagamento ao consultor
 }
 
 /// Nivel de agregacao em que a regra dispara.
@@ -2648,6 +2653,7 @@ enum NotificationRecipientType {
   ROLE // address e um RoleName; expande para usuarios com aquele papel
   PROJECT_MANAGER // resolve para o gestor do projeto (scope = PROJECT) — remetente/destino 1.4
   CLIENT_CONTACT // resolve para o contato de cobranca do cliente (1.2)
+  EVENT_TARGET // destinatario inerente ao evento (convidado, consultor, lista do relatorio)
 }
 
 /// Regra de notificacao: para um evento + escopo, define canal, destinatarios e

@@ -26,6 +26,11 @@ const EVENT_LABELS: Record<NotificationEventKey, string> = {
   COMMERCIAL_CONTRACT_MISSING: "Contrato ausente",
   OPERATION_CLOSED: "Fechamento operacional (DP)",
   HOLIDAY_UPCOMING: "Feriado próximo",
+  MISSING_TIMESHEET_REPORT: "Ausência de lançamento (relatório)",
+  ACCESS_INVITE: "Convite de acesso",
+  PRE_INVOICE_ISSUED: "Pré-fatura (cliente)",
+  NFSE_ISSUED: "NFS-e emitida (cliente)",
+  PAYMENT_FORECAST: "Previsão de pagamento (consultor)",
 };
 const EVENTS = Object.keys(EVENT_LABELS) as NotificationEventKey[];
 const SCOPES: NotificationScopeKey[] = ["GLOBAL", "PROJECT"];
@@ -35,6 +40,7 @@ const RECIPIENT_TYPES: Record<NotificationRecipientTypeKey, string> = {
   ROLE: "Papel (grupo)",
   PROJECT_MANAGER: "Gestor do projeto",
   CLIENT_CONTACT: "Contato do cliente",
+  EVENT_TARGET: "Destinatário do evento",
 };
 const ROLE_NAMES = [
   "ADMIN",

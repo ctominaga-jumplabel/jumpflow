@@ -14,6 +14,7 @@ import {
 } from "@/lib/db/invitations";
 import { getEmailTransport } from "@/lib/automation/email-transport";
 import { buildAccessInviteEmail } from "@/lib/automation/email/templates";
+import { resolveEventDelivery } from "@/lib/automation/notifications/event-delivery";
 
 /**
  * Server actions for the admin access screen (`/app/admin/acessos`).
@@ -140,17 +141,26 @@ export async function inviteUser(
           link,
           recipientName: parsed.data.name,
         });
-        await getEmailTransport().send({
-          to: [result.invitation.email],
-          subject: inviteEmail.subject,
-          text: inviteEmail.text,
-          html: inviteEmail.html,
+        // ACCESS_INVITE rule (/app/admin/notificacoes): the invitee is the
+        // EVENT_TARGET; admin can turn it off or add recipients.
+        const delivery = await resolveEventDelivery("ACCESS_INVITE", {
+          targets: [
+            { email: result.invitation.email, name: parsed.data.name },
+          ],
         });
-        revalidatePath(ROUTE);
-        return {
-          ok: true,
-          data: { email: result.invitation.email, emailed: true },
-        };
+        if (!delivery.skip && delivery.emails.length > 0) {
+          await getEmailTransport().send({
+            to: delivery.emails,
+            subject: inviteEmail.subject,
+            text: inviteEmail.text,
+            html: inviteEmail.html,
+          });
+          revalidatePath(ROUTE);
+          return {
+            ok: true,
+            data: { email: result.invitation.email, emailed: true },
+          };
+        }
       } catch (error) {
         // Email failed: fall back to returning the link so the admin is not
         // left without a way to deliver it. Never log the token.
@@ -237,17 +247,22 @@ export async function regenerateInvite(input: {
     if (hasRealEmailProvider()) {
       try {
         const regenEmail = buildAccessInviteEmail({ link, regenerated: true });
-        await getEmailTransport().send({
-          to: [result.invitation.email],
-          subject: regenEmail.subject,
-          text: regenEmail.text,
-          html: regenEmail.html,
+        const delivery = await resolveEventDelivery("ACCESS_INVITE", {
+          targets: [{ email: result.invitation.email }],
         });
-        revalidatePath(ROUTE);
-        return {
-          ok: true,
-          data: { email: result.invitation.email, emailed: true },
-        };
+        if (!delivery.skip && delivery.emails.length > 0) {
+          await getEmailTransport().send({
+            to: delivery.emails,
+            subject: regenEmail.subject,
+            text: regenEmail.text,
+            html: regenEmail.html,
+          });
+          revalidatePath(ROUTE);
+          return {
+            ok: true,
+            data: { email: result.invitation.email, emailed: true },
+          };
+        }
       } catch (error) {
         console.error("[acessos] regenerate email failed; returning link", {
           email: result.invitation.email,

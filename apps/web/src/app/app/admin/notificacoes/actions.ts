@@ -30,6 +30,11 @@ const eventEnum = z.enum([
   "COMMERCIAL_CONTRACT_MISSING",
   "OPERATION_CLOSED",
   "HOLIDAY_UPCOMING",
+  "MISSING_TIMESHEET_REPORT",
+  "ACCESS_INVITE",
+  "PRE_INVOICE_ISSUED",
+  "NFSE_ISSUED",
+  "PAYMENT_FORECAST",
 ]);
 const scopeEnum = z.enum(["GLOBAL", "PROJECT", "ALLOCATION"]);
 const channelEnum = z.enum(["EMAIL", "TEAMS"]);
@@ -38,6 +43,7 @@ const recipientTypeEnum = z.enum([
   "ROLE",
   "PROJECT_MANAGER",
   "CLIENT_CONTACT",
+  "EVENT_TARGET",
 ]);
 
 const createRuleSchema = z
@@ -157,10 +163,17 @@ const addRecipientSchema = z
     address: z.string().trim().min(1).optional(),
     name: z.string().trim().optional(),
   })
-  .refine((v) => v.type === "PROJECT_MANAGER" || v.type === "CLIENT_CONTACT" || Boolean(v.address), {
-    message: "Informe o e-mail, URL ou papel.",
-    path: ["address"],
-  });
+  .refine(
+    (v) =>
+      v.type === "PROJECT_MANAGER" ||
+      v.type === "CLIENT_CONTACT" ||
+      v.type === "EVENT_TARGET" ||
+      Boolean(v.address),
+    {
+      message: "Informe o e-mail, URL ou papel.",
+      path: ["address"],
+    },
+  );
 
 export type AddRecipientFormInput = z.infer<typeof addRecipientSchema>;
 

@@ -16,10 +16,16 @@ import type { NotificationChannel, ResolvedRecipient } from "./dispatch";
 export interface ResolveContext {
   projectId?: string;
   clientId?: string;
+  /**
+   * Addresses inherent to the emitting event (the invitee, the consultant, the
+   * report recipient list). Consumed by the EVENT_TARGET recipient type, whose
+   * "who" is decided by the action, not by a role/contact lookup.
+   */
+  targets?: Array<{ email: string; name?: string | null }>;
 }
 
 interface RecipientRow {
-  type: "STATIC" | "ROLE" | "PROJECT_MANAGER" | "CLIENT_CONTACT";
+  type: "STATIC" | "ROLE" | "PROJECT_MANAGER" | "CLIENT_CONTACT" | "EVENT_TARGET";
   channel: NotificationChannel;
   address: string | null;
   name: string | null;
@@ -115,6 +121,11 @@ export async function resolveRecipients(
         break;
       case "CLIENT_CONTACT":
         resolved.push(...(await resolveClientContact(context)));
+        break;
+      case "EVENT_TARGET":
+        for (const t of context.targets ?? []) {
+          if (t.email) resolved.push(emailRecipient(t.email, t.name));
+        }
         break;
     }
   }

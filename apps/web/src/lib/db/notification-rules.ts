@@ -15,7 +15,12 @@ export type NotificationEventKey =
   | "INVOICING_OVERDUE"
   | "COMMERCIAL_CONTRACT_MISSING"
   | "OPERATION_CLOSED"
-  | "HOLIDAY_UPCOMING";
+  | "HOLIDAY_UPCOMING"
+  | "MISSING_TIMESHEET_REPORT"
+  | "ACCESS_INVITE"
+  | "PRE_INVOICE_ISSUED"
+  | "NFSE_ISSUED"
+  | "PAYMENT_FORECAST";
 
 export type NotificationScopeKey = "GLOBAL" | "PROJECT" | "ALLOCATION";
 export type NotificationChannelKey = "EMAIL" | "TEAMS";
@@ -23,7 +28,8 @@ export type NotificationRecipientTypeKey =
   | "STATIC"
   | "ROLE"
   | "PROJECT_MANAGER"
-  | "CLIENT_CONTACT";
+  | "CLIENT_CONTACT"
+  | "EVENT_TARGET";
 
 export interface NotificationRecipientView {
   id: string;

@@ -1310,6 +1310,75 @@ async function seedNotificationDefaults() {
     [{ type: "ROLE", channel: "EMAIL", address: "PEOPLE", name: "DP / People" }],
     "HOLIDAY_UPCOMING → ROLE PEOPLE (EMAIL)",
   );
+
+  // E-mails transacionais integrados às regras (liga/desliga + destinatários na
+  // tela). EVENT_TARGET = destinatário inerente à ação (lista do relatório /
+  // convidado / consultor), resolvido em runtime; CLIENT_CONTACT p/ os do
+  // cliente. Todos ativos por padrão (comportamento atual preservado).
+  await ensureNotificationRule(
+    "MISSING_TIMESHEET_REPORT",
+    [
+      {
+        type: "EVENT_TARGET",
+        channel: "EMAIL",
+        address: null,
+        name: "Lista do relatório (config. de automação)",
+      },
+    ],
+    "MISSING_TIMESHEET_REPORT → EVENT_TARGET (EMAIL)",
+  );
+
+  await ensureNotificationRule(
+    "ACCESS_INVITE",
+    [
+      {
+        type: "EVENT_TARGET",
+        channel: "EMAIL",
+        address: null,
+        name: "Pessoa convidada",
+      },
+    ],
+    "ACCESS_INVITE → EVENT_TARGET (EMAIL)",
+  );
+
+  await ensureNotificationRule(
+    "PRE_INVOICE_ISSUED",
+    [
+      {
+        type: "CLIENT_CONTACT",
+        channel: "EMAIL",
+        address: null,
+        name: "Contato do cliente",
+      },
+    ],
+    "PRE_INVOICE_ISSUED → CLIENT_CONTACT (EMAIL)",
+  );
+
+  await ensureNotificationRule(
+    "NFSE_ISSUED",
+    [
+      {
+        type: "CLIENT_CONTACT",
+        channel: "EMAIL",
+        address: null,
+        name: "Contato do cliente",
+      },
+    ],
+    "NFSE_ISSUED → CLIENT_CONTACT (EMAIL)",
+  );
+
+  await ensureNotificationRule(
+    "PAYMENT_FORECAST",
+    [
+      {
+        type: "EVENT_TARGET",
+        channel: "EMAIL",
+        address: null,
+        name: "Consultor",
+      },
+    ],
+    "PAYMENT_FORECAST → EVENT_TARGET (EMAIL)",
+  );
 }
 
 // Feriados nacionais brasileiros. Datas oficiais fixas + móveis (Sexta-feira
