@@ -10,6 +10,7 @@ export const projectStatusLabels: Record<SupportedProjectStatus, string> = {
   ON_HOLD: "Em espera",
   PAUSED: "Pausado",
   CLOSED: "Encerrado",
+  CANCELLED: "Cancelado",
 };
 
 const toneByStatus: Record<SupportedProjectStatus, StatusTone> = {
@@ -19,6 +20,7 @@ const toneByStatus: Record<SupportedProjectStatus, StatusTone> = {
   ON_HOLD: "warning",
   PAUSED: "warning",
   CLOSED: "neutral",
+  CANCELLED: "danger",
 };
 
 export interface ProjectStatusBadgeProps {

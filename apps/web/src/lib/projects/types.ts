@@ -1,4 +1,9 @@
-export type ProjectStatus = "PROPOSAL" | "ACTIVE" | "PAUSED" | "CLOSED";
+export type ProjectStatus =
+  | "PROPOSAL"
+  | "ACTIVE"
+  | "PAUSED"
+  | "CLOSED"
+  | "CANCELLED";
 export type ProjectPaymentType =
   | "ONE_TIME"
   | "INSTALLMENTS"
