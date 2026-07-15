@@ -4,39 +4,45 @@ import { createRemoteJWKSet, jwtVerify } from "jose";
 /**
  * Machine-to-machine (M2M) guard for the CRM → JumpFlow ingestion endpoint.
  *
- * JumpFlow acts as the OAuth 2.0 resource server: it validates the Bearer token
- * that the CRM obtains via client-credentials against Microsoft Entra ID
- * (contrato v1 §1, guarda G6). This endpoint lives OUTSIDE `/app/*`, so it is
- * NOT covered by `proxy.ts` — the guard here is the only gate.
+ * This endpoint lives OUTSIDE `/app/*`, so it is NOT covered by `proxy.ts` —
+ * the guard here is the only gate (contrato v1 §1, guarda G6).
+ *
+ * PRIMARY method (no Azure required): a shared secret in the
+ * `Authorization: Bearer <secret>` header, compared in constant time — the same
+ * pattern as `CRON_SECRET`/`job-auth.ts`. This is the production method now, so
+ * the CRM does not need MSAL/Entra at all. The secret IS the credential, so
+ * there is no role/scope check on this path. Rely on HTTPS in transit.
+ *
+ * The OAuth/Entra resource-server path is kept as an ALTERNATIVE (future use);
+ * see `docs/integracao-crm-m2m-auth.md`.
  *
  * Environment variables:
- * - `CRM_M2M_ISSUER`            OIDC issuer to validate the token `iss` against.
+ * - `CRM_M2M_SHARED_SECRET`     PRIMARY. Shared Bearer secret the CRM sends.
+ *                               Works in ALL environments, including production.
+ *                               Same value set here (Vercel) and in the CRM.
+ *                               Generate with `openssl rand -base64 48`.
+ * - `CRM_M2M_ISSUER`            (Entra alt.) OIDC issuer to validate `iss`.
  *                               Falls back to `AUTH_MICROSOFT_ENTRA_ID_ISSUER`,
  *                               or is derived from `AUTH_MICROSOFT_ENTRA_ID_TENANT_ID`
  *                               (`https://login.microsoftonline.com/<tenant>/v2.0`).
- * - `CRM_M2M_JWKS_URI`          Optional explicit JWKS endpoint. Defaults to
- *                               `<issuer>/discovery/v2.0/keys` for Entra.
- * - `CRM_M2M_AUDIENCE`          Expected token `aud` (the resource/app id URI).
- * - `CRM_M2M_REQUIRED_ROLE`     App role (claim `roles`) or scope (claim `scp`)
- *                               the token MUST carry (e.g. `crm.ingest`).
- *                               REQUIRED in production: without it the guard
- *                               would accept any tenant token with the right
- *                               `aud`, so a missing value is treated as
- *                               misconfiguration and DENIED. Optional in
- *                               non-production (local convenience).
- * - `CRM_M2M_DEV_SECRET`        Dev-only shared secret; `Authorization: Bearer
- *                               <secret>` authorizes without Entra. Honored ONLY
- *                               when `NODE_ENV !== "production"`; in production it
- *                               is ignored entirely (the Entra JWT is the only
- *                               authorization path).
+ * - `CRM_M2M_JWKS_URI`          (Entra alt.) Optional explicit JWKS endpoint.
+ *                               Defaults to `<issuer>/discovery/v2.0/keys`.
+ * - `CRM_M2M_AUDIENCE`          (Entra alt.) Expected token `aud`.
+ * - `CRM_M2M_REQUIRED_ROLE`     (Entra alt.) App role (`roles`) or scope (`scp`)
+ *                               the token MUST carry. REQUIRED in production on
+ *                               the Entra path (else any tenant token with the
+ *                               right `aud` would pass ⇒ treated as
+ *                               misconfiguration and DENIED). Optional non-prod.
+ * - `CRM_M2M_DEV_SECRET`        Dev-only shared secret; honored ONLY when
+ *                               `NODE_ENV !== "production"` (ignored in prod).
  *
  * Security posture (consistent with `job-auth.ts`, "never a silent open
  * endpoint in production"):
- * - Production: the ONLY way in is a valid Entra JWT (issuer + audience) that
- *   also carries `CRM_M2M_REQUIRED_ROLE`. Missing issuer/audience/role config
- *   ⇒ DENY 401 (`m2m_auth_not_configured`). Dev secret ⇒ ignored.
- * - Non-production WITHOUT any config ⇒ allow (local convenience). Dev secret
- *   and an optional role are honored when configured.
+ * - Production NEVER opens without a credential. A configured environment
+ *   (shared secret and/or Entra) never opens silently even in non-production
+ *   when the bearer is wrong ⇒ 401.
+ * - Only when NOTHING is configured AND `NODE_ENV !== "production"` does the
+ *   guard allow (local convenience, `clientId: "dev-open"`).
  */
 
 export type CrmM2MAuthResult =
@@ -111,23 +117,31 @@ function getJwks(uri: string): ReturnType<typeof createRemoteJWKSet> {
 export async function authorizeCrmM2M(
   request: Request,
 ): Promise<CrmM2MAuthResult> {
+  const sharedSecret = envTrimmed("CRM_M2M_SHARED_SECRET");
   const issuer = resolveIssuer();
   const audience = envTrimmed("CRM_M2M_AUDIENCE");
   const requiredRole = envTrimmed("CRM_M2M_REQUIRED_ROLE");
   const devSecret = envTrimmed("CRM_M2M_DEV_SECRET");
   const isProduction = process.env.NODE_ENV === "production";
   const entraConfigured = Boolean(issuer && audience);
+  const configured = entraConfigured || Boolean(sharedSecret);
 
   const bearer = readBearer(request);
 
-  // Dev shared-secret fallback (mirrors job-auth.ts). Constant-time compare.
-  // Honored ONLY in non-production: in production the dev secret is ignored so
-  // the Entra JWT is the single authorization path (contradiction fix I1).
+  // 1) PRIMARY: shared secret (mirrors job-auth.ts). Constant-time compare.
+  // Works in ALL environments, INCLUDING production — this is the production
+  // method now. The secret is the credential; no role check on this path.
+  if (sharedSecret && bearer && safeEqual(bearer, sharedSecret)) {
+    return { ok: true, clientId: "crm-shared-secret" };
+  }
+
+  // 2) Dev shared-secret fallback. Honored ONLY in non-production: in
+  // production the dev secret is ignored entirely.
   if (!isProduction && devSecret && bearer && safeEqual(bearer, devSecret)) {
     return { ok: true, clientId: "crm-dev-secret" };
   }
 
-  // Primary path: validate the Entra JWT as a resource server.
+  // 3) Alternative path: validate the Entra JWT as a resource server.
   if (entraConfigured) {
     // In production the app-role/scope is mandatory: without it, any tenant
     // token with the right `aud` would pass. Treat a missing role config as
@@ -164,9 +178,13 @@ export async function authorizeCrmM2M(
     }
   }
 
-  // No Entra config. In production, never open silently.
-  if (isProduction) {
-    return { ok: false, status: 401, error: "m2m_auth_not_configured" };
+  // 4) Nothing matched. A configured environment (shared secret and/or Entra)
+  // never opens silently — deny even in non-production if the bearer was wrong
+  // or absent. Production always denies without a credential.
+  if (configured || isProduction) {
+    return configured
+      ? { ok: false, status: 401, error: "unauthorized" }
+      : { ok: false, status: 401, error: "m2m_auth_not_configured" };
   }
 
   // Non-production convenience: no config at all ⇒ allow (as job-auth does).
