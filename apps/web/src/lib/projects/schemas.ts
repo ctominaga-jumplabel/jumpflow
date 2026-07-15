@@ -70,7 +70,7 @@ export const projectInputSchema = z
     clientId: entityId,
     name: z.string().trim().min(2).max(120),
     description: optionalText(500),
-    status: z.enum(["PROPOSAL", "ACTIVE", "PAUSED", "CLOSED"]),
+    status: z.enum(["PROPOSAL", "ACTIVE", "PAUSED", "CLOSED", "CANCELLED"]),
     startDate: z.string().trim().min(10).max(10),
     endDate: optionalDate,
     managerUserId: optionalText(80),

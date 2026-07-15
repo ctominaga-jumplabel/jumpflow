@@ -323,11 +323,16 @@ function mapSeniority(value: string): Seniority {
     case "MID_LEVEL":
       return "PLENO";
     case "SENIOR":
+    case "TECH_LEAD":
       return "SENIOR";
     case "SPECIALIST":
     case "PRINCIPAL":
+    case "ARCHITECT":
+    case "COORDINATOR":
+    case "MANAGER":
       return "ESPECIALISTA";
     case "INTERN":
+    case "TRAINEE":
     case "JUNIOR":
     default:
       return "JUNIOR";

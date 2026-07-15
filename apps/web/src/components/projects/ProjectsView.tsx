@@ -144,6 +144,7 @@ const statusFilters: (ProjectStatus | "ALL")[] = [
   "ACTIVE",
   "PAUSED",
   "CLOSED",
+  "CANCELLED",
 ];
 
 const emptyProject: ProjectInput = {
@@ -1081,7 +1082,15 @@ function ProjectModal({
             }
             className={fieldClass()}
           >
-            {(["PROPOSAL", "ACTIVE", "PAUSED", "CLOSED"] as ProjectStatus[]).map(
+            {(
+              [
+                "PROPOSAL",
+                "ACTIVE",
+                "PAUSED",
+                "CLOSED",
+                "CANCELLED",
+              ] as ProjectStatus[]
+            ).map(
               (item) => (
                 <option key={item} value={item}>
                   {projectStatusLabels[item]}
