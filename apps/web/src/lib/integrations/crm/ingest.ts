@@ -377,7 +377,10 @@ async function applyIngestion(
     });
     projectId = created.id;
   } else {
-    // LINKED_EXISTING / UPDATED => NAO altera o status vigente.
+    // LINKED_EXISTING / UPDATED => NAO altera o status vigente, EXCETO reativar
+    // um projeto CANCELLED que foi re-ganho no CRM (simetrico ao cancelamento;
+    // so chega aqui apos passar pelo guard de revision => revisao nova).
+    const reactivated = existingProject.status === "CANCELLED";
     const updated = await tx.project.update({
       where: { id: existingProject.id },
       data: {
@@ -390,10 +393,24 @@ async function applyIngestion(
         commercialContractRef: ref,
         managerUserId: executive.managerUserId,
         billingTypeId: billing.billingTypeId,
+        ...(reactivated ? { status: "ACTIVE" as const } : {}),
       },
       select: { id: true },
     });
     projectId = updated.id;
+
+    if (reactivated) {
+      await tx.auditEvent.create({
+        data: buildAuditEventData({
+          actorUserId: null,
+          entityType: "Project",
+          entityId: projectId,
+          action: "PROJECT_REACTIVATED_BY_CRM",
+          before: { status: "CANCELLED" },
+          after: { status: "ACTIVE", commercialContractRef: ref, revision: payload.revision },
+        }),
+      });
+    }
   }
 
   // --- Valor de venda -> ProjectSaleRate (blended = total / horas) -----------

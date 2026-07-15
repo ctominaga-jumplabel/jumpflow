@@ -542,3 +542,88 @@ describe("reversal (project.cancelled)", () => {
     expect(d.auditEvent.create).not.toHaveBeenCalled();
   });
 });
+
+// 7) Reativacao (won/updated sobre projeto CANCELLED) -----------------------
+describe("reactivation (won/updated over a CANCELLED project)", () => {
+  it("restores status ACTIVE + audits PROJECT_REACTIVATED_BY_CRM on a newer revision", async () => {
+    d.project.findFirst.mockResolvedValue({
+      id: "proj-rewon",
+      status: "CANCELLED",
+      billingTypeId: "bt-1",
+    });
+    // Prior CRM history (e.g. the cancellation) at revision 4; new won carries 5.
+    d.integrationEvent.findMany.mockResolvedValue([
+      { requestMeta: { revision: 4 } },
+    ]);
+
+    const outcome = await ingestCrmProject(basePayload({ revision: 5 }));
+
+    expect(outcome.result).toBe("UPDATED");
+    expect(outcome.targetId).toBe("proj-rewon");
+
+    // Status flipped back to ACTIVE in the same update.
+    const updateArgs = d.project.update.mock.calls[0]![0] as {
+      data: { status?: string };
+    };
+    expect(updateArgs.data.status).toBe("ACTIVE");
+    expect(d.project.create).not.toHaveBeenCalled();
+
+    // A dedicated reactivation audit event was recorded.
+    const reactivation = d.auditEvent.create.mock.calls.find(
+      (c) =>
+        (c[0] as { data: { action: string } }).data.action ===
+        "PROJECT_REACTIVATED_BY_CRM",
+    );
+    expect(reactivation).toBeTruthy();
+    const auditData = (reactivation![0] as {
+      data: { before: unknown; after: { status?: string } };
+    }).data;
+    expect(auditData.before).toEqual({ status: "CANCELLED" });
+    expect(auditData.after.status).toBe("ACTIVE");
+  });
+
+  it("does NOT touch status (nor audit reactivation) when the project is ACTIVE", async () => {
+    d.project.findFirst.mockResolvedValue({
+      id: "proj-active",
+      status: "ACTIVE",
+      billingTypeId: "bt-1",
+    });
+    d.integrationEvent.findMany.mockResolvedValue([
+      { requestMeta: { revision: 1 } },
+    ]);
+
+    const outcome = await ingestCrmProject(basePayload({ revision: 2 }));
+
+    expect(outcome.result).toBe("UPDATED");
+    const updateArgs = d.project.update.mock.calls[0]![0] as {
+      data: Record<string, unknown>;
+    };
+    expect(updateArgs.data).not.toHaveProperty("status");
+    const reactivation = d.auditEvent.create.mock.calls.find(
+      (c) =>
+        (c[0] as { data: { action: string } }).data.action ===
+        "PROJECT_REACTIVATED_BY_CRM",
+    );
+    expect(reactivation).toBeUndefined();
+  });
+
+  it("does NOT reactivate a CANCELLED project on a STALE revision (stays IGNORED)", async () => {
+    d.project.findFirst.mockResolvedValue({
+      id: "proj-cancelled-stale",
+      status: "CANCELLED",
+      billingTypeId: "bt-1",
+    });
+    d.integrationEvent.findMany.mockResolvedValue([
+      { requestMeta: { revision: 5 } },
+    ]);
+
+    const outcome = await ingestCrmProject(basePayload({ revision: 3 }));
+
+    expect(outcome.result).toBe("IGNORED");
+    expect(outcome.warnings.some((w) => w.startsWith("STALE_REVISION"))).toBe(
+      true,
+    );
+    expect(d.project.update).not.toHaveBeenCalled();
+    expect(d.auditEvent.create).not.toHaveBeenCalled();
+  });
+});
