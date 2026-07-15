@@ -3,6 +3,7 @@ import { buildAuditEventData } from "@/lib/db/audit";
 import type { CrmProjectPayload } from "./contract";
 import { resolveBillingTypeId } from "./billing-map";
 import { resolveClientId } from "./client-match";
+import { resolveJobRoleId } from "./job-role-match";
 import { mapSeniority } from "./seniority-map";
 
 /**
@@ -364,6 +365,7 @@ async function applyIngestion(
         clientId: clientResolution.clientId,
         name: payload.project.title,
         status: "ACTIVE",
+        opportunityType: payload.project.opportunityType,
         startDate,
         endDate,
         budgetHours,
@@ -381,6 +383,7 @@ async function applyIngestion(
       data: {
         clientId: clientResolution.clientId,
         name: payload.project.title,
+        opportunityType: payload.project.opportunityType,
         startDate,
         endDate,
         budgetHours,
@@ -543,11 +546,22 @@ async function reconcilePlannedProfiles(
     const seniority = mapSeniority(profile.seniority);
     if (seniority.warning) warnings.push(seniority.warning);
 
+    // De/para de cargo -> catalogo JobRole (match por slug, create on-demand).
+    const jobRole = await resolveJobRoleId(tx, {
+      slug: profile.jobRoleSlug,
+      name: profile.jobRoleName,
+    });
+    // Dedup: o mesmo cargo pode se repetir em varias linhas.
+    if (jobRole.warning && !warnings.includes(jobRole.warning)) {
+      warnings.push(jobRole.warning);
+    }
+
     await tx.projectPlannedProfile.create({
       data: {
         projectId,
         crmLineId:
           profile.crmLineId != null ? String(profile.crmLineId) : null,
+        jobRoleId: jobRole.jobRoleId,
         roleName: profile.jobRoleName ?? profile.jobRoleSlug ?? "",
         seniority: seniority.seniority,
         quantity: profile.quantity,

@@ -49,6 +49,7 @@ const h = vi.hoisted(() => {
     deleteMany: vi.fn(),
   };
   const client = { findFirst: vi.fn(), create: vi.fn() };
+  const jobRole = { findUnique: vi.fn(), create: vi.fn() };
   const user = { findUnique: vi.fn() };
   const billingType = { findUnique: vi.fn() };
   const timeEntry = { count: vi.fn() };
@@ -60,6 +61,7 @@ const h = vi.hoisted(() => {
     integrationEvent,
     project,
     client,
+    jobRole,
     user,
     billingType,
     timeEntry,
@@ -172,6 +174,9 @@ beforeEach(() => {
 
   d.client.findFirst.mockResolvedValue({ id: "client-1" });
   d.client.create.mockResolvedValue({ id: "client-new" });
+
+  d.jobRole.findUnique.mockResolvedValue({ id: "jr-1" });
+  d.jobRole.create.mockResolvedValue({ id: "jr-new" });
 
   d.user.findUnique.mockResolvedValue({ id: "user-exec" });
   d.billingType.findUnique.mockResolvedValue({ id: "bt-1" });
@@ -329,6 +334,8 @@ describe("LINKED_EXISTING (manual project with no prior CRM event)", () => {
     expect(updateArgs.where.id).toBe("proj-manual");
     // Never overwrites the running status.
     expect(updateArgs.data).not.toHaveProperty("status");
+    // opportunityType is persisted on the update too.
+    expect(updateArgs.data.opportunityType).toBe("PROJECT");
   });
 });
 
@@ -390,6 +397,60 @@ describe("timesheetMode controls planned-profile materialization", () => {
     expect(d.projectPlannedProfile.deleteMany).toHaveBeenCalledTimes(1);
     expect(d.projectPlannedProfile.create).toHaveBeenCalledTimes(2);
     expect(outcome.warnings).not.toContain("NO_TIMESHEET_PROFILES_SKIPPED");
+
+    // opportunityType is persisted on the created Project.
+    const createArgs = d.project.create.mock.calls[0]![0] as {
+      data: { opportunityType?: string };
+    };
+    expect(createArgs.data.opportunityType).toBe("PROJECT");
+
+    // Each ProjectPlannedProfile is wired to a resolved jobRoleId (match default).
+    for (const call of d.projectPlannedProfile.create.mock.calls) {
+      const data = (call[0] as { data: { jobRoleId?: string | null } }).data;
+      expect(data.jobRoleId).toBe("jr-1");
+    }
+  });
+
+  it("TIMESHEET: creates the JobRole on-demand and surfaces JOBROLE_CREATED (deduped)", async () => {
+    d.jobRole.findUnique.mockResolvedValue(null); // unknown role
+    d.jobRole.create.mockResolvedValue({ id: "jr-created" });
+
+    const outcome = await ingestCrmProject(
+      basePayload({
+        plannedProfiles: [
+          {
+            crmLineId: 1,
+            jobRoleSlug: "desenvolvedor",
+            jobRoleName: "Desenvolvedor",
+            seniority: "SENIOR",
+            quantity: 1,
+            budgetHours: 100,
+            saleUnitValue: 150,
+            saleLineValue: 15000,
+          },
+          {
+            crmLineId: 2,
+            jobRoleSlug: "desenvolvedor",
+            jobRoleName: "Desenvolvedor",
+            seniority: "SENIOR",
+            quantity: 1,
+            budgetHours: 80,
+            saleUnitValue: 150,
+            saleLineValue: 12000,
+          },
+        ],
+      }),
+    );
+
+    expect(d.jobRole.create).toHaveBeenCalled();
+    const profileData = d.projectPlannedProfile.create.mock.calls[0]![0] as {
+      data: { jobRoleId?: string | null };
+    };
+    expect(profileData.data.jobRoleId).toBe("jr-created");
+    // Same role on both lines => warning appears exactly once (deduped).
+    expect(
+      outcome.warnings.filter((w) => w === "JOBROLE_CREATED:desenvolvedor"),
+    ).toHaveLength(1);
   });
 
   it("does not IGNORE just because of an unusual opportunityType (LICENSING)", async () => {

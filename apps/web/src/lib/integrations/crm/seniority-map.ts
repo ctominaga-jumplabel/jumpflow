@@ -3,15 +3,15 @@
  *
  * O CRM manda `Seniority.name` como string livre. O alvo no JumpFlow e o
  * `enum Seniority` (INTERN | JUNIOR | MID_LEVEL | SENIOR | SPECIALIST |
- * PRINCIPAL). Este e o unico de/para de perfil que tem alvo tipado (cargo e
- * texto livre, ver D6).
+ * PRINCIPAL | TRAINEE | TECH_LEAD | ARCHITECT | COORDINATOR | MANAGER). Este e o
+ * unico de/para de perfil que tem alvo tipado (cargo e texto livre, ver D6).
  *
  * Modulo PURO: sem "use server", sem I/O.
  *
- * DECISAO DE NEGOCIO EM ABERTO: o mapa final de aliases (nomes/idiomas aceitos)
- * e uma decisao de sessao conjunta (respostas-fase1 §5.4 / contrato §3.1). O mapa
- * abaixo cobre os nomes do enum (case-insensitive) + aliases PT comuns; qualquer
- * valor fora dele cai no fallback MID_LEVEL + warning SENIORITY_UNMAPPED.
+ * DECISAO DE NEGOCIO (fidelidade total): o catalogo de senioridade do JumpFlow
+ * agora e 1:1 com o do CRM (10 niveis + PRINCIPAL, exclusivo do JumpFlow). O mapa
+ * abaixo cobre os nomes do enum (case-insensitive) + os 10 niveis do CRM em PT;
+ * qualquer valor fora dele cai no fallback MID_LEVEL + warning SENIORITY_UNMAPPED.
  */
 
 /** Valores validos do `enum Seniority` do JumpFlow (uniao string = tipo Prisma). */
@@ -21,7 +21,12 @@ export type SeniorityValue =
   | "MID_LEVEL"
   | "SENIOR"
   | "SPECIALIST"
-  | "PRINCIPAL";
+  | "PRINCIPAL"
+  | "TRAINEE"
+  | "TECH_LEAD"
+  | "ARCHITECT"
+  | "COORDINATOR"
+  | "MANAGER";
 
 /** Fallback quando o valor recebido nao tem de/para conhecido. */
 export const SENIORITY_FALLBACK: SeniorityValue = "MID_LEVEL";
@@ -31,8 +36,9 @@ export const WARNING_SENIORITY_UNMAPPED = "SENIORITY_UNMAPPED";
 
 /**
  * De/para explicito (chaves normalizadas: uppercase, sem acento, trim).
- * Cobre os nomes do enum + aliases PT comuns. PONTO EM ABERTO: ampliar/curar
- * na sessao conjunta de negocio.
+ * Cobre os nomes do enum (match direto) + os 10 niveis do catalogo do CRM em PT
+ * (fidelidade total). Estagiario e Trainee sao niveis DISTINTOS no CRM: mapeiam
+ * para INTERN e TRAINEE respectivamente.
  */
 const SENIORITY_ALIASES: Record<string, SeniorityValue> = {
   // Nomes do enum (match direto)
@@ -43,10 +49,14 @@ const SENIORITY_ALIASES: Record<string, SeniorityValue> = {
   SENIOR: "SENIOR",
   SPECIALIST: "SPECIALIST",
   PRINCIPAL: "PRINCIPAL",
-  // Aliases PT / abreviacoes comuns
+  TRAINEE: "TRAINEE",
+  TECH_LEAD: "TECH_LEAD",
+  ARCHITECT: "ARCHITECT",
+  COORDINATOR: "COORDINATOR",
+  MANAGER: "MANAGER",
+  // Aliases PT / abreviacoes comuns (10 niveis do CRM)
   ESTAGIARIO: "INTERN",
   ESTAGIO: "INTERN",
-  TRAINEE: "INTERN",
   JR: "JUNIOR",
   PLENO: "MID_LEVEL",
   PL: "MID_LEVEL",
@@ -55,6 +65,10 @@ const SENIORITY_ALIASES: Record<string, SeniorityValue> = {
   SENIOR2: "SENIOR",
   ESPECIALISTA: "SPECIALIST",
   PRINCIPAL_ENGINEER: "PRINCIPAL",
+  TECHLEAD: "TECH_LEAD",
+  ARQUITETO: "ARCHITECT",
+  COORDENADOR: "COORDINATOR",
+  GERENTE: "MANAGER",
 };
 
 export interface MapSeniorityResult {

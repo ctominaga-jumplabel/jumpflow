@@ -28,6 +28,11 @@ const SENIORITY_LABELS: Record<string, string> = {
   SENIOR: "Senior",
   SPECIALIST: "Especialista",
   PRINCIPAL: "Principal",
+  TRAINEE: "Trainee",
+  TECH_LEAD: "Tech Lead",
+  ARCHITECT: "Arquiteto",
+  COORDINATOR: "Coordenador",
+  MANAGER: "Gerente",
 };
 
 /** Entrada bruta do agregador — desacoplada do Prisma para facilitar testes. */

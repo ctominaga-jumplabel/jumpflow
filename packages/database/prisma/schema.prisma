@@ -43,6 +43,14 @@ enum Seniority {
   SENIOR
   SPECIALIST
   PRINCIPAL
+  /// Os 5 valores abaixo (append, para nao dar drift com a ordem do DB) alinham
+  /// o catalogo de senioridade 1:1 com o CRM-Jumplabel. PRINCIPAL nao tem origem
+  /// no CRM (valor exclusivo do JumpFlow).
+  TRAINEE
+  TECH_LEAD
+  ARCHITECT
+  COORDINATOR
+  MANAGER
 }
 
 enum ClientStatus {
@@ -289,6 +297,18 @@ enum ProjectStatus {
   /// Estado terminal alternativo a CLOSED: preserva o historico (nunca deletar,
   /// pode haver TimeEntry). Ingestao CRM define status=CANCELLED em vez de apagar.
   CANCELLED
+}
+
+/// Tipo de oportunidade de origem (espelha o OpportunityType do CRM-Jumplabel).
+/// So preenchido em projetos vindos da ingestao; projetos criados a mao ficam nulo.
+enum ProjectOpportunityType {
+  PROJECT
+  ALLOCATION
+  SQUAD
+  LICENSING
+  BPO
+  SUPPORT
+  OTHER
 }
 
 /// Condicao/arranjo de pagamento do cliente no projeto (PRAZO de recebimento).
@@ -1463,6 +1483,8 @@ model Project {
   /// Referencia do contrato comercial (numero/identificador). ADR 0002 Fase 1:
   /// presenca = contrato vinculado; ausencia dispara alerta COMMERCIAL_CONTRACT_MISSING.
   commercialContractRef       String?
+  /// Tipo de oportunidade de origem no CRM-Jumplabel. Nulo em projetos manuais.
+  opportunityType             ProjectOpportunityType?
   /// Condicao de pagamento do cliente (prazo/arranjo). Opcional; complementa o
   /// BillingChargeType (modelo de cobranca) sem substitui-lo.
   paymentType                 ProjectPaymentType?
@@ -1510,6 +1532,20 @@ model Project {
   @@index([billingTypeId])
 }
 
+/// Catalogo de cargos (de/para de cargo por slug). Espelha o catalogo de cargos
+/// do CRM-Jumplabel, que e dinamico/gerido pelo usuario; NAO ha lista fixa
+/// semeada — o JumpFlow preenche on-demand pela ingestao (wiring em outro agente).
+model JobRole {
+  id              String                  @id @default(cuid())
+  name            String                  @unique
+  slug            String                  @unique
+  description     String?
+  active          Boolean                 @default(true)
+  plannedProfiles ProjectPlannedProfile[]
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+}
+
 /// Linha orcada / perfil planejado do projeto SEM pessoa (ingestao CRM-Jumplabel,
 /// G1 Opcao A). Armazenamento fino, sem comportamento: Allocation exige
 /// consultantId (pessoa real) e Project.budgetHours e total unico, entao nao ha
@@ -1523,7 +1559,11 @@ model ProjectPlannedProfile {
   project       Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
   /// Rastreio da linha de origem no CRM (id da linha da oportunidade).
   crmLineId     String?
-  /// Cargo como texto livre (nao ha catalogo de JobRole no JumpFlow, ver D6).
+  /// De/para de cargo (opcional): FK ao catalogo JobRole quando o slug do CRM
+  /// resolve. onDelete SetNull: remover o cargo do catalogo nao apaga a linha.
+  jobRoleId     String?
+  jobRole       JobRole?  @relation(fields: [jobRoleId], references: [id], onDelete: SetNull)
+  /// Cargo como texto de exibicao/fallback (mantido mesmo quando ha jobRoleId).
   roleName      String
   seniority     Seniority
   quantity      Int
@@ -1536,6 +1576,7 @@ model ProjectPlannedProfile {
   updatedAt     DateTime  @updatedAt
 
   @@index([projectId])
+  @@index([jobRoleId])
 }
 
 /// Agenda de recebimentos previstos do cliente (lado receita). Complementa
