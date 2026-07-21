@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 /** Standard input/select sizing + focus ring used across project forms. */
 export function fieldClass() {
   return cn(
-    "h-10 rounded-md border border-border bg-surface px-3 text-sm",
+    "h-10 w-full rounded-md border border-border bg-surface px-3 text-sm",
     focusRingInput,
   );
 }

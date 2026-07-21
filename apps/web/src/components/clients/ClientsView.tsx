@@ -634,7 +634,7 @@ interface ClientModalProps {
 }
 
 function fieldClass() {
-  return cn("h-10 rounded-md border border-border bg-surface px-3 text-sm", focusRingInput);
+  return cn("h-10 w-full rounded-md border border-border bg-surface px-3 text-sm", focusRingInput);
 }
 
 function ClientModal({
