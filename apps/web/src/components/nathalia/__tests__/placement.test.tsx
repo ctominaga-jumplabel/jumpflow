@@ -61,7 +61,7 @@ describe("NathaliaRoot", () => {
     expect(layer).not.toBeNull();
     const layerEl = layer as HTMLElement;
     expect(layerEl.style.bottom).toBe("0.5rem");
-    expect(layerEl.style.right).toBe("-2rem");
+    expect(layerEl.style.right).toBe("-7rem");
   });
 
   it("opens the chat panel directly when the free-standing launcher is clicked", () => {

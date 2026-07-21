@@ -40,7 +40,10 @@ export function NathaliaWidget({ hideBubble, className }: NathaliaWidgetProps) {
       style={
         open
           ? { bottom: "1rem", right: "1rem" }
-          : { bottom: "0.5rem", right: "-2rem" }
+          : // Minimized: the full-body avatar (430px) has transparent padding on
+            // its sides, so a stronger negative right offset slides her toward the
+            // edge — reducing overlap with page content — without cropping her body.
+            { bottom: "0.5rem", right: "-7rem" }
       }
     >
       <AnimatePresence>
