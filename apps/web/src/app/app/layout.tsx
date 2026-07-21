@@ -1,6 +1,9 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/app-shell/AppShell";
+import { NathaliaMount } from "@/components/nathalia/NathaliaMount";
+import { isNathaliaFeatureEnabled } from "@/lib/nathalia/flags";
+import { getNathaliaSignals } from "@/lib/nathalia/signals";
 import { requireUser } from "@/lib/auth/guards";
 import { logout } from "@/lib/auth/actions";
 import { isDatabaseConfigured } from "@/lib/db/config";
@@ -67,6 +70,16 @@ export default async function AppLayout({
   // the sidebar hides items the matrix denies.
   const viewableNavCodes = filterViewableCodes(matrix, navPermissionCodes());
 
+  // Nathal.IA master switch. Read server-side so it can be flipped at runtime
+  // (Vercel env) with no rebuild. Default OFF: the assistant does not exist —
+  // no mount, no client bundle, no signal computation — until NATHALIA_ENABLED
+  // is set to "true". Keeps the whole feature dark in prod until intentionally
+  // turned on.
+  const nathaliaEnabled = isNathaliaFeatureEnabled();
+  const nathaliaSignals = nathaliaEnabled
+    ? await getNathaliaSignals({ id: user.id, roles: user.roles })
+    : undefined;
+
   return (
     <AppShell
       user={user}
@@ -75,6 +88,14 @@ export default async function AppLayout({
       viewableNavCodes={viewableNavCodes}
     >
       {children}
+      {/* Nathal.IA — contextual assistant, authenticated app only, gated by the
+          NATHALIA_ENABLED master switch (default off). */}
+      {nathaliaEnabled ? (
+        <NathaliaMount
+          user={{ id: user.id, name: user.name, roles: user.roles }}
+          signals={nathaliaSignals}
+        />
+      ) : null}
     </AppShell>
   );
 }

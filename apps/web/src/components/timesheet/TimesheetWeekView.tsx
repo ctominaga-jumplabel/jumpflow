@@ -11,6 +11,11 @@ import {
   Plus,
   TriangleAlert,
 } from "lucide-react";
+import {
+  celebrateNathalia,
+  isNathaliaActive,
+  voiceNathaliaCue,
+} from "@jumpflow/character-nathalia";
 import { cn } from "@/lib/utils";
 import { ActionButton } from "@/components/ui/ActionButton";
 import { SectionPanel } from "@/components/ui/SectionPanel";
@@ -976,6 +981,9 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
             "warning",
             `Lançamento salvo, mas o anexo falhou: ${attachmentError}`,
           );
+          // Nathal.IA voice cue (recorded) on the pending/warning outcome.
+          // Guarded so it never fires while the assistant is globally off.
+          if (isNathaliaActive()) voiceNathaliaCue("warning");
         } else {
           notify(
             "success",
@@ -983,6 +991,11 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
               ? "Lançamento corrigido e reenviado para aprovação."
               : "Lançamento enviado para aprovação.",
           );
+          // Nathal.IA celebrates + speaks (recorded) when hours go to approval.
+          if (isNathaliaActive()) {
+            celebrateNathalia("Horas enviadas! 🎉");
+            voiceNathaliaCue("success");
+          }
         }
       } else {
         notify("warning", result.message);

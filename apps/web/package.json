@@ -12,6 +12,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@jumpflow/character-nathalia": "*",
     "@jumpflow/database": "*",
     "@jumpflow/shared": "*",
     "@jumpflow/ui": "*",

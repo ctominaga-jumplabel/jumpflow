@@ -1,13 +1,39 @@
 # Nathal.IA — Voz (TTS) e lip-sync
 
-## Hoje (Fase 9.4)
+## Hoje
 
-- **Web Speech API** do navegador (`nathaliaSpeech.ts`): grátis, zero-config,
-  **pt-BR**, sem servidor. Fala toda resposta da Nathal e **dirige o lip-sync
-  pelo áudio real** via `onboundary` (cada caractere → visema; resincroniza nas
-  fronteiras de palavra). Botão de **mudo** no painel.
-- **Limitação:** a naturalidade depende das vozes instaladas no SO do usuário
-  (no Windows costuma ser a "Maria" pt-BR) — funcional, mas **robótica**.
+- **Voz natural gravada** (`nathaliaSpeechCatalog.ts` → `speakNathaliaAudio` /
+  `voiceNathaliaCached`): arquivos de áudio (`/nathalia/audio/...`) tocados via
+  `HTMLAudioElement`, com lip-sync por timer resincronizado à duração do áudio.
+  É a **única voz real** da aplicação (ex.: tour de Horas/Aprovações). Botão de
+  **mudo** no painel.
+- A antiga **voz sintética do navegador (Web Speech API), "robótica", foi
+  removida de toda a aplicação.** O provider padrão agora é **silencioso**
+  (`SilentVoiceProvider`): falas sem áudio gravado não emitem som (a boca ainda
+  anima pelo baseline de timer do store), em vez de cair na TTS sintética.
+
+### Biblioteca de voz gravada (`nathaliaVoiceLibrary.ts`)
+
+Fonte única que mapeia **o que a Nathal.IA diz** → **qual clipe toca**. Contém os
+27 clipes do pacote `nath-custom-review` (transcrições do `manifest.json`; exclui
+o #27 de consentimento). Como funciona:
+
+- **`voiceNathaliaReply(text, hint)`** (respostas do chat): toca por
+  correspondência **exata de texto** (`audioForVoiceText`, normalizada
+  p/ emoji/maiúsculas/pontuação); senão por **cue** derivado do `source`
+  (`navigation`→08, `fallback`→12) ou do **estado visual**
+  (`success/happy/celebrate`→25, `warning`→26, `error`→12); senão silêncio.
+- **`voiceNathaliaCue(cue)`** (eventos de produto): `success` / `warning` /
+  `not-found` / `navigation` → clipe correspondente. Usado em momentos reais de
+  interação (ex.: envio de horas em `TimesheetWeekView` dispara `success`/`warning`).
+- **Saudação falada** na 1ª abertura do painel (clipe 07), no `NathaliaProvider`.
+- **Tour**: intros (“Me mostre a tela/fila”) usam o clipe 09; passos 01–06 seguem
+  no `nathaliaSpeechCatalog`.
+
+Para vocalizar um novo momento: faça o texto exibido ser **igual** a um clipe da
+biblioteca, ou chame `voiceNathaliaCue(...)` no evento. Respostas ricas de FAQ que
+não têm gravação continuam **silenciosas** (não são substituídas por clipes
+genéricos, para não perder conteúdo).
 
 ## O seam para voz externa (já no código)
 
@@ -60,8 +86,9 @@ interface NathaliaVoiceProvider {
 
 ## Migração (sem dor)
 
-- **Agora:** Web Speech (já entregue) — grátis, funciona, lip-sync por fonema.
-- **Quando quiser natural:** criar a rota `tts` + `CloudVoiceProvider` e chamar
+- **Agora:** voz natural gravada para as falas curadas; demais falas silenciosas
+  (sem TTS robótica). O seam `NathaliaVoiceProvider` segue disponível.
+- **Quando quiser natural on-demand:** criar a rota `tts` + `CloudVoiceProvider` e chamar
   `setNathaliaVoiceProvider(...)` no boot do client (atrás de uma flag, ex.
   `NEXT_PUBLIC_NATHALIA_VOICE=azure`). **Nada** no avatar/lip-sync/mudo muda.
 - **Privacidade/custo:** o texto vai a um terceiro — para respostas curadas,

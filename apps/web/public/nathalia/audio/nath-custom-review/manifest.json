@@ -1,0 +1,218 @@
+﻿[
+    {
+        "index":  1,
+        "file":  "01-hours-period.mp3",
+        "start":  0,
+        "end":  2.467,
+        "duration":  2.467,
+        "text":  "Escolha aqui a semana que deseja revisar."
+    },
+    {
+        "index":  2,
+        "file":  "02-hours-new-entry.mp3",
+        "start":  2.597,
+        "end":  7.605,
+        "duration":  5.009,
+        "text":  "Clique aqui para criar um novo lançamento."
+    },
+    {
+        "index":  3,
+        "file":  "03-hours-grid.mp3",
+        "start":  7.781,
+        "end":  14.67,
+        "duration":  6.89,
+        "text":  "Revise aqui os lançamentos salvos da semana."
+    },
+    {
+        "index":  4,
+        "file":  "04-hours-status.mp3",
+        "start":  14.913,
+        "end":  21.238,
+        "duration":  6.325,
+        "text":  "Pronto. Agora acompanhe o status dos apontamentos."
+    },
+    {
+        "index":  5,
+        "file":  "05-approvals-queue.mp3",
+        "start":  21.427,
+        "end":  28.512,
+        "duration":  7.085,
+        "text":  "Analise aqui os itens enviados para aprovação."
+    },
+    {
+        "index":  6,
+        "file":  "06-approvals-actions.mp3",
+        "start":  28.681,
+        "end":  30.435,
+        "duration":  1.755,
+        "text":  "Finalize usando aprovar ou reprovar. Tudo fica registrado."
+    },
+    {
+        "index":  7,
+        "file":  "07-welcome-jumpflow.mp3",
+        "start":  30.8,
+        "end":  31.609,
+        "duration":  0.809,
+        "text":  "Oi, eu sou a Nathal.IA. Vou te ajudar a navegar pelo JumpFlow."
+    },
+    {
+        "index":  8,
+        "file":  "08-deixa-comigo.mp3",
+        "start":  31.835,
+        "end":  33.278,
+        "duration":  1.442,
+        "text":  "Pode deixar comigo. Vou te mostrar o caminho."
+    },
+    {
+        "index":  9,
+        "file":  "09-pontos-importantes.mp3",
+        "start":  33.431,
+        "end":  34.804,
+        "duration":  1.373,
+        "text":  "Encontrei alguns pontos importantes para revisar."
+    },
+    {
+        "index":  10,
+        "file":  "10-conferir-informacoes.mp3",
+        "start":  35.077,
+        "end":  37.265,
+        "duration":  2.188,
+        "text":  "Antes de continuar, vale conferir essas informações."
+    },
+    {
+        "index":  11,
+        "file":  "11-tudo-certo.mp3",
+        "start":  37.399,
+        "end":  40.484,
+        "duration":  3.085,
+        "text":  "Tudo certo por aqui. Você pode seguir com segurança."
+    },
+    {
+        "index":  12,
+        "file":  "12-nao-encontrei.mp3",
+        "start":  40.679,
+        "end":  43.185,
+        "duration":  2.506,
+        "text":  "Hmm, não encontrei isso agora. Quer tentar de outro jeito?"
+    },
+    {
+        "index":  13,
+        "file":  "13-rascunho.mp3",
+        "start":  43.333,
+        "end":  46.239,
+        "duration":  2.906,
+        "text":  "Esse lançamento ainda está em rascunho."
+    },
+    {
+        "index":  14,
+        "file":  "14-semana-apontamentos.mp3",
+        "start":  46.44,
+        "end":  49.006,
+        "duration":  2.566,
+        "text":  "A semana selecionada já possui apontamentos salvos."
+    },
+    {
+        "index":  15,
+        "file":  "15-revisar-detalhes.mp3",
+        "start":  49.183,
+        "end":  52.902,
+        "duration":  3.719,
+        "text":  "Você pode revisar os detalhes antes de enviar."
+    },
+    {
+        "index":  16,
+        "file":  "16-status-aprovacao.mp3",
+        "start":  53.134,
+        "end":  56.257,
+        "duration":  3.124,
+        "text":  "Quando terminar, acompanhe o status da aprovação."
+    },
+    {
+        "index":  17,
+        "file":  "17-projeto-fechamento.mp3",
+        "start":  56.477,
+        "end":  60.447,
+        "duration":  3.97,
+        "text":  "Esse projeto precisa de atenção no fechamento."
+    },
+    {
+        "index":  18,
+        "file":  "18-filtros.mp3",
+        "start":  60.572,
+        "end":  61.901,
+        "duration":  1.328,
+        "text":  "Os filtros ajudam a encontrar exatamente o que você precisa."
+    },
+    {
+        "index":  19,
+        "file":  "19-fila-aprovacao.mp3",
+        "start":  62.032,
+        "end":  62.839,
+        "duration":  0.807,
+        "text":  "A fila de aprovação mostra os itens pendentes."
+    },
+    {
+        "index":  20,
+        "file":  "20-relatorios.mp3",
+        "start":  63.076,
+        "end":  66.454,
+        "duration":  3.378,
+        "text":  "Os relatórios consolidam horas, despesas e indicadores."
+    },
+    {
+        "index":  21,
+        "file":  "21-explicar-partes.mp3",
+        "start":  66.638,
+        "end":  68.474,
+        "duration":  1.836,
+        "text":  "Vou explicar em partes, bem rápido."
+    },
+    {
+        "index":  22,
+        "file":  "22-primeiro-periodo.mp3",
+        "start":  68.637,
+        "end":  69.23,
+        "duration":  0.593,
+        "text":  "Primeiro, confira o período selecionado."
+    },
+    {
+        "index":  23,
+        "file":  "23-depois-dados.mp3",
+        "start":  69.477,
+        "end":  72.566,
+        "duration":  3.089,
+        "text":  "Depois, revise os dados principais."
+    },
+    {
+        "index":  24,
+        "file":  "24-por-fim-salve.mp3",
+        "start":  72.704,
+        "end":  73.192,
+        "duration":  0.488,
+        "text":  "Por fim, salve ou envie quando estiver tudo certo."
+    },
+    {
+        "index":  25,
+        "file":  "25-sucesso.mp3",
+        "start":  73.436,
+        "end":  75.64,
+        "duration":  2.204,
+        "text":  "Boa! A ação foi concluída com sucesso."
+    },
+    {
+        "index":  26,
+        "file":  "26-atencao-pendencia.mp3",
+        "start":  75.869,
+        "end":  76.676,
+        "duration":  0.807,
+        "text":  "Atenção: existe uma pendência antes de continuar."
+    },
+    {
+        "index":  27,
+        "file":  "27-consentimento.mp3",
+        "start":  76.895,
+        "end":  79.234,
+        "duration":  2.339,
+        "text":  "Eu autorizo o uso da minha voz para criação da voz da Nathal.IA no JumpFlow, incluindo geração de falas sintéticas para uso no produto."
+    }
+]

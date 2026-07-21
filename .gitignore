@@ -56,3 +56,15 @@ packages/character-nathalia/assets/**/*.jpg
 packages/character-nathalia/assets/**/*.jpeg
 packages/character-nathalia/assets/**/*.webp
 packages/character-nathalia/assets/**/*.ktx2
+
+# Nathal.IA video avatar — heavy binaries served from external storage (CDN),
+# not versioned. Enable video at runtime via NEXT_PUBLIC_NATHALIA_VIDEO_BASE_URL.
+apps/web/public/nathalia/videos/
+scripts/nathalia/videos/
+# Local voice/video working sources (not runtime assets)
+/audios/
+# Local dev scratch logs / captures
+tmp-*.log
+tmp-*.out.log
+tmp-*.err.log
+tmp-*.png
