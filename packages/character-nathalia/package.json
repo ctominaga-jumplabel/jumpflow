@@ -1,0 +1,25 @@
+{
+  "name": "@jumpflow/character-nathalia",
+  "version": "0.1.0",
+  "private": true,
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "description": "Nathal.IA — companheira de trabalho 2D contextual do JumpFlow (sem LLM, sem 3D).",
+  "peerDependencies": {
+    "@rive-app/react-canvas": "^4.0.0",
+    "lucide-react": "^1.17.0",
+    "motion": "^12.40.0",
+    "next": ">=15",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@rive-app/react-canvas": { "optional": true }
+  },
+  "dependencies": {
+    "@jumpflow/ui": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}
