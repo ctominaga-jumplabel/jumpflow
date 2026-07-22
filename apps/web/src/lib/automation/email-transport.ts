@@ -12,6 +12,14 @@ export interface EmailAttachment {
   filename: string;
   content: string;
   contentType: string;
+  /**
+   * How `content` is encoded. "utf8" (default) is text that gets base64-encoded
+   * before send (e.g. a CSV). "base64" is already-base64 binary (e.g. an .xlsx)
+   * and is passed through as-is — required for binary attachments to survive.
+   */
+  encoding?: "utf8" | "base64";
+  /** "attachment" (default when a filename is set) vs "inline". */
+  disposition?: "inline" | "attachment";
 }
 
 export interface EmailMessage {
@@ -82,8 +90,13 @@ class ResendEmailTransport implements EmailTransport {
         ...(message.html ? { html: message.html } : {}),
         attachments: message.attachments?.map((a) => ({
           filename: a.filename,
-          // Resend expects base64 content for inline attachments.
-          content: Buffer.from(a.content, "utf-8").toString("base64"),
+          // Resend expects base64. Text (utf8, default) is encoded here; binary
+          // parts arrive already base64 (encoding: "base64") and pass through —
+          // re-encoding them as utf-8 would corrupt the bytes.
+          content:
+            a.encoding === "base64"
+              ? a.content
+              : Buffer.from(a.content, "utf-8").toString("base64"),
           // Resend's HTTP API uses snake_case `content_type` (it otherwise
           // infers the type from the filename extension).
           content_type: a.contentType,
