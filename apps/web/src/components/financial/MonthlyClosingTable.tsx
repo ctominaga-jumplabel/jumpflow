@@ -107,51 +107,86 @@ export function MonthlyClosingTable({
       else notify("warning", result.message);
     });
   }
-  // D4 (Onda B): liberar o faturamento para o financeiro (transição CLOSE) exige
-  // justificativa. Capturamos num diálogo do design system (nunca window.confirm).
-  const [closeDialog, setCloseDialog] = useState<{ id: string } | null>(null);
+  // D4 (Onda B) + P16 (Onda 4): transições sensíveis do fechamento exigem uma
+  // justificativa registrada (CLOSE "liberar faturamento" e as REVERSAS: voltar
+  // status / reabrir). Capturamos num diálogo do design system (nunca
+  // window.confirm). Um único diálogo parametrizado por ação.
+  type JustifyAction = "CLOSE" | "REVERT_TO_OPEN" | "REVERT_TO_REVIEW" | "REOPEN";
+  const justifyDialogCopy: Record<
+    JustifyAction,
+    { title: string; description: string; confirm: string; success: string }
+  > = {
+    CLOSE: {
+      title: "Liberar faturamento para o financeiro",
+      description:
+        "Fecha o fechamento de receita e o entrega ao financeiro (libera pre-fatura e NFS-e). A justificativa fica registrada na trilha de auditoria.",
+      confirm: "Liberar faturamento",
+      success: "Faturamento liberado para o financeiro.",
+    },
+    REVERT_TO_OPEN: {
+      title: "Voltar status para Aberto",
+      description:
+        "Desfaz o envio para revisão, retornando o fechamento a Aberto. A justificativa fica registrada na trilha de auditoria.",
+      confirm: "Voltar status",
+      success: "Status revertido para Aberto.",
+    },
+    REVERT_TO_REVIEW: {
+      title: "Voltar status para Em revisão",
+      description:
+        "Desfaz a marcação de Pronto, retornando o fechamento a Em revisão. A justificativa fica registrada na trilha de auditoria.",
+      confirm: "Voltar status",
+      success: "Status revertido para Em revisão.",
+    },
+    REOPEN: {
+      title: "Reabrir fechamento",
+      description:
+        "Reabre um fechamento fechado (volta a Pronto para liberar). A justificativa fica registrada na trilha de auditoria.",
+      confirm: "Reabrir fechamento",
+      success: "Fechamento reaberto.",
+    },
+  };
+  const [justifyDialog, setJustifyDialog] = useState<{
+    id: string;
+    action: JustifyAction;
+  } | null>(null);
   const [justification, setJustification] = useState("");
   const [justificationError, setJustificationError] = useState<string | null>(
     null,
   );
 
-  function openCloseDialog(id: string) {
+  function openJustifyDialog(id: string, action: JustifyAction) {
     if (isDemo) {
       notify("info", "Transicao local simulada.");
       return;
     }
     setJustification("");
     setJustificationError(null);
-    setCloseDialog({ id });
+    setJustifyDialog({ id, action });
   }
 
-  function dismissCloseDialog() {
-    setCloseDialog(null);
+  function dismissJustifyDialog() {
+    setJustifyDialog(null);
     setJustification("");
     setJustificationError(null);
   }
 
-  function handleConfirmClose() {
-    if (!closeDialog) return;
+  function handleConfirmJustify() {
+    if (!justifyDialog) return;
     const text = justification.trim();
     if (!text) {
       setJustificationError(
-        "Informe uma justificativa para liberar o faturamento para o financeiro.",
+        justifyDialog.action === "CLOSE"
+          ? "Informe uma justificativa para liberar o faturamento para o financeiro."
+          : "Informe uma justificativa para alterar o status deste fechamento.",
       );
       return;
     }
-    const id = closeDialog.id;
+    const { id, action } = justifyDialog;
     startTransition(async () => {
-      const result = await advanceRevenueClosing({
-        id,
-        action: "CLOSE",
-        justification: text,
-      });
+      const result = await advanceRevenueClosing({ id, action, justification: text });
       if (result.ok) {
-        notify("success", "Faturamento liberado para o financeiro.");
-        setCloseDialog(null);
-        setJustification("");
-        setJustificationError(null);
+        notify("success", justifyDialogCopy[action].success);
+        dismissJustifyDialog();
       } else {
         setJustificationError(result.message);
       }
@@ -436,7 +471,7 @@ export function MonthlyClosingTable({
                 variant="secondary"
                 icon={Undo2}
                 disabled={isPending}
-                onClick={() => handleAdvance(r.id, "REVERT_TO_OPEN")}
+                onClick={() => openJustifyDialog(r.id, "REVERT_TO_OPEN")}
               >
                 Voltar
               </ActionButton>
@@ -449,7 +484,7 @@ export function MonthlyClosingTable({
                 variant="primary"
                 icon={Lock}
                 disabled={isPending}
-                onClick={() => openCloseDialog(r.id)}
+                onClick={() => openJustifyDialog(r.id, "CLOSE")}
               >
                 Liberar faturamento
               </ActionButton>
@@ -458,7 +493,7 @@ export function MonthlyClosingTable({
                 variant="secondary"
                 icon={Undo2}
                 disabled={isPending}
-                onClick={() => handleAdvance(r.id, "REVERT_TO_REVIEW")}
+                onClick={() => openJustifyDialog(r.id, "REVERT_TO_REVIEW")}
               >
                 Voltar
               </ActionButton>
@@ -537,7 +572,7 @@ export function MonthlyClosingTable({
               variant="danger"
               icon={Undo2}
               disabled={isPending}
-              onClick={() => handleAdvance(r.id, "REOPEN")}
+              onClick={() => openJustifyDialog(r.id, "REOPEN")}
             >
               Reabrir
             </ActionButton>
@@ -695,17 +730,19 @@ export function MonthlyClosingTable({
       </Modal>
 
       <Modal
-        open={closeDialog != null}
-        onClose={dismissCloseDialog}
-        title="Liberar faturamento para o financeiro"
-        description="Fecha o fechamento de receita e o entrega ao financeiro (libera pre-fatura e NFS-e). A justificativa fica registrada na trilha de auditoria."
+        open={justifyDialog != null}
+        onClose={dismissJustifyDialog}
+        title={justifyDialog ? justifyDialogCopy[justifyDialog.action].title : ""}
+        description={
+          justifyDialog ? justifyDialogCopy[justifyDialog.action].description : ""
+        }
         footer={
           <>
             <ActionButton
               size="sm"
               variant="secondary"
               disabled={isPending}
-              onClick={dismissCloseDialog}
+              onClick={dismissJustifyDialog}
             >
               Cancelar
             </ActionButton>
@@ -714,9 +751,9 @@ export function MonthlyClosingTable({
               variant="primary"
               icon={Lock}
               disabled={isPending}
-              onClick={handleConfirmClose}
+              onClick={handleConfirmJustify}
             >
-              Liberar faturamento
+              {justifyDialog ? justifyDialogCopy[justifyDialog.action].confirm : ""}
             </ActionButton>
           </>
         }
@@ -739,7 +776,7 @@ export function MonthlyClosingTable({
           }}
           rows={4}
           aria-invalid={justificationError != null}
-          placeholder="Ex.: Horas conferidas e aprovadas; valores conferem com o contrato."
+          placeholder="Ex.: Ajuste solicitado pelo cliente; correção de horas antes do fechamento."
           className={cn(
             "w-full resize-y rounded-md border border-border bg-surface px-3 py-2 text-sm text-strong placeholder:text-soft",
             focusRingInput,

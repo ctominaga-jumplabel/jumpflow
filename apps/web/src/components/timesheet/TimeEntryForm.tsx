@@ -68,6 +68,12 @@ export interface TimeEntryFormValue {
   description: string;
   billable: boolean;
   /**
+   * Justificativa obrigatória quando um GESTOR marca o lançamento como NÃO
+   * faturável (P9). Vazio quando faturável, ou quando a não-faturabilidade é a
+   * regra automática de ON_CALL (Sobreaviso). O servidor é a autoridade.
+   */
+  nonBillableReason: string;
+  /**
    * Fator de remuneração (melhoria #2). 1.00 para atividades normais; um fator
    * fracionário para ON_CALL. O equivalente remunerado é `horas x fator`.
    */
@@ -133,6 +139,12 @@ export interface TimeEntryFormProps {
   onSubmit: (
     value: TimeEntryFormValue,
     attachment?: TimeEntryAttachmentIntent,
+    /**
+     * Anexo OPCIONAL que comprova a justificativa de NÃO faturável (P9). Só um
+     * `upload` é oferecido (o motivo textual é a persistência primária). O
+     * parent (TimesheetWeekView) sobe o arquivo após o save, com o id retornado.
+     */
+    billableJustificationFile?: File,
   ) => void;
   /**
    * Delete the entry behind the currently selected day (db mode only). The
@@ -175,6 +187,7 @@ const emptyValue = (days: WeekDay[]): TimeEntryFormValue => ({
   weekdays: [1, 2, 3, 4, 5],
   description: "",
   billable: true,
+  nonBillableReason: "",
   multiplier: 1,
 });
 
@@ -223,6 +236,16 @@ export function TimeEntryForm({
   // Diálogo de confirmação "Dia Útil em feriado" (Onda A-ext). Aberto no submit
   // quando a regra dispara; confirmar chama onSubmit, cancelar volta ao form.
   const [confirmHoliday, setConfirmHoliday] = useState(false);
+  // P9: modal de justificativa obrigatória quando o GESTOR marca NÃO faturável
+  // (só atividades normais; ON_CALL é regra de negócio, sem justificativa).
+  const [nonBillableOpen, setNonBillableOpen] = useState(false);
+  const [nonBillableReasonError, setNonBillableReasonError] = useState(false);
+  const [justificationFile, setJustificationFile] = useState<File | null>(null);
+  const [justificationAttachError, setJustificationAttachError] = useState<
+    string | null
+  >(null);
+  const justificationInputRef = useRef<HTMLInputElement>(null);
+  const justificationInputId = useId();
 
   // Re-initialize when the modal (re)opens for a different entry (new vs edit).
   // Render-time state adjustment — the React-recommended alternative to an
@@ -240,6 +263,10 @@ export function TimeEntryForm({
       setAttachFile(null);
       setRemoveAttachment(false);
       setAttachError(null);
+      setNonBillableOpen(false);
+      setNonBillableReasonError(false);
+      setJustificationFile(null);
+      setJustificationAttachError(null);
     }
   }
 
@@ -356,6 +383,12 @@ export function TimeEntryForm({
   // storage configurado (degrade honesto quando ausente).
   const attachmentFieldVisible = attachmentsAvailable && value.mode === "daily";
 
+  // P9: anexo opcional da justificativa de não faturável — depende de storage
+  // configurado (degrade honesto quando ausente); o motivo textual é a
+  // persistência primária.
+  const justificationAttachVisible =
+    attachmentsAvailable && value.mode === "daily";
+
   /** Intenção de anexo a enviar no submit; `undefined` = não mexeu no anexo. */
   function attachmentIntent(): TimeEntryAttachmentIntent | undefined {
     if (!attachmentFieldVisible) return undefined;
@@ -363,6 +396,15 @@ export function TimeEntryForm({
     if (removeAttachment && initialAttachment) return { kind: "remove" };
     return undefined;
   }
+
+  // P9: um gestor que marca uma atividade NORMAL como não faturável precisa de
+  // justificativa (o servidor recusa sem ela). ON_CALL é regra de negócio.
+  const nonBillableReasonRequired =
+    canEditBillable && !value.billable && value.activity !== "ON_CALL";
+  const submitJustificationFile: File | undefined =
+    nonBillableReasonRequired && justificationAttachVisible
+      ? (justificationFile ?? undefined)
+      : undefined;
 
   function handleSubmit() {
     if (hasErrors) {
@@ -375,19 +417,25 @@ export function TimeEntryForm({
       setShowErrors(true);
       return;
     }
+    // Não faturável sem motivo: reabre o modal exigindo a justificativa.
+    if (nonBillableReasonRequired && value.nonBillableReason.trim().length === 0) {
+      setNonBillableReasonError(true);
+      setNonBillableOpen(true);
+      return;
+    }
     // "Dia Útil" em feriado: pede confirmação antes de salvar (não bloqueia —
     // confirmar salva normalmente).
     if (holidayConfirmRequired) {
       setConfirmHoliday(true);
       return;
     }
-    onSubmit(value, attachmentIntent());
+    onSubmit(value, attachmentIntent(), submitJustificationFile);
   }
 
   /** Confirmação do "Dia Útil em feriado": salva de fato. */
   function confirmAndSubmit() {
     setConfirmHoliday(false);
-    onSubmit(value, attachmentIntent());
+    onSubmit(value, attachmentIntent(), submitJustificationFile);
   }
 
   /** Pré-checagem do arquivo escolhido (tipo/tamanho) antes de aceitar. */
@@ -420,6 +468,60 @@ export function TimeEntryForm({
     setRemoveAttachment(true);
     setAttachError(null);
     if (attachInputRef.current) attachInputRef.current.value = "";
+  }
+
+  /**
+   * Alterna "Faturável". Ao DESMARCAR uma atividade NORMAL (gestão), abre o modal
+   * de justificativa obrigatória. ON_CALL não faturável é regra de negócio (sem
+   * justificativa). Ao MARCAR de volta, limpa motivo e anexo staged.
+   */
+  function handleBillableToggle(checked: boolean) {
+    if (checked) {
+      setValue((v) => ({ ...v, billable: true, nonBillableReason: "" }));
+      setJustificationFile(null);
+      setJustificationAttachError(null);
+      setNonBillableReasonError(false);
+      return;
+    }
+    setValue((v) => ({ ...v, billable: false }));
+    if (value.activity === "ON_CALL") return; // regra automática, sem modal
+    setNonBillableReasonError(false);
+    setNonBillableOpen(true);
+  }
+
+  /** Pré-checagem do arquivo de justificativa (mesma whitelist/teto do anexo). */
+  function handleJustificationFiles(files: FileList | null) {
+    const file = files?.[0];
+    if (!file) return;
+    if (!isAcceptedAttachment(file)) {
+      setJustificationAttachError("Formato não aceito. Use PDF, JPG, PNG ou WEBP.");
+      return;
+    }
+    if (file.size > ATTACH_MAX_SIZE_BYTES) {
+      setJustificationAttachError("Arquivo acima de 10 MB.");
+      return;
+    }
+    setJustificationAttachError(null);
+    setJustificationFile(file);
+  }
+
+  /** Confirma a justificativa de não faturável: exige motivo não-vazio. */
+  function confirmNonBillable() {
+    if (value.nonBillableReason.trim().length === 0) {
+      setNonBillableReasonError(true);
+      return;
+    }
+    setNonBillableReasonError(false);
+    setNonBillableOpen(false);
+  }
+
+  /** Cancela: reverte para faturável e limpa motivo/anexo. */
+  function cancelNonBillable() {
+    setValue((v) => ({ ...v, billable: true, nonBillableReason: "" }));
+    setJustificationFile(null);
+    setJustificationAttachError(null);
+    setNonBillableReasonError(false);
+    setNonBillableOpen(false);
   }
 
   function toggleWeekday(day: number) {
@@ -555,16 +657,24 @@ export function TimeEntryForm({
                   if (isOnCall && !wasOnCall) {
                     // Entering ON_CALL: sugerir o fator usual e marcar como não
                     // faturável por padrão (sobreaviso normalmente não é faturado).
+                    // ON_CALL não faturável é regra de negócio → sem justificativa.
                     return {
                       ...v,
                       activity,
                       multiplier: DEFAULT_ON_CALL_MULTIPLIER,
                       billable: false,
+                      nonBillableReason: "",
                     };
                   }
                   if (!isOnCall && wasOnCall) {
                     // Leaving ON_CALL: voltar aos defaults de atividade normal.
-                    return { ...v, activity, multiplier: 1, billable: true };
+                    return {
+                      ...v,
+                      activity,
+                      multiplier: 1,
+                      billable: true,
+                      nonBillableReason: "",
+                    };
                   }
                   return { ...v, activity };
                 });
@@ -769,19 +879,45 @@ export function TimeEntryForm({
 
         {/* "Faturável" é oculto para consultores puros (Onda B): o valor segue
             no submit (default true, ou false automático para ON_CALL), mas só
-            gestão/admin/finance vê e edita o controle. */}
+            gestão/admin/finance vê e edita o controle. P8: a marcação é POR DIA
+            — mesmo no modo semanal, o valor vale para cada dia gerado. */}
         {canEditBillable ? (
-          <label className="flex items-center gap-2 text-sm text-medium">
-            <input
-              type="checkbox"
-              checked={value.billable}
-              onChange={(e) =>
-                setValue((v) => ({ ...v, billable: e.target.checked }))
-              }
-              className="size-4 rounded border-border text-brand focus:ring-brand"
-            />
-            Faturável
-          </label>
+          <div>
+            <label
+              className="flex items-center gap-2 text-sm text-medium"
+              title="A marcação vale para este lançamento (por dia). No modo semanal, aplica-se a cada dia gerado."
+            >
+              <input
+                type="checkbox"
+                checked={value.billable}
+                onChange={(e) => handleBillableToggle(e.target.checked)}
+                className="size-4 rounded border-border text-brand focus:ring-brand"
+              />
+              Faturável
+            </label>
+            {/* P8: deixa explícito que a marcação é POR DIA, mesmo no modo
+                semanal. Fora do <label> para não alterar o nome acessível. */}
+            <p className="mt-0.5 text-xs text-soft">
+              {value.mode === "weekly"
+                ? "A marcação é por dia — aplica-se a cada dia gerado."
+                : "A marcação é por dia."}
+            </p>
+            {!value.billable && value.activity !== "ON_CALL" ? (
+              value.nonBillableReason.trim() ? (
+                <button
+                  type="button"
+                  onClick={() => setNonBillableOpen(true)}
+                  className="mt-1 block max-w-full truncate text-left text-xs text-medium underline-offset-2 hover:underline"
+                >
+                  Motivo (não faturável): {value.nonBillableReason.trim()}
+                </button>
+              ) : (
+                <p className="mt-1 text-xs font-medium text-danger">
+                  Informe o motivo de não faturável.
+                </p>
+              )
+            ) : null}
+          </div>
         ) : null}
 
         {/* Anexo opcional (melhoria #2): exceção disponível em qualquer
@@ -873,6 +1009,129 @@ export function TimeEntryForm({
           </div>
         ) : null}
       </form>
+
+      {/* P9: justificativa obrigatória ao marcar NÃO faturável (gestão, atividade
+          normal). Motivo obrigatório + anexo opcional. Confirmar mantém o
+          lançamento não faturável; cancelar reverte para faturável. */}
+      <Modal
+        open={nonBillableOpen}
+        onClose={cancelNonBillable}
+        title="Marcar como não faturável"
+        description="Informe o motivo pelo qual este lançamento não será faturado. O motivo fica registrado na trilha de auditoria."
+        footer={
+          <>
+            <ActionButton
+              variant="secondary"
+              size="sm"
+              disabled={busy}
+              onClick={cancelNonBillable}
+            >
+              Cancelar (manter faturável)
+            </ActionButton>
+            <ActionButton
+              variant="primary"
+              size="sm"
+              icon={Save}
+              disabled={busy}
+              onClick={confirmNonBillable}
+            >
+              Confirmar não faturável
+            </ActionButton>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <div>
+            <label htmlFor="non-billable-reason" className={labelClass}>
+              Motivo <span className="font-normal text-soft">(obrigatório)</span>
+            </label>
+            <textarea
+              id="non-billable-reason"
+              value={value.nonBillableReason}
+              onChange={(e) => {
+                const reason = e.target.value;
+                setValue((v) => ({ ...v, nonBillableReason: reason }));
+                if (reason.trim().length > 0) setNonBillableReasonError(false);
+              }}
+              rows={3}
+              placeholder="Ex.: Retrabalho não cobrável; cortesia acordada com o cliente."
+              aria-invalid={nonBillableReasonError}
+              className={cn(inputClass(nonBillableReasonError), "resize-y")}
+            />
+            {nonBillableReasonError ? (
+              <p className="mt-1 text-xs text-danger">O motivo é obrigatório.</p>
+            ) : null}
+          </div>
+
+          {justificationAttachVisible ? (
+            <div>
+              <span className="mb-1 block text-xs font-semibold text-medium">
+                Anexo{" "}
+                <span className="font-normal text-soft">
+                  (opcional · PDF, JPG, PNG ou WEBP, até 10 MB)
+                </span>
+              </span>
+              {justificationFile ? (
+                <div className="flex items-center gap-3 rounded-md border border-border bg-surface-muted/50 px-3 py-2">
+                  <FileText
+                    aria-hidden="true"
+                    className="size-4 shrink-0 text-medium"
+                  />
+                  <p className="min-w-0 flex-1 truncate text-sm font-medium text-strong">
+                    {justificationFile.name}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setJustificationFile(null);
+                      setJustificationAttachError(null);
+                      if (justificationInputRef.current) {
+                        justificationInputRef.current.value = "";
+                      }
+                    }}
+                    aria-label="Remover arquivo selecionado"
+                    className={cn(
+                      "grid size-7 shrink-0 place-items-center rounded-md text-medium transition-colors hover:bg-surface hover:text-strong",
+                      focusRing,
+                    )}
+                  >
+                    <X aria-hidden="true" className="size-4" />
+                  </button>
+                </div>
+              ) : (
+                <label
+                  htmlFor={justificationInputId}
+                  className={cn(
+                    "flex cursor-pointer items-center gap-2 rounded-md border border-dashed border-border bg-surface px-3 py-2.5 text-sm text-medium transition-colors hover:border-brand hover:text-strong",
+                    focusRing,
+                  )}
+                >
+                  <Paperclip aria-hidden="true" className="size-4" />
+                  Anexar comprovante
+                </label>
+              )}
+              <input
+                ref={justificationInputRef}
+                id={justificationInputId}
+                type="file"
+                accept={ATTACH_ACCEPT}
+                className="sr-only"
+                onChange={(e) => handleJustificationFiles(e.target.files)}
+              />
+              {justificationAttachError ? (
+                <p role="alert" className="mt-1 text-xs font-medium text-danger">
+                  {justificationAttachError}
+                </p>
+              ) : null}
+            </div>
+          ) : attachmentsAvailable ? null : (
+            <p className="text-xs text-soft">
+              Anexo indisponível (armazenamento não configurado): o motivo textual
+              é registrado assim mesmo.
+            </p>
+          )}
+        </div>
+      </Modal>
 
       {/* Confirmação "Dia Útil em feriado" (Onda A-ext). Segue o padrão de
           Modal do design system (mesmo componente usado pelos demais fluxos de

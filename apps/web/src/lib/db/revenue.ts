@@ -126,47 +126,68 @@ export const revenueClosingTransitions: Record<
       | "INVOICED"
       | "CANCELLED";
     auditAction: string;
+    /**
+     * Whether the transition demands a mandatory justification (persisted to
+     * notes + AuditEvent). CLOSE ("liberar faturamento") já exigia; P16 estende
+     * a exigência às transições REVERSAS (voltar status / reabrir), que também
+     * são mudanças sensíveis de um fechamento de receita.
+     */
+    requiresJustification: boolean;
+    /** Rótulo curto usado na linha de nota (appendClosingNote). */
+    noteLabel?: string;
   }
 > = {
   SUBMIT_REVIEW: {
     expected: "OPEN",
     next: "IN_REVIEW",
     auditAction: "REVENUE_CLOSING_SUBMITTED_REVIEW",
+    requiresJustification: false,
   },
   MARK_READY: {
     expected: "IN_REVIEW",
     next: "READY_TO_CLOSE",
     auditAction: "REVENUE_CLOSING_MARKED_READY",
+    requiresJustification: false,
   },
   CLOSE: {
     expected: "READY_TO_CLOSE",
     next: "CLOSED",
     auditAction: "REVENUE_CLOSING_CLOSED",
+    requiresJustification: true,
+    noteLabel: "Liberacao faturamento",
   },
   MARK_INVOICED: {
     expected: "CLOSED",
     next: "INVOICED",
     auditAction: "REVENUE_CLOSING_INVOICED",
+    requiresJustification: false,
   },
   CANCEL: {
     expected: "OPEN",
     next: "CANCELLED",
     auditAction: "REVENUE_CLOSING_CANCELLED",
+    requiresJustification: false,
   },
   REVERT_TO_OPEN: {
     expected: "IN_REVIEW",
     next: "OPEN",
     auditAction: "REVENUE_CLOSING_REVERTED_OPEN",
+    requiresJustification: true,
+    noteLabel: "Voltar status",
   },
   REVERT_TO_REVIEW: {
     expected: "READY_TO_CLOSE",
     next: "IN_REVIEW",
     auditAction: "REVENUE_CLOSING_REVERTED_REVIEW",
+    requiresJustification: true,
+    noteLabel: "Voltar status",
   },
   REOPEN: {
     expected: "CLOSED",
     next: "READY_TO_CLOSE",
     auditAction: "REVENUE_CLOSING_REOPENED",
+    requiresJustification: true,
+    noteLabel: "Reabertura",
   },
 };
 

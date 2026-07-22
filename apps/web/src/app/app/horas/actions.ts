@@ -22,6 +22,7 @@ import {
   type TranscribeActivityAudioResult,
 } from "./activityAudio";
 import {
+  BILLABLE_JUSTIFICATION_BUCKET,
   getStorageProvider,
   isStorageConfigured,
   ONCALL_APPROVALS_BUCKET,
@@ -30,6 +31,10 @@ import {
   safeFileName,
   validateReceiptFile,
 } from "@/lib/storage/file-validation";
+import {
+  JUSTIFICATION_REQUIRED_MESSAGE,
+  justificationSchema,
+} from "@/lib/shared/justification";
 import {
   COMMENT_REQUIRED_MESSAGE,
   DECIDE_HOURS_SOURCE_STATUS,
@@ -111,6 +116,71 @@ function resolveBillable(
 ): boolean {
   if (hasRole(user, [...BILLABLE_MANAGER_ROLES])) return requested;
   return activityType !== "ON_CALL";
+}
+
+function isBillableManager(user: AppUser): boolean {
+  return hasRole(user, [...BILLABLE_MANAGER_ROLES]);
+}
+
+/**
+ * Resolução do campo financeiro `billable` PARA LANÇAMENTOS (P9 / melhoria #9),
+ * já com a regra de justificativa obrigatória:
+ *
+ *  - Consultor puro: NÃO dita `billable`. Deriva pela atividade (ON_CALL = não
+ *    faturável; demais = faturável). Essa derivação AUTOMÁTICA nunca exige um
+ *    motivo — é regra de negócio, não uma decisão explícita de gestor. Ignora
+ *    qualquer `reason` enviado.
+ *  - Gestão (BILLABLE_MANAGER_ROLES): define livremente. Marcar NÃO faturável é
+ *    uma ação sensível — exige `nonBillableReason` não-vazio (justificationSchema).
+ *    Sem motivo válido, recusa com COMMENT_REQUIRED (o servidor é a autoridade).
+ *
+ * Retorna também o `nonBillableReason` a persistir (null quando faturável ou
+ * quando a não-faturabilidade veio da derivação automática do consultor) e
+ * `managerMarkedNonBillable` (para auditar TIME_ENTRY_MARKED_NON_BILLABLE).
+ */
+function resolveBillableDecision(
+  user: AppUser,
+  activityType: string,
+  requested: boolean,
+  reason: string | null | undefined,
+): {
+  billable: boolean;
+  nonBillableReason: string | null;
+  managerMarkedNonBillable: boolean;
+} {
+  if (!isBillableManager(user)) {
+    return {
+      billable: activityType !== "ON_CALL",
+      nonBillableReason: null,
+      managerMarkedNonBillable: false,
+    };
+  }
+  if (requested) {
+    return {
+      billable: true,
+      nonBillableReason: null,
+      managerMarkedNonBillable: false,
+    };
+  }
+  // ON_CALL não faturável é REGRA DE NEGÓCIO (Sobreaviso), não uma ação
+  // explícita de gestor — nunca exige justificativa, mesmo para gestão.
+  if (activityType === "ON_CALL") {
+    return {
+      billable: false,
+      nonBillableReason: null,
+      managerMarkedNonBillable: false,
+    };
+  }
+  // Gestor tornando um lançamento NORMAL não faturável: ação sensível → motivo.
+  const parsed = justificationSchema.safeParse(reason ?? "");
+  if (!parsed.success) {
+    throw new ActionError("COMMENT_REQUIRED", JUSTIFICATION_REQUIRED_MESSAGE);
+  }
+  return {
+    billable: false,
+    nonBillableReason: parsed.data,
+    managerMarkedNonBillable: true,
+  };
 }
 
 /**
@@ -310,8 +380,15 @@ export async function createTimeEntry(
 
     const description = parsed.description.trim();
     const clock = clockToData(parsed);
-    // Enforcement de campo financeiro por papel: consultor puro não dita billable.
-    const billable = resolveBillable(user, parsed.activityType, parsed.billable);
+    // Enforcement de campo financeiro por papel + P9: consultor puro não dita
+    // billable; gestor que marca NÃO faturável precisa de justificativa.
+    const billableDecision = resolveBillableDecision(
+      user,
+      parsed.activityType,
+      parsed.billable,
+      parsed.nonBillableReason,
+    );
+    const billable = billableDecision.billable;
     const entry = await prisma.$transaction(async (tx) => {
       const period = await upsertOpenPeriod(tx, consultant.id, date);
       // A complete entry enters approval as soon as it is saved (Rodada 4.3):
@@ -346,6 +423,7 @@ export async function createTimeEntry(
             ...clock,
             description,
             billable,
+            nonBillableReason: billableDecision.nonBillableReason,
             multiplier: parsed.multiplier,
             status: "SUBMITTED",
             submittedAt: now,
@@ -365,6 +443,7 @@ export async function createTimeEntry(
             activityType: parsed.activityType,
             description,
             billable,
+            nonBillableReason: billableDecision.nonBillableReason,
             multiplier: parsed.multiplier,
             status: "SUBMITTED",
             submittedAt: now,
@@ -381,6 +460,21 @@ export async function createTimeEntry(
           after: { entryId: saved.id, hours: Number(saved.hours), merged },
         }),
       });
+      // P9: auditoria dedicada quando um gestor torna o lançamento não faturável.
+      if (billableDecision.managerMarkedNonBillable) {
+        await tx.auditEvent.create({
+          data: buildAuditEventData({
+            actorUserId: dbUser.id,
+            entityType: "TimeEntry",
+            entityId: saved.id,
+            action: "TIME_ENTRY_MARKED_NON_BILLABLE",
+            after: {
+              entryId: saved.id,
+              reason: billableDecision.nonBillableReason,
+            },
+          }),
+        });
+      }
       return saved;
     });
 
@@ -427,8 +521,16 @@ export async function createWeeklyTimeEntries(
     const weekdays = [...new Set(parsed.weekdays)].sort((a, b) => a - b);
     const description = parsed.description.trim();
     const clock = clockToData(parsed);
-    // Enforcement de campo financeiro por papel: consultor puro não dita billable.
-    const billable = resolveBillable(user, parsed.activityType, parsed.billable);
+    // Enforcement de campo financeiro por papel + P9: gestor que marca NÃO
+    // faturável precisa de justificativa (mesmo motivo aplicado a todos os dias
+    // criados nesta semana). Consultor puro não dita billable.
+    const billableDecision = resolveBillableDecision(
+      user,
+      parsed.activityType,
+      parsed.billable,
+      parsed.nonBillableReason,
+    );
+    const billable = billableDecision.billable;
 
     const result = await prisma.$transaction(async (tx) => {
       let period = await tx.timesheetPeriod.findUnique({
@@ -499,6 +601,7 @@ export async function createWeeklyTimeEntries(
             activityType: parsed.activityType,
             description,
             billable,
+            nonBillableReason: billableDecision.nonBillableReason,
             multiplier: parsed.multiplier,
             status: "SUBMITTED",
             submittedAt,
@@ -519,6 +622,21 @@ export async function createWeeklyTimeEntries(
             },
           }),
         });
+        // P9: auditoria dedicada quando o gestor torna o lançamento não faturável.
+        if (billableDecision.managerMarkedNonBillable) {
+          await tx.auditEvent.create({
+            data: buildAuditEventData({
+              actorUserId: dbUser.id,
+              entityType: "TimeEntry",
+              entityId: created.id,
+              action: "TIME_ENTRY_MARKED_NON_BILLABLE",
+              after: {
+                entryId: created.id,
+                reason: billableDecision.nonBillableReason,
+              },
+            }),
+          });
+        }
       }
 
       if (counts.created > 0 && period) await recomputePeriodStatus(tx, period.id);
@@ -544,7 +662,12 @@ export async function updateTimeEntry(
 
     const entry = await prisma.timeEntry.findUnique({
       where: { id: parsed.id },
-      include: { period: true },
+      include: {
+        period: true,
+        billableJustificationAttachment: {
+          select: { storageKey: true, storageBucket: true },
+        },
+      },
     });
     if (!entry) {
       throw new ActionError("NOT_FOUND", "Lançamento não encontrado.");
@@ -625,6 +748,17 @@ export async function updateTimeEntry(
     // Resolve the REAL db user BEFORE the transaction (audit FK).
     const dbUser = await requireDbUser(user);
 
+    // Enforcement por papel + P9: consultor puro não dita billable — deriva-se
+    // pela atividade EXISTENTE do lançamento (a atividade não muda no edit); um
+    // gestor que marca NÃO faturável precisa de justificativa. Quando volta a
+    // ser faturável, o motivo é limpo (nonBillableReason = null).
+    const billableDecision = resolveBillableDecision(
+      user,
+      entry.activityType,
+      parsed.billable,
+      parsed.nonBillableReason,
+    );
+
     await prisma.$transaction(async (tx) => {
       // Editing a DRAFT/REJECTED/SUBMITTED entry resubmits it for approval
       // (Rodada 4.3): status = SUBMITTED + new submittedAt. The new submittedAt
@@ -635,9 +769,8 @@ export async function updateTimeEntry(
         data: {
           ...clockToData(parsed),
           description: parsed.description.trim(),
-          // Enforcement por papel: consultor puro não dita billable — deriva-se
-          // pela atividade EXISTENTE do lançamento (a atividade não muda no edit).
-          billable: resolveBillable(user, entry.activityType, parsed.billable),
+          billable: billableDecision.billable,
+          nonBillableReason: billableDecision.nonBillableReason,
           multiplier: parsed.multiplier,
           date,
           allocationId,
@@ -659,7 +792,43 @@ export async function updateTimeEntry(
           after: { entryId: entry.id, resubmit: true },
         }),
       });
+      // P9: auditoria dedicada quando o gestor torna o lançamento não faturável.
+      if (billableDecision.managerMarkedNonBillable) {
+        await tx.auditEvent.create({
+          data: buildAuditEventData({
+            actorUserId: dbUser.id,
+            entityType: "TimeEntry",
+            entityId: entry.id,
+            action: "TIME_ENTRY_MARKED_NON_BILLABLE",
+            before: { billable: entry.billable },
+            after: { entryId: entry.id, reason: billableDecision.nonBillableReason },
+          }),
+        });
+      }
+      // Voltou a ser faturável: o comprovante de NÃO faturável não faz mais
+      // sentido — remove o registro para não ficar órfão (limpeza do objeto no
+      // storage é best-effort logo após a transação).
+      if (billableDecision.billable) {
+        await tx.timeEntryBillableJustificationAttachment.deleteMany({
+          where: { timeEntryId: entry.id },
+        });
+      }
     });
+
+    // Best-effort: apaga o objeto do anexo de justificativa órfão do storage.
+    if (billableDecision.billable && entry.billableJustificationAttachment) {
+      const att = entry.billableJustificationAttachment;
+      const provider = getStorageProvider(
+        att.storageBucket || BILLABLE_JUSTIFICATION_BUCKET,
+      );
+      if (provider) {
+        try {
+          await provider.delete(att.storageKey);
+        } catch (e) {
+          console.error("[horas] failed to delete orphan justification object", e);
+        }
+      }
+    }
 
     // The entry now sits in the approval queue, so refresh both routes.
     revalidatePath(HORAS_PATH);
@@ -1685,6 +1854,220 @@ export async function removeTimeEntryAttachment(
 
     revalidatePath(HORAS_PATH);
     return { ok: true, data: { id: parsed.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+// --- Anexo da justificativa de NÃO faturável (P9) ---------------------------
+//
+// Anexo OPCIONAL e DEDICADO que comprova a justificativa de "não faturável"
+// (melhoria #9). Modelo próprio (TimeEntryBillableJustificationAttachment) em
+// bucket privado dedicado — NUNCA reusa o anexo próprio do lançamento
+// (TimeEntryAttachment). Só papéis de gestão anexam (foi um gestor que marcou o
+// lançamento como não faturável). Degrade honesto: sem storage, a ação recusa
+// com NO_STORAGE e o lançamento segue com o motivo textual persistido.
+
+/** Papéis que podem anexar/gerir a justificativa (mesma autoridade do billable). */
+const BILLABLE_JUSTIFICATION_ROLES = [
+  "ADMIN",
+  "AREA_MANAGER",
+  "PROJECT_MANAGER",
+  "FINANCE",
+] as const;
+
+function buildBillableJustificationKey(entryId: string, fileName: string): string {
+  const ts = new Date()
+    .toISOString()
+    .replace(/[-:]/g, "")
+    .replace(/\.\d+Z$/, "Z");
+  return `billable-justifications/${entryId}/${ts}-${safeFileName(fileName)}`;
+}
+
+/**
+ * Anexa (ou substitui) o arquivo que comprova a justificativa de NÃO faturável
+ * de um lançamento. Só papéis de gestão, só enquanto o lançamento é editável e
+ * apenas quando o lançamento está de fato NÃO faturável (billable=false). O
+ * anexo é aplicado APÓS o save (com o id retornado), como o anexo próprio.
+ */
+export async function attachBillableJustificationFile(
+  formData: FormData,
+): Promise<ActionResult<{ fileName: string }>> {
+  try {
+    ensureDatabase();
+    const user = await requireRole([...BILLABLE_JUSTIFICATION_ROLES]);
+    if (!isStorageConfigured()) {
+      throw new ActionError(
+        "NO_STORAGE",
+        "Anexos indisponíveis: storage não configurado. A justificativa textual foi registrada.",
+      );
+    }
+    const parsed = parseInput(attachmentIdSchema, { id: formData.get("id") });
+
+    const file = formData.get("file");
+    if (!(file instanceof File)) {
+      throw new ActionError("INVALID_FILE", "Nenhum arquivo enviado.");
+    }
+    const invalid = validateReceiptFile({
+      name: file.name,
+      type: file.type,
+      size: file.size,
+    });
+    if (invalid) throw new ActionError(invalid.code, invalid.message);
+
+    const entry = await prisma.timeEntry.findUnique({
+      where: { id: parsed.id },
+      select: {
+        status: true,
+        billable: true,
+        period: { select: { status: true } },
+        billableJustificationAttachment: { select: { storageKey: true } },
+      },
+    });
+    if (!entry) throw new ActionError("NOT_FOUND", "Lançamento não encontrado.");
+    if (entry.billable) {
+      throw new ActionError(
+        "INVALID_INPUT",
+        "O anexo de justificativa só se aplica a lançamentos não faturáveis.",
+      );
+    }
+    if (entry.period.status === "CLOSED") {
+      throw new ActionError(
+        "PERIOD_CLOSED",
+        "Esta semana já foi fechada e não aceita alterações.",
+      );
+    }
+    if (
+      !(ATTACHMENT_EDITABLE_STATUS as readonly string[]).includes(entry.status)
+    ) {
+      throw new ActionError(
+        "ATTACHMENT_LOCKED",
+        "Lançamento aprovado ou fechado: anexo bloqueado.",
+      );
+    }
+    const dbUser = await resolveDbUser(user);
+
+    const provider = getStorageProvider(BILLABLE_JUSTIFICATION_BUCKET)!;
+    const storageKey = buildBillableJustificationKey(parsed.id, file.name);
+    await provider.upload(storageKey, await file.arrayBuffer(), file.type);
+
+    const previousKey =
+      entry.billableJustificationAttachment?.storageKey ?? null;
+    const data = {
+      fileName: file.name,
+      contentType: file.type,
+      size: file.size,
+      storageBucket: BILLABLE_JUSTIFICATION_BUCKET,
+      storageKey,
+      uploadedByUserId: dbUser?.id ?? null,
+    };
+    try {
+      await prisma.$transaction(async (tx) => {
+        const guard = await tx.timeEntry.updateMany({
+          where: {
+            id: parsed.id,
+            billable: false,
+            status: { in: [...ATTACHMENT_EDITABLE_STATUS] },
+          },
+          data: { updatedAt: new Date() },
+        });
+        if (guard.count !== 1) {
+          throw new ActionError(
+            "ATTACHMENT_LOCKED",
+            "Lançamento aprovado, fechado ou faturável: anexo bloqueado.",
+          );
+        }
+        await tx.timeEntryBillableJustificationAttachment.upsert({
+          where: { timeEntryId: parsed.id },
+          update: data,
+          create: { timeEntryId: parsed.id, ...data },
+        });
+        await tx.auditEvent.create({
+          data: buildAuditEventData({
+            actorUserId: dbUser?.id ?? null,
+            entityType: "TimeEntry",
+            entityId: parsed.id,
+            action: "TIME_ENTRY_BILLABLE_JUSTIFICATION_ATTACHED",
+            after: { fileName: file.name, size: file.size },
+          }),
+        });
+      });
+    } catch (error) {
+      try {
+        await provider.delete(storageKey);
+      } catch (cleanup) {
+        console.error(
+          "[horas] failed to clean up justification object",
+          cleanup,
+        );
+      }
+      throw error;
+    }
+    if (previousKey && previousKey !== storageKey) {
+      try {
+        await provider.delete(previousKey);
+      } catch (e) {
+        console.error("[horas] failed to delete replaced justification", e);
+      }
+    }
+
+    revalidatePath(HORAS_PATH);
+    return { ok: true, data: { fileName: file.name } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/**
+ * Short-lived signed URL for a lançamento's non-billable justification
+ * attachment. Visível ao próprio consultor e aos papéis de gestão/financeiro.
+ */
+export async function getBillableJustificationUrl(
+  input: z.infer<typeof attachmentIdSchema>,
+): Promise<ActionResult<{ url: string }>> {
+  try {
+    ensureDatabase();
+    const user = await requireUser();
+    const parsed = parseInput(attachmentIdSchema, input);
+    const consultant = await getConsultantForUser(user);
+    const isViewer = ATTACHMENT_VIEW_ROLES.some((r) => user.roles.includes(r));
+
+    const entry = await prisma.timeEntry.findUnique({
+      where: { id: parsed.id },
+      select: {
+        consultantId: true,
+        billable: true,
+        billableJustificationAttachment: {
+          select: { storageKey: true, storageBucket: true },
+        },
+      },
+    });
+    const allowed =
+      entry &&
+      (isViewer || (consultant && entry.consultantId === consultant.id));
+    // Recusa também quando o lançamento voltou a ser faturável: um comprovante
+    // de "não faturável" não deve ser servível nesse estado (defesa extra além
+    // da limpeza feita no updateTimeEntry).
+    if (
+      !entry ||
+      !allowed ||
+      entry.billable ||
+      !entry.billableJustificationAttachment
+    ) {
+      throw new ActionError("NOT_FOUND", "Anexo não encontrado.");
+    }
+    const provider = getStorageProvider(
+      entry.billableJustificationAttachment.storageBucket ||
+        BILLABLE_JUSTIFICATION_BUCKET,
+    );
+    if (!provider) {
+      throw new ActionError("NO_STORAGE", "Storage não configurado.");
+    }
+    const url = await provider.getSignedUrl(
+      entry.billableJustificationAttachment.storageKey,
+      300,
+    );
+    return { ok: true, data: { url } };
   } catch (error) {
     return toFailure(error);
   }

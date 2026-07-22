@@ -1784,11 +1784,20 @@ model TimeEntry {
   activityType           String
   description            String?
   billable               Boolean                 @default(true)
+  /// Justificativa obrigatoria quando um GESTOR marca o lancamento como NAO
+  /// faturavel (P9 / melhoria #9). A derivacao automatica do consultor
+  /// (ON_CALL nao faturavel) NAO preenche este campo — so a acao explicita de
+  /// gestao. Null quando billable=true. Auditado (TIME_ENTRY_MARKED_NON_BILLABLE).
+  nonBillableReason      String?
   status                 TimeEntryStatus         @default(DRAFT)
   submittedAt            DateTime?
   /// Anexo opcional do lancamento (ex.: "ok do responsavel" no sobreaviso). 1:1
   /// generico, valido para qualquer activityType. Sucede OnCallAttachment.
   attachment             TimeEntryAttachment?
+  /// Anexo opcional que comprova a justificativa de NAO faturavel (P9). Modelo
+  /// 1:1 DEDICADO (nunca reusa `attachment`, que e o anexo proprio do
+  /// lancamento) para nao conflitar. Vive em bucket privado dedicado.
+  billableJustificationAttachment TimeEntryBillableJustificationAttachment?
   revenueClosingLines    RevenueClosingLine[]
   consultantPaymentLines ConsultantPaymentLine[]
   createdAt              DateTime                @default(now())
@@ -1815,6 +1824,25 @@ model TimeEntry {
 /// (bucket privado + chave), a URL e sempre assinada. onDelete Cascade: o
 /// anexo segue o ciclo de vida do lancamento.
 model TimeEntryAttachment {
+  id               String    @id @default(cuid())
+  timeEntryId      String    @unique
+  timeEntry        TimeEntry @relation(fields: [timeEntryId], references: [id], onDelete: Cascade)
+  fileName         String
+  contentType      String
+  size             Int
+  storageBucket    String
+  storageKey       String
+  uploadedByUserId String?
+  createdAt        DateTime  @default(now())
+}
+
+/// Anexo (1:1) que comprova a justificativa de NAO faturavel de um lancamento
+/// (P9 / melhoria #9). Modelo DEDICADO — espelha TimeEntryAttachment mas e um
+/// artefato distinto (o anexo proprio do lancamento vive em TimeEntryAttachment)
+/// para evitar conflito quando ambos existem. Mesmo padrao: o arquivo vive em
+/// object storage (bucket privado dedicado + chave), a URL e sempre assinada.
+/// onDelete Cascade: o anexo segue o ciclo de vida do lancamento.
+model TimeEntryBillableJustificationAttachment {
   id               String    @id @default(cuid())
   timeEntryId      String    @unique
   timeEntry        TimeEntry @relation(fields: [timeEntryId], references: [id], onDelete: Cascade)

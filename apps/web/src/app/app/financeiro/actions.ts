@@ -187,17 +187,22 @@ export async function advanceRevenueClosing(input: {
     const transition = revenueClosingTransitions[parsed.action];
     const dbUser = await resolveDbUser(user);
 
-    // D4 (Onda B): "liberar o faturamento para o financeiro" é a transição CLOSE
-    // (READY_TO_CLOSE -> CLOSED). Ela entrega o fechamento ao financeiro (destrava
-    // pré-fatura + NFS-e) e dispara notifyHoursReleased (PEOPLE + FINANCE), então
-    // exige uma justificativa registrada em notes + AuditEvent. As demais
-    // transições (revisar, pronto, voltar, reabrir, faturar) NÃO a exigem.
-    const justification =
-      parsed.action === "CLOSE" ? (parsed.justification ?? "").trim() : undefined;
-    if (parsed.action === "CLOSE" && !justification) {
+    // D4 (Onda B) + P16 (Onda 4): uma justificativa OBRIGATÓRIA é registrada em
+    // notes + AuditEvent nas transições sensíveis do fechamento de receita:
+    //   - CLOSE ("liberar faturamento", READY_TO_CLOSE -> CLOSED);
+    //   - as REVERSAS: REVERT_TO_OPEN, REVERT_TO_REVIEW e REOPEN ("voltar
+    //     status" / "reabrir"), que desfazem um avanço já feito.
+    // As demais (revisar, pronto, faturar, cancelar) NÃO a exigem. A máquina de
+    // estados (revenueClosingTransitions.requiresJustification) é a autoridade.
+    const justification = transition.requiresJustification
+      ? (parsed.justification ?? "").trim()
+      : undefined;
+    if (transition.requiresJustification && !justification) {
       throw new ActionError(
         "INVALID_INPUT",
-        "Informe uma justificativa para liberar o faturamento para o financeiro.",
+        parsed.action === "CLOSE"
+          ? "Informe uma justificativa para liberar o faturamento para o financeiro."
+          : "Informe uma justificativa para voltar o status deste fechamento.",
       );
     }
 
@@ -242,14 +247,18 @@ export async function advanceRevenueClosing(input: {
       };
       if (parsed.action === "CLOSE") {
         updateData.closedAt = new Date();
-        updateData.notes = appendClosingNote(
-          closing.notes,
-          "Liberacao faturamento",
-          justification as string,
-        );
       }
       if (parsed.action === "REOPEN") {
         updateData.closedAt = null;
+      }
+      // P16: registra a justificativa (CLOSE + reversas) na trilha inline de
+      // notes, sem descartar as notas do motor de faturamento.
+      if (transition.requiresJustification) {
+        updateData.notes = appendClosingNote(
+          closing.notes,
+          transition.noteLabel ?? "Ajuste de status",
+          justification as string,
+        );
       }
       const updated = await tx.revenueClosing.updateMany({
         where: { id: parsed.id, status: transition.expected },
