@@ -32,6 +32,7 @@ import {
   removeAllocationSkill,
   updateAllocation,
   updateProject,
+  updateProjectOpportunityType,
   updateProjectPaymentType,
   updateReceivable,
   upsertProjectBillingConfig,
@@ -66,6 +67,7 @@ import type {
   ProjectConsultantOption,
   ProjectItem,
   ProjectManagerOption,
+  ProjectOpportunityType,
   ProjectPaymentType,
   ProjectReceivableItem,
   ProjectSkillOption,
@@ -80,6 +82,10 @@ import {
 } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { focusRingInput } from "@/lib/styles";
+import {
+  opportunityTypeLabels,
+  opportunityTypeOptions,
+} from "@/lib/projects/labels";
 import { ProjectStatusBadge, projectStatusLabels } from "./ProjectStatusBadge";
 import { ProjectTrackingPanel } from "./ProjectTrackingPanel";
 import {
@@ -294,6 +300,19 @@ export function ProjectsView({
       key: "status",
       header: "Status",
       cell: (project) => <ProjectStatusBadge status={project.status} />,
+    },
+    {
+      key: "opportunityType",
+      header: "Tipo",
+      cell: (project) =>
+        project.opportunityType ? (
+          <span className="rounded-full border border-border bg-surface-muted px-2 py-0.5 text-[11px] font-medium text-medium">
+            {opportunityTypeLabels[project.opportunityType]}
+          </span>
+        ) : (
+          <span className="text-xs text-soft">—</span>
+        ),
+      className: "hidden lg:table-cell",
     },
     {
       key: "manager",
@@ -772,6 +791,32 @@ export function ProjectsView({
     });
   }
 
+  function changeOpportunityType(
+    projectId: string,
+    opportunityType: ProjectOpportunityType | undefined,
+  ) {
+    setItems((current) =>
+      current.map((project) =>
+        project.id === projectId ? { ...project, opportunityType } : project,
+      ),
+    );
+    if (mode === "demo") {
+      setFeedback("Tipo de projeto salvo localmente.");
+      return;
+    }
+    startTransition(async () => {
+      const result = await updateProjectOpportunityType({
+        id: projectId,
+        opportunityType,
+      });
+      if (result.ok) setFeedback("Tipo de projeto salvo.");
+      else {
+        setFeedback(result.message);
+        setItems(projects);
+      }
+    });
+  }
+
   function acceptTerm(projectId: string) {
     const acceptedAt = new Date().toISOString();
     setItems((current) =>
@@ -997,6 +1042,7 @@ export function ProjectsView({
         onEditReceivable={editReceivable}
         onRemoveReceivable={removeReceivable}
         onChangePaymentType={changePaymentType}
+        onChangeOpportunityType={changeOpportunityType}
         onAcceptTerm={acceptTerm}
         onAddSkill={addSkill}
         onRemoveSkill={removeSkill}
@@ -1201,6 +1247,7 @@ function ProjectDetailModal({
   onEditReceivable,
   onRemoveReceivable,
   onChangePaymentType,
+  onChangeOpportunityType,
   onAcceptTerm,
   onAddSkill,
   onRemoveSkill,
@@ -1235,6 +1282,10 @@ function ProjectDetailModal({
   onChangePaymentType: (
     projectId: string,
     paymentType: ProjectPaymentType | undefined,
+  ) => void;
+  onChangeOpportunityType: (
+    projectId: string,
+    opportunityType: ProjectOpportunityType | undefined,
   ) => void;
   onAcceptTerm: (projectId: string) => void;
   onAddSkill: (value: AllocationSkillInput) => void;
@@ -1517,37 +1568,67 @@ function ProjectDetailModal({
       ) : tab === "RATES" ? (
         canViewCommercials ? (
           <div className="space-y-4">
-            <label className="flex flex-col gap-1 text-sm font-medium text-medium sm:max-w-xs">
-              Tipo de pagamento
-              <select
-                value={project.paymentType ?? ""}
-                disabled={!canManageSaleRates}
-                onChange={(event) =>
-                  onChangePaymentType(
-                    project.id,
-                    (event.target.value as ProjectPaymentType) || undefined,
-                  )
-                }
-                className={cn(
-                  fieldClass(),
-                  !canManageSaleRates && "opacity-70",
-                )}
-              >
-                <option value="">Não definido</option>
-                {(
-                  [
-                    "ONE_TIME",
-                    "INSTALLMENTS",
-                    "MONTHLY",
-                    "ON_MILESTONE",
-                  ] as ProjectPaymentType[]
-                ).map((item) => (
-                  <option key={item} value={item}>
-                    {paymentTypeLabels[item]}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="flex flex-col gap-1 text-sm font-medium text-medium">
+                Tipo de pagamento
+                <select
+                  value={project.paymentType ?? ""}
+                  disabled={!canManageSaleRates}
+                  onChange={(event) =>
+                    onChangePaymentType(
+                      project.id,
+                      (event.target.value as ProjectPaymentType) || undefined,
+                    )
+                  }
+                  className={cn(
+                    fieldClass(),
+                    !canManageSaleRates && "opacity-70",
+                  )}
+                >
+                  <option value="">Não definido</option>
+                  {(
+                    [
+                      "ONE_TIME",
+                      "INSTALLMENTS",
+                      "MONTHLY",
+                      "ON_MILESTONE",
+                    ] as ProjectPaymentType[]
+                  ).map((item) => (
+                    <option key={item} value={item}>
+                      {paymentTypeLabels[item]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-sm font-medium text-medium">
+                Tipo de projeto
+                <select
+                  value={project.opportunityType ?? ""}
+                  disabled={!canManageSaleRates}
+                  onChange={(event) =>
+                    onChangeOpportunityType(
+                      project.id,
+                      (event.target.value as ProjectOpportunityType) ||
+                        undefined,
+                    )
+                  }
+                  className={cn(
+                    fieldClass(),
+                    !canManageSaleRates && "opacity-70",
+                  )}
+                >
+                  <option value="">Não classificado</option>
+                  {opportunityTypeOptions.map((item) => (
+                    <option key={item} value={item}>
+                      {opportunityTypeLabels[item]}
+                    </option>
+                  ))}
+                </select>
+                <span className="text-xs font-normal text-soft">
+                  Vem do CRM na integração; pode ser sobrescrito manualmente.
+                </span>
+              </label>
+            </div>
             <DataTable
               columns={[
                 {

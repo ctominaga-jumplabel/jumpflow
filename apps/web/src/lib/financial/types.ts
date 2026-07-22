@@ -1,3 +1,5 @@
+import type { ProjectOpportunityType } from "@/lib/projects/types";
+
 export type RevenueClosingStatus =
   | "OPEN"
   | "IN_REVIEW"
@@ -23,8 +25,16 @@ export interface RevenueClosingFiscalDocument {
 
 export interface RevenueClosingRow {
   id: string;
+  /**
+   * Project of the closing. Used to correlate a closing line with the period
+   * exceptions (time entries) of the same project. Null for closings without a
+   * project (legacy/edge rows).
+   */
+  projectId: string | null;
   clientName: string;
   projectName: string;
+  /** Classificação de origem do projeto (do CRM). Informativa; pode ser nula. */
+  opportunityType: ProjectOpportunityType | null;
   approvedHours: number;
   billingHourlyRate: number;
   amount: number;

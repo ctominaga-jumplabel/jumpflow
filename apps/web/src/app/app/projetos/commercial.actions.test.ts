@@ -71,6 +71,7 @@ vi.mock("@/lib/auth/guards", () => ({
 import {
   updateProjectBillingType,
   updateProjectCommercial,
+  updateProjectOpportunityType,
 } from "./actions";
 
 beforeEach(() => {
@@ -143,6 +144,53 @@ describe("updateProjectBillingType", () => {
 
   it("returns NOT_FOUND for an unknown project", async () => {
     const result = await updateProjectBillingType({ id: "missing" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBe("NOT_FOUND");
+  });
+});
+
+describe("updateProjectOpportunityType", () => {
+  it("writes only opportunityType and audits PROJECT_OPPORTUNITY_TYPE_UPDATED", async () => {
+    const result = await updateProjectOpportunityType({
+      id: "prj-1",
+      opportunityType: "SQUAD",
+    });
+    expect(result.ok).toBe(true);
+    expect(h.store.updates).toHaveLength(1);
+    expect(h.store.updates[0].data).toEqual({ opportunityType: "SQUAD" });
+    // Must not touch commercial/operational fields.
+    expect(h.store.updates[0].data).not.toHaveProperty("billingTypeId");
+    expect(h.store.updates[0].data).not.toHaveProperty("budgetHours");
+    expect(h.store.audits[0]).toMatchObject({
+      action: "PROJECT_OPPORTUNITY_TYPE_UPDATED",
+    });
+  });
+
+  it("normalizes empty/absent opportunityType to null (clears the CRM value)", async () => {
+    // The client sends "" from an empty <select>; preprocess maps it to null.
+    const result = await updateProjectOpportunityType({
+      id: "prj-1",
+      opportunityType: "",
+    } as unknown as Parameters<typeof updateProjectOpportunityType>[0]);
+    expect(result.ok).toBe(true);
+    expect(h.store.updates[0].data).toEqual({ opportunityType: null });
+  });
+
+  it("rejects an unknown opportunityType with INVALID_INPUT", async () => {
+    const result = await updateProjectOpportunityType({
+      id: "prj-1",
+      opportunityType: "NOT_A_TYPE",
+    } as unknown as Parameters<typeof updateProjectOpportunityType>[0]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBe("INVALID_INPUT");
+    expect(h.store.updates).toHaveLength(0);
+  });
+
+  it("returns NOT_FOUND for an unknown project", async () => {
+    const result = await updateProjectOpportunityType({
+      id: "missing",
+      opportunityType: "PROJECT",
+    });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toBe("NOT_FOUND");
   });

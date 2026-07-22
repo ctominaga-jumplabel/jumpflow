@@ -14,6 +14,7 @@ vi.mock("@/app/app/horas/actions", () => ({
   copyPreviousWeek: vi.fn(),
   submitWeek: vi.fn(),
   decideHours: vi.fn(),
+  getTimeEntryAttachmentUrl: vi.fn(),
 }));
 // FinancialOverview renders ExpensesFinancePanel, which wires setPayment.
 vi.mock("@/app/app/despesas/actions", () => ({
@@ -34,6 +35,14 @@ vi.mock("@/app/app/financeiro/actions", () => ({
   advanceRevenueClosing: vi.fn(),
   createFiscalDocumentDraft: vi.fn(),
   requestFiscalDocumentIssue: vi.fn(),
+  generatePreInvoice: vi.fn(),
+  sendPreInvoiceEmail: vi.fn(),
+  sendClientBillingSummary: vi.fn(),
+}));
+// FinancialOverview's "Contas a Receber" tab renders PeriodExceptionsPanel,
+// which wires the on-call attachment action (a server-only module).
+vi.mock("@/app/app/sobreaviso/actions", () => ({
+  getOnCallApprovalUrl: vi.fn(),
 }));
 vi.mock("@/app/app/pagamentos/actions", () => ({
   generateMonthlyConsultantPayments: vi.fn(),

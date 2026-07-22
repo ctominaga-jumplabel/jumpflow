@@ -5,9 +5,15 @@ import {
   summarizeRevenueClosing,
   type RevenueClosingOverview,
 } from "@/lib/financial/types";
+import type {
+  PeriodExceptions,
+  RevenueExceptionsByProject,
+} from "@/lib/db/period-exceptions";
 import { RevenueSummaryCards } from "./RevenueSummaryCards";
 import { MonthlyClosingTable } from "./MonthlyClosingTable";
 import { ExpensesFinancePanel } from "./ExpensesFinancePanel";
+import { PeriodExceptionsPanel } from "./PeriodExceptionsPanel";
+import { FinanceTabs } from "./FinanceTabs";
 
 export interface FinancialOverviewProps {
   closing?: MonthlyClosing;
@@ -17,10 +23,18 @@ export interface FinancialOverviewProps {
   expensesMode?: "demo" | "db";
   /** db mode: expenses that reached finance. */
   financeExpenses?: Expense[];
+  /** Sobreaviso/hora extra do período (Contas a Receber). db mode. */
+  exceptions?: PeriodExceptions;
+  /** Time-entry exceptions per project (P5), for the closing table. db mode. */
+  exceptionsByProject?: RevenueExceptionsByProject;
+  /** Tab pré-selecionada (?tab=), preservada no client. */
+  defaultTab?: string;
 }
 
 /**
- * Monthly closing overview: revenue KPIs + the closing table. Composed by the
+ * Monthly financial overview split into two tabs (P1): "Contas a Receber"
+ * (revenue KPIs + closing table + period exceptions, the client/revenue side)
+ * and "Contas a Pagar" (finance-approved expenses to pay). Composed by the
  * role-protected Financeiro page (requireRole), so all figures are authorized.
  */
 export function FinancialOverview({
@@ -29,6 +43,9 @@ export function FinancialOverview({
   revenueMode = "demo",
   expensesMode = "demo",
   financeExpenses,
+  exceptions,
+  exceptionsByProject,
+  defaultTab,
 }: FinancialOverviewProps) {
   const overview =
     revenueClosing ??
@@ -37,8 +54,10 @@ export function FinancialOverview({
       year: closing.year,
       rows: closing.rows.map((row) => ({
         id: row.id,
+        projectId: null,
         clientName: row.clientName,
         projectName: row.projectName,
+        opportunityType: null,
         approvedHours: row.approvedHours,
         billingHourlyRate: row.billingHourlyRate,
         amount: row.approvedHours * row.billingHourlyRate,
@@ -54,7 +73,7 @@ export function FinancialOverview({
   const totals = summarizeRevenueClosing(overview);
   const monthLabel = formatMonth(overview.month, overview.year);
 
-  return (
+  const receber = (
     <div className="space-y-6">
       <RevenueSummaryCards
         approvedHours={totals.approvedHours}
@@ -69,8 +88,25 @@ export function FinancialOverview({
         month={overview.month}
         year={overview.year}
         monthLabel={monthLabel}
+        exceptionsByProject={exceptionsByProject}
       />
-      <ExpensesFinancePanel mode={expensesMode} expenses={financeExpenses} />
+      {exceptions ? (
+        <PeriodExceptionsPanel exceptions={exceptions} monthLabel={monthLabel} />
+      ) : null}
     </div>
+  );
+
+  const pagar = (
+    <ExpensesFinancePanel mode={expensesMode} expenses={financeExpenses} />
+  );
+
+  return (
+    <FinanceTabs
+      defaultTabId={defaultTab}
+      tabs={[
+        { id: "receber", label: "Contas a Receber", content: receber },
+        { id: "pagar", label: "Contas a Pagar", content: pagar },
+      ]}
+    />
   );
 }

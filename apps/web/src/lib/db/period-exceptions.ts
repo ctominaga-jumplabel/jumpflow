@@ -35,6 +35,88 @@ export interface PeriodExceptions {
   overtime: PeriodOvertimeException[];
 }
 
+/**
+ * One time-entry that falls outside a regular billable workday and therefore
+ * deserves a look before the revenue closing is released. Surfaced per project
+ * in the "Contas a Receber" tab (P5).
+ */
+export interface RevenueExceptionEntry {
+  id: string;
+  projectId: string;
+  date: string;
+  consultantName: string;
+  activityType: string;
+  hours: number;
+  /** Whether the entry carries an attachment (justificativa/comprovante). */
+  hasAttachment: boolean;
+}
+
+export type RevenueExceptionsByProject = Record<string, RevenueExceptionEntry[]>;
+
+/**
+ * Pure rule for what counts as a revenue-side exception on an approved time
+ * entry: anything that is NOT a plain "Dia Útil" (activityType !== "WORKDAY"),
+ * OR any entry that carries an attachment. Exported for unit tests.
+ */
+export function isRevenueExceptionEntry(input: {
+  activityType: string;
+  hasAttachment: boolean;
+}): boolean {
+  return input.activityType !== "WORKDAY" || input.hasAttachment;
+}
+
+/**
+ * Approved time entries in the competence month that qualify as exceptions
+ * (see `isRevenueExceptionEntry`), grouped by projectId so the closing table
+ * can render a per-line "Exceções" indicator + drill-down. Only APPROVED
+ * entries are considered: those are the ones that feed (or are expected to
+ * feed) the revenue closing.
+ */
+export async function listRevenueExceptionsByProject(input: {
+  month: number;
+  year: number;
+}): Promise<RevenueExceptionsByProject> {
+  const start = new Date(Date.UTC(input.year, input.month - 1, 1));
+  const end = new Date(Date.UTC(input.year, input.month, 1));
+
+  const rows = await prisma.timeEntry.findMany({
+    where: {
+      status: "APPROVED",
+      date: { gte: start, lt: end },
+      // Must mirror `isRevenueExceptionEntry` (the pure, unit-tested rule):
+      // activityType != WORKDAY OR has an attachment. `activityType` is a
+      // non-null String @default("WORKDAY"), so `not: "WORKDAY"` is safe (no
+      // NULL trap). Keep both in sync if the exception rule ever changes.
+      OR: [{ activityType: { not: "WORKDAY" } }, { attachment: { isNot: null } }],
+    },
+    orderBy: [{ projectId: "asc" }, { date: "asc" }],
+    select: {
+      id: true,
+      projectId: true,
+      date: true,
+      hours: true,
+      activityType: true,
+      consultant: { select: { name: true } },
+      attachment: { select: { id: true } },
+    },
+  });
+
+  const byProject: RevenueExceptionsByProject = {};
+  for (const row of rows) {
+    const entry: RevenueExceptionEntry = {
+      id: row.id,
+      projectId: row.projectId,
+      date: toIsoDate(row.date),
+      consultantName: row.consultant.name,
+      activityType: row.activityType,
+      hours: num(row.hours),
+      hasAttachment: row.attachment != null,
+    };
+    (byProject[row.projectId] ??= []).push(entry);
+  }
+  return byProject;
+}
+
 export async function listPeriodExceptions(input: {
   month: number;
   year: number;

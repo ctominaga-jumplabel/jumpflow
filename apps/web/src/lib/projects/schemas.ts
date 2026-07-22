@@ -121,6 +121,28 @@ export const projectPaymentTypeSchema = z.object({
   ),
 });
 
+// Tipo de oportunidade de origem (classificação do projeto). Vem do CRM, mas é
+// sobrescrevível manualmente. Patch isolado (não toca os demais campos do
+// projeto). Opcional: "" → undefined (grava null no banco). Gated pelo mesmo
+// papel do tipo de pagamento (SALE_RATE_ROLES) na action.
+export const projectOpportunityTypeSchema = z.object({
+  id: entityId,
+  opportunityType: z.preprocess(
+    (value) => (value === "" || value === null ? undefined : value),
+    z
+      .enum([
+        "PROJECT",
+        "ALLOCATION",
+        "SQUAD",
+        "LICENSING",
+        "BPO",
+        "SUPPORT",
+        "OTHER",
+      ])
+      .optional(),
+  ),
+});
+
 // Marca o termo de aceite (INFORMATIVO) como aceito. Operacional
 // (PROJECT_WRITE_ROLES); grava data + usuário atual. Não bloqueia nada.
 export const projectAcceptanceTermSchema = z.object({ id: entityId });
@@ -153,6 +175,9 @@ export type ProjectTrackingRequestInput = z.infer<
 >;
 
 export type ProjectPaymentTypeInput = z.infer<typeof projectPaymentTypeSchema>;
+export type ProjectOpportunityTypeInput = z.infer<
+  typeof projectOpportunityTypeSchema
+>;
 export type ProjectAcceptanceTermInput = z.infer<
   typeof projectAcceptanceTermSchema
 >;

@@ -1,11 +1,9 @@
 import type { Metadata } from "next";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { FinancialOverview } from "@/components/financial/FinancialOverview";
-import { PeriodExceptionsPanel } from "@/components/financial/PeriodExceptionsPanel";
 import { requireRole } from "@/lib/auth/guards";
 import { FINANCIAL_ROLES } from "@/lib/auth/route-permissions";
 import { isDatabaseConfigured } from "@/lib/db/config";
-import { formatMonth } from "@/lib/format";
 import {
   revenueClosingStatusLabels,
   type RevenueClosingOverview,
@@ -63,20 +61,24 @@ export default async function FinanceiroPage({
   const clientName = parseSingle(params.client);
   const projectName = parseSingle(params.project);
   const status = parseStatus(params.status);
+  const tab = parseSingle(params.tab);
 
   let financeExpenses;
   let revenueClosing: RevenueClosingOverview | undefined;
   let clientOptions: string[] = [];
   let projectOptions: string[] = [];
   let exceptions;
+  let exceptionsByProject;
   if (databaseConfigured) {
     // Lazy import so Prisma is never loaded on code paths without a database.
     const { listFinanceExpenses } = await import("@/lib/db/expenses");
     const { listRevenueClosings } = await import("@/lib/db/revenue");
-    const { listPeriodExceptions } = await import("@/lib/db/period-exceptions");
+    const { listPeriodExceptions, listRevenueExceptionsByProject } =
+      await import("@/lib/db/period-exceptions");
     financeExpenses = (await listFinanceExpenses()).expenses;
     const overview = await listRevenueClosings({ month, year });
     exceptions = await listPeriodExceptions({ month, year });
+    exceptionsByProject = await listRevenueExceptionsByProject({ month, year });
 
     // Filter options come from the full period (unfiltered) so a selected
     // client/project does not collapse the dropdowns. Project options are
@@ -115,6 +117,8 @@ export default async function FinanceiroPage({
         description="Fechamento mensal de horas aprovadas, valor hora, receita estimada e pagamento de despesas."
       />
       <form className="flex flex-wrap items-end gap-3 rounded-md border border-border bg-surface p-4">
+        {/* Preserva a aba ativa (Contas a Receber/Pagar) ao filtrar via GET. */}
+        <input type="hidden" name="tab" value={tab ?? ""} />
         <label className="text-sm font-medium text-medium">
           Mês
           <input
@@ -191,13 +195,10 @@ export default async function FinanceiroPage({
         revenueClosing={revenueClosing}
         expensesMode={databaseConfigured ? "db" : "demo"}
         financeExpenses={financeExpenses}
+        exceptions={exceptions}
+        exceptionsByProject={exceptionsByProject}
+        defaultTab={tab}
       />
-      {exceptions ? (
-        <PeriodExceptionsPanel
-          exceptions={exceptions}
-          monthLabel={formatMonth(month, year)}
-        />
-      ) : null}
     </div>
   );
 }

@@ -37,12 +37,14 @@ import {
   saleRateInputSchema,
   saleRateUpdateSchema,
   projectPaymentTypeSchema,
+  projectOpportunityTypeSchema,
   projectAcceptanceTermSchema,
   projectTrackingInputSchema,
   receivableInputSchema,
   receivableUpdateSchema,
   receivableRemoveSchema,
   type ProjectPaymentTypeInput,
+  type ProjectOpportunityTypeInput,
   type ProjectAcceptanceTermInput,
   type ReceivableInput,
   type ReceivableUpdateInput,
@@ -1002,6 +1004,40 @@ export async function updateProjectPaymentType(
     const data = { paymentType: parsed.paymentType ?? null };
     await prisma.project.update({ where: { id: parsed.id }, data });
     await audit("Project", parsed.id, "PROJECT_PAYMENT_TYPE_UPDATED", previous, data);
+    revalidateProjectViews();
+    return { ok: true, data: { id: parsed.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+// ── Tipo de oportunidade (classificação) ─────────────────────────────────
+// Classificação do projeto (PROJECT/ALLOCATION/SQUAD/…). Vem do CRM na
+// ingestão, mas é sobrescrevível manualmente aqui. Patch isolado (não toca
+// budget/valor de venda). Mesmo gate do tipo de pagamento (SALE_RATE_ROLES);
+// auditado como mudança comercial.
+
+export async function updateProjectOpportunityType(
+  input: ProjectOpportunityTypeInput,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(SALE_RATE_ROLES);
+    const parsed = parseInput(projectOpportunityTypeSchema, input);
+    const previous = await prisma.project.findUnique({
+      where: { id: parsed.id },
+      select: { opportunityType: true },
+    });
+    if (!previous) throw new ActionError("NOT_FOUND", "Projeto nao encontrado.");
+    const data = { opportunityType: parsed.opportunityType ?? null };
+    await prisma.project.update({ where: { id: parsed.id }, data });
+    await audit(
+      "Project",
+      parsed.id,
+      "PROJECT_OPPORTUNITY_TYPE_UPDATED",
+      previous,
+      data,
+    );
     revalidateProjectViews();
     return { ok: true, data: { id: parsed.id } };
   } catch (error) {

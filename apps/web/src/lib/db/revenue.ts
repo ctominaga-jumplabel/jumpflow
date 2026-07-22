@@ -178,7 +178,7 @@ export async function listRevenueClosings(input: {
     where: { month: input.month, year: input.year },
     include: {
       client: { select: { name: true } },
-      project: { select: { name: true } },
+      project: { select: { name: true, opportunityType: true } },
       fiscalDocuments: {
         orderBy: { createdAt: "desc" },
         take: 1,
@@ -203,8 +203,12 @@ export async function listRevenueClosings(input: {
       const fiscal = row.fiscalDocuments[0] ?? null;
       return {
         id: row.id,
+        projectId: row.projectId ?? null,
         clientName: row.client.name,
         projectName: row.project?.name ?? "Sem projeto",
+        opportunityType:
+          (row.project
+            ?.opportunityType as RevenueClosingRow["opportunityType"]) ?? null,
         approvedHours: hours,
         billingHourlyRate: closingAverageRate(hours, amount),
         amount,

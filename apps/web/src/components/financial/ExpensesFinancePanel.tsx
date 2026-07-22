@@ -1,7 +1,14 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { CalendarClock, CheckCircle2, Receipt, Undo2 } from "lucide-react";
+import {
+  AlertTriangle,
+  CalendarClock,
+  CheckCircle2,
+  Paperclip,
+  Receipt,
+  Undo2,
+} from "lucide-react";
 import { SectionPanel } from "@/components/ui/SectionPanel";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Modal } from "@/components/ui/Modal";
@@ -10,7 +17,7 @@ import { FeedbackBanner, useFeedback } from "@/components/ui/Feedback";
 import { cn } from "@/lib/utils";
 import { focusRingInput } from "@/lib/styles";
 import { formatCurrency, formatDate } from "@/lib/format";
-import { setPayment } from "@/app/app/despesas/actions";
+import { getReceiptUrl, setPayment } from "@/app/app/despesas/actions";
 import { expenses as mockExpenses } from "@/lib/mock-data/expenses";
 import { summarizeExpenses, type Expense } from "@/lib/expenses/types";
 import { ExpenseStatusBadge } from "@/components/expenses/ExpenseStatusBadge";
@@ -54,6 +61,18 @@ export function ExpensesFinancePanel(props: ExpensesFinancePanelProps) {
       prev.map((e) => (e.id === id ? { ...e, status } : e)),
     );
     notify("info", `${message} (local).`);
+  }
+
+  function viewReceipt(expense: Expense) {
+    if (isDemo) {
+      notify("info", "Comprovante disponível apenas no modo real.");
+      return;
+    }
+    startTransition(async () => {
+      const result = await getReceiptUrl({ expenseId: expense.id });
+      if (result.ok) window.open(result.data.url, "_blank", "noopener");
+      else notify("warning", result.message);
+    });
   }
 
   function handleSchedule(expense: Expense) {
@@ -157,6 +176,9 @@ export function ExpensesFinancePanel(props: ExpensesFinancePanelProps) {
                     Status
                   </th>
                   <th scope="col" className={thClass}>
+                    Exceções
+                  </th>
+                  <th scope="col" className={thClass}>
                     Ações
                   </th>
                 </tr>
@@ -184,6 +206,22 @@ export function ExpensesFinancePanel(props: ExpensesFinancePanelProps) {
                     </td>
                     <td className="px-4 py-3 align-middle">
                       <ExpenseStatusBadge status={expense.status} />
+                    </td>
+                    <td className="px-4 py-3 align-middle">
+                      {expense.attachment ? (
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-1 text-sm text-accent underline disabled:opacity-60"
+                          disabled={isPending}
+                          onClick={() => viewReceipt(expense)}
+                        >
+                          <Paperclip size={13} /> Comprovante
+                        </button>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 rounded-md bg-warning-soft px-2 py-0.5 text-xs font-medium text-warning">
+                          <AlertTriangle size={13} /> Sem comprovante
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3 align-middle">
                       <div className="flex flex-wrap items-center gap-1.5">

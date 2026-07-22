@@ -9,6 +9,19 @@ export type ProjectPaymentType =
   | "INSTALLMENTS"
   | "MONTHLY"
   | "ON_MILESTONE";
+/**
+ * Tipo de oportunidade de origem (espelha o OpportunityType do CRM-Jumplabel).
+ * Só preenchido em projetos vindos da ingestão; projetos criados a mão ficam
+ * nulos até um perfil comercial classificar manualmente (sobrescrevível).
+ */
+export type ProjectOpportunityType =
+  | "PROJECT"
+  | "ALLOCATION"
+  | "SQUAD"
+  | "LICENSING"
+  | "BPO"
+  | "SUPPORT"
+  | "OTHER";
 export type ReceivableStatus = "FORECAST" | "RECEIVED" | "CANCELLED";
 export type AllocationStatus =
   | "ACTIVE"
@@ -163,6 +176,12 @@ export interface ProjectItem {
   commercialContractRef?: string;
   /** Condição de pagamento do cliente (comercial). Opcional. */
   paymentType?: ProjectPaymentType;
+  /**
+   * Tipo de oportunidade de origem (do CRM). Classificação informativa do
+   * projeto; nula em projetos manuais até ser classificada. Sobrescrevível
+   * manualmente por perfil comercial.
+   */
+  opportunityType?: ProjectOpportunityType;
   /**
    * Flag INFORMATIVA de termo de aceite (não bloqueia lançamento/faturamento).
    * Opcional na borda (mock/otimista); o loader sempre popula com boolean.

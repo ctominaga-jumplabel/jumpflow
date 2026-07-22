@@ -8,6 +8,7 @@ import type {
   ProjectConsultantOption,
   ProjectItem,
   ProjectManagerOption,
+  ProjectOpportunityType,
   ProjectPaymentType,
   ProjectReceivableItem,
   ProjectSaleRateItem,
@@ -358,6 +359,11 @@ export async function listProjects(options?: {
       paymentType: includeFinancials
         ? ((row.paymentType as ProjectPaymentType | null) ?? undefined)
         : undefined,
+      // Tipo de oportunidade é uma CLASSIFICAÇÃO (não um valor sensível): vem do
+      // CRM e é retornado a qualquer perfil que veja o projeto, para a Operação
+      // enxergar a natureza do projeto. A EDIÇÃO é gated na server action.
+      opportunityType:
+        (row.opportunityType as ProjectOpportunityType | null) ?? undefined,
       // Termo de aceite é INFORMATIVO/operacional: sempre retornado.
       requiresAcceptanceTerm: row.requiresAcceptanceTerm,
       acceptanceTermAcceptedAt: row.acceptanceTermAcceptedAt
