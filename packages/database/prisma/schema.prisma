@@ -3150,3 +3150,32 @@ model Case {
   @@index([status])
   @@index([stage])
 }
+
+/// Regra da Politica de Reembolso (Onda 3, P12). NAO substitui o enum
+/// ExpenseCategory: as categorias continuam vindo do enum fixo; esta tabela
+/// apenas configura limites (prazo/valor) por categoria + uma regra Geral.
+/// `category` NULL = regra Geral (vale para qualquer categoria); um valor do
+/// enum = regra especifica. Ambos os limites sao opcionais (NULL desliga aquela
+/// checagem). `maxAgeDays` = prazo maximo em dias para lancar, contado da data
+/// da despesa; `maxAmount` = teto do valor do lancamento. Uma regra por
+/// categoria via @@unique([category]); a unicidade da regra Geral (category
+/// NULL) e reforcada por indice unico parcial criado na migration (Postgres
+/// trata NULLs como distintos, entao @@unique nao basta) e tambem checada na
+/// server action. Alteracoes sao auditadas (REIMBURSEMENT_POLICY_*).
+/// ATENCAO: o indice unico parcial `ReimbursementPolicyRule_general_key`
+/// (category IS NULL) NAO e representavel no Prisma. NAO rode `prisma migrate
+/// dev` cru sem preservar esse indice manual — o Prisma detectaria "drift" e
+/// geraria um DROP dele, reabrindo a possibilidade de multiplas regras Gerais.
+/// Em prod aplicamos via db:deploy/SQL manual (gate), entao o indice persiste.
+model ReimbursementPolicyRule {
+  id         String           @id @default(cuid())
+  category   ExpenseCategory?
+  maxAgeDays Int?
+  maxAmount  Decimal?         @db.Decimal(12, 2)
+  active     Boolean          @default(true)
+  notes      String?
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  @@unique([category])
+}

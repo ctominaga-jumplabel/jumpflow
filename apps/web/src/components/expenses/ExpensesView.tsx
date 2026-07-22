@@ -29,6 +29,7 @@ import {
   type ExpenseFilter,
   type ExpenseStatus,
 } from "@/lib/expenses/types";
+import type { PolicyRuleData } from "@/lib/expenses/reimbursement-policy";
 import { ExpenseSummaryCards } from "./ExpenseSummaryCards";
 import { ExpenseList } from "./ExpenseList";
 import {
@@ -84,6 +85,8 @@ export interface ExpensesViewProps {
   projects?: ExpenseFormProject[];
   /** db mode: whether the receipt storage is configured. */
   storageAvailable?: boolean;
+  /** db mode: regras ATIVAS da Politica de Reembolso (P13, alerta no form). */
+  policyRules?: PolicyRuleData[];
 }
 
 /**
@@ -553,6 +556,7 @@ export function ExpensesView(props: ExpensesViewProps) {
         defaultDate={props.today}
         initial={editing}
         attachmentUnavailable={!isDemo && !storageAvailable}
+        policyRules={props.policyRules ?? []}
         busy={isPending}
         onSubmit={handleFormSubmit}
         onSubmitBatch={handleBatchSubmit}

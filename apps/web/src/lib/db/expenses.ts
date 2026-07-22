@@ -381,6 +381,53 @@ export async function listFinanceExpenses(): Promise<FinanceExpenses> {
   return { expenses, totals: summarizeExpenses(expenses) };
 }
 
+export interface BulkReceiptRow {
+  expenseId: string;
+  fileName: string;
+  contentType: string;
+  storageKey: string;
+  consultantName: string;
+  /** ISO date (yyyy-mm-dd) of the expense. */
+  date: string;
+  description: string;
+}
+
+/**
+ * Receipt metadata for a set of expense ids, for the finance bulk ZIP download
+ * (P17). Only rows that actually have an attachment are returned. RBAC is
+ * enforced at the route (FINANCIAL_ROLES) — finance may open any receipt, so no
+ * per-row owner check is needed here (mirrors getReceiptSignedUrl's privileged
+ * branch). Never exposes project financial fields.
+ */
+export async function listReceiptsByIds(
+  expenseIds: string[],
+): Promise<BulkReceiptRow[]> {
+  if (expenseIds.length === 0) return [];
+  const rows = await prisma.expense.findMany({
+    where: { id: { in: expenseIds }, attachment: { isNot: null } },
+    select: {
+      id: true,
+      date: true,
+      description: true,
+      consultant: { select: { name: true } },
+      attachment: {
+        select: { fileName: true, contentType: true, storageKey: true },
+      },
+    },
+  });
+  return rows
+    .filter((row) => row.attachment !== null)
+    .map((row) => ({
+      expenseId: row.id,
+      fileName: row.attachment!.fileName,
+      contentType: row.attachment!.contentType,
+      storageKey: row.attachment!.storageKey,
+      consultantName: row.consultant.name,
+      date: toIsoDate(row.date),
+      description: row.description,
+    }));
+}
+
 const SIGNED_URL_TTL_SECONDS = 300;
 
 /**

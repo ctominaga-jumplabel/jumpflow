@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   CalendarClock,
   CheckCircle2,
+  Download,
   Paperclip,
   Receipt,
   Undo2,
@@ -35,6 +36,8 @@ export interface ExpensesFinancePanelProps {
   mode: "demo" | "db";
   /** db mode: expenses that reached finance (server-resolved). */
   expenses?: Expense[];
+  /** db mode: whether the receipt storage is configured (P17 bulk download). */
+  storageAvailable?: boolean;
 }
 
 /**
@@ -45,16 +48,68 @@ export interface ExpensesFinancePanelProps {
  */
 export function ExpensesFinancePanel(props: ExpensesFinancePanelProps) {
   const isDemo = props.mode === "demo";
+  const storageAvailable = props.storageAvailable ?? false;
   const [localItems, setLocalItems] = useState<Expense[]>(() =>
     mockExpenses.filter((e) => FINANCE_STATUSES.includes(e.status)),
   );
   const [cancelTarget, setCancelTarget] = useState<Expense | null>(null);
   const [cancelReason, setCancelReason] = useState("");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const { feedback, notify } = useFeedback();
   const [isPending, startTransition] = useTransition();
 
   const expenses = isDemo ? localItems : (props.expenses ?? []);
   const totals = summarizeExpenses(expenses);
+
+  // P17: seleção para download em massa dos comprovantes (Financeiro).
+  const selectableIds = expenses
+    .filter((e) => e.attachment)
+    .map((e) => e.id);
+  const selectedWithReceipt = selectedIds.filter((id) =>
+    selectableIds.includes(id),
+  );
+
+  function toggleSelected(id: string) {
+    setSelectedIds((current) =>
+      current.includes(id)
+        ? current.filter((v) => v !== id)
+        : [...current, id],
+    );
+  }
+
+  function toggleAll() {
+    setSelectedIds((current) =>
+      selectableIds.every((id) => current.includes(id)) ? [] : selectableIds,
+    );
+  }
+
+  function downloadReceiptsZip() {
+    if (isDemo) {
+      notify("info", "Download em massa disponível apenas no modo real.");
+      return;
+    }
+    if (!storageAvailable) {
+      notify("warning", "Anexos indisponíveis: storage não configurado.");
+      return;
+    }
+    if (selectedWithReceipt.length === 0) {
+      notify("info", "Selecione ao menos uma despesa com comprovante.");
+      return;
+    }
+    const href = `/api/despesas/comprovantes?ids=${encodeURIComponent(
+      selectedWithReceipt.join(","),
+    )}`;
+    const anchor = document.createElement("a");
+    anchor.href = href;
+    anchor.rel = "noopener noreferrer";
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    notify(
+      "info",
+      `Gerando ZIP com ${selectedWithReceipt.length} comprovante(s).`,
+    );
+  }
 
   function applyLocal(id: string, status: Expense["status"], message: string) {
     setLocalItems((prev) =>
@@ -135,14 +190,27 @@ export function ExpensesFinancePanel(props: ExpensesFinancePanelProps) {
         title="Despesas no financeiro"
         description="Reembolsos aprovados pelo financeiro: agendamento, pagamento e cancelamento com motivo."
         action={
-          <div className="flex flex-col items-end leading-tight">
-            <span className="text-sm font-semibold tabular-nums text-strong">
-              {formatCurrency(totals.toPayAmount + totals.scheduledAmount)} a
-              pagar
-            </span>
-            <span className="text-xs text-soft">
-              {formatCurrency(totals.paidAmount)} pago
-            </span>
+          <div className="flex items-center gap-3">
+            {!isDemo ? (
+              <ActionButton
+                variant="secondary"
+                size="sm"
+                icon={Download}
+                disabled={isPending || selectedWithReceipt.length === 0}
+                onClick={downloadReceiptsZip}
+              >
+                Baixar comprovantes ({selectedWithReceipt.length})
+              </ActionButton>
+            ) : null}
+            <div className="flex flex-col items-end leading-tight">
+              <span className="text-sm font-semibold tabular-nums text-strong">
+                {formatCurrency(totals.toPayAmount + totals.scheduledAmount)} a
+                pagar
+              </span>
+              <span className="text-xs text-soft">
+                {formatCurrency(totals.paidAmount)} pago
+              </span>
+            </div>
           </div>
         }
       >
@@ -160,6 +228,21 @@ export function ExpensesFinancePanel(props: ExpensesFinancePanelProps) {
               <caption className="sr-only">Despesas no financeiro</caption>
               <thead>
                 <tr className="border-b border-border">
+                  {!isDemo ? (
+                    <th scope="col" className={`${thClass} w-10`}>
+                      <input
+                        type="checkbox"
+                        aria-label="Selecionar todas com comprovante"
+                        checked={
+                          selectableIds.length > 0 &&
+                          selectableIds.every((id) => selectedIds.includes(id))
+                        }
+                        onChange={toggleAll}
+                        disabled={selectableIds.length === 0}
+                        className="size-4 rounded border-border text-brand focus:ring-brand"
+                      />
+                    </th>
+                  ) : null}
                   <th scope="col" className={thClass}>
                     Data
                   </th>
@@ -189,6 +272,18 @@ export function ExpensesFinancePanel(props: ExpensesFinancePanelProps) {
                     key={expense.id}
                     className="transition-colors hover:bg-surface-muted/60"
                   >
+                    {!isDemo ? (
+                      <td className="px-4 py-3 align-middle">
+                        <input
+                          type="checkbox"
+                          aria-label={`Selecionar comprovante de ${expense.consultantName}`}
+                          checked={selectedIds.includes(expense.id)}
+                          onChange={() => toggleSelected(expense.id)}
+                          disabled={!expense.attachment}
+                          className="size-4 rounded border-border text-brand focus:ring-brand disabled:opacity-40"
+                        />
+                      </td>
+                    ) : null}
                     <td className="px-4 py-3 align-middle tabular-nums text-medium">
                       {formatDate(expense.date)}
                     </td>

@@ -14,6 +14,10 @@ import {
   type ExpenseAttachmentMeta,
   type ExpenseCategory,
 } from "@/lib/expenses/types";
+import {
+  evaluateExpensePolicy,
+  type PolicyRuleData,
+} from "@/lib/expenses/reimbursement-policy";
 
 export interface ExpenseFormProject {
   id: string;
@@ -60,6 +64,8 @@ export interface ExpenseFormProps {
   initial?: Expense | null;
   /** Storage not configured (db mode): attachment input shows a warning. */
   attachmentUnavailable?: boolean;
+  /** Regras ATIVAS da Politica de Reembolso (P13): alerta bloqueante no form. */
+  policyRules?: PolicyRuleData[];
   /** Disable buttons while a server action is in flight. */
   busy?: boolean;
   /** Edit submit (single expense). */
@@ -120,6 +126,7 @@ export function ExpenseForm({
   defaultDate,
   initial = null,
   attachmentUnavailable = false,
+  policyRules = [],
   busy = false,
   onSubmit,
   onSubmitBatch,
@@ -186,6 +193,38 @@ export function ExpenseForm({
     [date, amount, category],
   );
 
+  // P13: violacoes da Politica de Reembolso (alerta bloqueante). `defaultDate`
+  // e a data de hoje (resolvida no servidor) usada no calculo de prazo.
+  const policyViolations = useMemo<string[]>(() => {
+    if (policyRules.length === 0) return [];
+    const messages: string[] = [];
+    const collect = (
+      cat: ExpenseCategory | undefined,
+      dateStr: string,
+      amountRaw: string,
+    ) => {
+      const value = parseAmount(amountRaw);
+      if (!dateStr || Number.isNaN(value) || value <= 0) return;
+      for (const v of evaluateExpensePolicy(
+        { category: cat, date: dateStr, amount: value },
+        policyRules,
+        defaultDate,
+      )) {
+        if (!messages.includes(v.message)) messages.push(v.message);
+      }
+    };
+    if (isEdit) {
+      collect(category || undefined, date, amount);
+    } else {
+      for (const it of items) {
+        collect(it.category || undefined, it.date, it.amount);
+      }
+    }
+    return messages;
+  }, [policyRules, isEdit, category, date, amount, items, defaultDate]);
+
+  const hasPolicyViolation = policyViolations.length > 0;
+
   function addItem() {
     setItems((prev) => [...prev, emptyItem(defaultDate, itemSeq)]);
     setItemSeq((n) => n + 1);
@@ -216,7 +255,10 @@ export function ExpenseForm({
       editErrors.date ||
       editErrors.amount ||
       editErrors.category;
-    if (hasErrors || missingReceipt) {
+    // Politica de Reembolso: rascunho e permitido, mas o envio nao (o servidor
+    // tambem recusa no submit).
+    const blockedByPolicy = mode === "SUBMITTED" && hasPolicyViolation;
+    if (hasErrors || missingReceipt || blockedByPolicy) {
       setShowErrors(true);
       return;
     }
@@ -239,7 +281,15 @@ export function ExpenseForm({
     const anyItemErrors = items.some(itemHasErrors);
     const missingReceipt =
       mode === "SUBMITTED" && items.some((it) => it.attachment === null);
-    if (headerErrors.projectId || headerErrors.description || anyItemErrors || missingReceipt) {
+    // No fluxo de criacao o servidor reforca a politica ate no rascunho
+    // (createExpenseBatch), entao bloqueia ambos os modos aqui.
+    if (
+      headerErrors.projectId ||
+      headerErrors.description ||
+      anyItemErrors ||
+      missingReceipt ||
+      hasPolicyViolation
+    ) {
       setShowErrors(true);
       return;
     }
@@ -282,7 +332,7 @@ export function ExpenseForm({
             variant="secondary"
             size="sm"
             icon={Save}
-            disabled={busy}
+            disabled={busy || (!isEdit && hasPolicyViolation)}
             onClick={() => submit("DRAFT")}
           >
             Salvar rascunho
@@ -291,7 +341,7 @@ export function ExpenseForm({
             variant="primary"
             size="sm"
             icon={Send}
-            disabled={busy}
+            disabled={busy || hasPolicyViolation}
             onClick={() => submit("SUBMITTED")}
           >
             Enviar para aprovação
@@ -310,6 +360,25 @@ export function ExpenseForm({
           <p className="rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-xs font-medium text-danger">
             Justificativa da reprovação: {initial.rejectionReason}
           </p>
+        ) : null}
+
+        {hasPolicyViolation ? (
+          <div
+            role="alert"
+            className="space-y-1 rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-xs font-medium text-danger"
+          >
+            <p className="font-semibold">
+              Lançamento fora da Política de Reembolso:
+            </p>
+            <ul className="list-disc space-y-0.5 pl-4">
+              {policyViolations.map((message) => (
+                <li key={message}>{message}</li>
+              ))}
+            </ul>
+            <p className="font-normal">
+              Ajuste o valor, a data ou o tipo para prosseguir.
+            </p>
+          </div>
         ) : null}
 
         <div>
@@ -569,6 +638,11 @@ export function ExpenseForm({
             ) : null}
           </div>
         )}
+
+        <p className="rounded-md border border-border bg-surface-muted/40 px-3 py-2 text-xs text-soft">
+          O comprovante é <strong>obrigatório para enviar para aprovação</strong>
+          . Você pode salvar como rascunho sem anexo e adicioná-lo depois.
+        </p>
       </form>
     </Modal>
   );

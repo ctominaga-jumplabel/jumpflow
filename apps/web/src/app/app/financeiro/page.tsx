@@ -4,6 +4,7 @@ import { FinancialOverview } from "@/components/financial/FinancialOverview";
 import { requireRole } from "@/lib/auth/guards";
 import { FINANCIAL_ROLES } from "@/lib/auth/route-permissions";
 import { isDatabaseConfigured } from "@/lib/db/config";
+import { isStorageConfigured } from "@/lib/storage/provider";
 import {
   revenueClosingStatusLabels,
   type RevenueClosingOverview,
@@ -195,6 +196,7 @@ export default async function FinanceiroPage({
         revenueClosing={revenueClosing}
         expensesMode={databaseConfigured ? "db" : "demo"}
         financeExpenses={financeExpenses}
+        expensesStorageAvailable={databaseConfigured && isStorageConfigured()}
         exceptions={exceptions}
         exceptionsByProject={exceptionsByProject}
         defaultTab={tab}

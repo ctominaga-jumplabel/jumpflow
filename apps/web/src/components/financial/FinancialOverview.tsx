@@ -23,6 +23,8 @@ export interface FinancialOverviewProps {
   expensesMode?: "demo" | "db";
   /** db mode: expenses that reached finance. */
   financeExpenses?: Expense[];
+  /** db mode: whether receipt storage is configured (P17 bulk download). */
+  expensesStorageAvailable?: boolean;
   /** Sobreaviso/hora extra do período (Contas a Receber). db mode. */
   exceptions?: PeriodExceptions;
   /** Time-entry exceptions per project (P5), for the closing table. db mode. */
@@ -43,6 +45,7 @@ export function FinancialOverview({
   revenueMode = "demo",
   expensesMode = "demo",
   financeExpenses,
+  expensesStorageAvailable = false,
   exceptions,
   exceptionsByProject,
   defaultTab,
@@ -97,7 +100,11 @@ export function FinancialOverview({
   );
 
   const pagar = (
-    <ExpensesFinancePanel mode={expensesMode} expenses={financeExpenses} />
+    <ExpensesFinancePanel
+      mode={expensesMode}
+      expenses={financeExpenses}
+      storageAvailable={expensesStorageAvailable}
+    />
   );
 
   return (

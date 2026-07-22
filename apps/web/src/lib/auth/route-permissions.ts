@@ -27,6 +27,19 @@ export type RouteAccess = RoleName[] | "ALL";
 export const FINANCIAL_ROLES: RoleName[] = ["ADMIN", "AREA_MANAGER", "FINANCE"];
 
 /**
+ * Roles que administram a Politica de Reembolso (Onda 3, P12): cadastro dos
+ * limites (prazo/valor) por categoria e da regra Geral. Governanca financeira +
+ * People — os mesmos que respondem pelo pagamento (FINANCIAL_ROLES) mais PEOPLE
+ * (DP, que define a politica de reembolso). O Consultor nunca configura.
+ */
+export const REIMBURSEMENT_POLICY_ROLES: RoleName[] = [
+  "ADMIN",
+  "AREA_MANAGER",
+  "FINANCE",
+  "PEOPLE",
+];
+
+/**
  * Roles that own the operational lifecycle of a Project (criar/editar projeto,
  * status, período, gestor, alocações, skills) on the Operação surface.
  */
@@ -259,6 +272,9 @@ export const routePermissions: RouteRule[] = [
   // com a feature flag NEXT_PUBLIC_FEATURE_FEED (a página retorna notFound
   // quando off). Regra específica antes da `/app` ampla.
   { prefix: "/app/feed", access: "ALL" },
+  // Politica de Reembolso (Onda 3, P12): cadastro de limites por categoria +
+  // regra Geral. Governanca financeira/People. DEVE vir antes de /app/despesas.
+  { prefix: "/app/despesas/politica", access: REIMBURSEMENT_POLICY_ROLES },
   // Despesas are open to any authenticated user (consultants log their own).
   // Payment-status changes are gated in-page by FINANCIAL_ROLES, not here.
   { prefix: "/app/despesas", access: "ALL" },
