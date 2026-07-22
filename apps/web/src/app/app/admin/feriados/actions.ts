@@ -3,18 +3,23 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { ActionResult } from "@/lib/actions/result";
-import { requireRole } from "@/lib/auth/guards";
+import { requirePermission } from "@/lib/auth/guards";
+import type { PermissionAction } from "@/lib/auth/permission-codes";
+import { FERIADOS_PERMISSION } from "@/app/app/admin/feriados/permission";
 import { recordAuditEvent } from "@/lib/db/audit";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { resolveDbUser } from "@/lib/db/users";
 
 /**
  * Server actions for the holidays admin screen (`/app/admin/feriados`).
- * Managed by ADMIN + PEOPLE; every change is audited. Feeds the holidays
- * calendar (notification "feriado próximo" + apontamento em feriado).
+ * Access is governed by the configurable permission matrix
+ * (`CONFIGURACOES_FERIADOS`): view gates the page, and create/edit/delete gate
+ * the write actions here. This lets an admin grant holiday management to any
+ * role (e.g. Gestor de Área) from the permission grid, instead of a hardcoded
+ * ADMIN+PEOPLE list. Every change is audited. Feeds the holidays calendar
+ * (notification "feriado próximo" + apontamento em feriado).
  */
 const ROUTE = "/app/admin/feriados";
-const MANAGE_ROLES = ["ADMIN", "PEOPLE"] as const;
 
 const noDatabase = (): ActionResult<never> => ({
   ok: false,
@@ -44,8 +49,8 @@ const writeSchema = z
 
 export type HolidayFormInput = z.infer<typeof writeSchema>;
 
-async function manageActor() {
-  const user = await requireRole([...MANAGE_ROLES]);
+async function manageActor(action: PermissionAction) {
+  const user = await requirePermission(FERIADOS_PERMISSION, action);
   const actor = await resolveDbUser(user);
   return actor;
 }
@@ -64,7 +69,7 @@ function duplicateMessage(conflictProjectName?: string): string {
 export async function createHolidayAction(
   input: HolidayFormInput,
 ): Promise<ActionResult<{ id: string }>> {
-  const actor = await manageActor();
+  const actor = await manageActor("create");
   if (!isDatabaseConfigured()) return noDatabase();
   const parsed = writeSchema.safeParse(input);
   if (!parsed.success) {
@@ -122,7 +127,7 @@ export type UpdateHolidayFormInput = z.infer<typeof updateSchema>;
 export async function updateHolidayAction(
   input: UpdateHolidayFormInput,
 ): Promise<ActionResult<{ id: string }>> {
-  const actor = await manageActor();
+  const actor = await manageActor("edit");
   if (!isDatabaseConfigured()) return noDatabase();
   const parsed = updateSchema.safeParse(input);
   if (!parsed.success) {
@@ -179,7 +184,7 @@ const idSchema = z.object({ id: z.string().min(1) });
 export async function deleteHolidayAction(
   input: z.infer<typeof idSchema>,
 ): Promise<ActionResult<{ id: string }>> {
-  const actor = await manageActor();
+  const actor = await manageActor("delete");
   if (!isDatabaseConfigured()) return noDatabase();
   const parsed = idSchema.safeParse(input);
   if (!parsed.success) {

@@ -20,6 +20,7 @@ function projectRow(overrides: Partial<OperationClosingRow>): OperationClosingRo
     closedByName: null,
     notifiedAt: null,
     readiness: summarizeReadiness([]),
+    exceptionCount: 0,
     ...overrides,
   };
 }

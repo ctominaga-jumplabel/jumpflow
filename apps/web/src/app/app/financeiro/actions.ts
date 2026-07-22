@@ -663,15 +663,28 @@ export async function generatePreInvoice(input: {
     if (isStorageConfigured()) {
       const provider = getStorageProvider(PRE_INVOICES_BUCKET);
       if (provider) {
-        const key = preInvoiceStorageKey(data.closing);
-        await provider.upload(
-          key,
-          new TextEncoder().encode(html),
-          "text/html; charset=utf-8",
-        );
-        storageBucket = PRE_INVOICES_BUCKET;
-        storageKey = key;
-        downloadUrl = await provider.getSignedUrl(key, 600);
+        // Degrade honestly: a storage error (e.g. the `pre-invoices` bucket not
+        // provisioned, or a transient outage) must NOT blow up the whole action
+        // — the HTML is already computed, so we still return it for on-screen
+        // preview + manual download instead of surfacing a generic "não foi
+        // possível concluir a ação". Only a genuine upload success flips
+        // `stored` to true.
+        try {
+          const key = preInvoiceStorageKey(data.closing);
+          await provider.upload(
+            key,
+            new TextEncoder().encode(html),
+            "text/html; charset=utf-8",
+          );
+          storageBucket = PRE_INVOICES_BUCKET;
+          storageKey = key;
+          downloadUrl = await provider.getSignedUrl(key, 600);
+        } catch (storageError) {
+          console.error(
+            "[financeiro] pre-invoice storage upload failed; serving preview-only",
+            storageError,
+          );
+        }
       }
     }
 

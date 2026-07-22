@@ -1580,12 +1580,17 @@ export async function decideHours(
 // assinada e de vida curta. Reusa o bucket privado de anexos (oncall-approvals)
 // que já é provisionado, evitando uma mudança de devops nesta etapa.
 
-/** Papéis que podem visualizar o anexo de um lançamento (além do dono). */
+/**
+ * Papéis que podem visualizar o anexo de um lançamento (além do dono). Inclui
+ * PEOPLE (DP): a apuração do Fechamento Operacional é a tela do DP e precisa
+ * abrir os anexos dia a dia de cada consultor.
+ */
 const ATTACHMENT_VIEW_ROLES = [
   "ADMIN",
   "AREA_MANAGER",
   "PROJECT_MANAGER",
   "FINANCE",
+  "PEOPLE",
 ] as const;
 
 // Não validamos com .cuid(): ids do seed não são cuid (apenas string não vazia).

@@ -8,9 +8,15 @@ import { requirePermission } from "@/lib/auth/guards";
 import { notifyOperationClosed } from "@/lib/automation/notifications/events";
 import { buildAuditEventData } from "@/lib/db/audit";
 import { isDatabaseConfigured } from "@/lib/db/config";
-import { getOperationReadiness } from "@/lib/db/operation-closing";
+import {
+  getOperationClosingDetail,
+  getOperationReadiness,
+} from "@/lib/db/operation-closing";
 import { resolveDbUser } from "@/lib/db/users";
-import { pendingAlert } from "@/lib/operations/closing";
+import {
+  pendingAlert,
+  type OperationClosingDetail,
+} from "@/lib/operations/closing";
 import { justificationSchema } from "@/lib/shared/justification";
 
 const OPERACAO_PATH = "/app/operacao/fechamento";
@@ -86,6 +92,31 @@ function toFailure(error: unknown): ActionResult<never> {
     error: "UNEXPECTED",
     message: "Nao foi possivel concluir a acao.",
   };
+}
+
+/**
+ * Read the day-by-day apuração of a project's month (every consultant's
+ * launches: date, activity, hours, status, attachment). Read-only, so it is
+ * gated by `view` (same as the screen) — inspection is not a management action.
+ * Feeds the "Apurar" modal in the Fechamento Operacional table.
+ */
+export async function getOperationClosingApuracao(input: {
+  projectId: string;
+  month: number;
+  year: number;
+}): Promise<ActionResult<OperationClosingDetail>> {
+  try {
+    ensureDatabase();
+    await requirePermission(PERMISSION_CODE, "view");
+    const parsed = parseInput(targetInputSchema, input);
+    const detail = await getOperationClosingDetail(parsed);
+    if (!detail) {
+      throw new ActionError("NOT_FOUND", "Projeto não encontrado.");
+    }
+    return { ok: true, data: detail };
+  } catch (error) {
+    return toFailure(error);
+  }
 }
 
 /**

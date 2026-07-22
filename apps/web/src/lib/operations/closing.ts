@@ -155,6 +155,67 @@ export interface OperationClosingRow {
   closedByName: string | null;
   notifiedAt: string | null;
   readiness: OperationReadiness;
+  /**
+   * How many of the project's month launches are exceptions — anything that is
+   * NOT a plain "Dia Útil" OR carries an attachment (see {@link isExceptionEntry}).
+   * Drives the "Exceções" column + drill-down into the apuração detail.
+   */
+  exceptionCount: number;
+}
+
+/**
+ * Shared rule for what counts as a launch "exception": anything that is NOT a
+ * plain workday (`activityType !== "WORKDAY"`) OR any entry that carries an
+ * attachment (justificativa/comprovante). Pure, so it is used both by the DB
+ * read layer and by unit tests. Mirrors `isRevenueExceptionEntry` on the
+ * revenue side (Contas a Receber) — keep both in sync if the rule changes.
+ */
+export function isExceptionEntry(input: {
+  activityType: string;
+  hasAttachment: boolean;
+}): boolean {
+  return input.activityType !== "WORKDAY" || input.hasAttachment;
+}
+
+/** One time entry of a consultant's month, for the apuração (day-by-day) modal. */
+export interface OperationEntryDetail {
+  id: string;
+  /** ISO date (yyyy-mm-dd) of the launch. */
+  date: string;
+  /** Raw activityType code; the label is resolved in the UI (`activityLabelOf`). */
+  activityType: string;
+  hours: number;
+  status: string;
+  /** Whether the day is marked billable (visibility for the DP/apuração). */
+  billable: boolean;
+  hasAttachment: boolean;
+  /** True when this entry falls under {@link isExceptionEntry}. */
+  isException: boolean;
+}
+
+/** A consultant's launches for the project's month, grouped for the apuração. */
+export interface OperationConsultantDetail {
+  consultantId: string;
+  consultantName: string;
+  totalHours: number;
+  exceptionCount: number;
+  entries: OperationEntryDetail[];
+}
+
+/**
+ * Full day-by-day apuração of a project's month: every allocated/logging
+ * consultant with their launches (activity type, hours, status, attachment) so
+ * the DP can inspect the detail behind the aggregate before closing. Loaded
+ * on-demand (not part of the overview) by the "Apurar" action.
+ */
+export interface OperationClosingDetail {
+  projectId: string;
+  projectName: string;
+  clientName: string;
+  month: number;
+  year: number;
+  consultants: OperationConsultantDetail[];
+  totalExceptions: number;
 }
 
 export interface OperationClosingOverview {

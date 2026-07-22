@@ -2,7 +2,15 @@
 
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
-import { ChevronRight, Lock, RotateCcw, Users } from "lucide-react";
+import {
+  AlertTriangle,
+  ChevronRight,
+  ClipboardList,
+  Lock,
+  Paperclip,
+  RotateCcw,
+  Users,
+} from "lucide-react";
 import { ActionButton } from "@/components/ui/ActionButton";
 import { ExportExcelButton } from "@/components/ui/ExportExcelButton";
 import { DataTable, type DataTableColumn } from "@/components/ui/DataTable";
@@ -14,17 +22,26 @@ import { formatHours } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { focusRingInput } from "@/lib/styles";
 import {
+  activityLabelOf,
+  timeEntryStatusLabels,
+  type TimeEntryStatus,
+} from "@/lib/timesheet/types";
+import {
   consultantReadinessLabels,
   pendingAlert,
   type ConsultantReadiness,
   type ConsultantReadinessState,
+  type OperationClosingDetail,
   type OperationClosingOverview,
   type OperationClosingRow,
+  type OperationEntryDetail,
 } from "@/lib/operations/closing";
 import {
   closeOperation,
+  getOperationClosingApuracao,
   reopenOperation,
 } from "@/app/app/operacao/fechamento/actions";
+import { getTimeEntryAttachmentUrl } from "@/app/app/horas/actions";
 
 const readinessTone: Record<ConsultantReadinessState, StatusTone> = {
   APPROVED: "success",
@@ -33,6 +50,18 @@ const readinessTone: Record<ConsultantReadinessState, StatusTone> = {
   REJECTED: "danger",
   NO_ENTRIES: "warning",
 };
+
+const entryStatusTone: Record<TimeEntryStatus, StatusTone> = {
+  DRAFT: "neutral",
+  SUBMITTED: "warning",
+  APPROVED: "success",
+  REJECTED: "danger",
+  CLOSED: "info",
+};
+
+function entryStatusLabel(status: string): string {
+  return timeEntryStatusLabels[status as TimeEntryStatus] ?? status;
+}
 
 type Filter = "PENDING" | "CLOSED" | "ALL";
 
@@ -96,6 +125,13 @@ export function OperationClosingTable({
   );
   const [reopenReason, setReopenReason] = useState("");
   const [reopenError, setReopenError] = useState<string | null>(null);
+  // "Apurar": day-by-day detail loaded on demand (never bulk-loaded upfront).
+  const [apuracao, setApuracao] = useState<OperationClosingDetail | null>(null);
+  const [apuracaoLoading, setApuracaoLoading] = useState(false);
+  const [apuracaoError, setApuracaoError] = useState<string | null>(null);
+  const [apuracaoOnlyExceptions, setApuracaoOnlyExceptions] = useState(false);
+  // The modal is "open" while loading, on error, or with a result.
+  const [apuracaoOpen, setApuracaoOpen] = useState(false);
 
   const rows = useMemo(() => {
     if (filter === "PENDING") {
@@ -157,6 +193,39 @@ export function OperationClosingTable({
     });
   }
 
+  function openApuracao(row: OperationClosingRow, onlyExceptions: boolean) {
+    setApuracao(null);
+    setApuracaoError(null);
+    setApuracaoOnlyExceptions(onlyExceptions);
+    setApuracaoLoading(true);
+    setApuracaoOpen(true);
+    startTransition(async () => {
+      const result = await getOperationClosingApuracao({
+        projectId: row.projectId,
+        month: overview.month,
+        year: overview.year,
+      });
+      setApuracaoLoading(false);
+      if (result.ok) setApuracao(result.data);
+      else setApuracaoError(result.message);
+    });
+  }
+
+  function dismissApuracao() {
+    setApuracaoOpen(false);
+    setApuracao(null);
+    setApuracaoError(null);
+    setApuracaoOnlyExceptions(false);
+  }
+
+  function viewEntryAttachment(id: string) {
+    startTransition(async () => {
+      const result = await getTimeEntryAttachmentUrl({ id });
+      if (result.ok) window.open(result.data.url, "_blank", "noopener");
+      else notify("warning", result.message);
+    });
+  }
+
   const columns: DataTableColumn<OperationClosingRow>[] = [
     {
       key: "project",
@@ -194,6 +263,24 @@ export function OperationClosingTable({
       className: "hidden sm:table-cell",
     },
     {
+      key: "exceptions",
+      header: "Exceções",
+      cell: (r) =>
+        r.exceptionCount === 0 ? (
+          <span className="text-xs text-soft">—</span>
+        ) : (
+          <button
+            type="button"
+            className="inline-flex items-center gap-1.5 rounded-md bg-warning-soft px-2.5 py-1 text-xs font-semibold text-warning hover:brightness-95"
+            title="Ver lançamentos fora do Dia Útil ou com anexo"
+            onClick={() => openApuracao(r, true)}
+          >
+            <AlertTriangle size={14} /> {r.exceptionCount}
+          </button>
+        ),
+      className: "hidden md:table-cell",
+    },
+    {
       key: "readiness",
       header: "Prontidão",
       cell: (r) =>
@@ -225,32 +312,53 @@ export function OperationClosingTable({
       key: "actions",
       header: "Ações",
       cell: (r) => {
-        if (!canManage) return <span className="text-xs text-soft">—</span>;
-        if (r.status === "CLOSED") {
-          return (
-            <ActionButton
-              size="sm"
-              variant="secondary"
-              icon={RotateCcw}
-              disabled={isPending}
-              onClick={() => openReopenDialog(r)}
-            >
-              Reabrir
-            </ActionButton>
-          );
-        }
-        const blocked = !r.readiness.canClose;
-        return (
+        // "Apurar" is read-only inspection → available to every viewer, not
+        // just managers. Closing/reopening stay behind `canManage`.
+        const apurar = (
           <ActionButton
             size="sm"
-            variant="primary"
-            icon={Lock}
-            disabled={isPending || blocked}
-            title={blocked ? `Bloqueado: ${pendingAlert(r.readiness)}` : undefined}
-            onClick={() => handleClose(r)}
+            variant="secondary"
+            icon={ClipboardList}
+            disabled={isPending}
+            onClick={() => openApuracao(r, false)}
           >
-            Fechar (DP)
+            Apurar
           </ActionButton>
+        );
+        const manage = !canManage ? null : r.status === "CLOSED" ? (
+          <ActionButton
+            size="sm"
+            variant="secondary"
+            icon={RotateCcw}
+            disabled={isPending}
+            onClick={() => openReopenDialog(r)}
+          >
+            Reabrir
+          </ActionButton>
+        ) : (
+          (() => {
+            const blocked = !r.readiness.canClose;
+            return (
+              <ActionButton
+                size="sm"
+                variant="primary"
+                icon={Lock}
+                disabled={isPending || blocked}
+                title={
+                  blocked ? `Bloqueado: ${pendingAlert(r.readiness)}` : undefined
+                }
+                onClick={() => handleClose(r)}
+              >
+                Fechar (DP)
+              </ActionButton>
+            );
+          })()
+        );
+        return (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {apurar}
+            {manage}
+          </div>
         );
       },
     },
@@ -444,7 +552,190 @@ export function OperationClosingTable({
           <p className="mt-1 text-xs font-medium text-danger">{reopenError}</p>
         ) : null}
       </Modal>
+
+      <Modal
+        open={apuracaoOpen}
+        onClose={dismissApuracao}
+        title={apuracao ? `Apuração — ${apuracao.projectName}` : "Apuração"}
+        description={
+          apuracao
+            ? `${apuracao.clientName} — lançamentos dia a dia por consultor no mês.`
+            : "Lançamentos dia a dia por consultor no mês."
+        }
+        className="max-w-3xl"
+      >
+        {apuracaoLoading ? (
+          <p className="py-6 text-center text-sm text-soft">Carregando apuração…</p>
+        ) : apuracaoError ? (
+          <p className="py-6 text-center text-sm text-danger">{apuracaoError}</p>
+        ) : apuracao ? (
+          <ApuracaoBody
+            detail={apuracao}
+            onlyExceptions={apuracaoOnlyExceptions}
+            onToggleOnlyExceptions={setApuracaoOnlyExceptions}
+            onViewAttachment={viewEntryAttachment}
+            attachmentPending={isPending}
+          />
+        ) : null}
+      </Modal>
     </div>
+  );
+}
+
+/**
+ * Body of the "Apurar" modal: each consultant's launches for the month with
+ * activity, hours, status, billable and attachment. Exception launches (não
+ * "Dia Útil" ou com anexo) are highlighted; a toggle narrows to just those.
+ */
+function ApuracaoBody({
+  detail,
+  onlyExceptions,
+  onToggleOnlyExceptions,
+  onViewAttachment,
+  attachmentPending,
+}: {
+  detail: OperationClosingDetail;
+  onlyExceptions: boolean;
+  onToggleOnlyExceptions: (value: boolean) => void;
+  onViewAttachment: (id: string) => void;
+  attachmentPending: boolean;
+}) {
+  const consultants = onlyExceptions
+    ? detail.consultants
+        .map((c) => ({
+          ...c,
+          entries: c.entries.filter((e) => e.isException),
+        }))
+        .filter((c) => c.entries.length > 0)
+    : detail.consultants;
+
+  return (
+    <div className="space-y-4">
+      <label className="flex items-center gap-2 text-xs font-medium text-medium">
+        <input
+          type="checkbox"
+          checked={onlyExceptions}
+          onChange={(e) => onToggleOnlyExceptions(e.target.checked)}
+          className="size-4 rounded border-border"
+        />
+        Somente exceções
+        <span className="text-soft">
+          (fora do Dia Útil ou com anexo · {detail.totalExceptions} no total)
+        </span>
+      </label>
+
+      {consultants.length === 0 ? (
+        <p className="py-4 text-center text-sm text-soft">
+          {onlyExceptions
+            ? "Nenhuma exceção neste mês."
+            : "Nenhum consultor alocado ou com lançamento neste mês."}
+        </p>
+      ) : (
+        <div className="space-y-5">
+          {consultants.map((c) => (
+            <div key={c.consultantId}>
+              <div className="mb-1.5 flex items-center justify-between gap-3">
+                <p className="text-sm font-semibold text-strong">
+                  {c.consultantName}
+                </p>
+                <div className="flex items-center gap-2 text-xs text-soft">
+                  <span className="tabular-nums">{formatHours(c.totalHours)}</span>
+                  {c.exceptionCount > 0 ? (
+                    <span className="inline-flex items-center gap-1 rounded bg-warning-soft px-1.5 py-0.5 font-semibold text-warning">
+                      <AlertTriangle size={12} /> {c.exceptionCount}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+              {c.entries.length === 0 ? (
+                <p className="rounded-md border border-dashed border-border px-3 py-2 text-xs text-soft">
+                  Sem lançamentos no mês.
+                </p>
+              ) : (
+                <div className="overflow-x-auto rounded-md border border-border">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-surface-muted text-xs uppercase tracking-wide text-soft">
+                      <tr>
+                        <th className="px-3 py-2 font-semibold">Data</th>
+                        <th className="px-3 py-2 font-semibold">Atividade</th>
+                        <th className="px-3 py-2 text-right font-semibold">Horas</th>
+                        <th className="px-3 py-2 font-semibold">Status</th>
+                        <th className="px-3 py-2 font-semibold">Faturável</th>
+                        <th className="px-3 py-2 font-semibold">Anexo</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {c.entries.map((e) => (
+                        <ApuracaoRow
+                          key={e.id}
+                          entry={e}
+                          onViewAttachment={onViewAttachment}
+                          attachmentPending={attachmentPending}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ApuracaoRow({
+  entry,
+  onViewAttachment,
+  attachmentPending,
+}: {
+  entry: OperationEntryDetail;
+  onViewAttachment: (id: string) => void;
+  attachmentPending: boolean;
+}) {
+  return (
+    <tr
+      className={cn(
+        "border-t border-border",
+        entry.isException && "bg-warning-soft/40",
+      )}
+    >
+      <td className="whitespace-nowrap px-3 py-2 tabular-nums text-strong">
+        {new Date(entry.date).toLocaleDateString("pt-BR", { timeZone: "UTC" })}
+      </td>
+      <td className="px-3 py-2 text-medium">
+        <span className="inline-flex items-center gap-1.5">
+          {entry.activityType !== "WORKDAY" ? (
+            <AlertTriangle size={13} className="text-warning" />
+          ) : null}
+          {activityLabelOf(entry.activityType)}
+        </span>
+      </td>
+      <td className="px-3 py-2 text-right tabular-nums">{formatHours(entry.hours)}</td>
+      <td className="px-3 py-2">
+        <StatusBadge tone={entryStatusTone[entry.status as TimeEntryStatus] ?? "neutral"}>
+          {entryStatusLabel(entry.status)}
+        </StatusBadge>
+      </td>
+      <td className="px-3 py-2 text-xs text-medium">
+        {entry.billable ? "Sim" : "Não"}
+      </td>
+      <td className="px-3 py-2">
+        {entry.hasAttachment ? (
+          <button
+            type="button"
+            className="inline-flex items-center gap-1 text-sm text-accent underline disabled:opacity-50"
+            disabled={attachmentPending}
+            onClick={() => onViewAttachment(entry.id)}
+          >
+            <Paperclip size={13} /> Ver
+          </button>
+        ) : (
+          <span className="text-xs text-soft">—</span>
+        )}
+      </td>
+    </tr>
   );
 }
 

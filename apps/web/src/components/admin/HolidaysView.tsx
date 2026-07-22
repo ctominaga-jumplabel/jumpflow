@@ -41,11 +41,18 @@ export function HolidaysView({
   years,
   selectedYear,
   projects,
+  canManage = true,
 }: {
   holidays: HolidayView[];
   years: number[];
   selectedYear?: number;
   projects: ProjectOption[];
+  /**
+   * Whether the viewer may create/edit/delete (matrix create/edit/delete). When
+   * false the screen is read-only: no "Novo feriado", no row actions — so a
+   * view-only grantee never faces a button that the server would reject.
+   */
+  canManage?: boolean;
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState<HolidayView | null>(null);
@@ -95,13 +102,15 @@ export function HolidaysView({
             ))}
           </select>
         </label>
-        <ActionButton
-          size="sm"
-          icon={CalendarPlus}
-          onClick={() => setCreating(true)}
-        >
-          Novo feriado
-        </ActionButton>
+        {canManage && (
+          <ActionButton
+            size="sm"
+            icon={CalendarPlus}
+            onClick={() => setCreating(true)}
+          >
+            Novo feriado
+          </ActionButton>
+        )}
       </div>
 
       {rowError && <p className="text-sm text-danger">{rowError}</p>}
@@ -121,7 +130,7 @@ export function HolidaysView({
                 <th className="px-4 py-2.5 font-semibold">Feriado</th>
                 <th className="px-4 py-2.5 font-semibold">Abrangência</th>
                 <th className="px-4 py-2.5 font-semibold">Aplicabilidade</th>
-                <th className="px-4 py-2.5" />
+                {canManage && <th className="px-4 py-2.5" />}
               </tr>
             </thead>
             <tbody>
@@ -150,28 +159,30 @@ export function HolidaysView({
                       </span>
                     )}
                   </td>
-                  <td className="whitespace-nowrap px-4 py-2.5 text-right">
-                    <button
-                      type="button"
-                      className="mr-3 text-medium transition-colors hover:text-strong disabled:opacity-50"
-                      title="Editar feriado"
-                      aria-label={`Editar ${h.name}`}
-                      disabled={pending}
-                      onClick={() => setEditing(h)}
-                    >
-                      <Pencil aria-hidden="true" className="size-4" />
-                    </button>
-                    <button
-                      type="button"
-                      className="text-danger transition-colors hover:opacity-80 disabled:opacity-50"
-                      title="Remover feriado"
-                      aria-label={`Remover ${h.name}`}
-                      disabled={pending}
-                      onClick={() => setToDelete(h)}
-                    >
-                      <Trash2 aria-hidden="true" className="size-4" />
-                    </button>
-                  </td>
+                  {canManage && (
+                    <td className="whitespace-nowrap px-4 py-2.5 text-right">
+                      <button
+                        type="button"
+                        className="mr-3 text-medium transition-colors hover:text-strong disabled:opacity-50"
+                        title="Editar feriado"
+                        aria-label={`Editar ${h.name}`}
+                        disabled={pending}
+                        onClick={() => setEditing(h)}
+                      >
+                        <Pencil aria-hidden="true" className="size-4" />
+                      </button>
+                      <button
+                        type="button"
+                        className="text-danger transition-colors hover:opacity-80 disabled:opacity-50"
+                        title="Remover feriado"
+                        aria-label={`Remover ${h.name}`}
+                        disabled={pending}
+                        onClick={() => setToDelete(h)}
+                      >
+                        <Trash2 aria-hidden="true" className="size-4" />
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

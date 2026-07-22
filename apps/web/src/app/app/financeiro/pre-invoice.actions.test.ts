@@ -26,6 +26,7 @@ const h = vi.hoisted(() => {
     sendCalls: 0,
     lastMessage: null as Any,
     storageConfigured: false,
+    uploadShouldFail: false,
     uploads: [] as Array<{ key: string }>,
     timeEntries: [] as Array<{
       consultantId: string;
@@ -122,6 +123,9 @@ vi.mock("@/lib/storage/provider", () => ({
   isStorageConfigured: vi.fn(() => h.store.storageConfigured),
   getStorageProvider: vi.fn(() => ({
     upload: async (key: string) => {
+      if (h.store.uploadShouldFail) {
+        throw new Error("bucket 'pre-invoices' not found");
+      }
       h.store.uploads.push({ key });
     },
     delete: async () => {},
@@ -176,6 +180,7 @@ beforeEach(() => {
   h.store.sendCalls = 0;
   h.store.lastMessage = null;
   h.store.storageConfigured = false;
+  h.store.uploadShouldFail = false;
   h.store.uploads = [];
   h.store.timeEntries = [];
   sendMock.mockClear();
@@ -223,6 +228,25 @@ describe("generatePreInvoice — gating + degrade", () => {
       expect(result.data.downloadUrl).toBe("https://signed.example/pre-fatura");
     }
     expect(h.store.uploads).toHaveLength(1);
+  });
+
+  it("degrades to preview-only when a configured storage upload fails", async () => {
+    // Prod symptom: storage IS configured but the `pre-invoices` bucket is
+    // missing, so upload throws. The action must NOT surface a generic failure
+    // — it returns the HTML for on-screen preview with stored=false.
+    h.store.storageConfigured = true;
+    h.store.uploadShouldFail = true;
+    const result = await generatePreInvoice({ closingId: "rc-1" });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.stored).toBe(false);
+      expect(result.data.storageKey).toBeNull();
+      expect(result.data.downloadUrl).toBeNull();
+      expect(result.data.html).toContain("Pre-fatura");
+    }
+    expect(h.store.uploads).toHaveLength(0);
+    // The generation is still audited (the artifact was produced).
+    expect(h.store.audits).toHaveLength(1);
   });
 
   it("denies non-financial roles (RBAC redirect)", async () => {

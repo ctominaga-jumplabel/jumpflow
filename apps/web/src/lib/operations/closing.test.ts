@@ -1,12 +1,36 @@
 import { describe, expect, it } from "vitest";
 import {
   classifyConsultantReadiness,
+  isExceptionEntry,
   pendingAlert,
   summarizeOverview,
   summarizeReadiness,
   type ConsultantReadiness,
   type OperationClosingRow,
 } from "./closing";
+
+describe("isExceptionEntry", () => {
+  it("is false for a plain workday with no attachment", () => {
+    expect(
+      isExceptionEntry({ activityType: "WORKDAY", hasAttachment: false }),
+    ).toBe(false);
+  });
+
+  it("is true for any non-workday activity", () => {
+    expect(
+      isExceptionEntry({ activityType: "ON_CALL", hasAttachment: false }),
+    ).toBe(true);
+    expect(
+      isExceptionEntry({ activityType: "ABSENCE", hasAttachment: false }),
+    ).toBe(true);
+  });
+
+  it("is true for a workday that carries an attachment", () => {
+    expect(
+      isExceptionEntry({ activityType: "WORKDAY", hasAttachment: true }),
+    ).toBe(true);
+  });
+});
 
 describe("classifyConsultantReadiness", () => {
   it("returns NO_ENTRIES when there are no entries", () => {
@@ -130,6 +154,7 @@ describe("summarizeOverview", () => {
       closedByName: partial.closedByName ?? null,
       notifiedAt: partial.notifiedAt ?? null,
       readiness: partial.readiness ?? baseReadiness,
+      exceptionCount: partial.exceptionCount ?? 0,
     };
   }
 

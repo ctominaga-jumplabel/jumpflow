@@ -214,7 +214,7 @@ export function MonthlyClosingTable({
           result.data.stored ? "success" : "info",
           result.data.stored
             ? "Pré-fatura gerada e armazenada."
-            : "Armazenamento não configurado: a pré-fatura foi gerada apenas para visualização. Baixe o HTML para arquivar.",
+            : "Pré-fatura gerada para visualização. Baixe o HTML para arquivar (o arquivamento automático está indisponível).",
         );
       } else {
         notify("warning", result.message);

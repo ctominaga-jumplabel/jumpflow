@@ -3,7 +3,9 @@ import { CalendarDays } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { HolidaysView } from "@/components/admin/HolidaysView";
-import { requireRole } from "@/lib/auth/guards";
+import { requirePermission } from "@/lib/auth/guards";
+import { can } from "@/lib/auth/permissions";
+import { FERIADOS_PERMISSION } from "@/app/app/admin/feriados/permission";
 import { isDatabaseConfigured } from "@/lib/db/config";
 
 export const metadata: Metadata = { title: "Feriados" };
@@ -11,14 +13,23 @@ export const metadata: Metadata = { title: "Feriados" };
 /**
  * Admin holidays calendar (`/app/admin/feriados`). Registers holidays and their
  * applicability by project: no linked project = global (every project); >=1 link
- * = only the linked projects. Managed by ADMIN + PEOPLE; every change is audited.
+ * = only the linked projects. Access is governed by the configurable permission
+ * matrix (`CONFIGURACOES_FERIADOS`), the same source the sidebar and layout use,
+ * so a role granted this permission (e.g. Gestor de Área) is not denied by a
+ * stale hardcoded role list. Every change is audited.
  */
 export default async function FeriadosPage({
   searchParams,
 }: {
   searchParams: Promise<{ ano?: string }>;
 }) {
-  await requireRole(["ADMIN", "PEOPLE"]);
+  await requirePermission(FERIADOS_PERMISSION, "view");
+  // Write affordances follow the matrix too: a view-only grantee gets a
+  // read-only screen (the server actions enforce create/edit/delete regardless).
+  const canManage =
+    (await can(FERIADOS_PERMISSION, "create")) ||
+    (await can(FERIADOS_PERMISSION, "edit")) ||
+    (await can(FERIADOS_PERMISSION, "delete"));
 
   const header = (
     <PageHeader
@@ -62,6 +73,7 @@ export default async function FeriadosPage({
         years={years}
         selectedYear={selectedYear}
         projects={projects}
+        canManage={canManage}
       />
     </div>
   );

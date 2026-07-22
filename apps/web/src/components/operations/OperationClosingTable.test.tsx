@@ -13,6 +13,13 @@ import {
 vi.mock("@/app/app/operacao/fechamento/actions", () => ({
   closeOperation: vi.fn(),
   reopenOperation: vi.fn(),
+  getOperationClosingApuracao: vi.fn(),
+}));
+
+// The "Apurar" flow opens attachments via the horas action; mock it so the
+// server-only module (Prisma) never loads in jsdom.
+vi.mock("@/app/app/horas/actions", () => ({
+  getTimeEntryAttachmentUrl: vi.fn(),
 }));
 
 // Accented names exercise percent-encoding of the deep-link query.
@@ -40,6 +47,7 @@ function buildRow(): OperationClosingRow {
     closedByName: null,
     notifiedAt: null,
     readiness: summarizeReadiness([pendingConsultant, approvedConsultant]),
+    exceptionCount: 0,
   };
 }
 

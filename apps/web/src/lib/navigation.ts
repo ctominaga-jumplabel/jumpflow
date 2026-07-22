@@ -482,9 +482,10 @@ export const adminNavigation: NavItemDef[] = [
   },
   {
     // Calendário de feriados (Onda A-ext). Cadastro com aplicabilidade por
-    // projeto: sem vínculo = global; com vínculo = só os projetos. Gerido por
-    // ADMIN + PEOPLE (calendário operacional/DP); a escrita é enforced no
-    // servidor (requireRole) e a visibilidade pela matriz (view).
+    // projeto: sem vínculo = global; com vínculo = só os projetos. Acesso 100%
+    // governado pela matriz (CONFIGURACOES_FERIADOS): visibilidade + rota por
+    // `view`, escrita por create/edit/delete no servidor. `requiredRoles` abaixo
+    // é apenas o fallback legado para itens SEM permissionCode (aqui ignorado).
     label: "Feriados",
     href: "/app/admin/feriados",
     permissionCode: "CONFIGURACOES_FERIADOS",

@@ -1,11 +1,16 @@
 import { prisma } from "@jumpflow/database";
+import { toIsoDate } from "@/lib/timesheet/week";
 import {
   classifyConsultantReadiness,
+  isExceptionEntry,
   summarizeOverview,
   summarizeReadiness,
   type ConsultantReadiness,
+  type OperationClosingDetail,
   type OperationClosingOverview,
   type OperationClosingRow,
+  type OperationConsultantDetail,
+  type OperationEntryDetail,
   type OperationReadiness,
 } from "@/lib/operations/closing";
 
@@ -28,6 +33,8 @@ interface ConsultantAccumulator {
   name: string;
   statuses: string[];
   hours: number;
+  /** Count of the consultant's exception launches (see `isExceptionEntry`). */
+  exceptions: number;
 }
 
 function ensureConsultant(
@@ -41,7 +48,12 @@ function ensureConsultant(
     if (!existing.name && name) existing.name = name;
     return existing;
   }
-  const created: ConsultantAccumulator = { name, statuses: [], hours: 0 };
+  const created: ConsultantAccumulator = {
+    name,
+    statuses: [],
+    hours: 0,
+    exceptions: 0,
+  };
   map.set(id, created);
   return created;
 }
@@ -146,6 +158,8 @@ export async function listOperationClosings(input: {
         consultantId: true,
         status: true,
         hours: true,
+        activityType: true,
+        attachment: { select: { id: true } },
         consultant: { select: { name: true } },
       },
     }),
@@ -183,6 +197,14 @@ export async function listOperationClosings(input: {
     );
     acc.statuses.push(e.status);
     acc.hours += Number(e.hours ?? 0);
+    if (
+      isExceptionEntry({
+        activityType: e.activityType,
+        hasAttachment: e.attachment != null,
+      })
+    ) {
+      acc.exceptions += 1;
+    }
   }
 
   const closingByProject = new Map(closings.map((c) => [c.projectId, c]));
@@ -214,7 +236,10 @@ export async function listOperationClosings(input: {
 
   const rows: OperationClosingRow[] = projects.map((p) => {
     const closing = closingByProject.get(p.id) ?? null;
-    const readiness = readinessFromAccumulator(byProject.get(p.id) ?? new Map());
+    const consultants = byProject.get(p.id) ?? new Map();
+    const readiness = readinessFromAccumulator(consultants);
+    let exceptionCount = 0;
+    for (const acc of consultants.values()) exceptionCount += acc.exceptions;
     return {
       projectId: p.id,
       projectName: p.name,
@@ -227,8 +252,122 @@ export async function listOperationClosings(input: {
         : null,
       notifiedAt: closing?.notifiedAt ? closing.notifiedAt.toISOString() : null,
       readiness,
+      exceptionCount,
     };
   });
 
   return summarizeOverview(month, year, rows);
+}
+
+/**
+ * Day-by-day apuração of ONE project's month: every consultant who was
+ * allocated or logged hours, with each launch's date, activity type, hours,
+ * status, billable flag and whether it carries an attachment. Loaded on demand
+ * by the "Apurar" action (not part of the overview, which stays aggregate-only).
+ * Bulk queries (no N+1): the team from active allocations ∪ whoever logged.
+ */
+export async function getOperationClosingDetail(input: {
+  projectId: string;
+  month: number;
+  year: number;
+}): Promise<OperationClosingDetail | null> {
+  const { projectId, month, year } = input;
+  const { start, end } = monthBounds(month, year);
+
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { id: true, name: true, client: { select: { name: true } } },
+  });
+  if (!project) return null;
+
+  // Team that must finish the month (active allocations overlapping it).
+  const allocations = await prisma.allocation.findMany({
+    where: {
+      projectId,
+      status: "ACTIVE",
+      startDate: { lt: end },
+      OR: [{ endDate: null }, { endDate: { gte: start } }],
+    },
+    select: { consultantId: true, consultant: { select: { name: true } } },
+  });
+
+  const entries = await prisma.timeEntry.findMany({
+    where: { projectId, date: { gte: start, lt: end } },
+    orderBy: [{ consultantId: "asc" }, { date: "asc" }],
+    select: {
+      id: true,
+      consultantId: true,
+      date: true,
+      hours: true,
+      status: true,
+      activityType: true,
+      billable: true,
+      attachment: { select: { id: true } },
+      consultant: { select: { name: true } },
+    },
+  });
+
+  // consultantId → detail. Seed with the allocated team so a consultant with no
+  // launches still appears (NO_ENTRIES is itself worth seeing in the apuração).
+  const byConsultant = new Map<string, OperationConsultantDetail>();
+  const ensure = (id: string, name: string): OperationConsultantDetail => {
+    let d = byConsultant.get(id);
+    if (!d) {
+      d = {
+        consultantId: id,
+        consultantName: name || "Consultor",
+        totalHours: 0,
+        exceptionCount: 0,
+        entries: [],
+      };
+      byConsultant.set(id, d);
+    } else if (d.consultantName === "Consultor" && name) {
+      d.consultantName = name;
+    }
+    return d;
+  };
+  for (const a of allocations) {
+    ensure(a.consultantId, a.consultant?.name ?? "");
+  }
+
+  let totalExceptions = 0;
+  for (const e of entries) {
+    const detail = ensure(e.consultantId, e.consultant?.name ?? "");
+    const hasAttachment = e.attachment != null;
+    const isException = isExceptionEntry({
+      activityType: e.activityType,
+      hasAttachment,
+    });
+    const hours = Math.round(Number(e.hours ?? 0) * 100) / 100;
+    const entry: OperationEntryDetail = {
+      id: e.id,
+      date: toIsoDate(e.date),
+      activityType: e.activityType,
+      hours,
+      status: e.status,
+      billable: e.billable,
+      hasAttachment,
+      isException,
+    };
+    detail.entries.push(entry);
+    detail.totalHours = Math.round((detail.totalHours + hours) * 100) / 100;
+    if (isException) {
+      detail.exceptionCount += 1;
+      totalExceptions += 1;
+    }
+  }
+
+  const consultants = [...byConsultant.values()].sort((a, b) =>
+    a.consultantName.localeCompare(b.consultantName, "pt-BR"),
+  );
+
+  return {
+    projectId: project.id,
+    projectName: project.name,
+    clientName: project.client?.name ?? "—",
+    month,
+    year,
+    consultants,
+    totalExceptions,
+  };
 }
