@@ -10,6 +10,15 @@ import type {
 
 type ConsultantContractType = "CLT" | "PJ" | "CLT_FLEX";
 import { sendPaymentForecastEmail } from "@/lib/payments/notify";
+import type { PaymentExportConsultant } from "@/lib/payments/payment-export";
+
+/**
+ * Fluxo de Pagamentos cobre SOMENTE contratação por serviço (PJ e CLT_FLEX).
+ * CLT puro é folha (jump-hr-compensation-agent) e sai deste fluxo — não é
+ * listado na tela nem exportado (P18). Fonte única para o `where` da listagem e
+ * do export, para os dois não divergirem.
+ */
+const PAYMENT_CONTRACT_TYPES: ConsultantContractType[] = ["PJ", "CLT_FLEX"];
 
 function monthBounds(month: number, year: number) {
   const start = new Date(Date.UTC(year, month - 1, 1));
@@ -106,12 +115,22 @@ export async function listConsultantPayments(input: {
     where: {
       month: input.month,
       year: input.year,
+      // CLT puro é folha e sai do fluxo (P18): sempre restringe a PJ/CLT_FLEX.
+      // Um filtro explícito só pode estreitar dentro desse conjunto.
+      contractType: input.contractType
+        ? { equals: input.contractType, in: PAYMENT_CONTRACT_TYPES }
+        : { in: PAYMENT_CONTRACT_TYPES },
       ...(input.consultantId ? { consultantId: input.consultantId } : {}),
       ...(input.status ? { status: input.status } : {}),
-      ...(input.contractType ? { contractType: input.contractType } : {}),
     },
     include: {
-      consultant: { select: { name: true, email: true } },
+      consultant: {
+        select: {
+          name: true,
+          email: true,
+          companyInfo: { select: { cnpj: true } },
+        },
+      },
       lines: {
         include: { project: { select: { name: true } } },
         orderBy: [{ project: { name: "asc" } }, { createdAt: "asc" }],
@@ -125,6 +144,7 @@ export async function listConsultantPayments(input: {
     consultantName: row.consultant.name,
     consultantEmail: row.consultant.email,
     contractType: row.contractType,
+    cnpj: row.consultant.companyInfo?.cnpj ?? null,
     month: row.month,
     year: row.year,
     status: row.status,
@@ -137,6 +157,64 @@ export async function listConsultantPayments(input: {
     invoiceReceivedAt: toIsoDate(row.invoiceReceivedAt),
     invoiceValidatedAt: toIsoDate(row.invoiceValidatedAt),
     lines: row.lines.map(paymentLineView),
+  }));
+}
+
+/**
+ * Dados para o Excel de Pagamentos (P19). Mesmo `where` da tela (PJ/CLT_FLEX +
+ * filtros), trazendo o CNPJ (empresa), o CPF (pessoa física, fallback) e as
+ * contas bancárias (para o PIX). O achatamento em linhas fica no helper puro
+ * `buildPaymentExportRows`. RBAC e auditoria são responsabilidade da rota.
+ */
+export async function listConsultantPaymentsForExport(input: {
+  month: number;
+  year: number;
+  consultantId?: string;
+  status?: ConsultantPaymentStatus;
+  contractType?: ConsultantContractType;
+}): Promise<PaymentExportConsultant[]> {
+  const rows = await prisma.consultantPayment.findMany({
+    where: {
+      month: input.month,
+      year: input.year,
+      contractType: input.contractType
+        ? { equals: input.contractType, in: PAYMENT_CONTRACT_TYPES }
+        : { in: PAYMENT_CONTRACT_TYPES },
+      ...(input.consultantId ? { consultantId: input.consultantId } : {}),
+      ...(input.status ? { status: input.status } : {}),
+    },
+    include: {
+      consultant: {
+        select: {
+          name: true,
+          companyInfo: { select: { cnpj: true } },
+          personalInfo: { select: { cpf: true } },
+          bankAccounts: {
+            where: { active: true },
+            select: { kind: true, pixKey: true },
+          },
+        },
+      },
+      lines: {
+        include: { project: { select: { name: true } } },
+        orderBy: [{ project: { name: "asc" } }, { createdAt: "asc" }],
+      },
+    },
+    orderBy: [{ consultant: { name: "asc" } }],
+  });
+
+  return rows.map((row) => ({
+    consultantName: row.consultant.name,
+    cnpj: row.consultant.companyInfo?.cnpj ?? null,
+    cpf: row.consultant.personalInfo?.cpf ?? null,
+    bankAccounts: row.consultant.bankAccounts.map((account) => ({
+      kind: account.kind,
+      pixKey: account.pixKey,
+    })),
+    lines: row.lines.map((line) => ({
+      projectName: line.project?.name ?? "Beneficios",
+      amount: toNumber(line.amount),
+    })),
   }));
 }
 

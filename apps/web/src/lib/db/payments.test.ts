@@ -55,6 +55,7 @@ vi.mock("@/lib/automation/email-transport", () => ({
 
 import {
   listConsultantPayments,
+  listConsultantPaymentsForExport,
   sendConsultantPaymentForecast,
 } from "@/lib/db/payments";
 
@@ -68,12 +69,16 @@ describe("listConsultantPayments where", () => {
     return findMany.mock.calls.at(-1)![0].where;
   }
 
-  it("filters only by month/year when no extra filter is given", async () => {
+  it("always restricts to PJ/CLT_FLEX when no extra filter is given (P18)", async () => {
     await listConsultantPayments({ month: 6, year: 2026 });
-    expect(lastWhere()).toEqual({ month: 6, year: 2026 });
+    expect(lastWhere()).toEqual({
+      month: 6,
+      year: 2026,
+      contractType: { in: ["PJ", "CLT_FLEX"] },
+    });
   });
 
-  it("adds consultant, status and contractType when provided", async () => {
+  it("narrows a contractType filter INSIDE the PJ/CLT_FLEX set", async () => {
     await listConsultantPayments({
       month: 6,
       year: 2026,
@@ -86,20 +91,52 @@ describe("listConsultantPayments where", () => {
       year: 2026,
       consultantId: "c1",
       status: "INVOICE_VALIDATED",
-      contractType: "PJ",
+      contractType: { equals: "PJ", in: ["PJ", "CLT_FLEX"] },
     });
   });
 
-  it("combines a subset of filters and omits the unset ones", async () => {
+  it("combines a subset of filters and keeps the PJ/CLT_FLEX restriction", async () => {
     await listConsultantPayments({
       month: 1,
       year: 2026,
       status: "PAID",
     });
     const where = lastWhere();
-    expect(where).toEqual({ month: 1, year: 2026, status: "PAID" });
+    expect(where).toEqual({
+      month: 1,
+      year: 2026,
+      status: "PAID",
+      contractType: { in: ["PJ", "CLT_FLEX"] },
+    });
     expect(where).not.toHaveProperty("consultantId");
-    expect(where).not.toHaveProperty("contractType");
+  });
+});
+
+describe("listConsultantPaymentsForExport where (P18: CLT nunca escapa)", () => {
+  function lastWhere() {
+    return findMany.mock.calls.at(-1)![0].where;
+  }
+
+  it("sempre restringe a PJ/CLT_FLEX quando sem filtro extra", async () => {
+    await listConsultantPaymentsForExport({ month: 6, year: 2026 });
+    expect(lastWhere()).toEqual({
+      month: 6,
+      year: 2026,
+      contractType: { in: ["PJ", "CLT_FLEX"] },
+    });
+  });
+
+  it("estreita um filtro contractType DENTRO do conjunto PJ/CLT_FLEX", async () => {
+    await listConsultantPaymentsForExport({
+      month: 6,
+      year: 2026,
+      contractType: "CLT_FLEX",
+    });
+    expect(lastWhere()).toEqual({
+      month: 6,
+      year: 2026,
+      contractType: { equals: "CLT_FLEX", in: ["PJ", "CLT_FLEX"] },
+    });
   });
 });
 

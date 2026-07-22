@@ -14,6 +14,8 @@ export interface ConsultantPaymentView {
   consultantName: string;
   consultantEmail: string;
   contractType: "CLT" | "PJ" | "CLT_FLEX";
+  /** CNPJ da empresa (ConsultantCompanyInfo). Coluna da tabela (P18). */
+  cnpj: string | null;
   month: number;
   year: number;
   status: ConsultantPaymentStatus;

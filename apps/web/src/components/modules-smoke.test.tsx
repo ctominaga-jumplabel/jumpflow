@@ -85,7 +85,13 @@ describe("Horas — TimesheetWeekView", () => {
 describe("Pagamentos - ConsultantPaymentsPanel", () => {
   it("renders the payment table shell", () => {
     render(
-      <ConsultantPaymentsPanel mode="demo" month={6} year={2026} payments={[]} />,
+      <ConsultantPaymentsPanel
+        mode="demo"
+        month={6}
+        year={2026}
+        payments={[]}
+        exportHref="/api/pagamentos/export?month=6&year=2026"
+      />,
     );
     expect(screen.getByText("Pagamentos de consultores")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Gerar/ })).toBeInTheDocument();
