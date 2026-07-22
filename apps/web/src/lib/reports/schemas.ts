@@ -134,12 +134,43 @@ const directionSchema = z.preprocess(
 );
 
 /**
- * Allowed page sizes. Anything outside the set is rejected (the UI only offers
- * these values), keeping the page bounded and predictable. Shared by the
- * Relatorios screen and the Horas consultation panel.
+ * Allowed page sizes accepted by the schema. Anything outside this set is
+ * rejected, keeping the page bounded and predictable. Kept as a SUPERSET of the
+ * values the UI offers so that older query strings (?pageSize=25/250 from
+ * bookmarks/links) keep validating — backwards compatibility (P24). Shared by
+ * the Relatorios screen and the Horas consultation panel.
  */
-export const PAGE_SIZES = [5, 10, 25, 50, 100, 250, 500] as const;
+export const PAGE_SIZES = [5, 10, 25, 50, 100, 200, 250, 500, 1000] as const;
+
+/**
+ * Page sizes offered in the "Itens por página" selector (P24). Larger buckets
+ * for operational triage of long lists; a subset of {@link PAGE_SIZES} so every
+ * option is always valid. Legacy values (5/10/25/250) stay accepted by the
+ * schema but are no longer surfaced as new choices.
+ */
+export const PAGE_SIZE_OPTIONS = [50, 100, 200, 500, 1000] as const;
+
 export const DEFAULT_PAGE_SIZE = 50;
+
+/**
+ * Opções do seletor "Itens por página" para um valor corrente. Garante que um
+ * pageSize legado válido (ex.: 25/250, vindo de um link/bookmark antigo) apareça
+ * como opção — senão o <select> mostraria 50 e trocaria o valor no próximo
+ * submit sem o usuário perceber. Valores fora de PAGE_SIZES são ignorados.
+ */
+export function pageSizeOptionsWith(
+  current?: number | string | null,
+): number[] {
+  const n = Number(current);
+  if (
+    Number.isInteger(n) &&
+    (PAGE_SIZES as readonly number[]).includes(n) &&
+    !(PAGE_SIZE_OPTIONS as readonly number[]).includes(n)
+  ) {
+    return [...PAGE_SIZE_OPTIONS, n].sort((a, b) => a - b);
+  }
+  return [...PAGE_SIZE_OPTIONS];
+}
 
 const pageSchema = z.preprocess((value) => {
   const v = blankToUndefined(value);

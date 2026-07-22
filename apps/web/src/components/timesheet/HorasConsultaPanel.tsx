@@ -6,7 +6,7 @@ import { HoursReportTable } from "@/components/reports/HoursReportTable";
 import { focusRing } from "@/lib/styles";
 import { cn } from "@/lib/utils";
 import { timeEntryStatusLabels } from "@/lib/timesheet/types";
-import { PAGE_SIZES } from "@/lib/reports/schemas";
+import { pageSizeOptionsWith } from "@/lib/reports/schemas";
 import type { ReportFilterOptions } from "@/lib/db/reports";
 import type { HoursReport } from "@/lib/reports/types";
 
@@ -223,7 +223,7 @@ export function HorasConsultaPanel({
                 defaultValue={v("pageSize")}
                 className={fieldClass}
               >
-                {PAGE_SIZES.map((n) => (
+                {pageSizeOptionsWith(v("pageSize")).map((n) => (
                   <option key={n} value={n}>
                     {n}
                   </option>

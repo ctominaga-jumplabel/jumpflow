@@ -3207,3 +3207,18 @@ model ReimbursementPolicyRule {
 
   @@unique([category])
 }
+
+/// Ordem GLOBAL (por organizacao) do menu principal (P28 — Shell de UI). Uma
+/// linha por item do menu, identificada pela `key` = href do NavItemDef (chave
+/// estavel, presente ate em itens sem permissionCode como "Inicio"). `position`
+/// define a ordem crescente; itens sem linha caem no fim, preservando a ordem
+/// padrao do catalogo (ver applyNavOrder em lib/navigation.ts). A tela admin
+/// /app/admin/menu (ADMIN) reordena e persiste; alteracoes sao auditadas
+/// (NAVIGATION_ORDER_UPDATED).
+model NavigationOrder {
+  key       String   @id
+  position  Int
+  updatedAt DateTime @updatedAt
+
+  @@index([position])
+}

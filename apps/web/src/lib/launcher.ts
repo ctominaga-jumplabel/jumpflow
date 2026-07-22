@@ -155,6 +155,16 @@ export function withBadges(
 }
 
 /**
+ * Sum the counts of a `key → badge` map (pure). Used by the topbar notification
+ * bell (P20) to show a single total of actionable pending items, reusing the
+ * exact same source as the launcher badges so the number never overstates the
+ * user's real queue.
+ */
+export function sumBadgeCounts(badges: Record<string, LauncherBadge>): number {
+  return Object.values(badges).reduce((total, badge) => total + badge.count, 0);
+}
+
+/**
  * Demo-mode badges derived from the centralized mock data. Pure and honest:
  * used only when no database is configured, mirroring what the real badge
  * source ({@link import("./db/launcher-badges")}) reports against live data.

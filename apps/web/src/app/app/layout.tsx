@@ -70,6 +70,27 @@ export default async function AppLayout({
   // the sidebar hides items the matrix denies.
   const viewableNavCodes = filterViewableCodes(matrix, navPermissionCodes());
 
+  // Persisted GLOBAL menu order (P28) and the actionable-pending total for the
+  // notification bell (P20). Both are resolved server-side and fail safe: the
+  // menu falls back to the default order, the bell to zero — a slow/absent
+  // database never blocks the shell.
+  const { getNavigationOrder } = await import("@/lib/db/navigation-order");
+  const navOrder = await getNavigationOrder();
+
+  let notificationCount = 0;
+  try {
+    const { mockLauncherBadges, sumBadgeCounts } = await import("@/lib/launcher");
+    if (dbConfigured) {
+      const { getLauncherBadges } = await import("@/lib/db/launcher-badges");
+      notificationCount = sumBadgeCounts(await getLauncherBadges(user));
+    } else {
+      notificationCount = sumBadgeCounts(mockLauncherBadges());
+    }
+  } catch (error) {
+    console.error("[app-layout] notification count failed", error);
+    notificationCount = 0;
+  }
+
   // Nathal.IA master switch. Read server-side so it can be flipped at runtime
   // (Vercel env) with no rebuild. Default OFF: the assistant does not exist —
   // no mount, no client bundle, no signal computation — until NATHALIA_ENABLED
@@ -86,6 +107,8 @@ export default async function AppLayout({
       logoutAction={logout}
       databaseConfigured={isDatabaseConfigured()}
       viewableNavCodes={viewableNavCodes}
+      navOrder={navOrder}
+      notificationCount={notificationCount}
     >
       {children}
       {/* Nathal.IA — contextual assistant, authenticated app only, gated by the
