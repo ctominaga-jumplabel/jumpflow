@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { withInlineBrandAssets } from "./email/inline-assets";
 
 /**
  * Minimal pluggable email transport.
@@ -13,9 +14,14 @@ export interface EmailAttachment {
   content: string;
   contentType: string;
   /**
+   * Content-ID for inline (CID) embedding, referenced as `cid:<id>` in the HTML
+   * body. Present → the part is an inline image, not a downloadable attachment.
+   */
+  contentId?: string;
+  /**
    * How `content` is encoded. "utf8" (default) is text that gets base64-encoded
-   * before send (e.g. a CSV). "base64" is already-base64 binary (e.g. an .xlsx)
-   * and is passed through as-is — required for binary attachments to survive.
+   * before send (e.g. a CSV). "base64" is already-base64 binary (e.g. a PNG or
+   * .xlsx) and is passed through as-is — required for binary parts to survive.
    */
   encoding?: "utf8" | "base64";
   /** "attachment" (default when a filename is set) vs "inline". */
@@ -76,6 +82,10 @@ class ResendEmailTransport implements EmailTransport {
       );
       return new ConsoleEmailTransport().send(message);
     }
+    // Embed brand logos the HTML references via `cid:` so mail clients render
+    // them inline (no "download remote images" prompt). No-op when there's
+    // nothing to embed.
+    const prepared = await withInlineBrandAssets(message);
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {
@@ -84,11 +94,11 @@ class ResendEmailTransport implements EmailTransport {
       },
       body: JSON.stringify({
         from,
-        to: message.to,
-        subject: message.subject,
-        text: message.text,
-        ...(message.html ? { html: message.html } : {}),
-        attachments: message.attachments?.map((a) => ({
+        to: prepared.to,
+        subject: prepared.subject,
+        text: prepared.text,
+        ...(prepared.html ? { html: prepared.html } : {}),
+        attachments: prepared.attachments?.map((a) => ({
           filename: a.filename,
           // Resend expects base64. Text (utf8, default) is encoded here; binary
           // parts arrive already base64 (encoding: "base64") and pass through —
@@ -100,6 +110,8 @@ class ResendEmailTransport implements EmailTransport {
           // Resend's HTTP API uses snake_case `content_type` (it otherwise
           // infers the type from the filename extension).
           content_type: a.contentType,
+          // Inline images: `content_id` matches the `cid:<id>` in the HTML.
+          ...(a.contentId ? { content_id: a.contentId } : {}),
         })),
       }),
     });
