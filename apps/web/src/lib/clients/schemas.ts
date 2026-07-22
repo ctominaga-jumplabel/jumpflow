@@ -37,10 +37,33 @@ const dayOfMonth = z.preprocess(
   z.coerce.number().int().min(1).max(31).optional(),
 );
 
+// Lista de e-mails de cobranca (P4). Aceita tanto um array (UI de chips) quanto
+// um texto multi-linha/virgula (textarea): normaliza para array, apara espacos,
+// descarta vazios e valida o formato de cada e-mail. Vazio => [] (usa o
+// contactEmail no envio da pre-fatura).
+const emailList = z
+  .preprocess((value) => {
+    if (Array.isArray(value)) {
+      return value
+        .map((item) => (typeof item === "string" ? item.trim() : item))
+        .filter((item) => item !== "");
+    }
+    if (typeof value === "string") {
+      return value
+        .split(/[\n,;]+/)
+        .map((item) => item.trim())
+        .filter((item) => item !== "");
+    }
+    if (value === null || value === undefined) return [];
+    return value;
+  }, z.array(z.string().max(254).email()).max(50))
+  .default([]);
+
 export const clientInputSchema = z.object({
   name: z.string().trim().min(2).max(120),
   document: optionalText(20),
   contactEmail: optionalEmail,
+  billingEmails: emailList,
   logoUrl: optionalText(500),
   billingTypeId: optionalText(80),
   defaultHourlyRate: nullableNumber,

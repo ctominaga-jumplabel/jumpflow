@@ -171,6 +171,12 @@ export interface ProjectItem {
   billingChargeType?: string;
   billingConfig?: ProjectBillingConfigItem;
   billingHourlyRate?: number;
+  /**
+   * P4: anexar a planilha de horas por consultor ao e-mail de cobrança da
+   * pré-fatura deste projeto. Editado pelo Financeiro. Opcional na borda
+   * (mock/otimista); o loader sempre popula com boolean.
+   */
+  billingAttachHours?: boolean;
   budgetHours?: number;
   costCenter?: string;
   commercialContractRef?: string;

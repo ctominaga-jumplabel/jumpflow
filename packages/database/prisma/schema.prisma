@@ -1420,6 +1420,9 @@ model Client {
   name              String
   document          String?
   contactEmail      String?
+  /// Lista de e-mails de cobranca do cliente (P4). Quando nao-vazia, e a fonte
+  /// de destinatarios do e-mail de pre-fatura; senao cai no fallback contactEmail.
+  billingEmails     String[]            @default([])
   logoUrl           String?
   billingTypeId     String?
   billingType       BillingType?        @relation(fields: [billingTypeId], references: [id], onDelete: SetNull)
@@ -1479,6 +1482,10 @@ model Project {
   billingConfig               ProjectBillingConfig?
   billingHourlyRate           Decimal?                     @db.Decimal(12, 2)
   budgetHours                 Decimal?                     @db.Decimal(10, 2)
+  /// P4: anexar a planilha de horas realizadas por consultor (competencia do
+  /// fechamento) ao e-mail de cobranca da pre-fatura deste projeto. Editado pelo
+  /// Financeiro junto da regra de cobranca; nao afeta calculo de receita.
+  billingAttachHours          Boolean                      @default(false)
   costCenter                  String?
   /// Referencia do contrato comercial (numero/identificador). ADR 0002 Fase 1:
   /// presenca = contrato vinculado; ausencia dispara alerta COMMERCIAL_CONTRACT_MISSING.

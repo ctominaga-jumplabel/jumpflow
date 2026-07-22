@@ -234,15 +234,27 @@ export interface RevenueClosingForPreInvoice {
     year: number;
     status: string;
     adjustmentAmount: number;
+    /** null quando o fechamento e por cliente (sem projeto). Necessario para
+     * decidir se ha planilha de horas por consultor a anexar (P4). */
+    projectId: string | null;
   };
   client: {
     id: string;
     name: string;
     document: string | null;
     contactEmail: string | null;
+    /** Lista de e-mails de cobranca (P4). Vazia => usa contactEmail. */
+    billingEmails: string[];
     municipality: string | null;
     issRate: number | null;
   };
+  /** Presente apenas quando o fechamento e por projeto. Carrega a flag de anexo
+   * de horas (P4) sem re-consultar o projeto na action. */
+  project: {
+    id: string;
+    name: string;
+    billingAttachHours: boolean;
+  } | null;
   lines: Array<{
     projectId: string;
     projectName: string;
@@ -270,11 +282,14 @@ export async function getRevenueClosingForPreInvoice(
           name: true,
           document: true,
           contactEmail: true,
+          billingEmails: true,
           municipality: true,
           issRate: true,
         },
       },
-      project: { select: { id: true, name: true } },
+      project: {
+        select: { id: true, name: true, billingAttachHours: true },
+      },
     },
   });
   if (!closing) return null;
@@ -303,15 +318,24 @@ export async function getRevenueClosingForPreInvoice(
       year: closing.year,
       status: closing.status,
       adjustmentAmount: toNumber(closing.adjustmentAmount),
+      projectId: closing.projectId ?? null,
     },
     client: {
       id: closing.client.id,
       name: closing.client.name,
       document: closing.client.document,
       contactEmail: closing.client.contactEmail,
+      billingEmails: closing.client.billingEmails ?? [],
       municipality: closing.client.municipality,
       issRate: closing.client.issRate == null ? null : toNumber(closing.client.issRate),
     },
+    project: closing.project
+      ? {
+          id: closing.project.id,
+          name: closing.project.name,
+          billingAttachHours: closing.project.billingAttachHours,
+        }
+      : null,
     lines,
   };
 }

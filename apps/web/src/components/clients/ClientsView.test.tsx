@@ -1,7 +1,11 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { ClientItem } from "@/lib/clients/types";
-import { ClientsView } from "./ClientsView";
+import {
+  ClientsView,
+  mergeBillingEmailsDraft,
+  parseBillingEmails,
+} from "./ClientsView";
 
 vi.mock("@/app/app/clientes/actions", () => ({
   createClient: vi.fn(),
@@ -15,6 +19,7 @@ function dbClient(name: string): ClientItem {
   return {
     id: "cli-1",
     name,
+    billingEmails: [],
     roundingRule: "NONE",
     invoiceKind: "SERVICE",
     status: "ACTIVE",
@@ -34,6 +39,31 @@ function renderDemo(canViewFinancials = true) {
     />,
   );
 }
+
+describe("billing email helpers", () => {
+  it("parses valid emails and drops invalid/empty fragments", () => {
+    expect(parseBillingEmails("a@x.com, nope, b@y.com;")).toEqual([
+      "a@x.com",
+      "b@y.com",
+    ]);
+    expect(parseBillingEmails("   ")).toEqual([]);
+  });
+
+  it("merges a pending draft into the committed list without duplicates", () => {
+    expect(mergeBillingEmailsDraft(["a@x.com"], "b@y.com")).toEqual([
+      "a@x.com",
+      "b@y.com",
+    ]);
+    // Draft already present → no duplicate.
+    expect(mergeBillingEmailsDraft(["a@x.com"], "a@x.com")).toEqual([
+      "a@x.com",
+    ]);
+    // Invalid draft → committed list unchanged.
+    expect(mergeBillingEmailsDraft(["a@x.com"], "not-an-email")).toEqual([
+      "a@x.com",
+    ]);
+  });
+});
 
 describe("ClientsView", () => {
   it("renders clients and masks financial fields when role cannot view them", () => {

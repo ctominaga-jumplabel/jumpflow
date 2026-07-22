@@ -14,7 +14,12 @@ type Where = Record<string, any>;
 
 const h = vi.hoisted(() => {
   const store = {
-    projects: [] as { id: string; billingTypeId: string | null; budgetHours: unknown }[],
+    projects: [] as {
+      id: string;
+      billingTypeId: string | null;
+      budgetHours: unknown;
+      billingAttachHours?: boolean;
+    }[],
     updates: [] as { id: string; data: Where }[],
     users: [{ id: "user-1", name: "Sam", email: "sam@jumplabel.com.br" }],
     audits: [] as Record<string, unknown>[],
@@ -36,7 +41,11 @@ const h = vi.hoisted(() => {
       findUnique: async ({ where }: { where: Where }) => {
         const p = store.projects.find((x) => x.id === where.id);
         if (!p) return null;
-        return { billingTypeId: p.billingTypeId, budgetHours: p.budgetHours };
+        return {
+          billingTypeId: p.billingTypeId,
+          budgetHours: p.budgetHours,
+          billingAttachHours: p.billingAttachHours ?? false,
+        };
       },
       update: async ({ where, data }: { where: Where; data: Where }) => {
         store.updates.push({ id: where.id, data });
@@ -69,6 +78,7 @@ vi.mock("@/lib/auth/guards", () => ({
 }));
 
 import {
+  updateProjectBillingAttachHours,
   updateProjectBillingType,
   updateProjectCommercial,
   updateProjectOpportunityType,
@@ -144,6 +154,59 @@ describe("updateProjectBillingType", () => {
 
   it("returns NOT_FOUND for an unknown project", async () => {
     const result = await updateProjectBillingType({ id: "missing" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBe("NOT_FOUND");
+  });
+});
+
+describe("updateProjectBillingAttachHours (P4)", () => {
+  it("writes only billingAttachHours and audits the change", async () => {
+    h.store.projects = [
+      { id: "prj-1", billingTypeId: null, budgetHours: null, billingAttachHours: false },
+    ];
+    const result = await updateProjectBillingAttachHours({
+      id: "prj-1",
+      billingAttachHours: true,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data.billingAttachHours).toBe(true);
+    expect(h.store.updates).toHaveLength(1);
+    expect(h.store.updates[0].data).toEqual({ billingAttachHours: true });
+    // Never touches other billing/commercial fields.
+    expect(h.store.updates[0].data).not.toHaveProperty("billingTypeId");
+    expect(h.store.updates[0].data).not.toHaveProperty("budgetHours");
+    expect(h.store.audits[0]).toMatchObject({
+      action: "PROJECT_BILLING_ATTACH_HOURS_UPDATED",
+    });
+  });
+
+  it("is a no-op (no write, no audit) when the flag is unchanged", async () => {
+    h.store.projects = [
+      { id: "prj-1", billingTypeId: null, budgetHours: null, billingAttachHours: true },
+    ];
+    const result = await updateProjectBillingAttachHours({
+      id: "prj-1",
+      billingAttachHours: true,
+    });
+    expect(result.ok).toBe(true);
+    expect(h.store.updates).toHaveLength(0);
+    expect(h.store.audits).toHaveLength(0);
+  });
+
+  it("rejects a non-boolean flag with INVALID_INPUT", async () => {
+    const result = await updateProjectBillingAttachHours({
+      id: "prj-1",
+      billingAttachHours: "yes",
+    } as unknown as Parameters<typeof updateProjectBillingAttachHours>[0]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBe("INVALID_INPUT");
+  });
+
+  it("returns NOT_FOUND for an unknown project", async () => {
+    const result = await updateProjectBillingAttachHours({
+      id: "missing",
+      billingAttachHours: true,
+    });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toBe("NOT_FOUND");
   });

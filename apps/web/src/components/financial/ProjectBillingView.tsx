@@ -10,6 +10,7 @@ import { FilterChip } from "@/components/ui/FilterChip";
 import { Modal } from "@/components/ui/Modal";
 import { SectionPanel } from "@/components/ui/SectionPanel";
 import {
+  updateProjectBillingAttachHours,
   updateProjectBillingType,
   upsertProjectBillingConfig,
 } from "@/app/app/projetos/actions";
@@ -120,6 +121,35 @@ export function ProjectBillingView({
     startTransition(async () => {
       const result = await upsertProjectBillingConfig(billingForm);
       setFeedback(result.ok ? "Regra de cobrança salva." : result.message);
+    });
+  }
+
+  function saveAttachHours(projectId: string, billingAttachHours: boolean) {
+    if (mode === "demo") {
+      setLocalItems((current) =>
+        current.map((project) =>
+          project.id === projectId ? { ...project, billingAttachHours } : project,
+        ),
+      );
+      setFeedback(
+        billingAttachHours
+          ? "Anexo de horas ligado (local)."
+          : "Anexo de horas desligado (local).",
+      );
+      return;
+    }
+    startTransition(async () => {
+      const result = await updateProjectBillingAttachHours({
+        id: projectId,
+        billingAttachHours,
+      });
+      setFeedback(
+        result.ok
+          ? billingAttachHours
+            ? "Planilha de horas será anexada ao e-mail de cobrança."
+            : "Anexo de horas desligado."
+          : result.message,
+      );
     });
   }
 
@@ -322,6 +352,12 @@ export function ProjectBillingView({
               isPending={isPending}
               onSave={saveBillingType}
             />
+            <AttachHoursToggle
+              key={`attach-${configProject.id}`}
+              project={configProject}
+              isPending={isPending}
+              onToggle={saveAttachHours}
+            />
             <BillingConfigPanel
               chargeType={configProject.billingChargeType}
               value={billingForm}
@@ -379,6 +415,50 @@ function BillingTypeEditor({
           Salvar tipo
         </ActionButton>
       </div>
+    </section>
+  );
+}
+
+/**
+ * Toggle P4 do anexo de horas na cobrança. Ao ligar, a pré-fatura deste projeto
+ * leva uma planilha `.xlsx` com as horas realizadas por consultor na competência
+ * do fechamento. Salva imediatamente (patch isolado, gate FINANCIAL_ROLES na
+ * action). Mesmo gate de edição da regra de cobrança.
+ */
+function AttachHoursToggle({
+  project,
+  isPending,
+  onToggle,
+}: {
+  project: ProjectItem;
+  isPending: boolean;
+  onToggle: (projectId: string, value: boolean) => void;
+}) {
+  const checked = project.billingAttachHours ?? false;
+  return (
+    <section className="space-y-2">
+      <h3 className="text-sm font-semibold text-strong">
+        Anexo de horas na cobrança
+      </h3>
+      <label className="flex items-start gap-3 rounded-md border border-border bg-surface px-3 py-2.5 text-sm text-medium">
+        <input
+          type="checkbox"
+          checked={checked}
+          disabled={isPending}
+          onChange={(event) => onToggle(project.id, event.target.checked)}
+          className="mt-0.5 size-4 rounded border-border"
+        />
+        <span>
+          <span className="font-medium text-strong">
+            Anexar a planilha de horas por consultor ao e-mail de cobrança
+          </span>
+          <span className="mt-0.5 block text-xs text-soft">
+            Ao enviar a pré-fatura deste projeto, inclui uma planilha .xlsx com
+            as horas realizadas (aprovadas) por consultor na competência do
+            fechamento.
+          </span>
+        </span>
+      </label>
     </section>
   );
 }

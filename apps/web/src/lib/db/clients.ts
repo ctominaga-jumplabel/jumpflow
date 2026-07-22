@@ -78,6 +78,7 @@ export async function listClients(options?: {
     name: row.name,
     document: row.document ?? undefined,
     contactEmail: row.contactEmail ?? undefined,
+    billingEmails: row.billingEmails ?? [],
     logoUrl: logoUrls[index],
     logoRef: row.logoUrl ?? undefined,
     billingTypeId: includeFinancials ? (row.billingTypeId ?? undefined) : undefined,

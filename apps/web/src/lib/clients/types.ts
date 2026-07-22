@@ -48,6 +48,9 @@ export interface ClientItem {
   document?: string;
   /** Contact e-mail used to send the pre-invoice to the client. */
   contactEmail?: string;
+  /** Billing e-mails (P4). When non-empty, these receive the pre-invoice; the
+   * contactEmail is only the fallback. Always present (possibly empty). */
+  billingEmails: string[];
   /** Display URL: a signed URL for stored logos, or a plain pass-through URL. */
   logoUrl?: string;
   /** Raw persisted value of the logoUrl column (storage key OR plain URL). */

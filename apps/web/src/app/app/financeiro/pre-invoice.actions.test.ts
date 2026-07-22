@@ -24,13 +24,22 @@ const h = vi.hoisted(() => {
     audits: [] as Array<Record<string, unknown>>,
     currentUser: { id: "dev-user", roles: ["FINANCE"] as string[] },
     sendCalls: 0,
+    lastMessage: null as Any,
     storageConfigured: false,
     uploads: [] as Array<{ key: string }>,
+    timeEntries: [] as Array<{
+      consultantId: string;
+      hours: number;
+      consultant: { name: string };
+    }>,
   };
 
   const emailLogKey = (where: Any) => where.type_referenceKey;
 
   const prismaMock = {
+    timeEntry: {
+      findMany: async () => store.timeEntries,
+    },
     automationEmailLog: {
       findUnique: async ({ where }: { where: Any }) => {
         const k = emailLogKey(where);
@@ -120,8 +129,9 @@ vi.mock("@/lib/storage/provider", () => ({
   })),
 }));
 
-const sendMock = vi.fn(async () => {
+const sendMock = vi.fn(async (message: Any) => {
   h.store.sendCalls += 1;
+  h.store.lastMessage = message;
   return { id: "msg-1", provider: "console" };
 });
 vi.mock("@/lib/automation/email-transport", () => ({
@@ -138,15 +148,18 @@ function closingFixture(over: Partial<Any> = {}): Any {
       year: 2026,
       status: "CLOSED",
       adjustmentAmount: 0,
+      projectId: "p-1",
     },
     client: {
       id: "cli-1",
       name: "Atlas Energia",
       document: "12.345.678/0001-90",
       contactEmail: "financeiro@atlas.com",
+      billingEmails: [],
       municipality: "Sao Paulo",
       issRate: 2,
     },
+    project: { id: "p-1", name: "Alfa", billingAttachHours: false },
     lines: [
       { projectId: "p-1", projectName: "Alfa", hours: 10, unitRate: 200, amount: 2000 },
     ],
@@ -161,8 +174,10 @@ beforeEach(() => {
   h.store.audits = [];
   h.store.currentUser = { id: "dev-user", roles: ["FINANCE"] };
   h.store.sendCalls = 0;
+  h.store.lastMessage = null;
   h.store.storageConfigured = false;
   h.store.uploads = [];
+  h.store.timeEntries = [];
   sendMock.mockClear();
 });
 
@@ -260,13 +275,14 @@ describe("sendPreInvoiceEmail — idempotency + degrade", () => {
     expect(h.store.emailLogs[0]!.status).toBe("SENT");
   });
 
-  it("fails honestly when the client has no contactEmail (no send)", async () => {
+  it("fails honestly when the client has no billing contact at all (no send)", async () => {
     h.store.closing = closingFixture({
       client: {
         id: "cli-1",
         name: "Sem Email",
         document: null,
         contactEmail: null,
+        billingEmails: [],
         municipality: null,
         issRate: null,
       },
@@ -276,6 +292,72 @@ describe("sendPreInvoiceEmail — idempotency + degrade", () => {
     if (!result.ok) expect(result.error).toBe("NO_CONTACT_EMAIL");
     expect(h.store.sendCalls).toBe(0);
     expect(h.store.emailLogs).toHaveLength(0);
+  });
+
+  it("sends to the billingEmails list when present (not the contactEmail)", async () => {
+    h.store.closing = closingFixture({
+      client: {
+        id: "cli-1",
+        name: "Atlas Energia",
+        document: null,
+        contactEmail: "contato@atlas.com",
+        billingEmails: ["cobranca@atlas.com", "financeiro@atlas.com"],
+        municipality: null,
+        issRate: null,
+      },
+    });
+    const result = await sendPreInvoiceEmail({ closingId: "rc-1" });
+    expect(result.ok).toBe(true);
+    expect(h.store.sendCalls).toBe(1);
+    expect(h.store.lastMessage.to).toEqual(["cobranca@atlas.com", "financeiro@atlas.com"]);
+    // contactEmail is NOT used when billingEmails is non-empty.
+    expect(h.store.lastMessage.to).not.toContain("contato@atlas.com");
+    expect(h.store.emailLogs[0]!.recipient).toBe(
+      "cobranca@atlas.com, financeiro@atlas.com",
+    );
+  });
+
+  it("falls back to contactEmail when billingEmails is empty", async () => {
+    const result = await sendPreInvoiceEmail({ closingId: "rc-1" });
+    expect(result.ok).toBe(true);
+    expect(h.store.lastMessage.to).toEqual(["financeiro@atlas.com"]);
+  });
+
+  it("attaches the hours worksheet only when the project flag is on", async () => {
+    h.store.closing = closingFixture({
+      project: { id: "p-1", name: "Alfa", billingAttachHours: true },
+    });
+    h.store.timeEntries = [
+      { consultantId: "c-1", hours: 8, consultant: { name: "Bia" } },
+      { consultantId: "c-1", hours: 2, consultant: { name: "Bia" } },
+      { consultantId: "c-2", hours: 5, consultant: { name: "Ana" } },
+    ];
+    const result = await sendPreInvoiceEmail({ closingId: "rc-1" });
+    expect(result.ok).toBe(true);
+    expect(h.store.lastMessage.attachments).toHaveLength(1);
+    expect(h.store.lastMessage.attachments[0].filename).toBe("horas-alfa-2026-06.xlsx");
+    expect(h.store.lastMessage.attachments[0].encoding).toBe("base64");
+    expect(h.store.emailLogs[0]!.meta).toMatchObject({ attachedHours: true });
+  });
+
+  it("does not attach when the closing has no projectId (client-scoped)", async () => {
+    h.store.closing = closingFixture({
+      closing: {
+        id: "rc-1",
+        month: 6,
+        year: 2026,
+        status: "CLOSED",
+        adjustmentAmount: 0,
+        projectId: null,
+      },
+      project: null,
+    });
+    h.store.timeEntries = [
+      { consultantId: "c-1", hours: 8, consultant: { name: "Bia" } },
+    ];
+    const result = await sendPreInvoiceEmail({ closingId: "rc-1" });
+    expect(result.ok).toBe(true);
+    expect(h.store.lastMessage.attachments).toBeUndefined();
   });
 
   it("rejects when the closing is not CLOSED", async () => {

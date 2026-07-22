@@ -110,6 +110,13 @@ export const projectBillingTypeSchema = z.object({
   billingTypeId: optionalCuid,
 });
 
+// P4: flag "anexar planilha de horas por consultor" no e-mail de cobrança.
+// Patch isolado, editado pelo Financeiro junto da regra de cobrança.
+export const projectBillingAttachHoursSchema = z.object({
+  id: entityId,
+  billingAttachHours: z.boolean(),
+});
+
 // Tipo/condição de pagamento do cliente (prazo/arranjo). Campo comercial,
 // isolado para não tocar os demais campos do projeto. Opcional: "" → undefined
 // (grava null no banco). Gated por SALE_RATE_ROLES na action.
@@ -383,6 +390,9 @@ export type ProjectInput = z.infer<typeof projectInputSchema>;
 export type ProjectUpdateInput = z.infer<typeof projectUpdateSchema>;
 export type ProjectCommercialInput = z.infer<typeof projectCommercialSchema>;
 export type ProjectBillingTypeInput = z.infer<typeof projectBillingTypeSchema>;
+export type ProjectBillingAttachHoursInput = z.infer<
+  typeof projectBillingAttachHoursSchema
+>;
 export type ProjectBillingConfigInput = z.infer<
   typeof projectBillingConfigSchema
 >;

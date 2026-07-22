@@ -42,7 +42,16 @@ import {
   getStorageProvider,
   isStorageConfigured,
 } from "@/lib/storage/provider";
-import { getEmailTransport } from "@/lib/automation/email-transport";
+import {
+  getEmailTransport,
+  type EmailAttachment,
+} from "@/lib/automation/email-transport";
+import { buildWorkbook, defineSheet } from "@/lib/export/xlsx";
+import {
+  buildProjectHoursSheetRows,
+  sumProjectHours,
+  type ProjectHoursSheetRow,
+} from "@/lib/billing/hours-worksheet";
 
 const FINANCEIRO_PATH = "/app/financeiro";
 
@@ -691,11 +700,132 @@ export async function generatePreInvoice(input: {
 }
 
 /**
- * Send the pre-invoice to the client's contactEmail (Fase G3). Idempotent per
- * closing+competence via AutomationEmailLog (type PRE_INVOICE, stable
- * referenceKey): a SENT log short-circuits re-sends; a FAILED log is retried.
+ * Resolve the billing recipients for the pre-invoice (P4): the client's
+ * `billingEmails` list when non-empty, else the single legacy `contactEmail`.
+ * Trims/de-dupes and drops blanks. An empty result means the client has no
+ * billing contact at all → the caller fails with NO_CONTACT_EMAIL.
+ */
+function resolveBillingRecipients(client: {
+  billingEmails: string[];
+  contactEmail: string | null;
+}): string[] {
+  const fromList = client.billingEmails
+    .map((email) => email.trim())
+    .filter((email) => email.length > 0);
+  if (fromList.length > 0) {
+    return [...new Set(fromList)];
+  }
+  const fallback = client.contactEmail?.trim();
+  return fallback ? [fallback] : [];
+}
+
+/**
+ * Build the "horas realizadas por consultor" `.xlsx` attachment for a
+ * project-scoped closing (P4). Loads the APPROVED TimeEntry rows for the
+ * project/competence, groups them per consultant (pure helper), and serializes
+ * a two-sheet workbook (resumo por consultor + total). Returns null when there
+ * are no approved hours (nothing to attach). Binary is base64-encoded for the
+ * transport's `encoding: "base64"` passthrough.
+ */
+async function buildProjectHoursAttachment(params: {
+  projectId: string;
+  projectName: string;
+  month: number;
+  year: number;
+}): Promise<EmailAttachment | null> {
+  const start = new Date(Date.UTC(params.year, params.month - 1, 1));
+  const end = new Date(Date.UTC(params.year, params.month, 1));
+  const entries = await prisma.timeEntry.findMany({
+    where: {
+      projectId: params.projectId,
+      status: "APPROVED",
+      date: { gte: start, lt: end },
+    },
+    select: {
+      consultantId: true,
+      hours: true,
+      consultant: { select: { name: true } },
+    },
+  });
+  if (entries.length === 0) return null;
+
+  const rows: ProjectHoursSheetRow[] = buildProjectHoursSheetRows(
+    entries.map((entry) => ({
+      consultantId: entry.consultantId,
+      consultantName: entry.consultant.name,
+      hours: Number(entry.hours),
+    })),
+  );
+  const totalHours = sumProjectHours(rows);
+  const competence = `${params.year}-${String(params.month).padStart(2, "0")}`;
+
+  const buffer = await buildWorkbook([
+    defineSheet({
+      name: "Horas por consultor",
+      rows,
+      columns: [
+        { header: "Consultor", value: (row) => row.consultant, width: 32 },
+        {
+          header: "Horas realizadas",
+          value: (row) => row.totalHours,
+          numFmt: "#,##0.00",
+          width: 18,
+        },
+        {
+          header: "Lancamentos",
+          value: (row) => row.entries,
+          numFmt: "#,##0",
+          width: 14,
+        },
+      ],
+    }),
+    defineSheet({
+      name: "Resumo",
+      rows: [
+        { label: "Projeto", value: params.projectName },
+        { label: "Competencia", value: competence },
+        { label: "Consultores", value: rows.length },
+        { label: "Total de horas", value: totalHours },
+      ],
+      columns: [
+        { header: "Campo", value: (row) => row.label, width: 20 },
+        { header: "Valor", value: (row) => row.value, width: 32 },
+      ],
+    }),
+  ]);
+
+  const slug =
+    params.projectName
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 40) || "projeto";
+
+  return {
+    filename: `horas-${slug}-${competence}.xlsx`,
+    content: buffer.toString("base64"),
+    contentType:
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    encoding: "base64",
+    disposition: "attachment",
+  };
+}
+
+/**
+ * Send the pre-invoice to the client's billing contacts (Fase G3 + P4).
+ * Recipients come from `client.billingEmails` when set, else the legacy
+ * `contactEmail`. Idempotent per closing+competence via AutomationEmailLog (type
+ * PRE_INVOICE, stable referenceKey): a SENT log short-circuits re-sends; a
+ * FAILED log is retried.
  *
- * Degrade honesto: without a client contactEmail, fail with NO_CONTACT_EMAIL
+ * P4 attachment: when the closing is project-scoped AND the project has
+ * `billingAttachHours`, a `.xlsx` of realized hours per consultant (APPROVED
+ * entries in the competence) is attached. A client-scoped closing (no
+ * projectId) never attaches — there is no single project to summarize.
+ *
+ * Degrade honesto: with no billing contact at all, fail with NO_CONTACT_EMAIL
  * (never fake a send). Gated to CLOSED + FINANCIAL_ROLES, audited.
  */
 export async function sendPreInvoiceEmail(input: {
@@ -717,11 +847,11 @@ export async function sendPreInvoiceEmail(input: {
         "A pre-fatura so pode ser enviada para fechamento fechado.",
       );
     }
-    const contactEmail = data.client.contactEmail?.trim();
-    if (!contactEmail) {
+    const recipients = resolveBillingRecipients(data.client);
+    if (recipients.length === 0) {
       throw new ActionError(
         "NO_CONTACT_EMAIL",
-        "Cliente sem e-mail de contato. Cadastre o e-mail antes de enviar a pre-fatura.",
+        "Cliente sem e-mail de cobranca. Cadastre ao menos um e-mail antes de enviar a pre-fatura.",
       );
     }
 
@@ -755,17 +885,35 @@ export async function sendPreInvoiceEmail(input: {
     });
     const preInvoiceEmail = buildPreInvoiceEmail({ preInvoice });
 
-    // PRE_INVOICE_ISSUED rule (/app/admin/notificacoes): recipients default to
-    // the client contact (CLIENT_CONTACT). If the admin turned the event off,
-    // do not send and do not log SENT (so re-enabling lets it send later).
+    // P4: anexa a planilha de horas por consultor apenas em fechamento por
+    // projeto com a flag ligada. Fechamento por cliente (sem projectId) nunca
+    // anexa — nao ha um projeto unico a resumir.
+    const attachments: EmailAttachment[] = [];
+    if (data.closing.projectId && data.project?.billingAttachHours) {
+      const attachment = await buildProjectHoursAttachment({
+        projectId: data.closing.projectId,
+        projectName: data.project.name,
+        month: data.closing.month,
+        year: data.closing.year,
+      });
+      if (attachment) attachments.push(attachment);
+    }
+
+    // PRE_INVOICE_ISSUED rule (/app/admin/notificacoes). We pass the P4 billing
+    // recipients as EVENT_TARGET-style targets; both the fallback (no rule) and
+    // the CLIENT_CONTACT recipient type now resolve to the client's
+    // billingEmails (see resolveClientContact), so no configuration silently
+    // drops the cobrança list. If the admin turned the event off, do not send
+    // and do not log SENT (so re-enabling lets it send later).
     const delivery = await resolveEventDelivery("PRE_INVOICE_ISSUED", {
       context: { clientId: data.client.id },
-      targets: [{ email: contactEmail, name: data.client.name }],
+      targets: recipients.map((email) => ({ email, name: data.client.name })),
     });
     if (delivery.skip || delivery.emails.length === 0) {
       return { ok: true, data: { emailed: false, alreadySent: false } };
     }
     const toEmails = delivery.emails;
+    const recipientLog = toEmails.join(", ");
 
     let status: "SENT" | "FAILED" = "SENT";
     let error: string | null = null;
@@ -777,6 +925,7 @@ export async function sendPreInvoiceEmail(input: {
         subject: preInvoiceEmail.subject,
         text: preInvoiceEmail.text,
         html: preInvoiceEmail.html,
+        ...(attachments.length > 0 ? { attachments } : {}),
       });
       messageId = sent.id;
       provider = sent.provider;
@@ -793,16 +942,28 @@ export async function sendPreInvoiceEmail(input: {
       create: {
         type: "PRE_INVOICE",
         referenceKey,
-        recipient: contactEmail,
+        recipient: recipientLog,
         status,
         error,
-        meta: { messageId, provider, competence: preInvoice.competence },
+        meta: {
+          messageId,
+          provider,
+          competence: preInvoice.competence,
+          recipients: toEmails,
+          attachedHours: attachments.length > 0,
+        },
       },
       update: {
-        recipient: contactEmail,
+        recipient: recipientLog,
         status,
         error,
-        meta: { messageId, provider, competence: preInvoice.competence },
+        meta: {
+          messageId,
+          provider,
+          competence: preInvoice.competence,
+          recipients: toEmails,
+          attachedHours: attachments.length > 0,
+        },
       },
     });
 
@@ -813,10 +974,12 @@ export async function sendPreInvoiceEmail(input: {
         entityId: data.closing.id,
         action: "REVENUE_PRE_INVOICE_EMAILED",
         after: {
-          recipient: contactEmail,
+          recipient: recipientLog,
+          recipients: toEmails,
           competence: preInvoice.competence,
           status,
           provider,
+          attachedHours: attachments.length > 0,
         },
       }),
     });

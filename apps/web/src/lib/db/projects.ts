@@ -350,6 +350,9 @@ export async function listProjects(options?: {
       billingHourlyRate: includeFinancials
         ? decimalToNumber(row.billingHourlyRate)
         : undefined,
+      // Flag de anexo de horas na cobrança (P4): controle de faturamento,
+      // mascarado junto dos demais dados financeiros.
+      billingAttachHours: includeFinancials ? row.billingAttachHours : undefined,
       budgetHours: includeFinancials ? decimalToNumber(row.budgetHours) : undefined,
       // Centro de custo é um dado operacional (não um valor financeiro
       // sensível), então é retornado a qualquer perfil que veja o projeto.
