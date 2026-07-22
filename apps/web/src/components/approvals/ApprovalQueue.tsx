@@ -11,6 +11,7 @@ import {
   X,
 } from "lucide-react";
 import { ActionButton } from "@/components/ui/ActionButton";
+import { ExportExcelButton } from "@/components/ui/ExportExcelButton";
 import { SectionPanel } from "@/components/ui/SectionPanel";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -267,6 +268,25 @@ export function ApprovalQueue({
     const qs = params.toString();
     return `/api/relatorios/horas${qs ? `?${qs}` : ""}`;
   }, [reportFilterOptions, filters]);
+
+  // Excel export (Onda 6) of the WHOLE queue the user sees (hours + expenses),
+  // via the dedicated /api/aprovacoes/export route. The route rebuilds the same
+  // scoped queue server-side and reapplies these filters by NAME (no id
+  // resolution needed), so it mirrors the visible list exactly. Hidden in demo.
+  const xlsxHref = useMemo<string | null>(() => {
+    if (demoBanner) return null;
+    const params = new URLSearchParams();
+    if (kind !== "ALL") params.set("kind", kind);
+    if (filters.status !== "ALL") params.set("status", filters.status);
+    if (filters.client) params.set("client", filters.client);
+    if (filters.project) params.set("project", filters.project);
+    if (filters.consultant) params.set("consultant", filters.consultant);
+    if (filters.activity) params.set("activity", filters.activity);
+    if (filters.startDate) params.set("from", filters.startDate);
+    if (filters.endDate) params.set("to", filters.endDate);
+    const qs = params.toString();
+    return `/api/aprovacoes/export${qs ? `?${qs}` : ""}`;
+  }, [demoBanner, kind, filters]);
 
   const counts = useMemo(() => summarizeApprovals(filtered), [filtered]);
   const pending = useMemo(() => pendingApprovals(filtered), [filtered]);
@@ -714,6 +734,7 @@ export function ApprovalQueue({
                 Exportar CSV
               </a>
             ) : null}
+            {xlsxHref ? <ExportExcelButton href={xlsxHref} /> : null}
           </div>
         </div>
       </SectionPanel>

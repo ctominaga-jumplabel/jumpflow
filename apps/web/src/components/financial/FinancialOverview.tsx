@@ -31,6 +31,10 @@ export interface FinancialOverviewProps {
   exceptionsByProject?: RevenueExceptionsByProject;
   /** Tab pré-selecionada (?tab=), preservada no client. */
   defaultTab?: string;
+  /** `.xlsx` export href da aba Contas a Receber (Onda 6). db mode. */
+  receberExportHref?: string;
+  /** `.xlsx` export href da aba Contas a Pagar (Onda 6). db mode. */
+  pagarExportHref?: string;
 }
 
 /**
@@ -49,6 +53,8 @@ export function FinancialOverview({
   exceptions,
   exceptionsByProject,
   defaultTab,
+  receberExportHref,
+  pagarExportHref,
 }: FinancialOverviewProps) {
   const overview =
     revenueClosing ??
@@ -92,6 +98,7 @@ export function FinancialOverview({
         year={overview.year}
         monthLabel={monthLabel}
         exceptionsByProject={exceptionsByProject}
+        exportHref={receberExportHref}
       />
       {exceptions ? (
         <PeriodExceptionsPanel exceptions={exceptions} monthLabel={monthLabel} />
@@ -104,6 +111,7 @@ export function FinancialOverview({
       mode={expensesMode}
       expenses={financeExpenses}
       storageAvailable={expensesStorageAvailable}
+      exportHref={pagarExportHref}
     />
   );
 

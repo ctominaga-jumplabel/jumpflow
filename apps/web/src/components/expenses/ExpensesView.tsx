@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState, useTransition } from "react";
 import { Download, ExternalLink, Plus, TriangleAlert, X } from "lucide-react";
 import { ActionButton } from "@/components/ui/ActionButton";
+import { ExportExcelButton } from "@/components/ui/ExportExcelButton";
 import { FilterChip } from "@/components/ui/FilterChip";
 import { SectionPanel } from "@/components/ui/SectionPanel";
 import { Modal } from "@/components/ui/Modal";
@@ -127,6 +128,22 @@ export function ExpensesView(props: ExpensesViewProps) {
 
   const filtered = useMemo(() => filterExpenses(items, filter), [items, filter]);
   const totals = useMemo(() => summarizeExpenses(filtered), [filtered]);
+
+  /**
+   * `.xlsx` export (Onda 6) via the shared Relatorios endpoint, carrying the
+   * current screen filter. The server recomputes the report scope from the real
+   * user (a consultant only ever exports their own expenses), so this href can
+   * never widen what is visible.
+   */
+  function expenseXlsxHref(): string {
+    const params = new URLSearchParams();
+    if (status !== "ALL") params.set("status", status);
+    if (projectId !== "ALL") params.set("projectId", projectId);
+    if (from) params.set("from", from);
+    if (to) params.set("to", to);
+    const qs = params.toString();
+    return `/api/relatorios/despesas/xlsx${qs ? `?${qs}` : ""}`;
+  }
 
   const projectOptions = useMemo(() => {
     const seen = new Map<string, string>();
@@ -449,14 +466,17 @@ export function ExpensesView(props: ExpensesViewProps) {
         title="Filtros"
         description="Refine por status, projeto e período."
         action={
-          <ActionButton
-            variant="primary"
-            size="sm"
-            icon={Plus}
-            onClick={openNew}
-          >
-            Nova despesa
-          </ActionButton>
+          <div className="flex items-center gap-2">
+            {isDemo ? null : <ExportExcelButton href={expenseXlsxHref()} />}
+            <ActionButton
+              variant="primary"
+              size="sm"
+              icon={Plus}
+              onClick={openNew}
+            >
+              Nova despesa
+            </ActionButton>
+          </div>
         }
       >
         <div className="space-y-4 px-5 py-4">

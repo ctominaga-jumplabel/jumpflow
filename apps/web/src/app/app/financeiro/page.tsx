@@ -110,6 +110,22 @@ export default async function FinanceiroPage({
     revenueClosingStatusLabels,
   ) as RevenueClosingStatus[];
 
+  // Excel export (Onda 6): Contas a Receber carrega o filtro corrente (período +
+  // cliente/projeto/status); Contas a Pagar espelha a fila do financeiro (sem
+  // filtro de período próprio). Ocultos sem banco.
+  let receberExportHref: string | undefined;
+  let pagarExportHref: string | undefined;
+  if (databaseConfigured) {
+    const receberQuery = new URLSearchParams();
+    receberQuery.set("month", String(month));
+    receberQuery.set("year", String(year));
+    if (clientName) receberQuery.set("client", clientName);
+    if (projectName) receberQuery.set("project", projectName);
+    if (status) receberQuery.set("status", status);
+    receberExportHref = `/api/financeiro/receber/export?${receberQuery.toString()}`;
+    pagarExportHref = "/api/financeiro/pagar/export";
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -200,6 +216,8 @@ export default async function FinanceiroPage({
         exceptions={exceptions}
         exceptionsByProject={exceptionsByProject}
         defaultTab={tab}
+        receberExportHref={receberExportHref}
+        pagarExportHref={pagarExportHref}
       />
     </div>
   );

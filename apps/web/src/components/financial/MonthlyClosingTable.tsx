@@ -16,6 +16,7 @@ import {
   Users,
 } from "lucide-react";
 import { ActionButton } from "@/components/ui/ActionButton";
+import { ExportExcelButton } from "@/components/ui/ExportExcelButton";
 import { DataTable, type DataTableColumn } from "@/components/ui/DataTable";
 import { FeedbackBanner, useFeedback } from "@/components/ui/Feedback";
 import { Modal } from "@/components/ui/Modal";
@@ -67,6 +68,8 @@ export interface MonthlyClosingTableProps {
   month: number;
   year: number;
   monthLabel: string;
+  /** `.xlsx` export href (Onda 6), already carrying the screen filter. db only. */
+  exportHref?: string;
   /**
    * Time-entry exceptions of the period grouped by projectId (P5). Drives the
    * per-line "Exceções" indicator + drill-down. Absent in demo mode.
@@ -85,6 +88,7 @@ export function MonthlyClosingTable({
   year,
   monthLabel,
   exceptionsByProject,
+  exportHref,
 }: MonthlyClosingTableProps) {
   const isDemo = mode === "demo";
   const [isPending, startTransition] = useTransition();
@@ -589,15 +593,20 @@ export function MonthlyClosingTable({
         title="Fechamento mensal"
         description={`Horas aprovadas por cliente e projeto - ${monthLabel}`}
         action={
-          <ActionButton
-            variant="primary"
-            size="sm"
-            icon={RotateCw}
-            disabled={isPending}
-            onClick={handleGenerate}
-          >
-            Gerar/recalcular
-          </ActionButton>
+          <div className="flex items-center gap-2">
+            {!isDemo && exportHref ? (
+              <ExportExcelButton href={exportHref} />
+            ) : null}
+            <ActionButton
+              variant="primary"
+              size="sm"
+              icon={RotateCw}
+              disabled={isPending}
+              onClick={handleGenerate}
+            >
+              Gerar/recalcular
+            </ActionButton>
+          </div>
         }
       >
         <DataTable

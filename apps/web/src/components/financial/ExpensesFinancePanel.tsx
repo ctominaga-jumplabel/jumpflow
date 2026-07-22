@@ -14,6 +14,7 @@ import { SectionPanel } from "@/components/ui/SectionPanel";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Modal } from "@/components/ui/Modal";
 import { ActionButton } from "@/components/ui/ActionButton";
+import { ExportExcelButton } from "@/components/ui/ExportExcelButton";
 import { FeedbackBanner, useFeedback } from "@/components/ui/Feedback";
 import { cn } from "@/lib/utils";
 import { focusRingInput } from "@/lib/styles";
@@ -38,6 +39,8 @@ export interface ExpensesFinancePanelProps {
   expenses?: Expense[];
   /** db mode: whether the receipt storage is configured (P17 bulk download). */
   storageAvailable?: boolean;
+  /** `.xlsx` export href (Onda 6) for the finance queue. db mode only. */
+  exportHref?: string;
 }
 
 /**
@@ -191,6 +194,9 @@ export function ExpensesFinancePanel(props: ExpensesFinancePanelProps) {
         description="Reembolsos aprovados pelo financeiro: agendamento, pagamento e cancelamento com motivo."
         action={
           <div className="flex items-center gap-3">
+            {!isDemo && props.exportHref ? (
+              <ExportExcelButton href={props.exportHref} />
+            ) : null}
             {!isDemo ? (
               <ActionButton
                 variant="secondary"

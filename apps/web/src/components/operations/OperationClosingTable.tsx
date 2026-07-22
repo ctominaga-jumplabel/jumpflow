@@ -4,6 +4,7 @@ import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { ChevronRight, Lock, RotateCcw, Users } from "lucide-react";
 import { ActionButton } from "@/components/ui/ActionButton";
+import { ExportExcelButton } from "@/components/ui/ExportExcelButton";
 import { DataTable, type DataTableColumn } from "@/components/ui/DataTable";
 import { FeedbackBanner, useFeedback } from "@/components/ui/Feedback";
 import { Modal } from "@/components/ui/Modal";
@@ -39,6 +40,8 @@ export interface OperationClosingTableProps {
   overview: OperationClosingOverview;
   canManage: boolean;
   monthLabel: string;
+  /** `.xlsx` export href for the month (Onda 6). Absent in demo/no-database. */
+  exportHref?: string;
 }
 
 function formatDate(iso: string | null): string {
@@ -80,6 +83,7 @@ export function OperationClosingTable({
   overview,
   canManage,
   monthLabel,
+  exportHref,
 }: OperationClosingTableProps) {
   const [isPending, startTransition] = useTransition();
   const { feedback, notify } = useFeedback();
@@ -284,7 +288,7 @@ export function OperationClosingTable({
         title="Fechamento operacional"
         description={`Horas do mês por projeto para o DP — ${monthLabel}`}
         action={
-          <div className="flex flex-wrap gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             {filters.map((f) => (
               <button
                 key={f.key}
@@ -299,6 +303,7 @@ export function OperationClosingTable({
                 {f.label} ({f.count})
               </button>
             ))}
+            {exportHref ? <ExportExcelButton href={exportHref} /> : null}
           </div>
         }
       >
