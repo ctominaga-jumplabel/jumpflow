@@ -12,6 +12,7 @@
  * The neo-brutalist frame/CTA degrade gracefully where box-shadow is dropped.
  */
 import { appConfig } from "@/config/app";
+import { COMPANY_LOGO_CID, PRODUCT_LOGO_CID } from "./inline-assets";
 import { emailTheme, toneColors, type EmailTone } from "./theme";
 
 const C = emailTheme.color;
@@ -188,6 +189,8 @@ interface ResolvedBrand {
   name: string;
   monogram: string;
   logoUrl: string | null;
+  /** Content-ID for the inline logo, referenced as `cid:<id>` in the <img>. */
+  logoCid: string;
   /**
    * A wordmark logo already contains the brand name and reads horizontally, so
    * it renders on its own (no icon tile, no repeated text). A non-wordmark logo
@@ -208,6 +211,7 @@ function resolveBrand(brand: EmailBrand): ResolvedBrand {
       name: appConfig.company.name,
       monogram: appConfig.company.monogram,
       logoUrl: appConfig.company.logoUrl,
+      logoCid: COMPANY_LOGO_CID,
       logoIsWordmark: true, // Jump logo is a horizontal wordmark (1369×310)
       logoWidth: 132,
       logoHeight: 30,
@@ -219,6 +223,7 @@ function resolveBrand(brand: EmailBrand): ResolvedBrand {
     name: appConfig.name,
     monogram: appConfig.monogram,
     logoUrl: appConfig.logoUrl,
+    logoCid: PRODUCT_LOGO_CID,
     logoIsWordmark: false, // JumpFlow logo is a square icon
     logoWidth: 30,
     logoHeight: 30,
@@ -239,9 +244,9 @@ function renderHeaderCells(b: ResolvedBrand): string {
     "border:0;outline:none;text-decoration:none;display:block;";
 
   if (b.logoUrl && b.logoIsWordmark) {
-    return `<td style="vertical-align:middle;"><img src="${esc(
-      b.logoUrl,
-    )}" width="${b.logoWidth}" height="${b.logoHeight}" alt="${esc(
+    return `<td style="vertical-align:middle;"><img src="cid:${
+      b.logoCid
+    }" width="${b.logoWidth}" height="${b.logoHeight}" alt="${esc(
       b.name,
     )}" style="${imgReset}height:${b.logoHeight}px;width:auto;" /></td>`;
   }
@@ -253,9 +258,9 @@ function renderHeaderCells(b: ResolvedBrand): string {
     C.ink +
     ";text-align:center;vertical-align:middle;";
   const tile = b.logoUrl
-    ? `<td style="${tileBase}background:${C.surface};"><img src="${esc(
-        b.logoUrl,
-      )}" width="${b.logoWidth}" height="${b.logoHeight}" alt="${esc(
+    ? `<td style="${tileBase}background:${C.surface};"><img src="cid:${
+        b.logoCid
+      }" width="${b.logoWidth}" height="${b.logoHeight}" alt="${esc(
         b.name,
       )}" style="${imgReset}margin:0 auto;" /></td>`
     : `<td style="${tileBase}background:${C.ink};color:#ffffff;font-weight:800;font-size:16px;">${esc(
@@ -290,9 +295,7 @@ function renderCompanyMarkCell(brand: EmailBrand): string {
   // Jump wordmark is 1369×310 → keep aspect ratio at 24px tall.
   const h = 24;
   const w = 106;
-  return `<td align="right" style="vertical-align:middle;text-align:right;"><img src="${esc(
-    url,
-  )}" width="${w}" height="${h}" alt="${esc(
+  return `<td align="right" style="vertical-align:middle;text-align:right;"><img src="cid:${COMPANY_LOGO_CID}" width="${w}" height="${h}" alt="${esc(
     appConfig.company.name,
   )}" style="border:0;outline:none;text-decoration:none;display:inline-block;height:${h}px;width:auto;" /></td>`;
 }

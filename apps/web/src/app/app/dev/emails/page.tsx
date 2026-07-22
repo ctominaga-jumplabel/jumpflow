@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth/guards";
+import { inlinePreviewHtml } from "@/lib/automation/email/inline-assets";
 import { EmailPreview } from "./EmailPreview";
 import { SAMPLE_EMAILS } from "./samples";
 
@@ -24,7 +25,9 @@ export default async function EmailPreviewPage() {
       key: sample.key,
       label: sample.label,
       subject: built.subject,
-      html: built.html,
+      // The email uses `cid:` logo refs (inline on real sends); the browser
+      // preview can't resolve those, so swap them to the public https URL.
+      html: inlinePreviewHtml(built.html),
     };
   });
 

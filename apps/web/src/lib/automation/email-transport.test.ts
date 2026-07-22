@@ -80,6 +80,46 @@ describe("getEmailTransport — resend provider", () => {
     expect(decoded).toBe(CSV_CONTENT);
   });
 
+  it("passes inline (base64) attachments through without re-encoding and maps content_id", async () => {
+    vi.stubEnv("EMAIL_PROVIDER", "resend");
+    vi.stubEnv("RESEND_API_KEY", "re_test");
+    vi.stubEnv("RESEND_FROM_EMAIL", "no-reply@x.com");
+
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ id: "resend-123" }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const pngBase64 = Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString("base64");
+    await getEmailTransport().send(
+      message({
+        html: '<img src="cid:logo" alt="x" />',
+        attachments: [
+          {
+            filename: "logo.png",
+            content: pngBase64,
+            contentType: "image/png",
+            contentId: "logo",
+            encoding: "base64",
+          },
+        ],
+      }),
+    );
+
+    // Only the Resend POST — no brand asset to fetch (cid:logo isn't a brand id).
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, init] = fetchMock.mock.calls[0] as unknown as [
+      string,
+      { body: string },
+    ];
+    const att = JSON.parse(init.body).attachments[0];
+    // base64 content is forwarded verbatim (not double-encoded).
+    expect(att.content).toBe(pngBase64);
+    expect(att.content_type).toBe("image/png");
+    expect(att.content_id).toBe("logo");
+  });
+
   it("throws a safe error (no api key) when Resend responds with a failure", async () => {
     vi.stubEnv("EMAIL_PROVIDER", "resend");
     vi.stubEnv("RESEND_API_KEY", "re_test");
