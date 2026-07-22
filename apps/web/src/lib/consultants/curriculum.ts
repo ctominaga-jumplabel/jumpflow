@@ -73,6 +73,18 @@ export interface CurriculumSourceData {
     expiresAt: Date | null;
     credentialUrl: string | null;
   }>;
+  /**
+   * Experiencias profissionais DECLARADAS pelo consultor (P27). Sao a ESPINHA
+   * do historico profissional; as allocations (abaixo) entram como complemento.
+   */
+  experiences: Array<{
+    company: string;
+    role: string;
+    startDate: Date;
+    endDate: Date | null;
+    description: string | null;
+    location: string | null;
+  }>;
   allocations: Array<{
     projectName: string;
     clientName: string | null;
@@ -123,6 +135,20 @@ export interface CurriculumCertificateEntry {
   credentialUrl: string | null;
 }
 
+/**
+ * Experiencia profissional DECLARADA (P27). Distinta de CurriculumProjectEntry
+ * (alocacao interna em projeto Jump): esta e a experiencia informada pelo
+ * consultor. `current` = experiencia em andamento (sem data de termino).
+ */
+export interface CurriculumExperienceEntry {
+  company: string;
+  role: string;
+  period: string;
+  location: string | null;
+  description: string | null;
+  current: boolean;
+}
+
 export interface CurriculumProjectEntry {
   projectName: string;
   clientName: string | null;
@@ -144,6 +170,9 @@ export interface ConsultantCurriculum {
   languages: CurriculumLanguageEntry[];
   skills: CurriculumSkillEntry[];
   certificates: CurriculumCertificateEntry[];
+  /** Experiencia profissional declarada (espinha do historico — P27). */
+  professionalExperience: CurriculumExperienceEntry[];
+  /** Historico derivado de alocacoes internas (complemento). */
   projects: CurriculumProjectEntry[];
   highlights: CurriculumHighlight[];
 }
@@ -218,6 +247,22 @@ export function assembleCurriculum(
     }))
     .sort((a, b) => b.issuedAt.localeCompare(a.issuedAt));
 
+  // Experiencias DECLARADAS: atuais (sem termino) primeiro, depois por inicio
+  // decrescente. E a espinha do historico profissional (P27).
+  const professionalExperience: CurriculumExperienceEntry[] = data.experiences
+    .map((entry) => ({
+      company: entry.company,
+      role: entry.role,
+      period: formatAllocationPeriod(entry.startDate, entry.endDate),
+      location: entry.location,
+      description: entry.description,
+      current: entry.endDate === null,
+    }))
+    .sort((a, b) => {
+      if (a.current !== b.current) return a.current ? -1 : 1;
+      return b.period.localeCompare(a.period);
+    });
+
   const projects: CurriculumProjectEntry[] = data.allocations
     .map((entry) => ({
       projectName: entry.projectName,
@@ -249,6 +294,7 @@ export function assembleCurriculum(
     languages,
     skills,
     certificates,
+    professionalExperience,
     projects,
     highlights,
   };
@@ -305,6 +351,16 @@ export async function buildConsultantCurriculum(
           credentialUrl: true,
         },
       },
+      experiences: {
+        select: {
+          company: true,
+          role: true,
+          startDate: true,
+          endDate: true,
+          description: true,
+          location: true,
+        },
+      },
       allocations: {
         select: {
           role: true,
@@ -348,6 +404,14 @@ export async function buildConsultantCurriculum(
         row.yearsExperience != null ? Number(row.yearsExperience) : null,
     })),
     certificates: consultant.certificates,
+    experiences: consultant.experiences.map((row) => ({
+      company: row.company,
+      role: row.role,
+      startDate: row.startDate,
+      endDate: row.endDate,
+      description: row.description,
+      location: row.location,
+    })),
     allocations: consultant.allocations.map((row) => ({
       projectName: row.project.name,
       clientName: row.project.client?.name ?? null,

@@ -14,9 +14,11 @@ import {
 } from "lucide-react";
 import { ActionButton } from "@/components/ui/ActionButton";
 import { DataToolbar } from "@/components/ui/DataToolbar";
+import { DataTable, type DataTableColumn } from "@/components/ui/DataTable";
 import { FilterChip } from "@/components/ui/FilterChip";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Modal } from "@/components/ui/Modal";
+import { SectionPanel } from "@/components/ui/SectionPanel";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { focusRingInput } from "@/lib/styles";
 import { cn } from "@/lib/utils";
@@ -61,7 +63,6 @@ import { computeCompensation } from "@/lib/consultants/compensation";
 import { ConsultantAvailabilityBadge } from "./ConsultantAvailabilityBadge";
 import { ConsultantCurriculumSection } from "./ConsultantCurriculumSection";
 import { ConsultantProfileSections } from "./ConsultantProfileSections";
-import { ConsultantSkillChips } from "./ConsultantSkillChips";
 
 const SENIORITY_FILTERS: (Seniority | "ALL")[] = [
   "ALL",
@@ -79,7 +80,10 @@ export interface ConsultantDirectoryProps {
 
 /**
  * Searchable consultant directory. Search by name/title/area, filter by
- * seniority and skill. Dense card grid so each consultant reads as a unit.
+ * seniority and skill. Presented as a clean, scannable LIST (DataTable): one
+ * row per consultant with the key operational columns, and a "Detalhes" action
+ * that opens the full profile view (ConsultantDetailModal). Gating (People /
+ * Financeiro) is preserved end to end.
  */
 export function ConsultantDirectory({
   consultants = allConsultants,
@@ -147,6 +151,69 @@ export function ConsultantDirectory({
     [consultants, search, seniority, skillId],
   );
 
+  const columns: DataTableColumn<Consultant>[] = [
+    {
+      key: "name",
+      header: "Nome",
+      cell: (c) => (
+        <div className="min-w-0">
+          <p className="truncate font-semibold text-strong">{c.name}</p>
+          {c.topSkills.length > 0 ? (
+            <p className="truncate text-xs text-soft">
+              {c.topSkills.map((s) => s.name).join(" · ")}
+            </p>
+          ) : null}
+        </div>
+      ),
+    },
+    {
+      key: "role",
+      header: "Cargo · Área",
+      cell: (c) => (
+        <span className="text-medium">
+          {[c.jobTitle, c.area].filter(Boolean).join(" · ") || "—"}
+        </span>
+      ),
+    },
+    {
+      key: "seniority",
+      header: "Senioridade",
+      cell: (c) => seniorityLabels[c.seniority],
+    },
+    {
+      key: "availability",
+      header: "Disponibilidade",
+      cell: (c) => (
+        <ConsultantAvailabilityBadge allocationPercent={c.allocationPercent} />
+      ),
+    },
+    {
+      key: "status",
+      header: "Status",
+      cell: (c) =>
+        c.status === "INACTIVE" ? (
+          <StatusBadge tone="neutral">Inativo</StatusBadge>
+        ) : (
+          <StatusBadge tone="success">Ativo</StatusBadge>
+        ),
+    },
+    {
+      key: "actions",
+      header: "",
+      align: "right",
+      cell: (c) => (
+        <ActionButton
+          variant="secondary"
+          size="sm"
+          icon={Edit}
+          onClick={() => void openDetails(c)}
+        >
+          Detalhes
+        </ActionButton>
+      ),
+    },
+  ];
+
   return (
     <div className="space-y-4">
       <DataToolbar
@@ -193,60 +260,24 @@ export function ConsultantDirectory({
         }
       />
 
-      {rows.length === 0 ? (
-        <EmptyState
-          icon={Users}
-          title="Nenhum consultor encontrado"
-          description="Ajuste a busca ou os filtros para encontrar outros perfis."
+      <SectionPanel
+        title="Consultores"
+        description={`${rows.length} ${rows.length === 1 ? "consultor" : "consultores"} no filtro atual`}
+      >
+        <DataTable
+          columns={columns}
+          rows={rows}
+          rowKey={(c) => c.id}
+          caption="Lista de consultores"
+          empty={
+            <EmptyState
+              icon={Users}
+              title="Nenhum consultor encontrado"
+              description="Ajuste a busca ou os filtros para encontrar outros perfis."
+            />
+          }
         />
-      ) : (
-        <ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {rows.map((consultant) => (
-            <li
-              key={consultant.id}
-              className="rounded-[var(--radius-card)] border-2 border-ink bg-surface p-4 shadow-[4px_4px_0_0_var(--color-ink)]"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="truncate font-semibold text-strong">
-                    {consultant.name}
-                  </p>
-                  <p className="truncate text-xs text-soft">
-                    {consultant.jobTitle} · {consultant.area}
-                  </p>
-                </div>
-                {consultant.status === "INACTIVE" ? (
-                  <StatusBadge tone="neutral">Inativo</StatusBadge>
-                ) : (
-                  <StatusBadge tone="info">
-                    {seniorityLabels[consultant.seniority]}
-                  </StatusBadge>
-                )}
-              </div>
-
-              <div className="mt-3">
-                <ConsultantAvailabilityBadge
-                  allocationPercent={consultant.allocationPercent}
-                />
-              </div>
-
-              <div className="mt-3 border-t border-border pt-3">
-                <ConsultantSkillChips skills={consultant.topSkills} />
-              </div>
-              <div className="mt-4 flex justify-end">
-                <ActionButton
-                  variant="secondary"
-                  size="sm"
-                  icon={Edit}
-                  onClick={() => void openDetails(consultant)}
-                >
-                  Detalhes
-                </ActionButton>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
+      </SectionPanel>
       <ConsultantDetailModal
         consultant={selected}
         profile={profile}

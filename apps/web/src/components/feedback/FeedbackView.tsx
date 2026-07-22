@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { MessageSquareHeart, Plus } from "lucide-react";
+import { Mail, MessageSquareHeart, Plus } from "lucide-react";
 import { ActionButton } from "@/components/ui/ActionButton";
 import { DataToolbar } from "@/components/ui/DataToolbar";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -21,6 +21,7 @@ import {
 import type { FeedbackFlags } from "@/lib/feedback/flags";
 import { FeedbackTimeline } from "./FeedbackTimeline";
 import { FeedbackFormModal } from "./FeedbackFormModal";
+import { FeedbackRequestModal } from "./FeedbackRequestModal";
 
 type TypeFilter = "ALL" | FeedbackType;
 type SourceFilter = "ALL" | FeedbackSource;
@@ -33,6 +34,11 @@ export interface FeedbackViewProps {
   projects: ProjectOption[];
   clients: ClientOption[];
   flags: FeedbackFlags;
+  /**
+   * Explicação honesta de por que não há consultor no escopo de escrita (null
+   * quando há). Fix do "não consegui incluir": escopo de escrita vazio.
+   */
+  writeScopeNote: string | null;
 }
 
 /**
@@ -49,12 +55,14 @@ export function FeedbackView({
   projects,
   clients,
   flags,
+  writeScopeNote,
 }: FeedbackViewProps) {
   const { feedback, notify } = useFeedback();
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("ALL");
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("ALL");
   const [subjectFilter, setSubjectFilter] = useState("");
   const [open, setOpen] = useState(false);
+  const [requestOpen, setRequestOpen] = useState(false);
 
   const subjectOptions = useMemo(() => {
     const seen = new Map<string, string>();
@@ -116,12 +124,27 @@ export function FeedbackView({
         }
         actions={
           canWrite ? (
-            <ActionButton icon={Plus} onClick={() => setOpen(true)}>
-              Novo feedback
-            </ActionButton>
+            <div className="flex flex-wrap gap-2">
+              <ActionButton
+                variant="secondary"
+                icon={Mail}
+                onClick={() => setRequestOpen(true)}
+              >
+                Solicitar ao cliente
+              </ActionButton>
+              <ActionButton icon={Plus} onClick={() => setOpen(true)}>
+                Novo feedback
+              </ActionButton>
+            </div>
           ) : null
         }
       />
+
+      {canWrite && writeScopeNote ? (
+        <p className="rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm text-warning">
+          {writeScopeNote}
+        </p>
+      ) : null}
 
       {subjectOptions.length > 1 ? (
         <label className="flex flex-wrap items-center gap-2 text-sm font-medium text-medium">
@@ -165,15 +188,26 @@ export function FeedbackView({
       </SectionPanel>
 
       {canWrite ? (
-        <FeedbackFormModal
-          open={open}
-          onClose={() => setOpen(false)}
-          consultants={consultants}
-          projects={projects}
-          clients={clients}
-          flags={flags}
-          notify={notify}
-        />
+        <>
+          <FeedbackFormModal
+            open={open}
+            onClose={() => setOpen(false)}
+            consultants={consultants}
+            projects={projects}
+            clients={clients}
+            flags={flags}
+            writeScopeNote={writeScopeNote}
+            notify={notify}
+          />
+          <FeedbackRequestModal
+            open={requestOpen}
+            onClose={() => setRequestOpen(false)}
+            consultants={consultants}
+            projects={projects}
+            clients={clients}
+            notify={notify}
+          />
+        </>
       ) : null}
     </div>
   );

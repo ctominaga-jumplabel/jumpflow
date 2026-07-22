@@ -235,13 +235,18 @@ export async function listProjectOptions(): Promise<ProjectOption[]> {
   }));
 }
 
-/** Active clients for the related-client select. */
+/** Active clients for the related-client select (carries a contact email). */
 export async function listClientOptions(): Promise<ClientOption[]> {
   if (!isDatabaseConfigured()) return [];
   const rows = await prisma.client.findMany({
     where: { status: "ACTIVE" },
-    select: { id: true, name: true },
+    select: { id: true, name: true, contactEmail: true, billingEmails: true },
     orderBy: { name: "asc" },
   });
-  return rows.map((row) => ({ id: row.id, name: row.name }));
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    // Prefill: prefere o primeiro e-mail de cobranca; senao o contato geral.
+    contactEmail: row.billingEmails[0] ?? row.contactEmail ?? undefined,
+  }));
 }

@@ -18,7 +18,16 @@ import {
   buildConsultantCurriculum,
   type ConsultantCurriculum,
 } from "@/lib/consultants/curriculum";
-import { curriculumBioSchema } from "@/lib/consultants/schemas";
+import {
+  listConsultantExperiences,
+  type ConsultantExperienceView,
+} from "@/lib/consultants/experiences";
+import {
+  curriculumBioSchema,
+  deleteExperienceSchema,
+  myExperienceSchema,
+  type MyExperienceInput,
+} from "@/lib/consultants/schemas";
 
 const SKILLS_PATH = "/app/skills";
 
@@ -473,6 +482,137 @@ export async function saveMyCurriculumBio(
 
     revalidatePath(SKILLS_PATH);
     return { ok: true, data: { consultantId: consultant.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Experiencia profissional — autosservico do consultor (P27, escopo de DONO)
+// ---------------------------------------------------------------------------
+//
+// O consultor cadastra/edita as PROPRIAS experiencias. O consultor e SEMPRE
+// resolvido do usuario logado (requireConsultant); o cliente NUNCA informa o
+// consultantId. Auditado. Sem dados financeiros.
+
+/** Le as experiencias declaradas do PROPRIO consultor logado. */
+export async function loadMyExperiences(): Promise<
+  ActionResult<ConsultantExperienceView[]>
+> {
+  try {
+    ensureDatabase();
+    const { consultant } = await requireConsultant();
+    const rows = await listConsultantExperiences(consultant.id);
+    return { ok: true, data: rows };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/** Cria ou atualiza uma experiencia do PROPRIO consultor logado. */
+export async function saveMyExperience(
+  input: MyExperienceInput,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    const result = myExperienceSchema.safeParse(input);
+    if (!result.success) {
+      throw new ActionError("INVALID_INPUT", "Revise os campos informados.");
+    }
+    const parsed = result.data;
+    const { user, consultant } = await requireConsultant();
+    const dbUser = await resolveDbUser(user);
+
+    const data = {
+      consultantId: consultant.id,
+      company: parsed.company,
+      role: parsed.role,
+      startDate: new Date(`${parsed.startDate}T00:00:00.000Z`),
+      endDate: parsed.endDate
+        ? new Date(`${parsed.endDate}T00:00:00.000Z`)
+        : null,
+      description: parsed.description ?? null,
+      location: parsed.location ?? null,
+    };
+
+    // Escopo de dono: ao editar, a linha precisa pertencer ao consultor logado.
+    let previous: unknown = null;
+    if (parsed.id) {
+      const existing = await prisma.consultantExperience.findFirst({
+        where: { id: parsed.id, consultantId: consultant.id },
+      });
+      if (!existing) {
+        throw new ActionError("NOT_FOUND", "Experiencia nao encontrada.");
+      }
+      previous = existing;
+    }
+
+    const row = await prisma.$transaction(async (tx) => {
+      const saved = parsed.id
+        ? await tx.consultantExperience.update({
+            where: { id: parsed.id },
+            data,
+          })
+        : await tx.consultantExperience.create({ data });
+      await tx.auditEvent.create({
+        data: buildAuditEventData({
+          actorUserId: dbUser?.id ?? null,
+          entityType: "ConsultantExperience",
+          entityId: saved.id,
+          action: parsed.id
+            ? "CONSULTANT_EXPERIENCE_SELF_UPDATED"
+            : "CONSULTANT_EXPERIENCE_SELF_CREATED",
+          before: previous,
+          after: data,
+        }),
+      });
+      return saved;
+    });
+
+    revalidatePath(SKILLS_PATH);
+    return { ok: true, data: { id: row.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/** Remove uma experiencia do PROPRIO consultor logado. */
+export async function deleteMyExperience(
+  input: z.infer<typeof deleteExperienceSchema>,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    const result = deleteExperienceSchema.safeParse(input);
+    if (!result.success) {
+      throw new ActionError("INVALID_INPUT", "Identificador invalido.");
+    }
+    const parsed = result.data;
+    const { user, consultant } = await requireConsultant();
+    const dbUser = await resolveDbUser(user);
+
+    const previous = await prisma.consultantExperience.findFirst({
+      where: { id: parsed.id, consultantId: consultant.id },
+    });
+    if (!previous) {
+      throw new ActionError("NOT_FOUND", "Experiencia nao encontrada.");
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.consultantExperience.delete({ where: { id: parsed.id } });
+      await tx.auditEvent.create({
+        data: buildAuditEventData({
+          actorUserId: dbUser?.id ?? null,
+          entityType: "ConsultantExperience",
+          entityId: parsed.id,
+          action: "CONSULTANT_EXPERIENCE_SELF_DELETED",
+          before: previous,
+          after: { consultantId: consultant.id },
+        }),
+      });
+    });
+
+    revalidatePath(SKILLS_PATH);
+    return { ok: true, data: { id: parsed.id } };
   } catch (error) {
     return toFailure(error);
   }

@@ -6,6 +6,8 @@ import {
   FEEDBACK_WRITE_ROLES,
   canManageFeedback,
   canWriteFeedback,
+  feedbackWriteScopeNote,
+  hasBroadFeedbackScope,
   resolveFeedbackReadScope,
   type FeedbackViewer,
 } from "./visibility";
@@ -185,5 +187,44 @@ describe("constantes de papel", () => {
     for (const role of FEEDBACK_WRITE_ROLES) {
       expect(known).toContain(role);
     }
+  });
+});
+
+describe("hasBroadFeedbackScope (P29)", () => {
+  it("é verdadeiro para ADMIN/PEOPLE e falso para gestores de projeto/área", () => {
+    expect(hasBroadFeedbackScope(["ADMIN"])).toBe(true);
+    expect(hasBroadFeedbackScope(["PEOPLE"])).toBe(true);
+    expect(hasBroadFeedbackScope(["PROJECT_MANAGER"])).toBe(false);
+    expect(hasBroadFeedbackScope(["AREA_MANAGER"])).toBe(false);
+    expect(hasBroadFeedbackScope([])).toBe(false);
+  });
+});
+
+describe("feedbackWriteScopeNote (P29 — fix do escopo vazio)", () => {
+  it("retorna null quando há consultores no escopo", () => {
+    expect(
+      feedbackWriteScopeNote({ broadScope: true, consultantCount: 3 }),
+    ).toBeNull();
+    expect(
+      feedbackWriteScopeNote({ broadScope: false, consultantCount: 1 }),
+    ).toBeNull();
+  });
+
+  it("explica escopo vazio de gestor (projeto/alocação) e o que fazer", () => {
+    const note = feedbackWriteScopeNote({
+      broadScope: false,
+      consultantCount: 0,
+    });
+    expect(note).toBeTruthy();
+    expect(note!.toLowerCase()).toContain("gestor");
+  });
+
+  it("explica escopo vazio amplo (ADMIN/PEOPLE sem consultores cadastrados)", () => {
+    const note = feedbackWriteScopeNote({
+      broadScope: true,
+      consultantCount: 0,
+    });
+    expect(note).toBeTruthy();
+    expect(note!.toLowerCase()).toContain("cadastre");
   });
 });

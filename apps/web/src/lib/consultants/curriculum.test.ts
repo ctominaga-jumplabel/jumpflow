@@ -49,6 +49,24 @@ function makeSource(
         credentialUrl: "https://example.com/cred",
       },
     ],
+    experiences: [
+      {
+        company: "Empresa Antiga",
+        role: "Analista",
+        startDate: new Date("2016-02-01T00:00:00.000Z"),
+        endDate: new Date("2019-12-31T00:00:00.000Z"),
+        description: "Analise de dados e relatorios.",
+        location: "Sao Paulo",
+      },
+      {
+        company: "Empresa Atual",
+        role: "Engenheira de Dados",
+        startDate: new Date("2020-01-01T00:00:00.000Z"),
+        endDate: null,
+        description: null,
+        location: null,
+      },
+    ],
     allocations: [
       {
         projectName: "Projeto Alpha",
@@ -80,6 +98,15 @@ describe("assembleCurriculum", () => {
     expect(cv.certificates[0].expiresAt).toBe("2026-05-10");
     expect(cv.projects[0].role).toBe("Tech Lead");
     expect(cv.projects[0].period).toBe("2024-01-01 - atual");
+    // Experiencia declarada (P27): a ATUAL (sem endDate) vem primeiro, depois a
+    // anterior por inicio decrescente.
+    expect(cv.professionalExperience).toHaveLength(2);
+    expect(cv.professionalExperience[0].company).toBe("Empresa Atual");
+    expect(cv.professionalExperience[0].current).toBe(true);
+    expect(cv.professionalExperience[0].period).toBe("2020-01-01 - atual");
+    expect(cv.professionalExperience[1].company).toBe("Empresa Antiga");
+    expect(cv.professionalExperience[1].current).toBe(false);
+    expect(cv.professionalExperience[1].period).toBe("2016-02-01 - 2019-12-31");
     expect(cv.highlights).toEqual([
       { label: "Planos de desenvolvimento ativos", value: "2" },
       { label: "Avaliacoes concluidas", value: "3" },
@@ -94,6 +121,7 @@ describe("assembleCurriculum", () => {
         languages: [],
         skills: [],
         certificates: [],
+        experiences: [],
         allocations: [],
         highlights: { developmentPlansActive: 0, evaluationsCompleted: 0 },
       }),
@@ -103,6 +131,7 @@ describe("assembleCurriculum", () => {
     expect(cv.languages).toEqual([]);
     expect(cv.skills).toEqual([]);
     expect(cv.certificates).toEqual([]);
+    expect(cv.professionalExperience).toEqual([]);
     expect(cv.projects).toEqual([]);
     expect(cv.highlights).toEqual([]);
   });
@@ -164,6 +193,7 @@ describe("assembleCurriculum", () => {
           "highlights",
           "identity",
           "languages",
+          "professionalExperience",
           "projects",
           "skills",
         ] satisfies (keyof ConsultantCurriculum)[]

@@ -5,6 +5,7 @@ import {
   Languages,
   Sparkles,
   Star,
+  Building2,
 } from "lucide-react";
 import type { ConsultantCurriculum } from "@/lib/consultants/curriculum";
 
@@ -36,12 +37,15 @@ export function CurriculumSubSection({ icon: Icon, title, children }: SubSection
  * agregador ja garante isso por construcao.
  */
 export function ConsultantCurriculumView({ cv }: { cv: ConsultantCurriculum }) {
+  // Defensivo: snapshots antigos (pre-P27) nao tem professionalExperience.
+  const professionalExperience = cv.professionalExperience ?? [];
   const hasAnyContent =
     cv.highlights.length > 0 ||
     cv.education.length > 0 ||
     cv.languages.length > 0 ||
     cv.skills.length > 0 ||
     cv.certificates.length > 0 ||
+    professionalExperience.length > 0 ||
     cv.projects.length > 0 ||
     Boolean(cv.identity.headline) ||
     Boolean(cv.identity.summary);
@@ -134,8 +138,30 @@ export function ConsultantCurriculumView({ cv }: { cv: ConsultantCurriculum }) {
         </CurriculumSubSection>
       ) : null}
 
+      {professionalExperience.length > 0 ? (
+        <CurriculumSubSection icon={Building2} title="Experiencia profissional">
+          <ul className="space-y-1.5 text-sm text-strong">
+            {professionalExperience.map((entry, index) => (
+              <li key={`${entry.company}-${index}`}>
+                <span className="font-medium">{entry.role}</span> — {entry.company}
+                {entry.location ? `, ${entry.location}` : ""} ({entry.period})
+                {entry.current ? " — atual" : ""}
+                {entry.description ? (
+                  <p className="whitespace-pre-line text-xs text-medium">
+                    {entry.description}
+                  </p>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </CurriculumSubSection>
+      ) : null}
+
       {cv.projects.length > 0 ? (
-        <CurriculumSubSection icon={Briefcase} title="Historico de projetos">
+        <CurriculumSubSection
+          icon={Briefcase}
+          title="Historico de alocacoes (interno)"
+        >
           <ul className="space-y-0.5 text-sm text-strong">
             {cv.projects.map((entry, index) => (
               <li key={`${entry.projectName}-${index}`}>

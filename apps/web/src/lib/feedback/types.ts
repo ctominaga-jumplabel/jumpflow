@@ -84,4 +84,10 @@ export interface ProjectOption {
 export interface ClientOption {
   id: string;
   name: string;
+  /**
+   * Contato de cobranca do cliente, para prefill do e-mail no pedido de
+   * feedback ao cliente (P29). Preferimos o primeiro billingEmail; senao o
+   * contactEmail. Pode ser undefined quando o cliente nao tem contato.
+   */
+  contactEmail?: string;
 }

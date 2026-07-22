@@ -798,6 +798,7 @@ model User {
   consultantPaymentsApproved  ConsultantPayment[]         @relation("ConsultantPaymentApprover")
   skillHistoryChanges         ConsultantSkillHistory[]    @relation("SkillHistoryChangedBy")
   feedbacksAuthored           Feedback[]                  @relation("FeedbackAuthor")
+  feedbackRequestsMade        FeedbackRequest[]           @relation("FeedbackRequestRequestedBy")
   evaluationCyclesCreated     EvaluationCycle[]           @relation("EvaluationCycleCreator")
   evaluationResponsesAsRater  EvaluationResponse[]        @relation("EvaluationResponseRater")
   developmentPlansOwned       DevelopmentPlan[]           @relation("DevelopmentPlanOwner")
@@ -1002,6 +1003,8 @@ model Consultant {
   documents           ConsultantDocument[]
   languages           ConsultantLanguage[]
   educations          ConsultantEducation[]
+  experiences         ConsultantExperience[]
+  feedbackRequests    FeedbackRequest[]              @relation("FeedbackRequestSubject")
   cltInfo             ConsultantCltInfo?
   vacations           ConsultantVacation[]
   hourBankEntries     ConsultantHourBankEntry[]
@@ -1210,6 +1213,27 @@ model ConsultantEducation {
   completed    Boolean         @default(false)
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
+
+  @@index([consultantId])
+}
+
+/// Experiencia profissional DECLARADA do consultor (P27 — curriculo-first). E a
+/// ESPINHA do historico profissional do curriculo, distinta das Allocation
+/// (alocacoes internas em projetos Jump, que seguem como complemento). 1:N,
+/// editavel pelo PROPRIO consultor e por People/RH. Sem dados financeiros.
+/// `endDate` null = experiencia atual (em andamento). Ordenavel por periodo.
+model ConsultantExperience {
+  id           String     @id @default(cuid())
+  consultantId String
+  consultant   Consultant @relation(fields: [consultantId], references: [id], onDelete: Restrict)
+  company      String
+  role         String
+  startDate    DateTime   @db.Date
+  endDate      DateTime?  @db.Date
+  description  String?
+  location     String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
 
   @@index([consultantId])
 }
@@ -1442,6 +1466,7 @@ model Client {
   revenueClosings   RevenueClosing[]
   fiscalDocuments   FiscalDocument[]
   feedbacks         Feedback[]
+  feedbackRequests  FeedbackRequest[]
   // Inteligencia comercial (Melhoria #4). Oportunidade/Case podem apontar para um
   // cliente (relatedClientId) com onDelete SetNull: o insight sobrevive ao cliente.
   opportunities     Opportunity[]
@@ -1515,6 +1540,7 @@ model Project {
   expenses                    Expense[]
   onCallEntries               OnCallEntry[]
   feedbacks                   Feedback[]
+  feedbackRequests            FeedbackRequest[]
   objectives                  Objective[]
   // Checkpoint/1-on-1 + inteligencia (Melhoria #4). Todas as FKs sao opcionais e
   // onDelete SetNull: o registro pode existir sem projeto e sobrevive a remocao dele.
@@ -2069,6 +2095,44 @@ model Feedback {
 
   @@index([subjectConsultantId])
   @@index([subjectConsultantId, createdAt])
+}
+
+/// Status de um pedido de feedback ao cliente (P29). SENT = e-mail entregue ao
+/// transporte (console/Resend); FAILED = falha no envio (guardada em `error`).
+enum FeedbackRequestStatus {
+  SENT
+  FAILED
+}
+
+/// Pedido de feedback ao cliente por e-mail (P29). Um usuario autorizado
+/// solicita, por e-mail, que o cliente avalie o trabalho de um consultor num
+/// projeto. Rastreia o disparo (para quem, quando, por quem, status). NAO
+/// contem o texto do feedback (o retorno vem por e-mail e e cadastrado depois
+/// como Feedback source=CLIENT). Espelha as relacoes de Feedback: subject em
+/// Cascade; cliente/projeto/solicitante em SetNull (preserva o historico).
+model FeedbackRequest {
+  id                  String                @id @default(cuid())
+  subjectConsultantId String
+  subjectConsultant   Consultant            @relation("FeedbackRequestSubject", fields: [subjectConsultantId], references: [id], onDelete: Cascade)
+  clientId            String?
+  client              Client?               @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  relatedProjectId    String?
+  relatedProject      Project?              @relation(fields: [relatedProjectId], references: [id], onDelete: SetNull)
+  /// E-mail para onde o pedido foi enviado (contato do cliente). Dado de
+  /// contato operacional; nunca expor alem do necessario.
+  email               String
+  requestedByUserId   String?
+  requestedBy         User?                 @relation("FeedbackRequestRequestedBy", fields: [requestedByUserId], references: [id], onDelete: SetNull)
+  status              FeedbackRequestStatus @default(SENT)
+  /// Provedor de e-mail efetivo (ex.: "console", "resend"). Diagnostico.
+  provider            String?
+  error               String?
+  sentAt              DateTime?
+  createdAt           DateTime              @default(now())
+
+  @@index([subjectConsultantId])
+  @@index([clientId])
+  @@index([createdAt])
 }
 
 /// Ciclo de avaliacao 90/180/360 (EP16). createdBy e SetNull para preservar o

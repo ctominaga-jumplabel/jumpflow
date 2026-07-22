@@ -56,6 +56,27 @@ export const feedbackVisibilitySchema = z.object({
   reason: z.string().trim().max(280).optional(),
 });
 
+/**
+ * P29 — Solicitar feedback ao cliente por e-mail. O e-mail e opcional no
+ * formulario: quando vazio, o servidor deriva do contato de cobranca do cliente
+ * (billingEmails[0] ou contactEmail). `note` e uma mensagem curta opcional do
+ * solicitante ao cliente (sem dados internos/financeiros).
+ */
+export const feedbackRequestSchema = z.object({
+  subjectConsultantId: entityId,
+  relatedProjectId: optionalRelation,
+  relatedClientId: optionalRelation,
+  email: z
+    .string()
+    .trim()
+    .max(160)
+    .email("Informe um e-mail valido.")
+    .optional()
+    .or(z.literal("").transform(() => undefined)),
+  note: z.string().trim().max(1000).optional(),
+});
+
 export type FeedbackCreateInput = z.infer<typeof feedbackCreateSchema>;
 export type FeedbackUpdateInput = z.infer<typeof feedbackUpdateSchema>;
 export type FeedbackVisibilityInput = z.infer<typeof feedbackVisibilitySchema>;
+export type FeedbackRequestInput = z.infer<typeof feedbackRequestSchema>;
