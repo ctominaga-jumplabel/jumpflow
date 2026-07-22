@@ -15,12 +15,17 @@ import {
 } from "@/lib/feedback/visibility";
 import {
   feedbackCreateSchema,
+  feedbackRequestSchema,
   feedbackUpdateSchema,
   feedbackVisibilitySchema,
   type FeedbackCreateInput,
+  type FeedbackRequestInput,
   type FeedbackUpdateInput,
   type FeedbackVisibilityInput,
 } from "@/lib/feedback/schemas";
+import { resolveFeedbackRequestEmail } from "@/lib/feedback/request-email";
+import { getEmailTransport } from "@/lib/automation/email-transport";
+import { buildFeedbackRequestEmail } from "@/lib/automation/email/feedback-request-template";
 
 const FEEDBACK_PATH = "/app/feedback";
 
@@ -272,6 +277,143 @@ export async function updateFeedback(
     );
     revalidatePath(FEEDBACK_PATH);
     return { ok: true, data: { id: parsed.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/**
+ * P29 — Solicitar feedback ao cliente por e-mail.
+ *
+ * Um gestor autorizado dispara um e-mail pedindo que o cliente avalie o trabalho
+ * de um consultor (opcionalmente ancorado num projeto/cliente). O e-mail sai
+ * pela marca da empresa e NAO expoe dado interno/financeiro. O envio usa o
+ * transporte configurado (getEmailTransport): sem provedor real, cai no console
+ * — degrade honesto, nunca finge envio. O disparo e rastreado em FeedbackRequest
+ * (status SENT/FAILED) + AuditEvent. O RBAC reaproveita canTargetConsultant, o
+ * mesmo escopo por consultor-alvo usado no createFeedback.
+ */
+export async function requestClientFeedback(
+  input: FeedbackRequestInput,
+): Promise<ActionResult<{ id: string; provider: string; email: string }>> {
+  try {
+    ensureDatabase();
+    const user = await requireRole(FEEDBACK_WRITE_ROLES);
+    const parsed = parseInput(feedbackRequestSchema, input);
+
+    if (!(await canTargetConsultant(user, parsed.subjectConsultantId))) {
+      throw new ActionError(
+        "FORBIDDEN",
+        "Voce nao pode solicitar feedback para este consultor.",
+      );
+    }
+
+    const { projectId, clientId } = await resolveRelations(
+      parsed.relatedProjectId,
+      parsed.relatedClientId,
+    );
+
+    const [consultant, project, client] = await Promise.all([
+      prisma.consultant.findUnique({
+        where: { id: parsed.subjectConsultantId },
+        select: { name: true },
+      }),
+      projectId
+        ? prisma.project.findUnique({
+            where: { id: projectId },
+            select: { name: true },
+          })
+        : Promise.resolve(null),
+      clientId
+        ? prisma.client.findUnique({
+            where: { id: clientId },
+            select: { name: true, contactEmail: true, billingEmails: true },
+          })
+        : Promise.resolve(null),
+    ]);
+
+    if (!consultant) {
+      throw new ActionError("NOT_FOUND", "Consultor nao encontrado.");
+    }
+
+    // E-mail explicito vence; senao deriva do contato de cobranca do cliente
+    // (billingEmails -> contactEmail). Regra pura testada em request-email.ts.
+    const email = resolveFeedbackRequestEmail(parsed.email, client);
+    if (!email) {
+      throw new ActionError(
+        "NO_CONTACT_EMAIL",
+        "Informe um e-mail do cliente ou cadastre o contato/e-mails de cobranca do cliente.",
+      );
+    }
+
+    const dbUser = await resolveDbUser(user);
+    const built = buildFeedbackRequestEmail({
+      consultantName: consultant.name,
+      projectName: project?.name,
+      clientName: client?.name,
+      requesterName: dbUser?.name,
+      note: parsed.note,
+    });
+
+    // Envio + rastreio. Falha no transporte NAO derruba a acao: registramos
+    // FeedbackRequest com status FAILED e devolvemos erro honesto.
+    let provider = "console";
+    let status: "SENT" | "FAILED" = "SENT";
+    let sendError: string | null = null;
+    try {
+      const result = await getEmailTransport().send({
+        to: [email],
+        subject: built.subject,
+        text: built.text,
+        html: built.html,
+      });
+      provider = result.provider;
+    } catch (err) {
+      status = "FAILED";
+      sendError = err instanceof Error ? err.message : "Falha no envio.";
+    }
+
+    const request = await prisma.feedbackRequest.create({
+      data: {
+        subjectConsultantId: parsed.subjectConsultantId,
+        clientId,
+        relatedProjectId: projectId,
+        email,
+        requestedByUserId: dbUser?.id ?? null,
+        status,
+        provider,
+        error: sendError,
+        sentAt: status === "SENT" ? new Date() : null,
+      },
+    });
+
+    await recordAuditEvent({
+      actorUserId: dbUser?.id ?? null,
+      entityType: "FeedbackRequest",
+      entityId: request.id,
+      // Distingue enviado de falho na trilha (o `after.status` também carrega).
+      action: status === "SENT" ? "FEEDBACK_REQUEST_SENT" : "FEEDBACK_REQUEST_FAILED",
+      before: null,
+      after: {
+        subjectConsultantId: parsed.subjectConsultantId,
+        clientId,
+        relatedProjectId: projectId,
+        email,
+        status,
+        provider,
+      },
+    });
+
+    revalidatePath(FEEDBACK_PATH);
+    if (status === "FAILED") {
+      // O e-mail EXISTIA; quem falhou foi o transporte — não é NO_CONTACT_EMAIL.
+      return {
+        ok: false,
+        error: "UNEXPECTED",
+        message: `Nao foi possivel enviar o pedido: ${sendError ?? "erro no transporte"}.`,
+      };
+    }
+    return { ok: true, data: { id: request.id, provider, email } };
   } catch (error) {
     return toFailure(error);
   }

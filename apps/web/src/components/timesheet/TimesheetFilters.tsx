@@ -3,6 +3,7 @@
 import { ChevronDown } from "lucide-react";
 import { SectionPanel } from "@/components/ui/SectionPanel";
 import { ActionButton } from "@/components/ui/ActionButton";
+import { ExportExcelButton } from "@/components/ui/ExportExcelButton";
 import { focusRing } from "@/lib/styles";
 import { cn } from "@/lib/utils";
 import {
@@ -103,7 +104,7 @@ export function TimesheetFilters({
    * link can never widen what the consultant may export. No page/pageSize ⇒
    * the whole filtered set is exported.
    */
-  function csvHref(): string {
+  function exportParams(): URLSearchParams {
     const params = new URLSearchParams();
     if (filter.clientId) params.set("clientId", filter.clientId);
     if (filter.projectId) params.set("projectId", filter.projectId);
@@ -114,8 +115,18 @@ export function TimesheetFilters({
     }
     if (filter.startDate) params.set("from", filter.startDate);
     if (filter.endDate) params.set("to", filter.endDate);
-    const qs = params.toString();
+    return params;
+  }
+
+  function csvHref(): string {
+    const qs = exportParams().toString();
     return `/api/relatorios/horas${qs ? `?${qs}` : ""}`;
+  }
+
+  /** Same filter as the CSV, but the `.xlsx` route (Onda 6). */
+  function xlsxHref(): string {
+    const qs = exportParams().toString();
+    return `/api/relatorios/horas/xlsx${qs ? `?${qs}` : ""}`;
   }
 
   function set<K extends keyof TimesheetFilter>(
@@ -387,15 +398,18 @@ export function TimesheetFilters({
               Limpar
             </a>
             {canExportCsv ? (
-              <a
-                href={csvHref()}
-                className={cn(
-                  "inline-flex h-8 items-center rounded-md border border-border bg-surface px-3 text-xs font-semibold text-medium hover:bg-surface-muted",
-                  focusRing,
-                )}
-              >
-                Exportar CSV
-              </a>
+              <>
+                <a
+                  href={csvHref()}
+                  className={cn(
+                    "inline-flex h-8 items-center rounded-md border border-border bg-surface px-3 text-xs font-semibold text-medium hover:bg-surface-muted",
+                    focusRing,
+                  )}
+                >
+                  Exportar CSV
+                </a>
+                <ExportExcelButton href={xlsxHref()} />
+              </>
             ) : null}
           </>
         )}

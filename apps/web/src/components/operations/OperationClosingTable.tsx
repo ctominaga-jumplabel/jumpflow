@@ -4,12 +4,15 @@ import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { ChevronRight, Lock, RotateCcw, Users } from "lucide-react";
 import { ActionButton } from "@/components/ui/ActionButton";
+import { ExportExcelButton } from "@/components/ui/ExportExcelButton";
 import { DataTable, type DataTableColumn } from "@/components/ui/DataTable";
 import { FeedbackBanner, useFeedback } from "@/components/ui/Feedback";
 import { Modal } from "@/components/ui/Modal";
 import { SectionPanel } from "@/components/ui/SectionPanel";
 import { StatusBadge, type StatusTone } from "@/components/ui/StatusBadge";
 import { formatHours } from "@/lib/format";
+import { cn } from "@/lib/utils";
+import { focusRingInput } from "@/lib/styles";
 import {
   consultantReadinessLabels,
   pendingAlert,
@@ -37,6 +40,8 @@ export interface OperationClosingTableProps {
   overview: OperationClosingOverview;
   canManage: boolean;
   monthLabel: string;
+  /** `.xlsx` export href for the month (Onda 6). Absent in demo/no-database. */
+  exportHref?: string;
 }
 
 function formatDate(iso: string | null): string {
@@ -78,11 +83,19 @@ export function OperationClosingTable({
   overview,
   canManage,
   monthLabel,
+  exportHref,
 }: OperationClosingTableProps) {
   const [isPending, startTransition] = useTransition();
   const { feedback, notify } = useFeedback();
   const [filter, setFilter] = useState<Filter>("PENDING");
   const [detail, setDetail] = useState<OperationClosingRow | null>(null);
+  // P16: reabrir um fechamento operacional é mudança sensível — exige
+  // justificativa capturada num diálogo (nunca window.confirm).
+  const [reopenDialog, setReopenDialog] = useState<OperationClosingRow | null>(
+    null,
+  );
+  const [reopenReason, setReopenReason] = useState("");
+  const [reopenError, setReopenError] = useState<string | null>(null);
 
   const rows = useMemo(() => {
     if (filter === "PENDING") {
@@ -106,15 +119,41 @@ export function OperationClosingTable({
     });
   }
 
-  function handleReopen(row: OperationClosingRow) {
+  function openReopenDialog(row: OperationClosingRow) {
+    setReopenReason("");
+    setReopenError(null);
+    setReopenDialog(row);
+  }
+
+  function dismissReopenDialog() {
+    setReopenDialog(null);
+    setReopenReason("");
+    setReopenError(null);
+  }
+
+  function handleConfirmReopen() {
+    if (!reopenDialog) return;
+    const text = reopenReason.trim();
+    if (!text) {
+      setReopenError(
+        "Informe uma justificativa para reabrir o fechamento operacional.",
+      );
+      return;
+    }
+    const row = reopenDialog;
     startTransition(async () => {
       const result = await reopenOperation({
         projectId: row.projectId,
         month: overview.month,
         year: overview.year,
+        justification: text,
       });
-      if (result.ok) notify("success", "Fechamento reaberto.");
-      else notify("warning", result.message);
+      if (result.ok) {
+        notify("success", "Fechamento reaberto.");
+        dismissReopenDialog();
+      } else {
+        setReopenError(result.message);
+      }
     });
   }
 
@@ -194,7 +233,7 @@ export function OperationClosingTable({
               variant="secondary"
               icon={RotateCcw}
               disabled={isPending}
-              onClick={() => handleReopen(r)}
+              onClick={() => openReopenDialog(r)}
             >
               Reabrir
             </ActionButton>
@@ -249,7 +288,7 @@ export function OperationClosingTable({
         title="Fechamento operacional"
         description={`Horas do mês por projeto para o DP — ${monthLabel}`}
         action={
-          <div className="flex flex-wrap gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             {filters.map((f) => (
               <button
                 key={f.key}
@@ -264,6 +303,7 @@ export function OperationClosingTable({
                 {f.label} ({f.count})
               </button>
             ))}
+            {exportHref ? <ExportExcelButton href={exportHref} /> : null}
           </div>
         }
       >
@@ -346,6 +386,62 @@ export function OperationClosingTable({
               })}
             </ul>
           )
+        ) : null}
+      </Modal>
+
+      <Modal
+        open={reopenDialog != null}
+        onClose={dismissReopenDialog}
+        title="Reabrir fechamento operacional"
+        description="Reabre um mês já fechado para o DP (ex.: correção tardia). A justificativa fica registrada na trilha de auditoria."
+        footer={
+          <>
+            <ActionButton
+              size="sm"
+              variant="secondary"
+              disabled={isPending}
+              onClick={dismissReopenDialog}
+            >
+              Cancelar
+            </ActionButton>
+            <ActionButton
+              size="sm"
+              variant="primary"
+              icon={RotateCcw}
+              disabled={isPending}
+              onClick={handleConfirmReopen}
+            >
+              Reabrir
+            </ActionButton>
+          </>
+        }
+      >
+        <label
+          htmlFor="reopen-justification"
+          className="mb-1 block text-xs font-semibold text-medium"
+        >
+          Justificativa <span className="font-normal text-soft">(obrigatoria)</span>
+        </label>
+        <textarea
+          id="reopen-justification"
+          value={reopenReason}
+          onChange={(e) => {
+            setReopenReason(e.target.value);
+            if (reopenError && e.target.value.trim().length > 0) {
+              setReopenError(null);
+            }
+          }}
+          rows={4}
+          aria-invalid={reopenError != null}
+          placeholder="Ex.: Consultor lançou horas fora do prazo; reabrindo para revalidar."
+          className={cn(
+            "w-full resize-y rounded-md border border-border bg-surface px-3 py-2 text-sm text-strong placeholder:text-soft",
+            focusRingInput,
+            reopenError && "border-danger",
+          )}
+        />
+        {reopenError ? (
+          <p className="mt-1 text-xs font-medium text-danger">{reopenError}</p>
         ) : null}
       </Modal>
     </div>

@@ -5,6 +5,7 @@ import {
   Banknote,
   CalendarClock,
   CheckCircle2,
+  Download,
   FileCheck2,
   FileText,
   Mail,
@@ -26,6 +27,15 @@ import {
   sendPaymentForecast,
 } from "@/app/app/pagamentos/actions";
 
+const contractTypeLabels: Record<
+  ConsultantPaymentView["contractType"],
+  string
+> = {
+  CLT: "CLT",
+  PJ: "PJ",
+  CLT_FLEX: "CLT Flex",
+};
+
 const toneByStatus: Record<ConsultantPaymentView["status"], StatusTone> = {
   OPEN: "neutral",
   WAITING_FOR_INVOICE: "warning",
@@ -43,6 +53,8 @@ export interface ConsultantPaymentsPanelProps {
   month: number;
   year: number;
   payments: ConsultantPaymentView[];
+  /** Rota do Excel já com o filtro aplicado (mês/ano/contratação). */
+  exportHref: string;
 }
 
 export function ConsultantPaymentsPanel({
@@ -50,6 +62,7 @@ export function ConsultantPaymentsPanel({
   month,
   year,
   payments,
+  exportHref,
 }: ConsultantPaymentsPanelProps) {
   const isDemo = mode === "demo";
   const [isPending, startTransition] = useTransition();
@@ -127,8 +140,19 @@ export function ConsultantPaymentsPanel({
       cell: (payment) => (
         <div>
           <p className="font-medium text-strong">{payment.consultantName}</p>
-          <p className="text-xs text-soft">{payment.contractType}</p>
+          <p className="text-xs text-soft">
+            {contractTypeLabels[payment.contractType]}
+          </p>
         </div>
+      ),
+    },
+    {
+      key: "cnpj",
+      header: "CNPJ",
+      cell: (payment) => (
+        <span className="text-xs tabular-nums text-medium">
+          {payment.cnpj ?? "—"}
+        </span>
       ),
     },
     {
@@ -315,6 +339,15 @@ export function ConsultantPaymentsPanel({
             <span className="text-sm font-semibold tabular-nums text-strong">
               {formatCurrency(total)}
             </span>
+            {isDemo ? null : (
+              <a
+                href={exportHref}
+                className="inline-flex h-8 items-center justify-center gap-2 rounded-md bg-surface px-3 text-xs font-semibold text-strong shadow-[2px_2px_0_0_var(--color-ink)]"
+              >
+                <Download aria-hidden="true" className="size-4" />
+                Exportar Excel
+              </a>
+            )}
             <ActionButton
               size="sm"
               variant="primary"

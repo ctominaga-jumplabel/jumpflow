@@ -141,7 +141,9 @@ describe("hoursReportFilterSchema", () => {
     expect(hoursReportFilterSchema.safeParse({ page: "-1" }).success).toBe(
       false,
     );
-    for (const size of [5, 10, 25, 50, 100, 250, 500]) {
+    // P24: legacy values stay accepted (backwards compatibility) and the new
+    // larger buckets (200/1000) are now valid too.
+    for (const size of [5, 10, 25, 50, 100, 200, 250, 500, 1000]) {
       expect(
         hoursReportFilterSchema.parse({ pageSize: String(size) }).pageSize,
       ).toBe(size);
@@ -149,9 +151,31 @@ describe("hoursReportFilterSchema", () => {
     expect(hoursReportFilterSchema.safeParse({ pageSize: "7" }).success).toBe(
       false,
     );
-    expect(hoursReportFilterSchema.safeParse({ pageSize: "200" }).success).toBe(
+    expect(hoursReportFilterSchema.safeParse({ pageSize: "300" }).success).toBe(
       false,
     );
+  });
+
+  it("offers only the intended page-size options (subset of the schema set)", async () => {
+    const { PAGE_SIZE_OPTIONS, PAGE_SIZES } = await import("./schemas");
+    expect([...PAGE_SIZE_OPTIONS]).toEqual([50, 100, 200, 500, 1000]);
+    // Every offered option must be schema-valid.
+    for (const size of PAGE_SIZE_OPTIONS) {
+      expect((PAGE_SIZES as readonly number[]).includes(size)).toBe(true);
+    }
+  });
+
+  it("pageSizeOptionsWith injeta um pageSize legado valido e ignora invalidos", async () => {
+    const { pageSizeOptionsWith } = await import("./schemas");
+    // Sem valor / valor padrao -> só as opcoes padrao.
+    expect(pageSizeOptionsWith(undefined)).toEqual([50, 100, 200, 500, 1000]);
+    expect(pageSizeOptionsWith(100)).toEqual([50, 100, 200, 500, 1000]);
+    // Legado valido (25/250) aparece, ordenado.
+    expect(pageSizeOptionsWith("25")).toEqual([25, 50, 100, 200, 500, 1000]);
+    expect(pageSizeOptionsWith(250)).toEqual([50, 100, 200, 250, 500, 1000]);
+    // Fora de PAGE_SIZES -> ignorado.
+    expect(pageSizeOptionsWith(37)).toEqual([50, 100, 200, 500, 1000]);
+    expect(pageSizeOptionsWith("abc")).toEqual([50, 100, 200, 500, 1000]);
   });
 
   it("validates the period preset enum", () => {

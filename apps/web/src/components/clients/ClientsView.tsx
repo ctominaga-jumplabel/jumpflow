@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState, useTransition } from "react";
+import type { KeyboardEvent } from "react";
 import {
   Building2,
   Edit,
@@ -10,6 +11,7 @@ import {
   Settings2,
   TriangleAlert,
   Upload,
+  X,
 } from "lucide-react";
 import { ActionButton } from "@/components/ui/ActionButton";
 import { DataTable, type DataTableColumn } from "@/components/ui/DataTable";
@@ -88,6 +90,7 @@ const emptyClient: ClientInput = {
   name: "",
   document: "",
   contactEmail: "",
+  billingEmails: [],
   logoUrl: "",
   billingTypeId: "",
   defaultHourlyRate: undefined,
@@ -118,6 +121,7 @@ function clientToInput(client: ClientItem): ClientInput {
     name: client.name,
     document: client.document ?? "",
     contactEmail: client.contactEmail ?? "",
+    billingEmails: client.billingEmails ?? [],
     // Persisted value (storage key or plain URL), not the signed display URL.
     logoUrl: client.logoRef ?? client.logoUrl ?? "",
     billingTypeId: client.billingTypeId ?? "",
@@ -175,6 +179,9 @@ export function ClientsView({
   const [editingClient, setEditingClient] = useState<ClientItem | null>(null);
   const [clientForm, setClientForm] = useState<ClientInput>(emptyClient);
   const [clientOpen, setClientOpen] = useState(false);
+  // Uncommitted billing-email draft, mirrored from the field so saveClient can
+  // absorb it without an extra re-render (see BillingEmailsField.onDraftChange).
+  const billingEmailsDraftRef = useRef("");
   // Display-only logo preview (signed URL from the server, or a plain URL).
   // Kept apart from clientForm.logoUrl, which carries the PERSISTED value.
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
@@ -344,6 +351,7 @@ export function ClientsView({
     setEditingClient(client ?? null);
     setClientForm(client ? clientToInput(client) : emptyClient);
     setLogoPreview(client?.logoUrl ?? null);
+    billingEmailsDraftRef.current = "";
     setClientOpen(true);
   }
 
@@ -390,10 +398,20 @@ export function ClientsView({
       setFeedback("Informe o nome do cliente.");
       return;
     }
+    // Absorve um e-mail de cobrança digitado mas ainda não confirmado (sem
+    // Enter/blur) — evita perder o endereço ao clicar direto em Salvar.
+    const form: ClientInput = {
+      ...clientForm,
+      billingEmails: mergeBillingEmailsDraft(
+        clientForm.billingEmails ?? [],
+        billingEmailsDraftRef.current,
+      ),
+    };
+    billingEmailsDraftRef.current = "";
     if (mode === "demo") {
-      const billingType = types.find((item) => item.id === clientForm.billingTypeId);
+      const billingType = types.find((item) => item.id === form.billingTypeId);
       const next: ClientItem = {
-        ...clientForm,
+        ...form,
         id: editingClient?.id ?? `cli-local-${Date.now()}`,
         billingTypeName: billingType?.name,
         projectCount: editingClient?.projectCount ?? 0,
@@ -409,8 +427,8 @@ export function ClientsView({
     }
     startTransition(async () => {
       const result = editingClient
-        ? await updateClient({ id: editingClient.id, ...clientForm })
-        : await createClient(clientForm);
+        ? await updateClient({ id: editingClient.id, ...form })
+        : await createClient(form);
       if (result.ok) {
         setClientOpen(false);
         setFeedback("Cliente salvo.");
@@ -604,6 +622,9 @@ export function ClientsView({
         isPending={isPending}
         onLookup={handleLookupCnpj}
         onSave={saveClient}
+        onBillingEmailsDraftChange={(draft) => {
+          billingEmailsDraftRef.current = draft;
+        }}
       />
       <BillingTypeModal
         open={typeOpen}
@@ -631,10 +652,117 @@ interface ClientModalProps {
   isPending: boolean;
   onLookup: () => void;
   onSave: () => void;
+  onBillingEmailsDraftChange: (draft: string) => void;
 }
 
 function fieldClass() {
   return cn("h-10 w-full rounded-md border border-border bg-surface px-3 text-sm", focusRingInput);
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * Lista de e-mails de cobranca (P4) como chips. Enter, virgula ou ponto-e-virgula
+ * confirmam o e-mail digitado; um chip invalido nunca entra (a validacao final e
+ * do Zod no servidor, isto e so o guard de UX). Backspace com o campo vazio
+ * remove o ultimo chip. Quando ha ao menos um e-mail aqui, ele substitui o
+ * "E-mail de contato" como destinatario da pre-fatura.
+ */
+/** Parse a raw draft (comma/newline/`;` separated) into valid, unique emails. */
+export function parseBillingEmails(raw: string): string[] {
+  return raw
+    .split(/[\n,;]+/)
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0 && EMAIL_RE.test(item));
+}
+
+/** Merge a pending, uncommitted draft into the committed list (union, unique). */
+export function mergeBillingEmailsDraft(
+  committed: string[],
+  draft: string,
+): string[] {
+  return [...new Set([...committed, ...parseBillingEmails(draft)])];
+}
+
+function BillingEmailsField({
+  value,
+  onChange,
+  onDraftChange,
+}: {
+  value: string[];
+  onChange: (value: string[]) => void;
+  /** Mirrors the uncommitted input to the parent so a Save without Enter/blur
+   * still captures a valid typed email (belt-and-braces over onBlur commit). */
+  onDraftChange?: (draft: string) => void;
+}) {
+  const [draft, setDraft] = useState("");
+
+  function setDraftValue(next: string) {
+    setDraft(next);
+    onDraftChange?.(next);
+  }
+
+  function commit(raw: string) {
+    const parts = parseBillingEmails(raw);
+    if (parts.length === 0) return;
+    const next = [...new Set([...value, ...parts])];
+    onChange(next);
+    setDraftValue("");
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Enter" || event.key === "," || event.key === ";") {
+      event.preventDefault();
+      commit(draft);
+    } else if (event.key === "Backspace" && draft === "" && value.length > 0) {
+      onChange(value.slice(0, -1));
+    }
+  }
+
+  return (
+    <div className="space-y-1 text-sm font-medium text-medium md:col-span-2">
+      <span>E-mails de cobrança</span>
+      <div
+        className={cn(
+          "flex min-h-10 flex-wrap items-center gap-1.5 rounded-md border border-border bg-surface px-2 py-1.5",
+          focusRingInput,
+        )}
+      >
+        {value.map((email) => (
+          <span
+            key={email}
+            className="inline-flex items-center gap-1 rounded-full border border-border bg-surface-muted px-2 py-0.5 text-xs font-medium text-strong"
+          >
+            {email}
+            <button
+              type="button"
+              aria-label={`Remover ${email}`}
+              onClick={() => onChange(value.filter((item) => item !== email))}
+              className="grid size-4 place-items-center rounded-full text-soft hover:text-strong"
+            >
+              <X aria-hidden="true" className="size-3" />
+            </button>
+          </span>
+        ))}
+        <input
+          type="email"
+          inputMode="email"
+          placeholder={
+            value.length === 0 ? "cobranca@cliente.com" : "adicionar e-mail"
+          }
+          value={draft}
+          onChange={(event) => setDraftValue(event.target.value)}
+          onKeyDown={handleKeyDown}
+          onBlur={() => commit(draft)}
+          className="h-7 min-w-40 flex-1 bg-transparent px-1 text-sm font-normal outline-none"
+        />
+      </div>
+      <p className="text-xs font-normal text-soft">
+        A pré-fatura é enviada para estes e-mails. Sem nenhum, usa o e-mail de
+        contato.
+      </p>
+    </div>
+  );
 }
 
 function ClientModal({
@@ -651,6 +779,7 @@ function ClientModal({
   isPending,
   onLookup,
   onSave,
+  onBillingEmailsDraftChange,
 }: ClientModalProps) {
   return (
     <Modal
@@ -721,6 +850,11 @@ function ClientModal({
             className={fieldClass()}
           />
         </label>
+        <BillingEmailsField
+          value={value.billingEmails ?? []}
+          onChange={(billingEmails) => onChange({ ...value, billingEmails })}
+          onDraftChange={onBillingEmailsDraftChange}
+        />
         <label className="space-y-1 text-sm font-medium text-medium">
           Status
           <select

@@ -50,6 +50,7 @@ interface EntryRec {
   activityType: string;
   description: string | null;
   billable: boolean;
+  nonBillableReason: string | null;
   status: string;
   submittedAt: Date | null;
 }
@@ -78,6 +79,7 @@ const h = vi.hoisted(() => {
     periods: [] as PeriodRec[],
     entries: [] as EntryRec[],
     attachments: [] as AttachmentRec[],
+    justificationAttachments: [] as AttachmentRec[],
     defaults: [] as Record<string, unknown>[],
     approvals: [] as Record<string, unknown>[],
     audits: [] as Record<string, unknown>[],
@@ -154,6 +156,12 @@ const h = vi.hoisted(() => {
     if (shape?.attachment) {
       const attachment = store.attachments.find((a) => a.timeEntryId === e.id);
       out.attachment = attachment ? { ...attachment } : null;
+    }
+    if (shape?.billableJustificationAttachment) {
+      const attachment = store.justificationAttachments.find(
+        (a) => a.timeEntryId === e.id,
+      );
+      out.billableJustificationAttachment = attachment ? { ...attachment } : null;
     }
     return out;
   }
@@ -323,6 +331,7 @@ const h = vi.hoisted(() => {
           activityType: data.activityType,
           description: data.description ?? null,
           billable: data.billable,
+          nonBillableReason: data.nonBillableReason ?? null,
           status: data.status,
           submittedAt: data.submittedAt ?? null,
         };
@@ -387,6 +396,43 @@ const h = vi.hoisted(() => {
         );
         const [removed] = store.attachments.splice(index, 1);
         return removed;
+      },
+    },
+    timeEntryBillableJustificationAttachment: {
+      upsert: async ({
+        where,
+        update,
+        create,
+      }: {
+        where: Where;
+        update: Where;
+        create: Where;
+      }) => {
+        const existing = store.justificationAttachments.find(
+          (a) => a.timeEntryId === where.timeEntryId,
+        );
+        if (existing) {
+          Object.assign(existing, update);
+          return { ...existing };
+        }
+        const rec: AttachmentRec = {
+          timeEntryId: create.timeEntryId,
+          fileName: create.fileName,
+          contentType: create.contentType,
+          size: create.size,
+          storageBucket: create.storageBucket,
+          storageKey: create.storageKey,
+          uploadedByUserId: create.uploadedByUserId ?? null,
+        };
+        store.justificationAttachments.push(rec);
+        return { ...rec };
+      },
+      deleteMany: async ({ where }: { where: Where }) => {
+        const before = store.justificationAttachments.length;
+        store.justificationAttachments = store.justificationAttachments.filter(
+          (a) => a.timeEntryId !== where.timeEntryId,
+        );
+        return { count: before - store.justificationAttachments.length };
       },
     },
     timesheetDefault: {
@@ -472,7 +518,9 @@ vi.mock("@/lib/storage/provider", async (importOriginal) => {
 
 import {
   applyTimesheetDefault,
+  attachBillableJustificationFile,
   attachTimeEntryFile,
+  getBillableJustificationUrl,
   copyPreviousWeek,
   createTimeEntry,
   createWeeklyTimeEntries,
@@ -503,6 +551,7 @@ function seedEntry(over: Partial<EntryRec> = {}): EntryRec {
     activityType: "WORKDAY",
     description: null,
     billable: true,
+    nonBillableReason: null,
     status: "DRAFT",
     submittedAt: null,
     ...over,
@@ -584,6 +633,7 @@ beforeEach(() => {
   h.store.periods = [];
   h.store.entries = [];
   h.store.attachments = [];
+  h.store.justificationAttachments = [];
   h.store.defaults = [];
   h.store.approvals = [];
   h.store.audits = [];
@@ -723,11 +773,68 @@ describe("billable — enforcement server-side por papel", () => {
     expect(h.store.entries[0].billable).toBe(false);
   });
 
-  it("gestor: consegue definir billable=false normalmente", async () => {
+  it("gestor: marca billable=false COM justificativa → persiste motivo + audita", async () => {
     h.store.currentUser.roles = ["PROJECT_MANAGER"];
-    const result = await createTimeEntry({ ...baseInput, billable: false });
+    const result = await createTimeEntry({
+      ...baseInput,
+      billable: false,
+      nonBillableReason: "Retrabalho não cobrável",
+    });
     expect(result.ok).toBe(true);
     expect(h.store.entries[0].billable).toBe(false);
+    expect(h.store.entries[0].nonBillableReason).toBe("Retrabalho não cobrável");
+    // P9: auditoria dedicada da marcação de não faturável.
+    expect(
+      h.store.audits.some((a) => a.action === "TIME_ENTRY_MARKED_NON_BILLABLE"),
+    ).toBe(true);
+  });
+
+  it("gestor: marca billable=false SEM justificativa → recusa (COMMENT_REQUIRED)", async () => {
+    h.store.currentUser.roles = ["PROJECT_MANAGER"];
+    const result = await createTimeEntry({ ...baseInput, billable: false });
+    expect(result).toMatchObject({ ok: false, error: "COMMENT_REQUIRED" });
+    // Nada é persistido quando falta a justificativa.
+    expect(h.store.entries).toHaveLength(0);
+  });
+
+  it("gestor: billable=false com justificativa só de espaços → recusa", async () => {
+    h.store.currentUser.roles = ["AREA_MANAGER"];
+    const result = await createTimeEntry({
+      ...baseInput,
+      billable: false,
+      nonBillableReason: "   ",
+    });
+    expect(result).toMatchObject({ ok: false, error: "COMMENT_REQUIRED" });
+    expect(h.store.entries).toHaveLength(0);
+  });
+
+  it("gestor em ON_CALL não faturável: NÃO exige justificativa (regra de negócio)", async () => {
+    h.store.currentUser.roles = ["AREA_MANAGER"];
+    const result = await createTimeEntry({
+      ...baseInput,
+      activityType: "ON_CALL",
+      multiplier: 0.33,
+      billable: false,
+    });
+    expect(result.ok).toBe(true);
+    expect(h.store.entries[0].billable).toBe(false);
+    expect(h.store.entries[0].nonBillableReason).toBeNull();
+    expect(
+      h.store.audits.some((a) => a.action === "TIME_ENTRY_MARKED_NON_BILLABLE"),
+    ).toBe(false);
+  });
+
+  it("consultor puro em ON_CALL não faturável: NÃO exige justificativa", async () => {
+    h.store.currentUser.roles = ["CONSULTANT"];
+    const result = await createTimeEntry({
+      ...baseInput,
+      activityType: "ON_CALL",
+      multiplier: 0.33,
+      billable: true,
+    });
+    expect(result.ok).toBe(true);
+    expect(h.store.entries[0].billable).toBe(false);
+    expect(h.store.entries[0].nonBillableReason).toBeNull();
   });
 
   it("consultor puro no lançamento semanal: billable=false é ignorado → persiste true", async () => {
@@ -761,7 +868,25 @@ describe("billable — enforcement server-side por papel", () => {
     expect(h.store.entries[0].billable).toBe(true);
   });
 
-  it("gestor no update: consegue definir billable=false", async () => {
+  it("gestor no update: billable=false COM justificativa → persiste motivo", async () => {
+    h.store.currentUser.roles = ["AREA_MANAGER"];
+    seedCurrentPeriod();
+    const entry = seedEntry({ status: "DRAFT", billable: true });
+    const result = await updateTimeEntry({
+      id: entry.id,
+      ...clockFor(6),
+      description: "Ajuste",
+      billable: false,
+      nonBillableReason: "Cortesia acordada com o cliente",
+    });
+    expect(result.ok).toBe(true);
+    expect(h.store.entries[0].billable).toBe(false);
+    expect(h.store.entries[0].nonBillableReason).toBe(
+      "Cortesia acordada com o cliente",
+    );
+  });
+
+  it("gestor no update: billable=false SEM justificativa → recusa", async () => {
     h.store.currentUser.roles = ["AREA_MANAGER"];
     seedCurrentPeriod();
     const entry = seedEntry({ status: "DRAFT", billable: true });
@@ -771,8 +896,28 @@ describe("billable — enforcement server-side por papel", () => {
       description: "Ajuste",
       billable: false,
     });
+    expect(result).toMatchObject({ ok: false, error: "COMMENT_REQUIRED" });
+    // O lançamento permanece faturável (nada mudou).
+    expect(h.store.entries[0].billable).toBe(true);
+  });
+
+  it("gestor no update: voltar a faturável limpa o motivo", async () => {
+    h.store.currentUser.roles = ["AREA_MANAGER"];
+    seedCurrentPeriod();
+    const entry = seedEntry({
+      status: "DRAFT",
+      billable: false,
+      nonBillableReason: "Motivo antigo",
+    });
+    const result = await updateTimeEntry({
+      id: entry.id,
+      ...clockFor(6),
+      description: "Ajuste",
+      billable: true,
+    });
     expect(result.ok).toBe(true);
-    expect(h.store.entries[0].billable).toBe(false);
+    expect(h.store.entries[0].billable).toBe(true);
+    expect(h.store.entries[0].nonBillableReason).toBeNull();
   });
 });
 
@@ -1799,5 +1944,91 @@ describe("anexo do lançamento — gravar / ler / remover", () => {
     };
     const result = await getTimeEntryAttachmentUrl({ id: entry.id });
     expect(result).toMatchObject({ ok: false, error: "NOT_FOUND" });
+  });
+});
+
+// --- P9: anexo (opcional) da justificativa de NÃO faturável ----------------
+
+describe("anexo da justificativa de não faturável (P9)", () => {
+  it("grava o anexo no modelo/bucket DEDICADO e audita", async () => {
+    h.store.currentUser.roles = ["AREA_MANAGER"];
+    seedCurrentPeriod();
+    const entry = seedEntry({
+      status: "SUBMITTED",
+      submittedAt: new Date(),
+      billable: false,
+      nonBillableReason: "Retrabalho",
+    });
+    const result = await attachBillableJustificationFile(
+      attachForm(entry.id, okPdf()),
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      data: { fileName: "ok-responsavel.pdf" },
+    });
+    // Modelo DEDICADO — não polui o anexo próprio do lançamento.
+    expect(h.store.justificationAttachments).toHaveLength(1);
+    expect(h.store.attachments).toHaveLength(0);
+    expect(h.store.justificationAttachments[0].storageBucket).toBe(
+      "billable-justifications",
+    );
+    expect(h.store.audits.at(-1)).toMatchObject({
+      action: "TIME_ENTRY_BILLABLE_JUSTIFICATION_ATTACHED",
+    });
+  });
+
+  it("recusa anexar quando o lançamento é FATURÁVEL", async () => {
+    h.store.currentUser.roles = ["AREA_MANAGER"];
+    seedCurrentPeriod();
+    const entry = seedEntry({ status: "SUBMITTED", billable: true });
+    const result = await attachBillableJustificationFile(
+      attachForm(entry.id, okPdf()),
+    );
+    expect(result).toMatchObject({ ok: false, error: "INVALID_INPUT" });
+    expect(h.store.justificationAttachments).toHaveLength(0);
+  });
+
+  it("bloqueia anexar em lançamento APROVADO (item aprovado)", async () => {
+    h.store.currentUser.roles = ["AREA_MANAGER"];
+    seedCurrentPeriod();
+    const entry = seedEntry({
+      status: "APPROVED",
+      billable: false,
+      nonBillableReason: "Motivo",
+    });
+    const result = await attachBillableJustificationFile(
+      attachForm(entry.id, okPdf()),
+    );
+    expect(result).toMatchObject({ ok: false, error: "ATTACHMENT_LOCKED" });
+  });
+
+  it("degrada honestamente sem storage configurado (motivo textual permanece)", async () => {
+    h.store.currentUser.roles = ["AREA_MANAGER"];
+    storage.configured.value = false;
+    seedCurrentPeriod();
+    const entry = seedEntry({
+      status: "SUBMITTED",
+      billable: false,
+      nonBillableReason: "Motivo",
+    });
+    const result = await attachBillableJustificationFile(
+      attachForm(entry.id, okPdf()),
+    );
+    expect(result).toMatchObject({ ok: false, error: "NO_STORAGE" });
+    expect(h.store.justificationAttachments).toHaveLength(0);
+  });
+
+  it("emite URL assinada de vida curta para papel de gestão", async () => {
+    h.store.currentUser.roles = ["AREA_MANAGER"];
+    seedCurrentPeriod();
+    const entry = seedEntry({
+      status: "SUBMITTED",
+      billable: false,
+      nonBillableReason: "Motivo",
+    });
+    await attachBillableJustificationFile(attachForm(entry.id, okPdf()));
+    const result = await getBillableJustificationUrl({ id: entry.id });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data.url).toContain("https://signed.example/");
   });
 });

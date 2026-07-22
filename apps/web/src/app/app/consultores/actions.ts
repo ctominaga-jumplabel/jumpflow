@@ -32,6 +32,10 @@ import {
   type ConsultantCurriculum,
 } from "@/lib/consultants/curriculum";
 import {
+  listConsultantExperiences,
+  type ConsultantExperienceView,
+} from "@/lib/consultants/experiences";
+import {
   addressSchema,
   adHocPaymentSchema,
   bankAccountSchema,
@@ -47,10 +51,12 @@ import {
   consultantPhotoDeleteSchema,
   cltInfoSchema,
   deleteEducationSchema,
+  deleteExperienceSchema,
   deleteHourBankEntrySchema,
   deleteLanguageSchema,
   deleteVacationSchema,
   educationSchema,
+  experienceSchema,
   hourBankEntrySchema,
   languageSchema,
   legalRepresentativeSchema,
@@ -72,6 +78,7 @@ import {
   type ConsultantIdentityInput,
   type CurriculumBioInput,
   type EducationInput,
+  type ExperienceInput,
   type GenerateCurriculumSnapshotInput,
   type HourBankEntryInput,
   type LanguageInput,
@@ -1066,6 +1073,92 @@ export async function deleteConsultantEducation(
     if (!previous) throw new ActionError("NOT_FOUND", "Formacao nao encontrada.");
     await prisma.consultantEducation.delete({ where: { id: parsed.id } });
     await audit("ConsultantEducation", parsed.id, "CONSULTANT_EDUCATION_DELETED", previous, null);
+    revalidatePath(CONSULTORES_PATH);
+    return { ok: true, data: { id: parsed.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Experiencia profissional declarada (P27 — curriculo-first). Gated People/RH.
+// Sem dados financeiros. Toda escrita gera AuditEvent.
+// ---------------------------------------------------------------------------
+
+/** Le as experiencias declaradas do consultor (People/RH). */
+export async function loadConsultantExperiences(
+  consultantId: string,
+): Promise<ActionResult<ConsultantExperienceView[]>> {
+  try {
+    ensureDatabase();
+    await requireRole(PEOPLE_ROLES);
+    const rows = await listConsultantExperiences(consultantId);
+    return { ok: true, data: rows };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/** Cria ou atualiza uma experiencia profissional declarada (People/RH). */
+export async function saveConsultantExperience(
+  input: ExperienceInput,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(PEOPLE_ROLES);
+    const parsed = parseInput(experienceSchema, input);
+    const data = {
+      consultantId: parsed.consultantId,
+      company: parsed.company,
+      role: parsed.role,
+      startDate: new Date(`${parsed.startDate}T00:00:00.000Z`),
+      endDate: toDate(parsed.endDate),
+      description: parsed.description ?? null,
+      location: parsed.location ?? null,
+    };
+    const previous = parsed.id
+      ? await prisma.consultantExperience.findUnique({ where: { id: parsed.id } })
+      : null;
+    if (parsed.id && !previous) {
+      throw new ActionError("NOT_FOUND", "Experiencia nao encontrada.");
+    }
+    const row = parsed.id
+      ? await prisma.consultantExperience.update({ where: { id: parsed.id }, data })
+      : await prisma.consultantExperience.create({ data });
+    await audit(
+      "ConsultantExperience",
+      row.id,
+      previous ? "CONSULTANT_EXPERIENCE_UPDATED" : "CONSULTANT_EXPERIENCE_CREATED",
+      previous,
+      data,
+    );
+    revalidatePath(CONSULTORES_PATH);
+    return { ok: true, data: { id: row.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/** Remove uma experiencia profissional declarada (People/RH). */
+export async function deleteConsultantExperience(
+  input: { id: string },
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(PEOPLE_ROLES);
+    const parsed = parseInput(deleteExperienceSchema, input);
+    const previous = await prisma.consultantExperience.findUnique({
+      where: { id: parsed.id },
+    });
+    if (!previous) throw new ActionError("NOT_FOUND", "Experiencia nao encontrada.");
+    await prisma.consultantExperience.delete({ where: { id: parsed.id } });
+    await audit(
+      "ConsultantExperience",
+      parsed.id,
+      "CONSULTANT_EXPERIENCE_DELETED",
+      previous,
+      null,
+    );
     revalidatePath(CONSULTORES_PATH);
     return { ok: true, data: { id: parsed.id } };
   } catch (error) {

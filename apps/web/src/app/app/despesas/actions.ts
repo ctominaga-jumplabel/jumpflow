@@ -35,8 +35,11 @@ import {
 } from "@/lib/expenses/schemas";
 import type {
   ExpenseAttachmentMeta,
+  ExpenseCategory,
   ExpenseStatus,
 } from "@/lib/expenses/types";
+import { getActivePolicyRules } from "@/lib/db/reimbursement-policy";
+import { evaluateExpensePolicy } from "@/lib/expenses/reimbursement-policy";
 import {
   buildStorageKey,
   validateReceiptFile,
@@ -46,7 +49,7 @@ import {
   getStorageProvider,
   isStorageConfigured,
 } from "@/lib/storage/provider";
-import { parseIsoDateUtc } from "@/lib/timesheet/week";
+import { parseIsoDateUtc, toIsoDate } from "@/lib/timesheet/week";
 
 /**
  * Server actions for the Despesas module (docs/despesas-persistencia.md).
@@ -149,6 +152,39 @@ async function ensureActiveAllocation(
     );
   }
   return allocation;
+}
+
+/** ISO date (yyyy-mm-dd, UTC) de hoje, para o motor de politica. */
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/**
+ * Reforco server-side da Politica de Reembolso (P13): reavalia os lancamentos
+ * contra as regras ATIVAS e recusa com POLICY_VIOLATION quando ha violacao de
+ * prazo/valor. Nunca confia so no cliente. A politica so restringe quando ha
+ * regras cadastradas (sem regras, no-op).
+ */
+async function assertPolicyOk(
+  items: ReadonlyArray<{
+    category?: ExpenseCategory | null;
+    date: string;
+    amount: number;
+  }>,
+): Promise<void> {
+  const rules = await getActivePolicyRules();
+  if (rules.length === 0) return;
+  const today = todayIso();
+  const messages: string[] = [];
+  for (const item of items) {
+    const violations = evaluateExpensePolicy(item, rules, today);
+    for (const v of violations) {
+      if (!messages.includes(v.message)) messages.push(v.message);
+    }
+  }
+  if (messages.length > 0) {
+    throw new ActionError("POLICY_VIOLATION", messages.join(" "));
+  }
 }
 
 async function ensureOpenProject(projectId: string) {
@@ -254,6 +290,9 @@ export async function createExpense(
       project.id,
       date,
     );
+    // P13: reforca a Politica de Reembolso (lancamento avulso nao tem
+    // categoria, entao so a regra Geral pode se aplicar aqui).
+    await assertPolicyOk([{ date: parsed.date, amount: parsed.amount }]);
 
     const expense = await prisma.expense.create({
       data: {
@@ -295,6 +334,15 @@ export async function createExpenseBatch(
     const parsed = parseInput(createExpenseBatchSchema, input);
 
     const project = await ensureOpenProject(parsed.projectId);
+    // P13: reforca a Politica de Reembolso item a item (cada item tem
+    // categoria/data/valor). Falha o lote inteiro antes de qualquer escrita.
+    await assertPolicyOk(
+      parsed.items.map((it) => ({
+        category: it.category,
+        date: it.date,
+        amount: it.amount,
+      })),
+    );
     const invoiceNumber = parsed.invoiceNumber?.trim() || null;
     const groupId = crypto.randomUUID();
 
@@ -635,6 +683,30 @@ export async function submitExpense(
         "INVALID_INPUT",
         "Anexe o comprovante antes de enviar a despesa para aprovação.",
       );
+    }
+
+    // P13: reforca a Politica de Reembolso no envio (defesa em profundidade —
+    // a regra ou o valor/data podem ter mudado desde o rascunho). Audita a
+    // tentativa bloqueada antes de recusar.
+    try {
+      await assertPolicyOk([
+        {
+          category: expense.category,
+          date: toIsoDate(expense.date),
+          amount: Number(expense.amount),
+        },
+      ]);
+    } catch (policyError) {
+      if (policyError instanceof ActionError) {
+        await recordAuditEvent({
+          actorUserId: (await resolveDbUser(user))?.id ?? null,
+          entityType: "Expense",
+          entityId: expense.id,
+          action: "EXPENSE_POLICY_BLOCKED",
+          after: { reason: policyError.message },
+        });
+      }
+      throw policyError;
     }
 
     // Same requirement as the other mutations: the audit actor must be the

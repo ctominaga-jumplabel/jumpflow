@@ -313,6 +313,12 @@ export async function getWeekForConsultant(
     if (!row.description && entry.description) {
       row.description = entry.description;
     }
+    // P9: motivo de não faturável (para pré-preencher a edição). O grupo é
+    // coerente por billable (billable entra implicitamente via status/atividade
+    // do lançamento), então o primeiro motivo presente representa a linha.
+    if (!row.nonBillableReason && entry.nonBillableReason) {
+      row.nonBillableReason = entry.nonBillableReason;
+    }
   }
 
   const sort = filter.sort ?? TIMESHEET_DEFAULT_SORT;

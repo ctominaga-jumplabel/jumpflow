@@ -28,6 +28,8 @@ export type ErrorCode =
   | "FILE_TOO_LARGE"
   | "ATTACHMENT_LOCKED"
   | "SELF_APPROVAL"
+  // Politica de Reembolso (Onda 3): lancamento viola prazo/teto configurado.
+  | "POLICY_VIOLATION"
   // Fluxo de ausência (Onda D): saldo de férias, conflito com dia útil e
   // guarda de lançamento em data coberta por ausência confirmada.
   | "INSUFFICIENT_BALANCE"

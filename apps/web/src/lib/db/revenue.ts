@@ -126,47 +126,68 @@ export const revenueClosingTransitions: Record<
       | "INVOICED"
       | "CANCELLED";
     auditAction: string;
+    /**
+     * Whether the transition demands a mandatory justification (persisted to
+     * notes + AuditEvent). CLOSE ("liberar faturamento") já exigia; P16 estende
+     * a exigência às transições REVERSAS (voltar status / reabrir), que também
+     * são mudanças sensíveis de um fechamento de receita.
+     */
+    requiresJustification: boolean;
+    /** Rótulo curto usado na linha de nota (appendClosingNote). */
+    noteLabel?: string;
   }
 > = {
   SUBMIT_REVIEW: {
     expected: "OPEN",
     next: "IN_REVIEW",
     auditAction: "REVENUE_CLOSING_SUBMITTED_REVIEW",
+    requiresJustification: false,
   },
   MARK_READY: {
     expected: "IN_REVIEW",
     next: "READY_TO_CLOSE",
     auditAction: "REVENUE_CLOSING_MARKED_READY",
+    requiresJustification: false,
   },
   CLOSE: {
     expected: "READY_TO_CLOSE",
     next: "CLOSED",
     auditAction: "REVENUE_CLOSING_CLOSED",
+    requiresJustification: true,
+    noteLabel: "Liberacao faturamento",
   },
   MARK_INVOICED: {
     expected: "CLOSED",
     next: "INVOICED",
     auditAction: "REVENUE_CLOSING_INVOICED",
+    requiresJustification: false,
   },
   CANCEL: {
     expected: "OPEN",
     next: "CANCELLED",
     auditAction: "REVENUE_CLOSING_CANCELLED",
+    requiresJustification: false,
   },
   REVERT_TO_OPEN: {
     expected: "IN_REVIEW",
     next: "OPEN",
     auditAction: "REVENUE_CLOSING_REVERTED_OPEN",
+    requiresJustification: true,
+    noteLabel: "Voltar status",
   },
   REVERT_TO_REVIEW: {
     expected: "READY_TO_CLOSE",
     next: "IN_REVIEW",
     auditAction: "REVENUE_CLOSING_REVERTED_REVIEW",
+    requiresJustification: true,
+    noteLabel: "Voltar status",
   },
   REOPEN: {
     expected: "CLOSED",
     next: "READY_TO_CLOSE",
     auditAction: "REVENUE_CLOSING_REOPENED",
+    requiresJustification: true,
+    noteLabel: "Reabertura",
   },
 };
 
@@ -178,7 +199,7 @@ export async function listRevenueClosings(input: {
     where: { month: input.month, year: input.year },
     include: {
       client: { select: { name: true } },
-      project: { select: { name: true } },
+      project: { select: { name: true, opportunityType: true } },
       fiscalDocuments: {
         orderBy: { createdAt: "desc" },
         take: 1,
@@ -203,8 +224,12 @@ export async function listRevenueClosings(input: {
       const fiscal = row.fiscalDocuments[0] ?? null;
       return {
         id: row.id,
+        projectId: row.projectId ?? null,
         clientName: row.client.name,
         projectName: row.project?.name ?? "Sem projeto",
+        opportunityType:
+          (row.project
+            ?.opportunityType as RevenueClosingRow["opportunityType"]) ?? null,
         approvedHours: hours,
         billingHourlyRate: closingAverageRate(hours, amount),
         amount,
@@ -230,15 +255,27 @@ export interface RevenueClosingForPreInvoice {
     year: number;
     status: string;
     adjustmentAmount: number;
+    /** null quando o fechamento e por cliente (sem projeto). Necessario para
+     * decidir se ha planilha de horas por consultor a anexar (P4). */
+    projectId: string | null;
   };
   client: {
     id: string;
     name: string;
     document: string | null;
     contactEmail: string | null;
+    /** Lista de e-mails de cobranca (P4). Vazia => usa contactEmail. */
+    billingEmails: string[];
     municipality: string | null;
     issRate: number | null;
   };
+  /** Presente apenas quando o fechamento e por projeto. Carrega a flag de anexo
+   * de horas (P4) sem re-consultar o projeto na action. */
+  project: {
+    id: string;
+    name: string;
+    billingAttachHours: boolean;
+  } | null;
   lines: Array<{
     projectId: string;
     projectName: string;
@@ -266,11 +303,14 @@ export async function getRevenueClosingForPreInvoice(
           name: true,
           document: true,
           contactEmail: true,
+          billingEmails: true,
           municipality: true,
           issRate: true,
         },
       },
-      project: { select: { id: true, name: true } },
+      project: {
+        select: { id: true, name: true, billingAttachHours: true },
+      },
     },
   });
   if (!closing) return null;
@@ -299,15 +339,24 @@ export async function getRevenueClosingForPreInvoice(
       year: closing.year,
       status: closing.status,
       adjustmentAmount: toNumber(closing.adjustmentAmount),
+      projectId: closing.projectId ?? null,
     },
     client: {
       id: closing.client.id,
       name: closing.client.name,
       document: closing.client.document,
       contactEmail: closing.client.contactEmail,
+      billingEmails: closing.client.billingEmails ?? [],
       municipality: closing.client.municipality,
       issRate: closing.client.issRate == null ? null : toNumber(closing.client.issRate),
     },
+    project: closing.project
+      ? {
+          id: closing.project.id,
+          name: closing.project.name,
+          billingAttachHours: closing.project.billingAttachHours,
+        }
+      : null,
     lines,
   };
 }

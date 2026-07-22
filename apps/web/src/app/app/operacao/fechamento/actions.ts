@@ -11,6 +11,7 @@ import { isDatabaseConfigured } from "@/lib/db/config";
 import { getOperationReadiness } from "@/lib/db/operation-closing";
 import { resolveDbUser } from "@/lib/db/users";
 import { pendingAlert } from "@/lib/operations/closing";
+import { justificationSchema } from "@/lib/shared/justification";
 
 const OPERACAO_PATH = "/app/operacao/fechamento";
 const PERMISSION_CODE = "OPERACAO_FECHAMENTO";
@@ -29,6 +30,28 @@ const targetInputSchema = z.object({
   month: z.number().int().min(1).max(12),
   year: z.number().int().min(2020).max(2100),
 });
+
+/**
+ * Reabertura do fechamento operacional (P16): mudança sensível que desfaz um
+ * fechamento já comunicado ao DP — exige justificativa obrigatória, registrada
+ * em `notes` + AuditEvent.
+ */
+const reopenInputSchema = targetInputSchema.extend({
+  // Opcional no schema para dar uma mensagem clara na action (a obrigatoriedade
+  // é reforçada logo abaixo com justificationSchema).
+  justification: z.string().trim().max(2000).optional(),
+});
+
+/** Append a timestamped, labeled line to OperationClosing.notes. */
+function appendClosingNote(
+  existing: string | null,
+  label: string,
+  text: string,
+): string {
+  const stamp = new Date().toISOString().slice(0, 10);
+  const line = `[${label} ${stamp}] ${text}`;
+  return existing && existing.trim().length > 0 ? `${existing}\n${line}` : line;
+}
 
 function ensureDatabase(): void {
   if (!isDatabaseConfigured()) {
@@ -167,12 +190,23 @@ export async function reopenOperation(input: {
   projectId: string;
   month: number;
   year: number;
+  justification?: string;
 }): Promise<ActionResult<{ id: string }>> {
   try {
     ensureDatabase();
     const user = await requirePermission(PERMISSION_CODE, "edit");
-    const parsed = parseInput(targetInputSchema, input);
+    const parsed = parseInput(reopenInputSchema, input);
     const dbUser = await resolveDbUser(user);
+    const justificationResult = justificationSchema.safeParse(
+      parsed.justification ?? "",
+    );
+    if (!justificationResult.success) {
+      throw new ActionError(
+        "INVALID_INPUT",
+        "Informe uma justificativa para reabrir o fechamento operacional.",
+      );
+    }
+    const justification = justificationResult.data;
 
     const existing = await prisma.operationClosing.findUnique({
       where: {
@@ -182,7 +216,7 @@ export async function reopenOperation(input: {
           year: parsed.year,
         },
       },
-      select: { id: true, status: true },
+      select: { id: true, status: true, notes: true },
     });
     if (!existing) {
       throw new ActionError("NOT_FOUND", "Fechamento não encontrado.");
@@ -195,6 +229,7 @@ export async function reopenOperation(input: {
           status: "OPEN",
           reopenedByUserId: dbUser?.id ?? null,
           reopenedAt: new Date(),
+          notes: appendClosingNote(existing.notes, "Reabertura", justification),
         },
       });
       if (updated.count !== 1) {
@@ -210,7 +245,7 @@ export async function reopenOperation(input: {
           entityId: existing.id,
           action: "OPERATION_REOPENED",
           before: { status: "CLOSED" },
-          after: { status: "OPEN" },
+          after: { status: "OPEN", justification },
         }),
       });
     });

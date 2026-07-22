@@ -14,11 +14,12 @@ import {
 
 export const metadata: Metadata = { title: "Pagamentos" };
 
-const CONTRACT_TYPES = ["CLT", "PJ", "CLT_FLEX"] as const;
+// P18: o fluxo de Pagamentos cobre SOMENTE PJ e CLT_FLEX. CLT puro é folha
+// (jump-hr-compensation-agent) e sai deste fluxo — não é listado nem filtrável.
+const CONTRACT_TYPES = ["PJ", "CLT_FLEX"] as const;
 type ContractType = (typeof CONTRACT_TYPES)[number];
 
 const CONTRACT_TYPE_LABELS: Record<ContractType, string> = {
-  CLT: "CLT",
   PJ: "PJ",
   CLT_FLEX: "CLT Flex",
 };
@@ -102,6 +103,16 @@ export default async function PagamentosPage({
       listPaymentConsultants(),
     ]);
   }
+
+  // Export href reflete exatamente o filtro aplicado (mês/ano/contratação/
+  // consultor/status). A rota re-checa RBAC e reaplica o mesmo `where`.
+  const exportQuery = new URLSearchParams();
+  exportQuery.set("month", String(month));
+  exportQuery.set("year", String(year));
+  if (consultantId) exportQuery.set("consultantId", consultantId);
+  if (status) exportQuery.set("status", status);
+  if (contractType) exportQuery.set("contractType", contractType);
+  const exportHref = `/api/pagamentos/export?${exportQuery.toString()}`;
 
   return (
     <div className="space-y-6">
@@ -193,6 +204,7 @@ export default async function PagamentosPage({
         month={month}
         year={year}
         payments={payments}
+        exportHref={exportHref}
       />
     </div>
   );

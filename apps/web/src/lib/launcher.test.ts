@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   launcherShortcuts,
   shortcutsForUser,
+  sumBadgeCounts,
   withBadges,
   type LauncherBadge,
 } from "./launcher";
@@ -118,5 +119,28 @@ describe("launcher withBadges", () => {
       horas: { count: 1, tone: "warning", label: "a enviar" },
     });
     expect(shortcuts.every((s) => s.badge === undefined)).toBe(true);
+  });
+});
+
+describe("sumBadgeCounts (P20 — total do sino de notificações)", () => {
+  it("returns 0 for no badges", () => {
+    expect(sumBadgeCounts({})).toBe(0);
+  });
+
+  it("sums the counts across all badges", () => {
+    const badges: Record<string, LauncherBadge> = {
+      horas: { count: 2, tone: "warning", label: "rascunhos pendentes" },
+      aprovacoes: { count: 5, tone: "info", label: "aguardando" },
+      financeiro: { count: 3, tone: "info", label: "a pagar" },
+    };
+    expect(sumBadgeCounts(badges)).toBe(10);
+  });
+
+  it("ignores badge tone/label and counts only the numbers", () => {
+    const badges: Record<string, LauncherBadge> = {
+      a: { count: 1, tone: "danger", label: "x" },
+      b: { count: 0, tone: "info", label: "y" },
+    };
+    expect(sumBadgeCounts(badges)).toBe(1);
   });
 });

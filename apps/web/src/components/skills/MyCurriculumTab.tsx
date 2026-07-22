@@ -4,12 +4,20 @@ import { useEffect, useState } from "react";
 import { FileText, Printer } from "lucide-react";
 import { ActionButton } from "@/components/ui/ActionButton";
 import { ConsultantCurriculumView } from "@/components/consultants/ConsultantCurriculumView";
+import {
+  ConsultantExperienceEditor,
+  type ExperienceDraft,
+} from "@/components/consultants/ConsultantExperienceEditor";
 import { focusRingInput } from "@/lib/styles";
 import { cn } from "@/lib/utils";
 import type { ConsultantCurriculum } from "@/lib/consultants/curriculum";
+import type { ConsultantExperienceView } from "@/lib/consultants/experiences";
 import {
+  deleteMyExperience,
   loadMyCurriculum,
+  loadMyExperiences,
   saveMyCurriculumBio,
+  saveMyExperience,
 } from "@/app/app/skills/actions";
 
 function fieldClass() {
@@ -37,8 +45,26 @@ export function MyCurriculumTab() {
   const [status, setStatus] = useState<Status>({ kind: "loading" });
   const [headline, setHeadline] = useState("");
   const [summary, setSummary] = useState("");
+  const [experiences, setExperiences] = useState<ConsultantExperienceView[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+
+  async function reloadExperiences() {
+    const res = await loadMyExperiences();
+    if (res.ok) setExperiences(res.data);
+  }
+
+  async function saveExperience(draft: ExperienceDraft) {
+    return saveMyExperience({
+      id: draft.id,
+      company: draft.company,
+      role: draft.role,
+      startDate: draft.startDate,
+      endDate: draft.endDate || undefined,
+      description: draft.description || undefined,
+      location: draft.location || undefined,
+    });
+  }
 
   // Busca sem tocar em setState de forma sincrona: o estado so muda APOS o
   // await (evita cascata de renders sinalizada por react-hooks/set-state-in-effect).
@@ -48,6 +74,7 @@ export function MyCurriculumTab() {
       setHeadline(result.data.curriculum.identity.headline ?? "");
       setSummary(result.data.curriculum.identity.summary ?? "");
       setStatus({ kind: "ready", curriculum: result.data.curriculum });
+      await reloadExperiences();
     } else if (result.error === "NO_CONSULTANT") {
       setStatus({ kind: "no-consultant" });
     } else {
@@ -72,6 +99,8 @@ export function MyCurriculumTab() {
         setHeadline(result.data.curriculum.identity.headline ?? "");
         setSummary(result.data.curriculum.identity.summary ?? "");
         setStatus({ kind: "ready", curriculum: result.data.curriculum });
+        const expResult = await loadMyExperiences();
+        if (active && expResult.ok) setExperiences(expResult.data);
       } else if (result.error === "NO_CONSULTANT") {
         setStatus({ kind: "no-consultant" });
       } else {
@@ -183,6 +212,25 @@ export function MyCurriculumTab() {
         <ActionButton size="sm" onClick={saveBio} disabled={busy} icon={FileText}>
           Salvar bio
         </ActionButton>
+      </div>
+
+      {/* Experiencia profissional declarada — cadastro direto (P27). E a espinha
+          do historico do curriculo; as alocacoes internas entram como complemento. */}
+      <div className="space-y-2 rounded-md border border-border p-3">
+        <div className="text-sm font-semibold text-strong">
+          Experiencia profissional
+        </div>
+        <p className="text-xs text-soft">
+          Cadastre suas experiencias passadas. Elas formam a espinha do seu
+          curriculo; as competencias e alocacoes internas complementam.
+        </p>
+        <ConsultantExperienceEditor
+          experiences={experiences}
+          onSave={saveExperience}
+          onDelete={(id) => deleteMyExperience({ id })}
+          onReload={reloadExperiences}
+          onMessage={setMessage}
+        />
       </div>
 
       <ConsultantCurriculumView cv={cv} />

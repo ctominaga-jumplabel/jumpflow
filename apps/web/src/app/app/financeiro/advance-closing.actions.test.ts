@@ -213,3 +213,62 @@ describe("advanceRevenueClosing — other transitions unaffected", () => {
     ).rejects.toThrow(/NEXT_REDIRECT/);
   });
 });
+
+// P16 (Onda 4): as transições REVERSAS ("voltar status" / "reabrir") também são
+// mudanças sensíveis do fechamento e exigem justificativa (persistida em notes +
+// AuditEvent). As transições de avanço (revisar/pronto/faturar) seguem sem exigir.
+describe("advanceRevenueClosing — P16: reversas exigem justificativa", () => {
+  it("REVERT_TO_OPEN sem justificativa → recusa (sem update/audit)", async () => {
+    h.store.closing = closingFixture({ status: "IN_REVIEW" });
+    const result = await advanceRevenueClosing({
+      id: "rc-1",
+      action: "REVERT_TO_OPEN",
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe("INVALID_INPUT");
+      expect(result.message).toMatch(/justificativa/i);
+    }
+    expect(h.store.updates).toHaveLength(0);
+    expect(h.store.audits).toHaveLength(0);
+  });
+
+  it("REVERT_TO_REVIEW com justificativa → volta, anota e audita", async () => {
+    h.store.closing = closingFixture({ status: "READY_TO_CLOSE" });
+    const result = await advanceRevenueClosing({
+      id: "rc-1",
+      action: "REVERT_TO_REVIEW",
+      justification: "Correção de horas antes do fechamento.",
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data.status).toBe("IN_REVIEW");
+    const notes = h.store.updates[0]!.data.notes as string;
+    expect(notes).toContain("Voltar status");
+    expect(notes).toContain("Correção de horas antes do fechamento.");
+    const after = h.store.audits[0]!.after as Record<string, unknown>;
+    expect(after.justification).toBe("Correção de horas antes do fechamento.");
+  });
+
+  it("REOPEN sem justificativa → recusa", async () => {
+    h.store.closing = closingFixture({ status: "CLOSED" });
+    const result = await advanceRevenueClosing({ id: "rc-1", action: "REOPEN" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBe("INVALID_INPUT");
+    expect(h.store.updates).toHaveLength(0);
+  });
+
+  it("REOPEN com justificativa → reabre (closedAt=null), anota e audita", async () => {
+    h.store.closing = closingFixture({ status: "CLOSED" });
+    const result = await advanceRevenueClosing({
+      id: "rc-1",
+      action: "REOPEN",
+      justification: "Reabrindo para incluir lançamento tardio.",
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data.status).toBe("READY_TO_CLOSE");
+    expect(h.store.updates[0]!.data.closedAt).toBeNull();
+    const notes = h.store.updates[0]!.data.notes as string;
+    expect(notes).toContain("Reabertura");
+    expect(notes).toContain("Reabrindo para incluir lançamento tardio.");
+  });
+});

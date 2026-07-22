@@ -798,6 +798,7 @@ model User {
   consultantPaymentsApproved  ConsultantPayment[]         @relation("ConsultantPaymentApprover")
   skillHistoryChanges         ConsultantSkillHistory[]    @relation("SkillHistoryChangedBy")
   feedbacksAuthored           Feedback[]                  @relation("FeedbackAuthor")
+  feedbackRequestsMade        FeedbackRequest[]           @relation("FeedbackRequestRequestedBy")
   evaluationCyclesCreated     EvaluationCycle[]           @relation("EvaluationCycleCreator")
   evaluationResponsesAsRater  EvaluationResponse[]        @relation("EvaluationResponseRater")
   developmentPlansOwned       DevelopmentPlan[]           @relation("DevelopmentPlanOwner")
@@ -1002,6 +1003,8 @@ model Consultant {
   documents           ConsultantDocument[]
   languages           ConsultantLanguage[]
   educations          ConsultantEducation[]
+  experiences         ConsultantExperience[]
+  feedbackRequests    FeedbackRequest[]              @relation("FeedbackRequestSubject")
   cltInfo             ConsultantCltInfo?
   vacations           ConsultantVacation[]
   hourBankEntries     ConsultantHourBankEntry[]
@@ -1214,6 +1217,27 @@ model ConsultantEducation {
   @@index([consultantId])
 }
 
+/// Experiencia profissional DECLARADA do consultor (P27 — curriculo-first). E a
+/// ESPINHA do historico profissional do curriculo, distinta das Allocation
+/// (alocacoes internas em projetos Jump, que seguem como complemento). 1:N,
+/// editavel pelo PROPRIO consultor e por People/RH. Sem dados financeiros.
+/// `endDate` null = experiencia atual (em andamento). Ordenavel por periodo.
+model ConsultantExperience {
+  id           String     @id @default(cuid())
+  consultantId String
+  consultant   Consultant @relation(fields: [consultantId], references: [id], onDelete: Restrict)
+  company      String
+  role         String
+  startDate    DateTime   @db.Date
+  endDate      DateTime?  @db.Date
+  description  String?
+  location     String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([consultantId])
+}
+
 /// Dados especificos CLT: contratacao + dados trabalhistas (1:1). Visivel
 /// quando Consultant.contractType e CLT ou CLT_FLEX.
 model ConsultantCltInfo {
@@ -1420,6 +1444,9 @@ model Client {
   name              String
   document          String?
   contactEmail      String?
+  /// Lista de e-mails de cobranca do cliente (P4). Quando nao-vazia, e a fonte
+  /// de destinatarios do e-mail de pre-fatura; senao cai no fallback contactEmail.
+  billingEmails     String[]            @default([])
   logoUrl           String?
   billingTypeId     String?
   billingType       BillingType?        @relation(fields: [billingTypeId], references: [id], onDelete: SetNull)
@@ -1439,6 +1466,7 @@ model Client {
   revenueClosings   RevenueClosing[]
   fiscalDocuments   FiscalDocument[]
   feedbacks         Feedback[]
+  feedbackRequests  FeedbackRequest[]
   // Inteligencia comercial (Melhoria #4). Oportunidade/Case podem apontar para um
   // cliente (relatedClientId) com onDelete SetNull: o insight sobrevive ao cliente.
   opportunities     Opportunity[]
@@ -1479,6 +1507,10 @@ model Project {
   billingConfig               ProjectBillingConfig?
   billingHourlyRate           Decimal?                     @db.Decimal(12, 2)
   budgetHours                 Decimal?                     @db.Decimal(10, 2)
+  /// P4: anexar a planilha de horas realizadas por consultor (competencia do
+  /// fechamento) ao e-mail de cobranca da pre-fatura deste projeto. Editado pelo
+  /// Financeiro junto da regra de cobranca; nao afeta calculo de receita.
+  billingAttachHours          Boolean                      @default(false)
   costCenter                  String?
   /// Referencia do contrato comercial (numero/identificador). ADR 0002 Fase 1:
   /// presenca = contrato vinculado; ausencia dispara alerta COMMERCIAL_CONTRACT_MISSING.
@@ -1508,6 +1540,7 @@ model Project {
   expenses                    Expense[]
   onCallEntries               OnCallEntry[]
   feedbacks                   Feedback[]
+  feedbackRequests            FeedbackRequest[]
   objectives                  Objective[]
   // Checkpoint/1-on-1 + inteligencia (Melhoria #4). Todas as FKs sao opcionais e
   // onDelete SetNull: o registro pode existir sem projeto e sobrevive a remocao dele.
@@ -1777,11 +1810,20 @@ model TimeEntry {
   activityType           String
   description            String?
   billable               Boolean                 @default(true)
+  /// Justificativa obrigatoria quando um GESTOR marca o lancamento como NAO
+  /// faturavel (P9 / melhoria #9). A derivacao automatica do consultor
+  /// (ON_CALL nao faturavel) NAO preenche este campo — so a acao explicita de
+  /// gestao. Null quando billable=true. Auditado (TIME_ENTRY_MARKED_NON_BILLABLE).
+  nonBillableReason      String?
   status                 TimeEntryStatus         @default(DRAFT)
   submittedAt            DateTime?
   /// Anexo opcional do lancamento (ex.: "ok do responsavel" no sobreaviso). 1:1
   /// generico, valido para qualquer activityType. Sucede OnCallAttachment.
   attachment             TimeEntryAttachment?
+  /// Anexo opcional que comprova a justificativa de NAO faturavel (P9). Modelo
+  /// 1:1 DEDICADO (nunca reusa `attachment`, que e o anexo proprio do
+  /// lancamento) para nao conflitar. Vive em bucket privado dedicado.
+  billableJustificationAttachment TimeEntryBillableJustificationAttachment?
   revenueClosingLines    RevenueClosingLine[]
   consultantPaymentLines ConsultantPaymentLine[]
   createdAt              DateTime                @default(now())
@@ -1808,6 +1850,25 @@ model TimeEntry {
 /// (bucket privado + chave), a URL e sempre assinada. onDelete Cascade: o
 /// anexo segue o ciclo de vida do lancamento.
 model TimeEntryAttachment {
+  id               String    @id @default(cuid())
+  timeEntryId      String    @unique
+  timeEntry        TimeEntry @relation(fields: [timeEntryId], references: [id], onDelete: Cascade)
+  fileName         String
+  contentType      String
+  size             Int
+  storageBucket    String
+  storageKey       String
+  uploadedByUserId String?
+  createdAt        DateTime  @default(now())
+}
+
+/// Anexo (1:1) que comprova a justificativa de NAO faturavel de um lancamento
+/// (P9 / melhoria #9). Modelo DEDICADO — espelha TimeEntryAttachment mas e um
+/// artefato distinto (o anexo proprio do lancamento vive em TimeEntryAttachment)
+/// para evitar conflito quando ambos existem. Mesmo padrao: o arquivo vive em
+/// object storage (bucket privado dedicado + chave), a URL e sempre assinada.
+/// onDelete Cascade: o anexo segue o ciclo de vida do lancamento.
+model TimeEntryBillableJustificationAttachment {
   id               String    @id @default(cuid())
   timeEntryId      String    @unique
   timeEntry        TimeEntry @relation(fields: [timeEntryId], references: [id], onDelete: Cascade)
@@ -2034,6 +2095,44 @@ model Feedback {
 
   @@index([subjectConsultantId])
   @@index([subjectConsultantId, createdAt])
+}
+
+/// Status de um pedido de feedback ao cliente (P29). SENT = e-mail entregue ao
+/// transporte (console/Resend); FAILED = falha no envio (guardada em `error`).
+enum FeedbackRequestStatus {
+  SENT
+  FAILED
+}
+
+/// Pedido de feedback ao cliente por e-mail (P29). Um usuario autorizado
+/// solicita, por e-mail, que o cliente avalie o trabalho de um consultor num
+/// projeto. Rastreia o disparo (para quem, quando, por quem, status). NAO
+/// contem o texto do feedback (o retorno vem por e-mail e e cadastrado depois
+/// como Feedback source=CLIENT). Espelha as relacoes de Feedback: subject em
+/// Cascade; cliente/projeto/solicitante em SetNull (preserva o historico).
+model FeedbackRequest {
+  id                  String                @id @default(cuid())
+  subjectConsultantId String
+  subjectConsultant   Consultant            @relation("FeedbackRequestSubject", fields: [subjectConsultantId], references: [id], onDelete: Cascade)
+  clientId            String?
+  client              Client?               @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  relatedProjectId    String?
+  relatedProject      Project?              @relation(fields: [relatedProjectId], references: [id], onDelete: SetNull)
+  /// E-mail para onde o pedido foi enviado (contato do cliente). Dado de
+  /// contato operacional; nunca expor alem do necessario.
+  email               String
+  requestedByUserId   String?
+  requestedBy         User?                 @relation("FeedbackRequestRequestedBy", fields: [requestedByUserId], references: [id], onDelete: SetNull)
+  status              FeedbackRequestStatus @default(SENT)
+  /// Provedor de e-mail efetivo (ex.: "console", "resend"). Diagnostico.
+  provider            String?
+  error               String?
+  sentAt              DateTime?
+  createdAt           DateTime              @default(now())
+
+  @@index([subjectConsultantId])
+  @@index([clientId])
+  @@index([createdAt])
 }
 
 /// Ciclo de avaliacao 90/180/360 (EP16). createdBy e SetNull para preservar o
@@ -3142,4 +3241,48 @@ model Case {
   @@index([relatedClientId])
   @@index([status])
   @@index([stage])
+}
+
+/// Regra da Politica de Reembolso (Onda 3, P12). NAO substitui o enum
+/// ExpenseCategory: as categorias continuam vindo do enum fixo; esta tabela
+/// apenas configura limites (prazo/valor) por categoria + uma regra Geral.
+/// `category` NULL = regra Geral (vale para qualquer categoria); um valor do
+/// enum = regra especifica. Ambos os limites sao opcionais (NULL desliga aquela
+/// checagem). `maxAgeDays` = prazo maximo em dias para lancar, contado da data
+/// da despesa; `maxAmount` = teto do valor do lancamento. Uma regra por
+/// categoria via @@unique([category]); a unicidade da regra Geral (category
+/// NULL) e reforcada por indice unico parcial criado na migration (Postgres
+/// trata NULLs como distintos, entao @@unique nao basta) e tambem checada na
+/// server action. Alteracoes sao auditadas (REIMBURSEMENT_POLICY_*).
+/// ATENCAO: o indice unico parcial `ReimbursementPolicyRule_general_key`
+/// (category IS NULL) NAO e representavel no Prisma. NAO rode `prisma migrate
+/// dev` cru sem preservar esse indice manual — o Prisma detectaria "drift" e
+/// geraria um DROP dele, reabrindo a possibilidade de multiplas regras Gerais.
+/// Em prod aplicamos via db:deploy/SQL manual (gate), entao o indice persiste.
+model ReimbursementPolicyRule {
+  id         String           @id @default(cuid())
+  category   ExpenseCategory?
+  maxAgeDays Int?
+  maxAmount  Decimal?         @db.Decimal(12, 2)
+  active     Boolean          @default(true)
+  notes      String?
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  @@unique([category])
+}
+
+/// Ordem GLOBAL (por organizacao) do menu principal (P28 — Shell de UI). Uma
+/// linha por item do menu, identificada pela `key` = href do NavItemDef (chave
+/// estavel, presente ate em itens sem permissionCode como "Inicio"). `position`
+/// define a ordem crescente; itens sem linha caem no fim, preservando a ordem
+/// padrao do catalogo (ver applyNavOrder em lib/navigation.ts). A tela admin
+/// /app/admin/menu (ADMIN) reordena e persiste; alteracoes sao auditadas
+/// (NAVIGATION_ORDER_UPDATED).
+model NavigationOrder {
+  key       String   @id
+  position  Int
+  updatedAt DateTime @updatedAt
+
+  @@index([position])
 }

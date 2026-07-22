@@ -19,6 +19,7 @@ import {
   Home,
   KeyRound,
   LayoutDashboard,
+  ListOrdered,
   MessageSquareHeart,
   MessagesSquare,
   PlaneTakeoff,
@@ -492,6 +493,19 @@ export const adminNavigation: NavItemDef[] = [
       "Calendário de feriados nacionais, estaduais e municipais, com aplicabilidade por projeto.",
     requiredRoles: ["ADMIN", "PEOPLE"],
   },
+  {
+    // Ordem do menu (P28). Reordena o menu principal de forma GLOBAL (por
+    // organização). Gate SÓ por papel (ADMIN), sem permissionCode: evita semear
+    // um novo código na matriz; a página e as server actions reforçam
+    // requireRole(["ADMIN"]) no servidor. Não é reordenável a si própria (é da
+    // navegação de Administração, não da principal).
+    label: "Ordem do Menu",
+    href: "/app/admin/menu",
+    icon: ListOrdered,
+    description:
+      "Reordena os itens do menu principal (ordem global da organização).",
+    requiredRoles: ["ADMIN"],
+  },
 ];
 
 /**
@@ -511,6 +525,34 @@ function withoutDisabledModules(items: NavItemDef[]): NavItemDef[] {
  */
 export const primaryNavigation: NavItemDef[] =
   withoutDisabledModules(primaryNavigationRaw);
+
+/**
+ * Reorder primary navigation items according to a persisted `href → position`
+ * map (P28). Items present in the map are sorted by ascending position; items
+ * WITHOUT a saved position keep the default catalog order and are appended
+ * after the ordered ones. Pure and stable — the same input always yields the
+ * same output — so it is safe on the server (layout) and the client (sidebar).
+ */
+export function applyNavOrder<T extends { href: string }>(
+  items: T[],
+  order: Readonly<Record<string, number>>,
+): T[] {
+  const positioned: Array<{ item: T; index: number }> = [];
+  const rest: Array<{ item: T; index: number }> = [];
+  items.forEach((item, index) => {
+    if (Object.prototype.hasOwnProperty.call(order, item.href)) {
+      positioned.push({ item, index });
+    } else {
+      rest.push({ item, index });
+    }
+  });
+  positioned.sort((a, b) => {
+    const byOrder = order[a.item.href] - order[b.item.href];
+    // Ties (or equal positions) fall back to the catalog order for stability.
+    return byOrder !== 0 ? byOrder : a.index - b.index;
+  });
+  return [...positioned, ...rest].map((entry) => entry.item);
+}
 
 /** Whether the current user's roles allow seeing a navigation item. */
 export function canSeeNavItem(

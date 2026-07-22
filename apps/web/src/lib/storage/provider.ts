@@ -32,6 +32,14 @@ export const CONSULTANT_DOCUMENTS_BUCKET = "consultant-documents";
 /** Private bucket for on-call ("sobreaviso") approval attachments. */
 export const ONCALL_APPROVALS_BUCKET = "oncall-approvals";
 
+/**
+ * Private bucket for the OPTIONAL attachment that backs a NON-billable
+ * justification (P9 / melhoria #9). Dedicated bucket — never mixed with the
+ * time entry's own attachment (ONCALL_APPROVALS_BUCKET). Created via devops,
+ * never public; the raw file is only reachable through a short-lived signed URL.
+ */
+export const BILLABLE_JUSTIFICATION_BUCKET = "billable-justifications";
+
 /** Private bucket for feed post attachments (Melhoria #5). */
 export const FEED_ATTACHMENTS_BUCKET = "feed-attachments";
 
@@ -88,6 +96,11 @@ export function getConsultantDocumentStorageProvider(): StorageProvider | null {
 /** Convenience resolver for the on-call approvals bucket. */
 export function getOnCallAttachmentStorageProvider(): StorageProvider | null {
   return getStorageProvider(ONCALL_APPROVALS_BUCKET);
+}
+
+/** Convenience resolver for the non-billable justification bucket (P9). */
+export function getBillableJustificationStorageProvider(): StorageProvider | null {
+  return getStorageProvider(BILLABLE_JUSTIFICATION_BUCKET);
 }
 
 /** Convenience resolver for the feed-attachments bucket. */

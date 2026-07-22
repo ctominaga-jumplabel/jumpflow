@@ -51,6 +51,35 @@ export function canWriteFeedback(roles: readonly RoleName[]): boolean {
   return intersects(roles, FEEDBACK_WRITE_ROLES);
 }
 
+/**
+ * Whether the viewer has BROAD write scope (ADMIN/PEOPLE): any ACTIVE consultant
+ * is a valid target. AREA_MANAGER/PROJECT_MANAGER are narrow (only consultants
+ * allocated to projects they manage).
+ */
+export function hasBroadFeedbackScope(roles: readonly RoleName[]): boolean {
+  return intersects(roles, ["ADMIN", "PEOPLE"]);
+}
+
+/**
+ * Honest empty-state copy explaining WHY there is no consultant to give feedback
+ * to, and WHAT to do. Pure (no I/O) so it is unit tested. Returns null when the
+ * scope is non-empty (there ARE targets). This is the fix for "não consegui
+ * incluir para testar": the block was almost always an empty write scope for a
+ * manager with no managed project — never a silent failure.
+ */
+export function feedbackWriteScopeNote(input: {
+  /** ADMIN/PEOPLE → broad scope. */
+  broadScope: boolean;
+  /** How many consultants are in the caller's write scope. */
+  consultantCount: number;
+}): string | null {
+  if (input.consultantCount > 0) return null;
+  if (input.broadScope) {
+    return "Nenhum consultor ativo cadastrado ainda. Cadastre consultores em Pessoas › Consultores para registrar feedback.";
+  }
+  return "Você não gerencia nenhum projeto com consultores ativos alocados. O feedback só pode ser registrado para consultores de projetos onde você é o gestor. Peça a People para associá-lo como gestor de um projeto, ou solicite que a People registre o feedback.";
+}
+
 // ── Quem lê: escopo por linha (US15.02, §3 LGPD) ────────────────────────────
 
 /**

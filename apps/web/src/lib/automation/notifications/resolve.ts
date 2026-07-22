@@ -2,8 +2,10 @@
  * Recipient resolution for the notification engine.
  *
  * Turns a NotificationRule's recipients (STATIC / ROLE / PROJECT_MANAGER /
- * CLIENT_CONTACT) into concrete `ResolvedRecipient`s with real addresses.
- * Dynamic types need a context (project/client) supplied by the emitting event.
+ * CLIENT_CONTACT / EVENT_TARGET) into concrete `ResolvedRecipient`s with real
+ * addresses. CLIENT_CONTACT resolves to the client's `billingEmails` (cobrança),
+ * falling back to `contactEmail` when the list is empty. Dynamic types need a
+ * context (project/client) supplied by the emitting event.
  *
  * All DB reads are best-effort: a missing manager or contact simply yields no
  * recipient for that entry — the engine never throws here (see emit.ts).
@@ -79,11 +81,21 @@ async function resolveClientContact(
   if (!clientId) return [];
   const client = await prisma.client.findUnique({
     where: { id: clientId },
-    select: { name: true, contactEmail: true },
+    select: { name: true, contactEmail: true, billingEmails: true },
   });
-  return client?.contactEmail
-    ? [emailRecipient(client.contactEmail, client.name)]
-    : [];
+  if (!client) return [];
+  // Cobrança ao cliente (P4): a lista `billingEmails` é a fonte de verdade dos
+  // destinatários de cobrança; `contactEmail` é apenas o fallback quando ela
+  // está vazia. Mantém CLIENT_CONTACT coerente com o caminho de fallback da
+  // pré-fatura (resolveBillingRecipients), evitando a armadilha de uma regra
+  // CLIENT_CONTACT descartar silenciosamente os e-mails de cobrança.
+  const emails =
+    client.billingEmails.length > 0
+      ? client.billingEmails
+      : client.contactEmail
+        ? [client.contactEmail]
+        : [];
+  return emails.map((email) => emailRecipient(email, client.name));
 }
 
 /**

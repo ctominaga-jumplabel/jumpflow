@@ -1,11 +1,12 @@
 import { Download } from "lucide-react";
 import { SectionPanel } from "@/components/ui/SectionPanel";
 import { ActionButton } from "@/components/ui/ActionButton";
+import { ExportExcelButton } from "@/components/ui/ExportExcelButton";
 import { HoursReportTable } from "@/components/reports/HoursReportTable";
 import { focusRing } from "@/lib/styles";
 import { cn } from "@/lib/utils";
 import { timeEntryStatusLabels } from "@/lib/timesheet/types";
-import { PAGE_SIZES } from "@/lib/reports/schemas";
+import { pageSizeOptionsWith } from "@/lib/reports/schemas";
 import type { ReportFilterOptions } from "@/lib/db/reports";
 import type { HoursReport } from "@/lib/reports/types";
 
@@ -74,15 +75,26 @@ export function HorasConsultaPanel({
     return `/app/horas?${search.toString()}`;
   }
 
-  /** CSV of the whole filtered set (no page/pageSize). */
-  function csvHref(): string {
+  /** Filter params for the whole filtered set (no page/pageSize). */
+  function exportSearch(): string {
     const search = new URLSearchParams();
     for (const key of FILTER_KEYS) {
       const value = values[key];
       if (value && value !== "ALL") search.set(key, value);
     }
-    const qs = search.toString();
+    return search.toString();
+  }
+
+  /** CSV of the whole filtered set. */
+  function csvHref(): string {
+    const qs = exportSearch();
     return `/api/relatorios/horas${qs ? `?${qs}` : ""}`;
+  }
+
+  /** Same filter as the CSV, but the `.xlsx` route (Onda 6). */
+  function xlsxHref(): string {
+    const qs = exportSearch();
+    return `/api/relatorios/horas/xlsx${qs ? `?${qs}` : ""}`;
   }
 
   return (
@@ -211,7 +223,7 @@ export function HorasConsultaPanel({
                 defaultValue={v("pageSize")}
                 className={fieldClass}
               >
-                {PAGE_SIZES.map((n) => (
+                {pageSizeOptionsWith(v("pageSize")).map((n) => (
                   <option key={n} value={n}>
                     {n}
                   </option>
@@ -243,6 +255,7 @@ export function HorasConsultaPanel({
               <Download aria-hidden="true" className="size-3.5" />
               Exportar CSV
             </a>
+            <ExportExcelButton href={xlsxHref()} />
           </div>
         </form>
       </div>

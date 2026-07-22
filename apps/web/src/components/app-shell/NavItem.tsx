@@ -11,16 +11,23 @@ export interface NavItemProps {
   active: boolean;
   /** Called after navigation (used to close the mobile drawer). */
   onNavigate?: () => void;
+  /**
+   * Collapsed desktop rail (P11): render icon-only, centered, with the label
+   * exposed as a native tooltip + accessible name. Labels stay visible on the
+   * mobile drawer (never collapsed).
+   */
+  collapsed?: boolean;
 }
 
 /** Single sidebar navigation entry with active state. */
-export function NavItem({ item, active, onNavigate }: NavItemProps) {
+export function NavItem({ item, active, onNavigate, collapsed = false }: NavItemProps) {
   const { href, label, icon: Icon, external } = item;
 
   // External items (e.g. the JumpAcademy portal) open in a new tab and are
   // never marked active, so they always use the inactive styling.
   const className = cn(
-    "group flex items-center gap-3 rounded-md border-2 px-3 py-2 text-sm font-medium transition-[background-color,color,box-shadow]",
+    "group flex items-center rounded-md border-2 py-2 text-sm font-medium transition-[background-color,color,box-shadow]",
+    collapsed ? "justify-center px-0" : "gap-3 px-3",
     focusRing,
     active
       ? "border-ink bg-brand-soft font-semibold text-brand-dark shadow-[2px_2px_0_0_var(--color-ink)]"
@@ -32,6 +39,11 @@ export function NavItem({ item, active, onNavigate }: NavItemProps) {
     active ? "text-brand" : "text-soft group-hover:text-medium",
   );
 
+  // When collapsed the label is hidden, so surface it as a tooltip + a11y name.
+  const collapsedA11y = collapsed
+    ? { title: label, "aria-label": label }
+    : {};
+
   if (external) {
     return (
       <a
@@ -40,13 +52,18 @@ export function NavItem({ item, active, onNavigate }: NavItemProps) {
         rel="noopener noreferrer"
         onClick={onNavigate}
         className={className}
+        {...collapsedA11y}
       >
         <Icon aria-hidden="true" className={iconClassName} />
-        <span className="truncate">{label}</span>
-        <ExternalLink
-          aria-label="abre em nova aba"
-          className="ml-auto size-3.5 shrink-0 text-soft group-hover:text-medium"
-        />
+        {collapsed ? null : (
+          <>
+            <span className="truncate">{label}</span>
+            <ExternalLink
+              aria-label="abre em nova aba"
+              className="ml-auto size-3.5 shrink-0 text-soft group-hover:text-medium"
+            />
+          </>
+        )}
       </a>
     );
   }
@@ -57,9 +74,10 @@ export function NavItem({ item, active, onNavigate }: NavItemProps) {
       onClick={onNavigate}
       aria-current={active ? "page" : undefined}
       className={className}
+      {...collapsedA11y}
     >
       <Icon aria-hidden="true" className={iconClassName} />
-      <span className="truncate">{label}</span>
+      {collapsed ? null : <span className="truncate">{label}</span>}
     </Link>
   );
 }

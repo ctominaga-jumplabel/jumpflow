@@ -24,6 +24,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { FeedbackBanner, useFeedback } from "@/components/ui/Feedback";
 import { formatHours } from "@/lib/format";
 import {
+  attachBillableJustificationFile,
   attachTimeEntryFile,
   copyPreviousWeek as copyPreviousWeekAction,
   applyTimesheetDefault as applyTimesheetDefaultAction,
@@ -872,6 +873,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
       weekdays: [1, 2, 3, 4, 5],
       description: row.description ?? "",
       billable: row.billable,
+      nonBillableReason: row.nonBillableReason ?? "",
       multiplier: row.multiplier ?? 1,
     });
     setFormOpen(true);
@@ -898,12 +900,30 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
     return result.ok ? null : result.message;
   }
 
+  /**
+   * Sobe o anexo (opcional) que comprova a justificativa de NÃO faturável (P9),
+   * após o lançamento ser salvo. Degrade honesto: sem storage, a action recusa
+   * com NO_STORAGE e devolvemos a mensagem para um aviso não-bloqueante.
+   */
+  async function applyJustificationFile(
+    entryId: string,
+    file: File | undefined,
+  ): Promise<string | null> {
+    if (!file) return null;
+    const fd = new FormData();
+    fd.set("id", entryId);
+    fd.set("file", file);
+    const result = await attachBillableJustificationFile(fd);
+    return result.ok ? null : result.message;
+  }
+
   function handleSubmitEntry(
     value: TimeEntryFormValue,
     attachment?: TimeEntryAttachmentIntent,
+    billableJustificationFile?: File,
   ) {
     if (isDemo) {
-      // Demo não persiste nada: anexo é ignorado (sem storage).
+      // Demo não persiste nada: anexo/justificativa são ignorados (sem storage).
       handleSubmitEntryDemo(value);
       return;
     }
@@ -925,6 +945,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
           weekdays: value.weekdays,
           description: value.description,
           billable: value.billable,
+          nonBillableReason: value.nonBillableReason || undefined,
           multiplier: value.multiplier,
         });
         if (result.ok) {
@@ -951,6 +972,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
             ...clockPayload,
             description: value.description,
             billable: value.billable,
+            nonBillableReason: value.nonBillableReason || undefined,
             multiplier: value.multiplier,
             date: value.date,
           })
@@ -964,6 +986,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
             ...clockPayload,
             description: value.description,
             billable: value.billable,
+            nonBillableReason: value.nonBillableReason || undefined,
             multiplier: value.multiplier,
           });
       if (result.ok) {
@@ -974,12 +997,17 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
           result.data.id,
           attachment,
         );
+        // Anexo da justificativa de não faturável (P9), também após o save.
+        const justificationError = await applyJustificationFile(
+          result.data.id,
+          billableJustificationFile,
+        );
         // A complete entry enters approval as soon as it is saved (Rodada 4.3).
         const correctedRejection = existingId && editingRow?.status === "REJECTED";
-        if (attachmentError) {
+        if (attachmentError || justificationError) {
           notify(
             "warning",
-            `Lançamento salvo, mas o anexo falhou: ${attachmentError}`,
+            `Lançamento salvo, mas o anexo falhou: ${attachmentError ?? justificationError}`,
           );
           // Nathal.IA voice cue (recorded) on the pending/warning outcome.
           // Guarded so it never fires while the assistant is globally off.

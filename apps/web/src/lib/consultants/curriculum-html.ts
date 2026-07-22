@@ -102,9 +102,26 @@ export function renderCurriculumHtml(cv: ConsultantCurriculum): string {
       )
     : "";
 
+  const professionalExperience = cv.professionalExperience.length
+    ? section(
+        "Experiencia profissional",
+        `<ul>${cv.professionalExperience
+          .map((entry) => {
+            const location = entry.location
+              ? ` — ${escapeHtml(entry.location)}`
+              : "";
+            const description = entry.description
+              ? `<br><span>${escapeHtml(entry.description)}</span>`
+              : "";
+            return `<li><strong>${escapeHtml(entry.role)}</strong>, ${escapeHtml(entry.company)}${location} (${escapeHtml(entry.period)})${description}</li>`;
+          })
+          .join("")}</ul>`,
+      )
+    : "";
+
   const projects = cv.projects.length
     ? section(
-        "Historico de projetos",
+        "Historico de alocacoes (interno)",
         `<ul>${cv.projects
           .map((entry) => {
             const client = entry.clientName ? ` — ${escapeHtml(entry.clientName)}` : "";
@@ -141,6 +158,7 @@ export function renderCurriculumHtml(cv: ConsultantCurriculum): string {
     highlights,
     education,
     languages,
+    professionalExperience,
     skills,
     certificates,
     projects,

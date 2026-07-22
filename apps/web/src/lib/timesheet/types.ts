@@ -123,6 +123,12 @@ export interface TimeEntryRow {
    */
   activity: string;
   billable: boolean;
+  /**
+   * Motivo de NÃO faturável (P9), presente em db mode quando um gestor marcou o
+   * lançamento como não faturável. Usado para pré-preencher o formulário de
+   * edição (evita re-digitar o motivo). Ausente/undefined = sem motivo.
+   */
+  nonBillableReason?: string;
   status: TimeEntryStatus;
   /**
    * Fator de remuneração do lançamento (melhoria #2). 1.00 para atividades

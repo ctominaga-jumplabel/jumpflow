@@ -24,14 +24,13 @@ export default async function DashboardPage() {
 
       <KpiGrid />
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <PendingList />
-        </div>
-        <div className="space-y-6">
-          <AllocationSummary />
-          <UpcomingClosings />
-        </div>
+      {/* P22: quadros empilhados em coluna única — Pendências > Alocação >
+          Próximos Fechamentos. Cada bloco ocupa a largura total, evitando a
+          coluna estreita à direita e melhorando a leitura em telas menores. */}
+      <div className="space-y-6">
+        <PendingList />
+        <AllocationSummary />
+        <UpcomingClosings />
       </div>
     </div>
   );

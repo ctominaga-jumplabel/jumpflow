@@ -14,6 +14,7 @@ vi.mock("@/app/app/projetos/actions", () => ({
   updateReceivable: vi.fn(),
   deleteReceivable: vi.fn(),
   updateProjectPaymentType: vi.fn(),
+  updateProjectOpportunityType: vi.fn(),
   markProjectAcceptanceAccepted: vi.fn(),
   addAllocationSkill: vi.fn(),
   removeAllocationSkill: vi.fn(),

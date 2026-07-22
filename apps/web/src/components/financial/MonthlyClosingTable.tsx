@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import {
+  AlertTriangle,
   CheckCircle2,
   Download,
   FileCheck2,
@@ -9,11 +10,13 @@ import {
   FileText,
   Lock,
   Mail,
+  Paperclip,
   RotateCw,
   Undo2,
   Users,
 } from "lucide-react";
 import { ActionButton } from "@/components/ui/ActionButton";
+import { ExportExcelButton } from "@/components/ui/ExportExcelButton";
 import { DataTable, type DataTableColumn } from "@/components/ui/DataTable";
 import { FeedbackBanner, useFeedback } from "@/components/ui/Feedback";
 import { Modal } from "@/components/ui/Modal";
@@ -21,7 +24,12 @@ import { SectionPanel } from "@/components/ui/SectionPanel";
 import { StatusBadge, type StatusTone } from "@/components/ui/StatusBadge";
 import { focusRingInput } from "@/lib/styles";
 import { cn } from "@/lib/utils";
-import { formatCurrency, formatCurrencyPrecise, formatHours } from "@/lib/format";
+import {
+  formatCurrency,
+  formatCurrencyPrecise,
+  formatDate,
+  formatHours,
+} from "@/lib/format";
 import {
   fiscalDocumentStatusLabels,
   revenueClosingStatusLabels,
@@ -37,6 +45,13 @@ import {
   sendClientBillingSummary,
   sendPreInvoiceEmail,
 } from "@/app/app/financeiro/actions";
+import { getTimeEntryAttachmentUrl } from "@/app/app/horas/actions";
+import { activityLabelOf } from "@/lib/timesheet/types";
+import { opportunityTypeLabels } from "@/lib/projects/labels";
+import type {
+  RevenueExceptionEntry,
+  RevenueExceptionsByProject,
+} from "@/lib/db/period-exceptions";
 
 const toneByStatus: Record<RevenueClosingStatus, StatusTone> = {
   OPEN: "neutral",
@@ -53,6 +68,13 @@ export interface MonthlyClosingTableProps {
   month: number;
   year: number;
   monthLabel: string;
+  /** `.xlsx` export href (Onda 6), already carrying the screen filter. db only. */
+  exportHref?: string;
+  /**
+   * Time-entry exceptions of the period grouped by projectId (P5). Drives the
+   * per-line "Exceções" indicator + drill-down. Absent in demo mode.
+   */
+  exceptionsByProject?: RevenueExceptionsByProject;
 }
 
 /**
@@ -65,6 +87,8 @@ export function MonthlyClosingTable({
   month,
   year,
   monthLabel,
+  exceptionsByProject,
+  exportHref,
 }: MonthlyClosingTableProps) {
   const isDemo = mode === "demo";
   const [isPending, startTransition] = useTransition();
@@ -74,51 +98,99 @@ export function MonthlyClosingTable({
     downloadUrl: string | null;
     stored: boolean;
   } | null>(null);
-  // D4 (Onda B): liberar o faturamento para o financeiro (transição CLOSE) exige
-  // justificativa. Capturamos num diálogo do design system (nunca window.confirm).
-  const [closeDialog, setCloseDialog] = useState<{ id: string } | null>(null);
+  // P5: drill-down das exceções de uma linha (cliente-projeto) do fechamento.
+  const [exceptionsDialog, setExceptionsDialog] = useState<{
+    title: string;
+    entries: RevenueExceptionEntry[];
+  } | null>(null);
+
+  function viewEntryAttachment(id: string) {
+    startTransition(async () => {
+      const result = await getTimeEntryAttachmentUrl({ id });
+      if (result.ok) window.open(result.data.url, "_blank", "noopener");
+      else notify("warning", result.message);
+    });
+  }
+  // D4 (Onda B) + P16 (Onda 4): transições sensíveis do fechamento exigem uma
+  // justificativa registrada (CLOSE "liberar faturamento" e as REVERSAS: voltar
+  // status / reabrir). Capturamos num diálogo do design system (nunca
+  // window.confirm). Um único diálogo parametrizado por ação.
+  type JustifyAction = "CLOSE" | "REVERT_TO_OPEN" | "REVERT_TO_REVIEW" | "REOPEN";
+  const justifyDialogCopy: Record<
+    JustifyAction,
+    { title: string; description: string; confirm: string; success: string }
+  > = {
+    CLOSE: {
+      title: "Liberar faturamento para o financeiro",
+      description:
+        "Fecha o fechamento de receita e o entrega ao financeiro (libera pre-fatura e NFS-e). A justificativa fica registrada na trilha de auditoria.",
+      confirm: "Liberar faturamento",
+      success: "Faturamento liberado para o financeiro.",
+    },
+    REVERT_TO_OPEN: {
+      title: "Voltar status para Aberto",
+      description:
+        "Desfaz o envio para revisão, retornando o fechamento a Aberto. A justificativa fica registrada na trilha de auditoria.",
+      confirm: "Voltar status",
+      success: "Status revertido para Aberto.",
+    },
+    REVERT_TO_REVIEW: {
+      title: "Voltar status para Em revisão",
+      description:
+        "Desfaz a marcação de Pronto, retornando o fechamento a Em revisão. A justificativa fica registrada na trilha de auditoria.",
+      confirm: "Voltar status",
+      success: "Status revertido para Em revisão.",
+    },
+    REOPEN: {
+      title: "Reabrir fechamento",
+      description:
+        "Reabre um fechamento fechado (volta a Pronto para liberar). A justificativa fica registrada na trilha de auditoria.",
+      confirm: "Reabrir fechamento",
+      success: "Fechamento reaberto.",
+    },
+  };
+  const [justifyDialog, setJustifyDialog] = useState<{
+    id: string;
+    action: JustifyAction;
+  } | null>(null);
   const [justification, setJustification] = useState("");
   const [justificationError, setJustificationError] = useState<string | null>(
     null,
   );
 
-  function openCloseDialog(id: string) {
+  function openJustifyDialog(id: string, action: JustifyAction) {
     if (isDemo) {
       notify("info", "Transicao local simulada.");
       return;
     }
     setJustification("");
     setJustificationError(null);
-    setCloseDialog({ id });
+    setJustifyDialog({ id, action });
   }
 
-  function dismissCloseDialog() {
-    setCloseDialog(null);
+  function dismissJustifyDialog() {
+    setJustifyDialog(null);
     setJustification("");
     setJustificationError(null);
   }
 
-  function handleConfirmClose() {
-    if (!closeDialog) return;
+  function handleConfirmJustify() {
+    if (!justifyDialog) return;
     const text = justification.trim();
     if (!text) {
       setJustificationError(
-        "Informe uma justificativa para liberar o faturamento para o financeiro.",
+        justifyDialog.action === "CLOSE"
+          ? "Informe uma justificativa para liberar o faturamento para o financeiro."
+          : "Informe uma justificativa para alterar o status deste fechamento.",
       );
       return;
     }
-    const id = closeDialog.id;
+    const { id, action } = justifyDialog;
     startTransition(async () => {
-      const result = await advanceRevenueClosing({
-        id,
-        action: "CLOSE",
-        justification: text,
-      });
+      const result = await advanceRevenueClosing({ id, action, justification: text });
       if (result.ok) {
-        notify("success", "Faturamento liberado para o financeiro.");
-        setCloseDialog(null);
-        setJustification("");
-        setJustificationError(null);
+        notify("success", justifyDialogCopy[action].success);
+        dismissJustifyDialog();
       } else {
         setJustificationError(result.message);
       }
@@ -139,10 +211,10 @@ export function MonthlyClosingTable({
           stored: result.data.stored,
         });
         notify(
-          "success",
+          result.data.stored ? "success" : "info",
           result.data.stored
-            ? "Pre-fatura gerada e armazenada."
-            : "Pre-fatura gerada (visualizacao em tela; storage nao configurado).",
+            ? "Pré-fatura gerada e armazenada."
+            : "Armazenamento não configurado: a pré-fatura foi gerada apenas para visualização. Baixe o HTML para arquivar.",
         );
       } else {
         notify("warning", result.message);
@@ -158,14 +230,28 @@ export function MonthlyClosingTable({
     startTransition(async () => {
       const result = await sendPreInvoiceEmail({ closingId: id });
       if (result.ok) {
-        notify(
-          "success",
-          result.data.alreadySent
-            ? "Pre-fatura ja havia sido enviada ao cliente."
-            : "Pre-fatura enviada ao cliente.",
-        );
+        if (result.data.alreadySent) {
+          notify("info", "Pré-fatura já havia sido enviada ao cliente.");
+        } else if (result.data.emailed) {
+          notify("success", "Pré-fatura enviada ao cliente.");
+        } else {
+          // Envio suprimido pela regra de notificação PRE_INVOICE_ISSUED
+          // (desligada / sem destinatário): não fingimos que enviou.
+          notify(
+            "info",
+            "Envio de pré-fatura está desativado nas regras de notificação. Gere a pré-fatura e baixe o HTML para enviar manualmente.",
+          );
+        }
       } else {
-        notify("warning", result.message);
+        // Degrade acionável conhecido (P3): cliente sem e-mail de contato.
+        // sendPreInvoiceEmail nunca emite NO_EMAIL/NO_STORAGE (o transporte cai
+        // para console quando não configurado), então não mapeamos códigos
+        // inexistentes — os demais erros usam a mensagem do servidor.
+        const message =
+          result.error === "NO_CONTACT_EMAIL"
+            ? "Cadastre o e-mail de contato do cliente (em Clientes) para enviar a pré-fatura."
+            : result.message;
+        notify("warning", message);
       }
     });
   }
@@ -256,7 +342,14 @@ export function MonthlyClosingTable({
       header: "Cliente / Projeto",
       cell: (r) => (
         <div>
-          <p className="font-medium text-strong">{r.projectName}</p>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <p className="font-medium text-strong">{r.projectName}</p>
+            {r.opportunityType ? (
+              <span className="rounded-full border border-border bg-surface-muted px-2 py-0.5 text-[11px] font-medium text-medium">
+                {opportunityTypeLabels[r.opportunityType]}
+              </span>
+            ) : null}
+          </div>
           <p className="text-xs text-soft">{r.clientName}</p>
         </div>
       ),
@@ -324,6 +417,33 @@ export function MonthlyClosingTable({
       className: "hidden lg:table-cell",
     },
     {
+      key: "exceptions",
+      header: "Exceções",
+      cell: (r) => {
+        const entries = r.projectId
+          ? (exceptionsByProject?.[r.projectId] ?? [])
+          : [];
+        if (entries.length === 0) {
+          return <span className="text-xs text-soft">—</span>;
+        }
+        return (
+          <button
+            type="button"
+            className="inline-flex items-center gap-1.5 rounded-md bg-warning-soft px-2.5 py-1 text-xs font-semibold text-warning hover:brightness-95"
+            onClick={() =>
+              setExceptionsDialog({
+                title: `${r.projectName} — ${r.clientName}`,
+                entries,
+              })
+            }
+          >
+            <AlertTriangle size={14} /> {entries.length}
+          </button>
+        );
+      },
+      className: "hidden md:table-cell",
+    },
+    {
       key: "actions",
       header: "Acoes",
       cell: (r) => (
@@ -355,7 +475,7 @@ export function MonthlyClosingTable({
                 variant="secondary"
                 icon={Undo2}
                 disabled={isPending}
-                onClick={() => handleAdvance(r.id, "REVERT_TO_OPEN")}
+                onClick={() => openJustifyDialog(r.id, "REVERT_TO_OPEN")}
               >
                 Voltar
               </ActionButton>
@@ -368,7 +488,7 @@ export function MonthlyClosingTable({
                 variant="primary"
                 icon={Lock}
                 disabled={isPending}
-                onClick={() => openCloseDialog(r.id)}
+                onClick={() => openJustifyDialog(r.id, "CLOSE")}
               >
                 Liberar faturamento
               </ActionButton>
@@ -377,7 +497,7 @@ export function MonthlyClosingTable({
                 variant="secondary"
                 icon={Undo2}
                 disabled={isPending}
-                onClick={() => handleAdvance(r.id, "REVERT_TO_REVIEW")}
+                onClick={() => openJustifyDialog(r.id, "REVERT_TO_REVIEW")}
               >
                 Voltar
               </ActionButton>
@@ -456,7 +576,7 @@ export function MonthlyClosingTable({
               variant="danger"
               icon={Undo2}
               disabled={isPending}
-              onClick={() => handleAdvance(r.id, "REOPEN")}
+              onClick={() => openJustifyDialog(r.id, "REOPEN")}
             >
               Reabrir
             </ActionButton>
@@ -473,15 +593,20 @@ export function MonthlyClosingTable({
         title="Fechamento mensal"
         description={`Horas aprovadas por cliente e projeto - ${monthLabel}`}
         action={
-          <ActionButton
-            variant="primary"
-            size="sm"
-            icon={RotateCw}
-            disabled={isPending}
-            onClick={handleGenerate}
-          >
-            Gerar/recalcular
-          </ActionButton>
+          <div className="flex items-center gap-2">
+            {!isDemo && exportHref ? (
+              <ExportExcelButton href={exportHref} />
+            ) : null}
+            <ActionButton
+              variant="primary"
+              size="sm"
+              icon={RotateCw}
+              disabled={isPending}
+              onClick={handleGenerate}
+            >
+              Gerar/recalcular
+            </ActionButton>
+          </div>
         }
       >
         <DataTable
@@ -522,26 +647,111 @@ export function MonthlyClosingTable({
         }
       >
         {preview ? (
-          <iframe
-            title="Pre-fatura"
-            srcDoc={preview.html}
-            className="h-[60vh] w-full rounded-md border border-border bg-white"
+          <div className="space-y-3">
+            {!preview.stored ? (
+              <p className="rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-xs font-medium text-warning">
+                Armazenamento não configurado: a pré-fatura foi gerada apenas
+                para visualização e não ficou arquivada. Use “Baixar HTML” para
+                guardar uma cópia.
+              </p>
+            ) : null}
+            <iframe
+              title="Pre-fatura"
+              srcDoc={preview.html}
+              className="h-[60vh] w-full rounded-md border border-border bg-white"
+            />
+          </div>
+        ) : null}
+      </Modal>
+
+      <Modal
+        open={exceptionsDialog != null}
+        onClose={() => setExceptionsDialog(null)}
+        title="Exceções do período"
+        description={
+          exceptionsDialog
+            ? `${exceptionsDialog.title} — lançamentos aprovados fora do Dia Útil ou com anexo.`
+            : undefined
+        }
+        className="max-w-2xl"
+      >
+        {exceptionsDialog ? (
+          <DataTable
+            columns={[
+              {
+                key: "date",
+                header: "Data",
+                cell: (e: RevenueExceptionEntry) => (
+                  <span className="text-sm tabular-nums">
+                    {formatDate(e.date)}
+                  </span>
+                ),
+              },
+              {
+                key: "consultant",
+                header: "Consultor",
+                cell: (e: RevenueExceptionEntry) => (
+                  <span className="text-sm text-strong">{e.consultantName}</span>
+                ),
+              },
+              {
+                key: "activity",
+                header: "Atividade",
+                cell: (e: RevenueExceptionEntry) => (
+                  <span className="text-sm text-medium">
+                    {activityLabelOf(e.activityType)}
+                  </span>
+                ),
+              },
+              {
+                key: "hours",
+                header: "Horas",
+                align: "right",
+                cell: (e: RevenueExceptionEntry) => (
+                  <span className="text-sm tabular-nums">
+                    {formatHours(e.hours)}
+                  </span>
+                ),
+              },
+              {
+                key: "attachment",
+                header: "Anexo",
+                cell: (e: RevenueExceptionEntry) =>
+                  e.hasAttachment ? (
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 text-sm text-accent underline"
+                      disabled={isPending}
+                      onClick={() => viewEntryAttachment(e.id)}
+                    >
+                      <Paperclip size={13} /> Ver
+                    </button>
+                  ) : (
+                    <span className="text-xs text-soft">—</span>
+                  ),
+              },
+            ]}
+            rows={exceptionsDialog.entries}
+            rowKey={(e) => e.id}
+            caption="Exceções do período por lançamento"
           />
         ) : null}
       </Modal>
 
       <Modal
-        open={closeDialog != null}
-        onClose={dismissCloseDialog}
-        title="Liberar faturamento para o financeiro"
-        description="Fecha o fechamento de receita e o entrega ao financeiro (libera pre-fatura e NFS-e). A justificativa fica registrada na trilha de auditoria."
+        open={justifyDialog != null}
+        onClose={dismissJustifyDialog}
+        title={justifyDialog ? justifyDialogCopy[justifyDialog.action].title : ""}
+        description={
+          justifyDialog ? justifyDialogCopy[justifyDialog.action].description : ""
+        }
         footer={
           <>
             <ActionButton
               size="sm"
               variant="secondary"
               disabled={isPending}
-              onClick={dismissCloseDialog}
+              onClick={dismissJustifyDialog}
             >
               Cancelar
             </ActionButton>
@@ -550,9 +760,9 @@ export function MonthlyClosingTable({
               variant="primary"
               icon={Lock}
               disabled={isPending}
-              onClick={handleConfirmClose}
+              onClick={handleConfirmJustify}
             >
-              Liberar faturamento
+              {justifyDialog ? justifyDialogCopy[justifyDialog.action].confirm : ""}
             </ActionButton>
           </>
         }
@@ -575,7 +785,7 @@ export function MonthlyClosingTable({
           }}
           rows={4}
           aria-invalid={justificationError != null}
-          placeholder="Ex.: Horas conferidas e aprovadas; valores conferem com o contrato."
+          placeholder="Ex.: Ajuste solicitado pelo cliente; correção de horas antes do fechamento."
           className={cn(
             "w-full resize-y rounded-md border border-border bg-surface px-3 py-2 text-sm text-strong placeholder:text-soft",
             focusRingInput,

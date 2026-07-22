@@ -13,7 +13,7 @@ import {
   EXPENSE_STAGES,
   EXPENSES_SORT_FIELDS,
   HOURS_SORT_FIELDS,
-  PAGE_SIZES,
+  pageSizeOptionsWith,
   type ExpensesSortField,
   type HoursSortField,
 } from "@/lib/reports/schemas";
@@ -469,7 +469,7 @@ export function ReportFilters({ tab, options, values }: ReportFiltersProps) {
                     defaultValue={v("pageSize")}
                     className={fieldClass}
                   >
-                    {PAGE_SIZES.map((n) => (
+                    {pageSizeOptionsWith(v("pageSize")).map((n) => (
                       <option key={n} value={n}>
                         {n}
                       </option>

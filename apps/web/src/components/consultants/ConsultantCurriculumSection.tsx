@@ -7,11 +7,19 @@ import {
   ConsultantCurriculumView,
   CurriculumSubSection,
 } from "@/components/consultants/ConsultantCurriculumView";
+import {
+  ConsultantExperienceEditor,
+  type ExperienceDraft,
+} from "@/components/consultants/ConsultantExperienceEditor";
 import { focusRingInput } from "@/lib/styles";
 import { cn } from "@/lib/utils";
+import type { ConsultantExperienceView } from "@/lib/consultants/experiences";
 import {
+  deleteConsultantExperience,
   generateCurriculumSnapshot,
   loadConsultantCurriculum,
+  loadConsultantExperiences,
+  saveConsultantExperience,
   saveCurriculumBio,
   type CurriculumSnapshotSummary,
   type CurriculumView,
@@ -48,21 +56,41 @@ export function ConsultantCurriculumSection({
   const [loading, setLoading] = useState(false);
   const [headline, setHeadline] = useState("");
   const [summary, setSummary] = useState("");
+  const [experiences, setExperiences] = useState<ConsultantExperienceView[]>([]);
   const [busy, setBusy] = useState(false);
   const printBase = `/app/consultores/${consultantId}/curriculo/print`;
+
+  async function reloadExperiences() {
+    const res = await loadConsultantExperiences(consultantId);
+    if (res.ok) setExperiences(res.data);
+  }
+
+  async function saveExperience(draft: ExperienceDraft) {
+    return saveConsultantExperience({
+      id: draft.id,
+      consultantId,
+      company: draft.company,
+      role: draft.role,
+      startDate: draft.startDate,
+      endDate: draft.endDate || undefined,
+      description: draft.description || undefined,
+      location: draft.location || undefined,
+    });
+  }
 
   async function load() {
     setLoading(true);
     const result = await loadConsultantCurriculum(consultantId);
-    setLoading(false);
     if (result.ok) {
       setView(result.data);
       setHeadline(result.data.curriculum.identity.headline ?? "");
       setSummary(result.data.curriculum.identity.summary ?? "");
+      await reloadExperiences();
       onMessage(null);
     } else {
       onMessage(result.message);
     }
+    setLoading(false);
   }
 
   async function saveBio() {
@@ -168,6 +196,24 @@ export function ConsultantCurriculumSection({
         <ActionButton size="sm" onClick={saveBio} disabled={busy} icon={FileText}>
           Salvar bio
         </ActionButton>
+      </div>
+
+      {/* Experiencia profissional declarada (P27) — espinha do historico. */}
+      <div className="space-y-2 rounded-md border border-border p-3">
+        <div className="text-sm font-semibold text-strong">
+          Experiencia profissional
+        </div>
+        <p className="text-xs text-soft">
+          Experiencias declaradas do consultor. Formam a espinha do curriculo; as
+          alocacoes internas aparecem como complemento na visao abaixo.
+        </p>
+        <ConsultantExperienceEditor
+          experiences={experiences}
+          onSave={saveExperience}
+          onDelete={(id) => deleteConsultantExperience({ id })}
+          onReload={reloadExperiences}
+          onMessage={onMessage}
+        />
       </div>
 
       <ConsultantCurriculumView cv={cv} />

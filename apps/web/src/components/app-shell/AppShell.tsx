@@ -8,6 +8,7 @@ import { focusRing } from "@/lib/styles";
 import type { AppUser } from "@/lib/auth/types";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
+import { useSidebarCollapsed } from "./use-sidebar-collapsed";
 
 export interface AppShellProps {
   /** Current authenticated user (real or dev), resolved on the server. */
@@ -21,6 +22,13 @@ export interface AppShellProps {
    * catalog. Resolved on the server; the sidebar hides items not in this set.
    */
   viewableNavCodes?: string[];
+  /** Persisted `href → position` order for the primary rail (P28). */
+  navOrder?: Record<string, number>;
+  /**
+   * Total count of actionable pending items for the user (P20). Drives the
+   * topbar notification badge; a number badge is shown only when > 0.
+   */
+  notificationCount?: number;
   children: React.ReactNode;
 }
 
@@ -33,9 +41,12 @@ export function AppShell({
   logoutAction,
   databaseConfigured = false,
   viewableNavCodes = [],
+  navOrder = {},
+  notificationCount = 0,
   children,
 }: AppShellProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [collapsed, setCollapsed] = useSidebarCollapsed();
   const reduce = useReducedMotion();
   const drawerRef = useRef<HTMLDivElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
@@ -68,11 +79,19 @@ export function AppShell({
   return (
     <div className="min-h-screen bg-canvas">
       {/* Desktop sidebar */}
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 border-r-2 border-ink lg:block">
+      <aside
+        className={cn(
+          "fixed inset-y-0 left-0 z-40 hidden border-r-2 border-ink transition-[width] duration-200 lg:block",
+          collapsed ? "w-16" : "w-64",
+        )}
+      >
         <Sidebar
           databaseConfigured={databaseConfigured}
           roles={user.roles}
           viewableNavCodes={viewableNavCodes}
+          navOrder={navOrder}
+          collapsed={collapsed}
+          onToggleCollapse={() => setCollapsed(!collapsed)}
         />
       </aside>
 
@@ -116,6 +135,7 @@ export function AppShell({
                 databaseConfigured={databaseConfigured}
                 roles={user.roles}
                 viewableNavCodes={viewableNavCodes}
+                navOrder={navOrder}
               />
             </motion.aside>
           </div>
@@ -123,11 +143,18 @@ export function AppShell({
       </AnimatePresence>
 
       {/* Main column */}
-      <div className="lg:pl-64" inert={mobileOpen || undefined}>
+      <div
+        className={cn(
+          "transition-[padding] duration-200",
+          collapsed ? "lg:pl-16" : "lg:pl-64",
+        )}
+        inert={mobileOpen || undefined}
+      >
         <Topbar
           user={user}
           logoutAction={logoutAction}
           onMenuClick={() => setMobileOpen(true)}
+          notificationCount={notificationCount}
         />
         <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
           {children}

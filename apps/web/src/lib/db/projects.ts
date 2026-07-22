@@ -8,6 +8,7 @@ import type {
   ProjectConsultantOption,
   ProjectItem,
   ProjectManagerOption,
+  ProjectOpportunityType,
   ProjectPaymentType,
   ProjectReceivableItem,
   ProjectSaleRateItem,
@@ -349,6 +350,9 @@ export async function listProjects(options?: {
       billingHourlyRate: includeFinancials
         ? decimalToNumber(row.billingHourlyRate)
         : undefined,
+      // Flag de anexo de horas na cobrança (P4): controle de faturamento,
+      // mascarado junto dos demais dados financeiros.
+      billingAttachHours: includeFinancials ? row.billingAttachHours : undefined,
       budgetHours: includeFinancials ? decimalToNumber(row.budgetHours) : undefined,
       // Centro de custo é um dado operacional (não um valor financeiro
       // sensível), então é retornado a qualquer perfil que veja o projeto.
@@ -358,6 +362,11 @@ export async function listProjects(options?: {
       paymentType: includeFinancials
         ? ((row.paymentType as ProjectPaymentType | null) ?? undefined)
         : undefined,
+      // Tipo de oportunidade é uma CLASSIFICAÇÃO (não um valor sensível): vem do
+      // CRM e é retornado a qualquer perfil que veja o projeto, para a Operação
+      // enxergar a natureza do projeto. A EDIÇÃO é gated na server action.
+      opportunityType:
+        (row.opportunityType as ProjectOpportunityType | null) ?? undefined,
       // Termo de aceite é INFORMATIVO/operacional: sempre retornado.
       requiresAcceptanceTerm: row.requiresAcceptanceTerm,
       acceptanceTermAcceptedAt: row.acceptanceTermAcceptedAt

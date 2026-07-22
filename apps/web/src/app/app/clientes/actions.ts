@@ -106,6 +106,9 @@ function clientData(
     name: input.name,
     document: input.document,
     contactEmail: input.contactEmail,
+    // Lista de e-mails de cobranca (P4): contato de faturamento, ao lado do
+    // contactEmail — nao e valor financeiro, entao segue o gate base do cliente.
+    billingEmails: input.billingEmails,
     logoUrl: input.logoUrl,
     status: input.status,
   };

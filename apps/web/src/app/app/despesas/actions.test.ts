@@ -39,6 +39,7 @@ interface ExpenseRec {
   amount: number;
   description: string;
   invoiceNumber: string | null;
+  category: string | null;
   status: string;
   submittedAt: Date | null;
 }
@@ -66,6 +67,12 @@ const h = vi.hoisted(() => {
     allocations: [] as AllocationRec[],
     expenses: [] as ExpenseRec[],
     attachments: [] as AttachmentRec[],
+    policyRules: [] as {
+      category: string | null;
+      maxAgeDays: number | null;
+      maxAmount: number | null;
+      active: boolean;
+    }[],
     approvals: [] as Record<string, unknown>[],
     audits: [] as Record<string, unknown>[],
     currentUser: {
@@ -166,6 +173,7 @@ const h = vi.hoisted(() => {
           amount: Number(data.amount),
           description: data.description,
           invoiceNumber: data.invoiceNumber ?? null,
+          category: data.category ?? null,
           status: data.status,
           submittedAt: data.submittedAt ?? null,
         };
@@ -234,6 +242,14 @@ const h = vi.hoisted(() => {
         const [removed] = store.attachments.splice(index, 1);
         return removed;
       },
+    },
+    reimbursementPolicyRule: {
+      // Onda 3 (P13): as actions reavaliam a Politica de Reembolso. O default
+      // e "sem regras" (no-op); testes de politica sobrescrevem store.policyRules.
+      findMany: async ({ where }: { where?: Where } = {}) =>
+        store.policyRules
+          .filter((r) => (where?.active !== undefined ? r.active === where.active : true))
+          .map((r) => ({ ...r })),
     },
     approval: {
       create: async ({ data }: { data: Record<string, unknown> }) => {
@@ -306,6 +322,7 @@ function seedExpense(over: Partial<ExpenseRec> = {}): ExpenseRec {
     amount: 100,
     description: "Despesa de teste",
     invoiceNumber: null,
+    category: null,
     status: "DRAFT",
     submittedAt: null,
     ...over,
@@ -370,6 +387,7 @@ beforeEach(() => {
   ];
   h.store.expenses = [];
   h.store.attachments = [];
+  h.store.policyRules = [];
   h.store.approvals = [];
   h.store.audits = [];
 });
@@ -455,6 +473,67 @@ describe("createExpenseBatch — one NF, several items", () => {
     });
     expect(result).toMatchObject({ ok: false, error: "NO_ACTIVE_ALLOCATION" });
     expect(h.store.expenses).toHaveLength(0);
+  });
+});
+
+describe("Politica de Reembolso — reforco server-side (P13)", () => {
+  it("bloqueia createExpense avulso acima do teto Geral (POLICY_VIOLATION)", async () => {
+    h.store.policyRules = [
+      { category: null, maxAgeDays: null, maxAmount: 50, active: true },
+    ];
+    const result = await createExpense(baseInput); // amount 184.9
+    expect(result).toMatchObject({ ok: false, error: "POLICY_VIOLATION" });
+    expect(h.store.expenses).toHaveLength(0);
+  });
+
+  it("ignora regra inativa (sem violacao)", async () => {
+    h.store.policyRules = [
+      { category: null, maxAgeDays: null, maxAmount: 50, active: false },
+    ];
+    const result = await createExpense(baseInput);
+    expect(result.ok).toBe(true);
+  });
+
+  it("bloqueia o lote inteiro quando um item viola o teto da categoria", async () => {
+    h.store.policyRules = [
+      { category: "MEALS", maxAgeDays: null, maxAmount: 30, active: true },
+    ];
+    const result = await createExpenseBatch({
+      projectId: "proj-1",
+      description: "Viagem",
+      items: [
+        { date: "2026-06-10", amount: 20, category: "MEALS" },
+        { date: "2026-06-10", amount: 90, category: "MEALS" },
+      ],
+    });
+    expect(result).toMatchObject({ ok: false, error: "POLICY_VIOLATION" });
+    expect(h.store.expenses).toHaveLength(0);
+  });
+
+  it("bloqueia submit quando a data excede o prazo e audita a tentativa", async () => {
+    // Prazo Geral de 5 dias; despesa de 2026-06-10 vista muito depois.
+    vi.setSystemTime(new Date("2026-07-01T12:00:00.000Z"));
+    h.store.policyRules = [
+      { category: null, maxAgeDays: 5, maxAmount: null, active: true },
+    ];
+    const expense = seedOwnExpense({ date: new Date("2026-06-10T00:00:00.000Z") });
+    h.store.attachments.push({
+      id: "att-p",
+      expenseId: expense.id,
+      fileName: "nota.pdf",
+      contentType: "application/pdf",
+      size: 100,
+      storageBucket: "expense-receipts",
+      storageKey: `expenses/${expense.id}/nota.pdf`,
+      uploadedByUserId: "user-1",
+    });
+    const result = await submitExpense({ id: expense.id });
+    expect(result).toMatchObject({ ok: false, error: "POLICY_VIOLATION" });
+    expect(h.store.expenses[0].status).toBe("DRAFT");
+    expect(
+      h.store.audits.some((a) => a.action === "EXPENSE_POLICY_BLOCKED"),
+    ).toBe(true);
+    vi.useRealTimers();
   });
 });
 

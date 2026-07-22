@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   adminNavigation,
+  applyNavOrder,
   canSeeNavItem,
   canSeeNavItemByMatrix,
   findActiveNav,
@@ -132,5 +133,74 @@ describe("permission-matrix nav gating", () => {
     expect(codes).toContain("CONFIGURACOES_PERMISSOES");
     // No duplicates.
     expect(new Set(codes).size).toBe(codes.length);
+  });
+});
+
+describe("applyNavOrder (P28 — ordem persistida do menu)", () => {
+  const items = [
+    { href: "/a", label: "A" },
+    { href: "/b", label: "B" },
+    { href: "/c", label: "C" },
+    { href: "/d", label: "D" },
+  ];
+
+  it("keeps the default order when no positions are saved", () => {
+    expect(applyNavOrder(items, {}).map((i) => i.href)).toEqual([
+      "/a",
+      "/b",
+      "/c",
+      "/d",
+    ]);
+  });
+
+  it("sorts positioned items by ascending position", () => {
+    const order = { "/c": 0, "/a": 1, "/d": 2, "/b": 3 };
+    expect(applyNavOrder(items, order).map((i) => i.href)).toEqual([
+      "/c",
+      "/a",
+      "/d",
+      "/b",
+    ]);
+  });
+
+  it("appends unknown (unsaved) items after the positioned ones, in catalog order", () => {
+    // Only /d and /b have a saved position; /a and /c fall back to the end,
+    // preserving their original relative order.
+    const order = { "/d": 0, "/b": 1 };
+    expect(applyNavOrder(items, order).map((i) => i.href)).toEqual([
+      "/d",
+      "/b",
+      "/a",
+      "/c",
+    ]);
+  });
+
+  it("is stable for equal positions (falls back to catalog index)", () => {
+    const order = { "/a": 5, "/b": 5 };
+    expect(applyNavOrder(items, order).map((i) => i.href)).toEqual([
+      "/a",
+      "/b",
+      "/c",
+      "/d",
+    ]);
+  });
+
+  it("does not mutate the input array", () => {
+    const copy = [...items];
+    applyNavOrder(items, { "/d": 0 });
+    expect(items).toEqual(copy);
+  });
+
+  it("orders the real primary navigation deterministically", () => {
+    const [first] = primaryNavigation;
+    const order = { [primaryNavigation[2].href]: 0 };
+    const reordered = applyNavOrder(primaryNavigation, order);
+    expect(reordered[0].href).toBe(primaryNavigation[2].href);
+    // Same set of items, no loss.
+    expect(reordered.length).toBe(primaryNavigation.length);
+    expect(new Set(reordered.map((i) => i.href))).toEqual(
+      new Set(primaryNavigation.map((i) => i.href)),
+    );
+    expect(first).toBe(primaryNavigation[0]);
   });
 });

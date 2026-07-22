@@ -433,6 +433,52 @@ export const generateCurriculumSnapshotSchema = z.object({
   consultantId: entityId,
 });
 
+/** Data ISO (yyyy-mm-dd) obrigatoria. */
+const requiredIsoDate = z
+  .string()
+  .trim()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "Informe uma data valida (aaaa-mm-dd).");
+
+/**
+ * Campos comuns de uma experiencia profissional DECLARADA (P27 — curriculo-first).
+ * Sem NENHUM campo financeiro (nem valor, nem custo). Reaproveitados pela versao
+ * de People (com consultantId) e pela versao de autosservico (sem consultantId).
+ */
+const experienceFields = {
+  company: z.string().trim().min(1, "Informe a empresa.").max(160),
+  role: z.string().trim().min(1, "Informe o cargo.").max(160),
+  startDate: requiredIsoDate,
+  endDate: optionalDate,
+  description: optionalText(2000),
+  location: optionalText(160),
+};
+
+/** `endDate` vazio = experiencia atual; quando existe, nao pode ser antes do inicio. */
+const experienceEndAfterStart = (value: {
+  startDate: string;
+  endDate?: string;
+}): boolean => value.endDate === undefined || value.endDate >= value.startDate;
+
+const experienceEndError = {
+  message: "A data de termino nao pode ser anterior ao inicio.",
+  path: ["endDate"],
+};
+
+/** Experiencia declarada gerenciada por People/RH (consultantId explicito). */
+export const experienceSchema = z
+  .object({ id: optionalText(80), consultantId: entityId, ...experienceFields })
+  .refine(experienceEndAfterStart, experienceEndError);
+
+/**
+ * Experiencia declarada no autosservico do consultor: NUNCA aceita consultantId
+ * do cliente (o dono e resolvido do usuario logado no servidor).
+ */
+export const myExperienceSchema = z
+  .object({ id: optionalText(80), ...experienceFields })
+  .refine(experienceEndAfterStart, experienceEndError);
+
+export const deleteExperienceSchema = z.object({ id: entityId });
+
 export type ConsultantIdentityInput = z.infer<typeof consultantIdentitySchema>;
 export type PersonalInfoInput = z.infer<typeof personalInfoSchema>;
 export type CompanyInfoInput = z.infer<typeof companyInfoSchema>;
@@ -464,6 +510,9 @@ export type AdHocPaymentInput = z.infer<typeof adHocPaymentSchema>;
 export type AdHocPaymentKind = (typeof AD_HOC_PAYMENT_KINDS)[number];
 export type AdHocPaymentStatus = (typeof AD_HOC_PAYMENT_STATUSES)[number];
 export type CurriculumBioInput = z.infer<typeof curriculumBioSchema>;
+// Tipo de ENTRADA (boundary da action): campos opcionais podem ser omitidos.
+export type ExperienceInput = z.input<typeof experienceSchema>;
+export type MyExperienceInput = z.input<typeof myExperienceSchema>;
 export type GenerateCurriculumSnapshotInput = z.infer<
   typeof generateCurriculumSnapshotSchema
 >;

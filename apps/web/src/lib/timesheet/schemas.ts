@@ -2,6 +2,7 @@ import { z } from "zod";
 import { ACTIVITY_TYPES } from "./types";
 import { parseIsoDateUtc } from "./week";
 import { validateClockTimes } from "./time-clock";
+import { JUSTIFICATION_MAX_LENGTH } from "@/lib/shared/justification";
 
 /**
  * Shared Zod schemas for the Horas server actions (and their tests).
@@ -87,6 +88,18 @@ const multiplierSchema = z.coerce
   .max(10, "Fator de remuneração inválido (máximo 10).")
   .default(1);
 
+/**
+ * Motivo de NÃO faturável (P9). Opcional no schema porque só é exigido quando um
+ * GESTOR marca o lançamento como não faturável — a obrigatoriedade condicional é
+ * reforçada no servidor (resolveBillableDecision usa justificationSchema). Um
+ * consultor puro não dita `billable`, então nunca precisa enviar o motivo.
+ */
+const nonBillableReasonSchema = z
+  .string()
+  .trim()
+  .max(JUSTIFICATION_MAX_LENGTH)
+  .optional();
+
 export const timeEntryInputSchema = refineClock(
   z.object({
     projectId: idSchema,
@@ -95,6 +108,7 @@ export const timeEntryInputSchema = refineClock(
     ...clockFields,
     description: descriptionSchema,
     billable: z.boolean(),
+    nonBillableReason: nonBillableReasonSchema,
     multiplier: multiplierSchema,
   }),
 );
@@ -122,6 +136,7 @@ export const weeklyTimeEntryInputSchema = refineClock(
       .max(7, "Selecione no maximo sete dias."),
     description: descriptionSchema,
     billable: z.boolean(),
+    nonBillableReason: nonBillableReasonSchema,
     multiplier: multiplierSchema,
   }),
 );
@@ -134,6 +149,7 @@ export const updateTimeEntryInputSchema = refineClock(
     ...clockFields,
     description: descriptionSchema,
     billable: z.boolean(),
+    nonBillableReason: nonBillableReasonSchema,
     multiplier: multiplierSchema,
     /** Optional move to another day of the SAME week. */
     date: isoDateSchema.optional(),

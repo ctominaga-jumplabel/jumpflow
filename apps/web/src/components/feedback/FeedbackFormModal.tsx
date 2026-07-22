@@ -47,6 +47,8 @@ export interface FeedbackFormModalProps {
   projects: ProjectOption[];
   clients: ClientOption[];
   flags: FeedbackFlags;
+  /** Explicação de escopo vazio (null quando há consultores para escolher). */
+  writeScopeNote?: string | null;
   notify: (tone: FeedbackTone, text: string) => void;
 }
 
@@ -62,6 +64,7 @@ export function FeedbackFormModal({
   projects,
   clients,
   flags,
+  writeScopeNote,
   notify,
 }: FeedbackFormModalProps) {
   const [pending, startTransition] = useTransition();
@@ -125,6 +128,12 @@ export function FeedbackFormModal({
       }
     >
       <div className="space-y-4">
+        {consultants.length === 0 ? (
+          <p className="rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm text-warning">
+            {writeScopeNote ??
+              "Nenhum consultor disponível no seu escopo de feedback."}
+          </p>
+        ) : null}
         <OptionSelect
           label="Consultor"
           value={draft.subjectConsultantId}

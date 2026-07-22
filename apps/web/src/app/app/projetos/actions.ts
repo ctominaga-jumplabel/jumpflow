@@ -28,6 +28,7 @@ import {
   projectAutoApprovalRuleSchema,
   projectBillingConfigSchema,
   projectBillingTypeSchema,
+  projectBillingAttachHoursSchema,
   projectCommercialSchema,
   projectInputSchema,
   projectUpdateSchema,
@@ -37,12 +38,14 @@ import {
   saleRateInputSchema,
   saleRateUpdateSchema,
   projectPaymentTypeSchema,
+  projectOpportunityTypeSchema,
   projectAcceptanceTermSchema,
   projectTrackingInputSchema,
   receivableInputSchema,
   receivableUpdateSchema,
   receivableRemoveSchema,
   type ProjectPaymentTypeInput,
+  type ProjectOpportunityTypeInput,
   type ProjectAcceptanceTermInput,
   type ReceivableInput,
   type ReceivableUpdateInput,
@@ -64,6 +67,7 @@ import {
   type SetProjectAutoApprovalActiveInput,
   type ProjectBillingConfigInput,
   type ProjectBillingTypeInput,
+  type ProjectBillingAttachHoursInput,
   type ProjectCommercialInput,
   type ProjectInput,
   type ProjectUpdateInput,
@@ -425,6 +429,48 @@ export async function updateProjectBillingType(
     await audit("Project", parsed.id, "PROJECT_UPDATED", previous, data);
     revalidateProjectViews();
     return { ok: true, data: { id: parsed.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/**
+ * P4: liga/desliga o anexo da planilha de horas por consultor no e-mail de
+ * cobrança do projeto. Patch isolado, mesmo gate da regra de cobrança
+ * (FINANCIAL_ROLES). Auditado como mudança de configuração financeira.
+ */
+export async function updateProjectBillingAttachHours(
+  input: ProjectBillingAttachHoursInput,
+): Promise<ActionResult<{ id: string; billingAttachHours: boolean }>> {
+  try {
+    ensureDatabase();
+    await requireRole(FINANCIAL_ROLES);
+    const parsed = parseInput(projectBillingAttachHoursSchema, input);
+    const previous = await prisma.project.findUnique({
+      where: { id: parsed.id },
+      select: { billingAttachHours: true },
+    });
+    if (!previous) throw new ActionError("NOT_FOUND", "Projeto nao encontrado.");
+    if (previous.billingAttachHours === parsed.billingAttachHours) {
+      return {
+        ok: true,
+        data: { id: parsed.id, billingAttachHours: previous.billingAttachHours },
+      };
+    }
+    const data = { billingAttachHours: parsed.billingAttachHours };
+    await prisma.project.update({ where: { id: parsed.id }, data });
+    await audit(
+      "Project",
+      parsed.id,
+      "PROJECT_BILLING_ATTACH_HOURS_UPDATED",
+      previous,
+      data,
+    );
+    revalidateProjectViews();
+    return {
+      ok: true,
+      data: { id: parsed.id, billingAttachHours: parsed.billingAttachHours },
+    };
   } catch (error) {
     return toFailure(error);
   }
@@ -1002,6 +1048,40 @@ export async function updateProjectPaymentType(
     const data = { paymentType: parsed.paymentType ?? null };
     await prisma.project.update({ where: { id: parsed.id }, data });
     await audit("Project", parsed.id, "PROJECT_PAYMENT_TYPE_UPDATED", previous, data);
+    revalidateProjectViews();
+    return { ok: true, data: { id: parsed.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+// ── Tipo de oportunidade (classificação) ─────────────────────────────────
+// Classificação do projeto (PROJECT/ALLOCATION/SQUAD/…). Vem do CRM na
+// ingestão, mas é sobrescrevível manualmente aqui. Patch isolado (não toca
+// budget/valor de venda). Mesmo gate do tipo de pagamento (SALE_RATE_ROLES);
+// auditado como mudança comercial.
+
+export async function updateProjectOpportunityType(
+  input: ProjectOpportunityTypeInput,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    await requireRole(SALE_RATE_ROLES);
+    const parsed = parseInput(projectOpportunityTypeSchema, input);
+    const previous = await prisma.project.findUnique({
+      where: { id: parsed.id },
+      select: { opportunityType: true },
+    });
+    if (!previous) throw new ActionError("NOT_FOUND", "Projeto nao encontrado.");
+    const data = { opportunityType: parsed.opportunityType ?? null };
+    await prisma.project.update({ where: { id: parsed.id }, data });
+    await audit(
+      "Project",
+      parsed.id,
+      "PROJECT_OPPORTUNITY_TYPE_UPDATED",
+      previous,
+      data,
+    );
     revalidateProjectViews();
     return { ok: true, data: { id: parsed.id } };
   } catch (error) {

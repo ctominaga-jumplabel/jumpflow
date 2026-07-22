@@ -61,6 +61,19 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  /*
+   * P23 — Escala global ~80%. Aplicada no `body` (não num wrapper do shell) de
+   * propósito: os Modais/dropdowns usam `createPortal(document.body)`, então
+   * escalar o body faz TODO o conteúdo — shell, portais e overlays — encolher
+   * junto, sem inconsistência de escala. `zoom` (não `transform: scale`) mantém
+   * o fluxo de layout, o `position: fixed` relativo à viewport e os insets
+   * `env(safe-area-*)` corretos, ao contrário de um `scale()` que exigiria
+   * recompensar largura/altura. Tradeoff: `zoom` é uma propriedade não
+   * padronizada (hoje suportada por todos os navegadores alvo, incl. Firefox
+   * 126+); em navegadores muito antigos a página apenas renderiza em 100%
+   * (degradação segura, sem quebra).
+   */
+  zoom: 0.8;
 }
 
 /* Respect users who prefer reduced motion across the operational app. */

@@ -110,6 +110,13 @@ export const projectBillingTypeSchema = z.object({
   billingTypeId: optionalCuid,
 });
 
+// P4: flag "anexar planilha de horas por consultor" no e-mail de cobrança.
+// Patch isolado, editado pelo Financeiro junto da regra de cobrança.
+export const projectBillingAttachHoursSchema = z.object({
+  id: entityId,
+  billingAttachHours: z.boolean(),
+});
+
 // Tipo/condição de pagamento do cliente (prazo/arranjo). Campo comercial,
 // isolado para não tocar os demais campos do projeto. Opcional: "" → undefined
 // (grava null no banco). Gated por SALE_RATE_ROLES na action.
@@ -118,6 +125,28 @@ export const projectPaymentTypeSchema = z.object({
   paymentType: z.preprocess(
     (value) => (value === "" || value === null ? undefined : value),
     z.enum(["ONE_TIME", "INSTALLMENTS", "MONTHLY", "ON_MILESTONE"]).optional(),
+  ),
+});
+
+// Tipo de oportunidade de origem (classificação do projeto). Vem do CRM, mas é
+// sobrescrevível manualmente. Patch isolado (não toca os demais campos do
+// projeto). Opcional: "" → undefined (grava null no banco). Gated pelo mesmo
+// papel do tipo de pagamento (SALE_RATE_ROLES) na action.
+export const projectOpportunityTypeSchema = z.object({
+  id: entityId,
+  opportunityType: z.preprocess(
+    (value) => (value === "" || value === null ? undefined : value),
+    z
+      .enum([
+        "PROJECT",
+        "ALLOCATION",
+        "SQUAD",
+        "LICENSING",
+        "BPO",
+        "SUPPORT",
+        "OTHER",
+      ])
+      .optional(),
   ),
 });
 
@@ -153,6 +182,9 @@ export type ProjectTrackingRequestInput = z.infer<
 >;
 
 export type ProjectPaymentTypeInput = z.infer<typeof projectPaymentTypeSchema>;
+export type ProjectOpportunityTypeInput = z.infer<
+  typeof projectOpportunityTypeSchema
+>;
 export type ProjectAcceptanceTermInput = z.infer<
   typeof projectAcceptanceTermSchema
 >;
@@ -358,6 +390,9 @@ export type ProjectInput = z.infer<typeof projectInputSchema>;
 export type ProjectUpdateInput = z.infer<typeof projectUpdateSchema>;
 export type ProjectCommercialInput = z.infer<typeof projectCommercialSchema>;
 export type ProjectBillingTypeInput = z.infer<typeof projectBillingTypeSchema>;
+export type ProjectBillingAttachHoursInput = z.infer<
+  typeof projectBillingAttachHoursSchema
+>;
 export type ProjectBillingConfigInput = z.infer<
   typeof projectBillingConfigSchema
 >;

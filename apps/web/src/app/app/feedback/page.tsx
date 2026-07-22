@@ -15,6 +15,8 @@ import {
 import {
   FEEDBACK_READ_ROLES,
   canWriteFeedback,
+  feedbackWriteScopeNote,
+  hasBroadFeedbackScope,
 } from "@/lib/feedback/visibility";
 import { getFeedbackFlags } from "@/lib/feedback/flags";
 
@@ -54,6 +56,15 @@ export default async function FeedbackPage() {
 
   const isManager = hasRole(user, ["ADMIN", "PEOPLE", "AREA_MANAGER", "PROJECT_MANAGER"]);
 
+  // Fix do "não consegui incluir": quando o escopo de escrita está vazio,
+  // explicamos por quê e o que fazer, em vez de só mostrar uma lista vazia.
+  const writeScopeNote = canWrite
+    ? feedbackWriteScopeNote({
+        broadScope: hasBroadFeedbackScope(user.roles),
+        consultantCount: consultants.length,
+      })
+    : null;
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -69,6 +80,7 @@ export default async function FeedbackPage() {
         projects={projects}
         clients={clients}
         flags={flags}
+        writeScopeNote={writeScopeNote}
       />
     </div>
   );

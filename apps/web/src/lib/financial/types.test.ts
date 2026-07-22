@@ -12,8 +12,10 @@ describe("summarizeRevenueClosing", () => {
       rows: [
         {
           id: "open",
+          projectId: "p-open",
           clientName: "Client A",
           projectName: "Atlas",
+          opportunityType: null,
           approvedHours: 10,
           billingHourlyRate: 300,
           amount: 3000,
@@ -22,8 +24,10 @@ describe("summarizeRevenueClosing", () => {
         },
         {
           id: "ready",
+          projectId: "p-ready",
           clientName: "Client A",
           projectName: "Vega",
+          opportunityType: null,
           approvedHours: 5,
           billingHourlyRate: 250,
           amount: 1250,
@@ -32,8 +36,10 @@ describe("summarizeRevenueClosing", () => {
         },
         {
           id: "invoiced",
+          projectId: "p-invoiced",
           clientName: "Client B",
           projectName: "Lumen",
+          opportunityType: null,
           approvedHours: 8,
           billingHourlyRate: 400,
           amount: 3200,

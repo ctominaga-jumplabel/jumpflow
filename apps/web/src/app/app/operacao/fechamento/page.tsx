@@ -50,11 +50,18 @@ export default async function OperationClosingPage({ searchParams }: PageProps) 
   const { month, year } = resolveMonthYear(params);
   const monthLabel = formatMonth(month, year);
 
+  const databaseConfigured = isDatabaseConfigured();
   let overview: OperationClosingOverview = summarizeOverview(month, year, []);
-  if (isDatabaseConfigured()) {
+  if (databaseConfigured) {
     const { listOperationClosings } = await import("@/lib/db/operation-closing");
     overview = await listOperationClosings({ month, year });
   }
+
+  // Excel export (Onda 6) reflects the selected month; hidden without a
+  // database (demo overview has nothing real to export).
+  const exportHref = databaseConfigured
+    ? `/api/operacao/fechamento/export?m=${month}&y=${year}`
+    : undefined;
 
   const prev = shiftMonth(month, year, -1);
   const next = shiftMonth(month, year, 1);
@@ -91,6 +98,7 @@ export default async function OperationClosingPage({ searchParams }: PageProps) 
         overview={overview}
         canManage={canManage}
         monthLabel={monthLabel}
+        exportHref={exportHref}
       />
     </div>
   );
