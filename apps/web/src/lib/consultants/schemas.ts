@@ -467,6 +467,34 @@ export const adHocPaymentSchema = z.object({
 
 export const deleteAdHocPaymentSchema = z.object({ id: entityId });
 
+/**
+ * M2: valor/hora diferenciado do consultor NUM projeto, com vigência. Quando
+ * ativo para a data do lançamento, substitui o `hourlyRate` acordado nesse
+ * projeto — no custo/margem e no pagamento. `startsAt`/`endsAt` são date-only
+ * (YYYY-MM-DD); `endsAt` opcional (vigência aberta). Dado financeiro: escrita
+ * restrita ao grupo de remuneração (role OU matriz) e sempre auditada.
+ */
+export const projectRateSchema = z
+  .object({
+    id: optionalText(80),
+    consultantId: entityId,
+    projectId: entityId,
+    hourlyRate: z.coerce.number().positive().max(9_999_999.99),
+    startsAt: z.string().trim().min(10).max(10),
+    endsAt: z.string().trim().min(10).max(10).optional().or(z.literal("")),
+    note: optionalText(300),
+  })
+  .transform((value) => ({
+    ...value,
+    endsAt: value.endsAt ? value.endsAt : undefined,
+  }))
+  .refine((value) => !value.endsAt || value.endsAt >= value.startsAt, {
+    message: "A data final deve ser maior ou igual à inicial.",
+    path: ["endsAt"],
+  });
+
+export const deleteProjectRateSchema = z.object({ id: entityId });
+
 export const lookupInputSchema = z.object({
   consultantId: entityId,
   value: z.string().trim().min(8).max(20),
@@ -567,6 +595,9 @@ export type VoucherBenefitsInput = z.infer<typeof voucherBenefitsSchema>;
 export type AdHocPaymentInput = z.infer<typeof adHocPaymentSchema>;
 export type AdHocPaymentKind = (typeof AD_HOC_PAYMENT_KINDS)[number];
 export type AdHocPaymentStatus = (typeof AD_HOC_PAYMENT_STATUSES)[number];
+// Saída pós-transform (hourlyRate: number, endsAt: string | undefined),
+// consistente com AdHocPaymentInput; o form e a action usam esta forma.
+export type ProjectRateInput = z.infer<typeof projectRateSchema>;
 export type CurriculumBioInput = z.infer<typeof curriculumBioSchema>;
 // Tipo de ENTRADA (boundary da action): campos opcionais podem ser omitidos.
 export type ExperienceInput = z.input<typeof experienceSchema>;

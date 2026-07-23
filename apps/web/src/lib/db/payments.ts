@@ -1,6 +1,11 @@
 import { Prisma, prisma } from "@jumpflow/database";
 import { buildConsultantPaymentAmounts } from "@/lib/payments/amounts";
 import { timeEntryEffectiveHours } from "@/lib/timesheet/effective-hours";
+import {
+  projectRateKey,
+  resolveProjectRate,
+  type ProjectRateWindow,
+} from "@/lib/consultants/project-rate";
 import type { ConsultantPaymentStatus } from "@/lib/payments/state-machine";
 import type {
   PaymentForecastView,
@@ -338,6 +343,28 @@ export async function generateConsultantPayments(input: {
     byConsultant.set(entry.consultantId, list);
   }
 
+  // M2: valor/hora diferenciado por projeto. Pré-carrega as vigências dos
+  // consultores com horas no mês e indexa por consultor+projeto. Quando ativa
+  // para a data do lançamento, a taxa substitui o hourlyRate acordado no cálculo
+  // de pagamento (mesma taxa também vale como custo/margem em project-tracking).
+  const projectRateRows =
+    byConsultant.size > 0
+      ? await prisma.consultantProjectRate.findMany({
+          where: { consultantId: { in: [...byConsultant.keys()] } },
+        })
+      : [];
+  const projectRateWindows = new Map<string, ProjectRateWindow[]>();
+  for (const rate of projectRateRows) {
+    const key = projectRateKey(rate.consultantId, rate.projectId);
+    const list = projectRateWindows.get(key) ?? [];
+    list.push({
+      startsAt: rate.startsAt,
+      endsAt: rate.endsAt,
+      hourlyRate: toNumber(rate.hourlyRate),
+    });
+    projectRateWindows.set(key, list);
+  }
+
   const adHocByConsultant = new Map<string, typeof adHocPayments>();
   for (const payment of adHocPayments) {
     const list = adHocByConsultant.get(payment.consultantId) ?? [];
@@ -456,7 +483,15 @@ export async function generateConsultantPayments(input: {
           toNumber(entry.hours),
           toNumber(entry.multiplier),
         );
-        const rate = toNumber(compensation.hourlyRate);
+        // M2: valor/hora do projeto (vigente na data do lançamento) tem
+        // precedência sobre o hourlyRate acordado; senão, cai no acordado.
+        const overrideRate = resolveProjectRate(
+          projectRateWindows.get(
+            projectRateKey(consultantId, entry.projectId),
+          ) ?? [],
+          entry.date,
+        );
+        const rate = overrideRate ?? toNumber(compensation.hourlyRate);
         const amount = hours * rate;
         const current = byProject.get(entry.projectId) ?? {
           projectName: entry.project.name,

@@ -9,6 +9,10 @@
  */
 import { prisma } from "@jumpflow/database";
 import { resolveSaleRate, type SaleRateRange } from "@/lib/projects/rates";
+import {
+  resolveProjectRate,
+  type ProjectRateWindow,
+} from "@/lib/consultants/project-rate";
 import { timeEntryEffectiveHours } from "@/lib/timesheet/effective-hours";
 import {
   computeProjectTracking,
@@ -49,6 +53,15 @@ export async function loadProjectTracking(
           hourlyRate: true,
         },
       },
+      // M2: valor/hora por consultor NESTE projeto (precede o custo de alocação).
+      consultantProjectRates: {
+        select: {
+          consultantId: true,
+          startsAt: true,
+          endsAt: true,
+          hourlyRate: true,
+        },
+      },
       allocations: {
         where: { status: { not: "CANCELLED" } },
         orderBy: [{ status: "asc" }, { startDate: "desc" }],
@@ -68,6 +81,20 @@ export async function loadProjectTracking(
     },
   });
   if (!project) return null;
+
+  // M2: janelas de valor/hora por projeto, indexadas por consultor. Resolvidas
+  // pela data de hoje (mesma convenção do custo de alocação — taxa vigente).
+  const todayDate = new Date(`${today}T00:00:00.000Z`);
+  const projectRateByConsultant = new Map<string, ProjectRateWindow[]>();
+  for (const rate of project.consultantProjectRates) {
+    const list = projectRateByConsultant.get(rate.consultantId) ?? [];
+    list.push({
+      startsAt: rate.startsAt,
+      endsAt: rate.endsAt,
+      hourlyRate: num(rate.hourlyRate),
+    });
+    projectRateByConsultant.set(rate.consultantId, list);
+  }
 
   // Horas APROVADAS do projeto, agrupadas por alocação (equivalente
   // hours×multiplier). billable separa a base de receita da base de custo.
@@ -122,7 +149,14 @@ export async function loadProjectTracking(
       return start <= today && (end === null || today < end);
     });
     const saleRate = sale?.hourlyRate ?? null;
-    const costRate = cost ? num(cost.hourlyCost) : null;
+    // M2: valor/hora por projeto (vigente hoje) tem precedência sobre o custo de
+    // alocação; senão, cai no custo de alocação vigente.
+    const projectRateOverride = resolveProjectRate(
+      projectRateByConsultant.get(a.consultantId) ?? [],
+      todayDate,
+    );
+    const costRate =
+      projectRateOverride ?? (cost ? num(cost.hourlyCost) : null);
 
     let plannedHours: number | null = null;
     if (PLANNED_STATUSES.has(a.status)) {

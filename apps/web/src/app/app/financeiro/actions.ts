@@ -47,11 +47,12 @@ import {
   type EmailAttachment,
 } from "@/lib/automation/email-transport";
 import { buildWorkbook, defineSheet } from "@/lib/export/xlsx";
-import {
-  buildProjectHoursSheetRows,
-  sumProjectHours,
-  type ProjectHoursSheetRow,
-} from "@/lib/billing/hours-worksheet";
+import { getHoursReport } from "@/lib/db/reports";
+import { hoursXlsxColumns } from "@/lib/reports/xlsx-columns";
+import type { HoursReport } from "@/lib/reports/types";
+import type { HoursReportFilter } from "@/lib/reports/schemas";
+import { timeEntryStatusLabels } from "@/lib/timesheet/types";
+import type { AppUser } from "@/lib/auth/types";
 
 const FINANCEIRO_PATH = "/app/financeiro";
 
@@ -313,6 +314,86 @@ export async function sendClientBillingSummary(input: {
     await notifyClientBillingSummary(parsed.closingId);
     revalidatePath(FINANCEIRO_PATH);
     return { ok: true, data: { ok: true } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/** Inclusive month range [from..last day] as ISO date strings (UTC). */
+function monthRangeIso(year: number, month: number): { from: string; to: string } {
+  const iso = (d: Date) => d.toISOString().slice(0, 10);
+  return {
+    from: iso(new Date(Date.UTC(year, month - 1, 1))),
+    to: iso(new Date(Date.UTC(year, month, 0))), // day 0 = last of the month
+  };
+}
+
+/** pt-BR label for a time-entry status (falls back to the raw code). */
+function hoursStatusLabel(status: string): string {
+  return (
+    timeEntryStatusLabels[status as keyof typeof timeEntryStatusLabels] ?? status
+  );
+}
+
+export interface ClosingApuracaoView {
+  clientName: string;
+  /** Null for a client-scoped closing (no single project). */
+  projectName: string | null;
+  /** Competence label, e.g. "07/2026". */
+  monthLabel: string;
+  /** Same rows/totals as the Relatórios → Horas screen, scoped to the closing. */
+  report: HoursReport;
+}
+
+/**
+ * M3 (Apurar): load the closing's detail at report level — the SAME rows the
+ * Relatórios → Horas screen shows (via `getHoursReport`), scoped to the closing's
+ * project (or client, when client-scoped) and competence. Read-only: sends no
+ * e-mail. RBAC + `includeFinancials` are recomputed from the real finance user
+ * inside `getHoursReport`, so a client hint can never widen the scope.
+ */
+export async function loadClosingApuracao(input: {
+  closingId: string;
+}): Promise<ActionResult<ClosingApuracaoView>> {
+  try {
+    ensureDatabase();
+    const user = await requireRole(FINANCIAL_ROLES);
+    const parsed = parseInput(closingIdInputSchema, input);
+
+    const closing = await prisma.revenueClosing.findUnique({
+      where: { id: parsed.closingId },
+      select: {
+        month: true,
+        year: true,
+        clientId: true,
+        projectId: true,
+        client: { select: { name: true } },
+        project: { select: { name: true } },
+      },
+    });
+    if (!closing) {
+      throw new ActionError("NOT_FOUND", "Fechamento nao encontrado.");
+    }
+
+    const { from, to } = monthRangeIso(closing.year, closing.month);
+    const filter: HoursReportFilter = {
+      from,
+      to,
+      ...(closing.projectId
+        ? { projectId: closing.projectId }
+        : { clientId: closing.clientId }),
+    };
+    const report = await getHoursReport(user, filter);
+
+    return {
+      ok: true,
+      data: {
+        clientName: closing.client.name,
+        projectName: closing.project?.name ?? null,
+        monthLabel: `${String(closing.month).padStart(2, "0")}/${closing.year}`,
+        report,
+      },
+    };
   } catch (error) {
     return toFailure(error);
   }
@@ -742,72 +823,54 @@ function resolveBillingRecipients(client: {
 }
 
 /**
- * Build the "horas realizadas por consultor" `.xlsx` attachment for a
- * project-scoped closing (P4). Loads the APPROVED TimeEntry rows for the
- * project/competence, groups them per consultant (pure helper), and serializes
- * a two-sheet workbook (resumo por consultor + total). Returns null when there
- * are no approved hours (nothing to attach). Binary is base64-encoded for the
- * transport's `encoding: "base64"` passthrough.
+ * Build the project hours `.xlsx` attachment for a project-scoped closing (P4 +
+ * M5). Emits the SAME columns as the Relatórios → Horas screen/export (via
+ * `getHoursReport` + `hoursXlsxColumns`), scoped to the closing's project and
+ * competence, and only `billable = true` APPROVED entries — matching exactly the
+ * billing total (`revenue.ts` sums APPROVED + billable:true). RBAC and the
+ * monetary columns (`includeFinancials`) are recomputed from the real finance
+ * `user`, never widened by the caller. Returns null when there are no matching
+ * rows (nothing to attach). Binary is base64-encoded for the transport.
  */
 async function buildProjectHoursAttachment(params: {
+  user: AppUser;
   projectId: string;
   projectName: string;
   month: number;
   year: number;
 }): Promise<EmailAttachment | null> {
-  const start = new Date(Date.UTC(params.year, params.month - 1, 1));
-  const end = new Date(Date.UTC(params.year, params.month, 1));
-  const entries = await prisma.timeEntry.findMany({
-    where: {
-      projectId: params.projectId,
-      status: "APPROVED",
-      date: { gte: start, lt: end },
-    },
-    select: {
-      consultantId: true,
-      hours: true,
-      consultant: { select: { name: true } },
-    },
+  const { from, to } = monthRangeIso(params.year, params.month);
+  const report = await getHoursReport(params.user, {
+    projectId: params.projectId,
+    from,
+    to,
+    status: "APPROVED",
+    billable: true,
   });
-  if (entries.length === 0) return null;
+  if (report.rows.length === 0) return null;
 
-  const rows: ProjectHoursSheetRow[] = buildProjectHoursSheetRows(
-    entries.map((entry) => ({
-      consultantId: entry.consultantId,
-      consultantName: entry.consultant.name,
-      hours: Number(entry.hours),
-    })),
-  );
-  const totalHours = sumProjectHours(rows);
   const competence = `${params.year}-${String(params.month).padStart(2, "0")}`;
+  const columns = hoursXlsxColumns({
+    includeFinancials: report.includeFinancials,
+    statusLabel: hoursStatusLabel,
+  });
 
   const buffer = await buildWorkbook([
     defineSheet({
-      name: "Horas por consultor",
-      rows,
-      columns: [
-        { header: "Consultor", value: (row) => row.consultant, width: 32 },
-        {
-          header: "Horas realizadas",
-          value: (row) => row.totalHours,
-          numFmt: "#,##0.00",
-          width: 18,
-        },
-        {
-          header: "Lancamentos",
-          value: (row) => row.entries,
-          numFmt: "#,##0",
-          width: 14,
-        },
-      ],
+      name: "Horas faturáveis",
+      rows: report.rows,
+      columns,
     }),
     defineSheet({
       name: "Resumo",
       rows: [
         { label: "Projeto", value: params.projectName },
         { label: "Competencia", value: competence },
-        { label: "Consultores", value: rows.length },
-        { label: "Total de horas", value: totalHours },
+        { label: "Lancamentos", value: report.totals.count },
+        { label: "Total de horas", value: report.totals.totalHours },
+        ...(report.includeFinancials
+          ? [{ label: "Total faturado", value: report.totals.totalBilled ?? 0 }]
+          : []),
       ],
       columns: [
         { header: "Campo", value: (row) => row.label, width: 20 },
@@ -913,6 +976,7 @@ export async function sendPreInvoiceEmail(input: {
     const attachments: EmailAttachment[] = [];
     if (data.closing.projectId && data.project?.billingAttachHours) {
       const attachment = await buildProjectHoursAttachment({
+        user,
         projectId: data.closing.projectId,
         projectName: data.project.name,
         month: data.closing.month,

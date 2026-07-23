@@ -1,47 +1,26 @@
 "use client";
 
 import { useRef, useState } from "react";
-import {
-  FileText,
-  IdCard,
-  MapPin,
-  Paperclip,
-  Phone,
-  Search,
-  Trash2,
-  Upload,
-} from "lucide-react";
+import { IdCard, MapPin, Phone, Search, Upload } from "lucide-react";
 import { ActionButton } from "@/components/ui/ActionButton";
 import { focusRing, focusRingInput } from "@/lib/styles";
 import { cn } from "@/lib/utils";
 import {
-  deleteConsultantDocument,
   lookupConsultantCep,
   saveAddress,
   savePersonalInfo,
-  uploadConsultantDocument,
   uploadConsultantPhoto,
 } from "@/app/app/consultores/actions";
 import type {
   AddressInput,
   ConsultantContractType,
-  ConsultantDocumentType,
   PersonalInfoInput,
 } from "@/lib/consultants/schemas";
-import {
-  CLT_DOCUMENT_TYPES,
-  COMMON_DOCUMENT_TYPES,
-  documentTypeLabels,
-  genderLabels,
-  maritalStatusLabels,
-  PJ_DOCUMENT_TYPES,
-} from "@/lib/consultants/labels";
+import { genderLabels, maritalStatusLabels } from "@/lib/consultants/labels";
 import type { ConsultantProfile } from "@/lib/db/consultants";
 import { ConsultantCltSection } from "./ConsultantCltSection";
-import { ConsultantCompetenciasSection } from "./ConsultantCompetenciasSection";
 import { ConsultantPjSection } from "./ConsultantPjSection";
 
-const ACCEPT_DOC = ".pdf,.jpg,.jpeg,.png,.webp";
 const ACCEPT_IMG = ".jpg,.jpeg,.png,.webp";
 
 export interface ConsultantProfileSectionsProps {
@@ -139,19 +118,6 @@ export function ConsultantProfileSections({
       onReload();
     }
   }
-
-  // Tipos de slot unico (um anexo por tipo). OTHER e tratado a parte porque
-  // pode repetir: lista todos os existentes + um slot para adicionar mais.
-  const documentTypes: ConsultantDocumentType[] = [
-    ...COMMON_DOCUMENT_TYPES,
-    ...(contractType === "CLT" || contractType === "CLT_FLEX"
-      ? CLT_DOCUMENT_TYPES
-      : []),
-    ...(contractType === "PJ" || contractType === "CLT_FLEX"
-      ? PJ_DOCUMENT_TYPES
-      : []),
-  ];
-  const otherDocuments = profile.documents.filter((doc) => doc.type === "OTHER");
 
   return (
     <div className="space-y-4">
@@ -330,15 +296,6 @@ export function ConsultantProfileSections({
         </ActionButton>
       </section>
 
-      <ConsultantCompetenciasSection
-        consultantId={consultantId}
-        languages={profile.languages}
-        educations={profile.educations}
-        canManagePeople={canManagePeople}
-        onMessage={onMessage}
-        onReload={onReload}
-      />
-
       {contractType === "CLT" || contractType === "CLT_FLEX" ? (
         <ConsultantCltSection
           consultantId={consultantId}
@@ -362,57 +319,6 @@ export function ConsultantProfileSections({
           onReload={onReload}
         />
       ) : null}
-
-      <section className="space-y-3 rounded-md border border-border p-3">
-        <div className="flex items-center gap-2 text-sm font-semibold text-strong">
-          <FileText aria-hidden="true" className="size-4" />
-          Documentos
-        </div>
-        {!contractType ? (
-          <p className="text-xs text-soft">
-            Defina o tipo de contratacao na identidade para ver os documentos
-            especificos de CLT/PJ. Os documentos comuns ja estao disponiveis
-            abaixo.
-          </p>
-        ) : null}
-        <ul className="space-y-2">
-          {documentTypes.map((type) => (
-            <DocumentRow
-              key={type}
-              consultantId={consultantId}
-              type={type}
-              document={profile.documents.find((doc) => doc.type === type) ?? null}
-              disabled={!canManagePeople}
-              onMessage={onMessage}
-              onReload={onReload}
-            />
-          ))}
-        </ul>
-
-        <div className="space-y-2">
-          <p className="text-xs font-semibold text-medium">Outros documentos</p>
-          <ul className="space-y-2">
-            {otherDocuments.map((doc) => (
-              <ExistingOtherRow
-                key={doc.id}
-                document={doc}
-                disabled={!canManagePeople}
-                onMessage={onMessage}
-                onReload={onReload}
-              />
-            ))}
-            {/* Slot de adicao: document=null sempre cria um novo OTHER. */}
-            <DocumentRow
-              consultantId={consultantId}
-              type="OTHER"
-              document={null}
-              disabled={!canManagePeople}
-              onMessage={onMessage}
-              onReload={onReload}
-            />
-          </ul>
-        </div>
-      </section>
     </div>
   );
 }
@@ -482,165 +388,6 @@ function PhotoField({
         />
       </div>
     </div>
-  );
-}
-
-function DocumentRow({
-  consultantId,
-  type,
-  document,
-  disabled,
-  onMessage,
-  onReload,
-}: {
-  consultantId: string;
-  type: ConsultantDocumentType;
-  document: ConsultantProfile["documents"][number] | null;
-  disabled: boolean;
-  onMessage: (message: string | null) => void;
-  onReload: () => void;
-}) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [busy, setBusy] = useState(false);
-
-  async function upload(file: File) {
-    setBusy(true);
-    const formData = new FormData();
-    formData.set("consultantId", consultantId);
-    formData.set("type", type);
-    formData.set("file", file);
-    const result = await uploadConsultantDocument(formData);
-    setBusy(false);
-    if (inputRef.current) inputRef.current.value = "";
-    onMessage(
-      result.ok ? `${documentTypeLabels[type]} anexado.` : result.message,
-    );
-    if (result.ok) onReload();
-  }
-
-  async function remove() {
-    if (!document) return;
-    setBusy(true);
-    const result = await deleteConsultantDocument({ documentId: document.id });
-    setBusy(false);
-    onMessage(result.ok ? `${documentTypeLabels[type]} removido.` : result.message);
-    if (result.ok) onReload();
-  }
-
-  return (
-    <li className="flex items-center gap-3 rounded-md border border-border bg-surface-muted/40 px-3 py-2">
-      <span className="w-44 shrink-0 text-sm font-medium text-strong">
-        {documentTypeLabels[type]}
-      </span>
-      <div className="min-w-0 flex-1">
-        {document ? (
-          <a
-            href={document.url ?? undefined}
-            target="_blank"
-            rel="noreferrer"
-            className={cn(
-              "inline-flex max-w-full items-center gap-1.5 truncate text-sm text-brand hover:underline",
-              !document.url && "pointer-events-none text-medium",
-            )}
-          >
-            <FileText aria-hidden="true" className="size-3.5 shrink-0" />
-            <span className="truncate">{document.fileName}</span>
-          </a>
-        ) : (
-          <span className="text-xs text-soft">Nenhum arquivo anexado.</span>
-        )}
-      </div>
-      <label
-        htmlFor={`doc-${type}-${consultantId}`}
-        className={cn(
-          "inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-xs font-semibold text-brand transition-colors hover:bg-surface",
-          disabled && "pointer-events-none opacity-50",
-          focusRing,
-        )}
-      >
-        <Paperclip aria-hidden="true" className="size-3.5" />
-        {busy ? "..." : document ? "Substituir" : "Anexar"}
-      </label>
-      {document ? (
-        <button
-          type="button"
-          onClick={remove}
-          disabled={disabled || busy}
-          aria-label={`Remover ${documentTypeLabels[type]}`}
-          className={cn(
-            "grid size-7 shrink-0 place-items-center rounded-md text-medium transition-colors hover:bg-surface hover:text-danger disabled:opacity-50",
-            focusRing,
-          )}
-        >
-          <Trash2 aria-hidden="true" className="size-4" />
-        </button>
-      ) : null}
-      <input
-        ref={inputRef}
-        id={`doc-${type}-${consultantId}`}
-        type="file"
-        accept={ACCEPT_DOC}
-        className="sr-only"
-        disabled={disabled || busy}
-        onChange={(event) => {
-          const file = event.target.files?.[0];
-          if (file) void upload(file);
-        }}
-      />
-    </li>
-  );
-}
-
-function ExistingOtherRow({
-  document,
-  disabled,
-  onMessage,
-  onReload,
-}: {
-  document: ConsultantProfile["documents"][number];
-  disabled: boolean;
-  onMessage: (message: string | null) => void;
-  onReload: () => void;
-}) {
-  const [busy, setBusy] = useState(false);
-
-  async function remove() {
-    setBusy(true);
-    const result = await deleteConsultantDocument({ documentId: document.id });
-    setBusy(false);
-    onMessage(result.ok ? "Documento removido." : result.message);
-    if (result.ok) onReload();
-  }
-
-  return (
-    <li className="flex items-center gap-3 rounded-md border border-border bg-surface-muted/40 px-3 py-2">
-      <div className="min-w-0 flex-1">
-        <a
-          href={document.url ?? undefined}
-          target="_blank"
-          rel="noreferrer"
-          className={cn(
-            "inline-flex max-w-full items-center gap-1.5 truncate text-sm text-brand hover:underline",
-            !document.url && "pointer-events-none text-medium",
-          )}
-        >
-          <FileText aria-hidden="true" className="size-3.5 shrink-0" />
-          <span className="truncate">{document.fileName}</span>
-        </a>
-      </div>
-      <button
-        type="button"
-        onClick={remove}
-        disabled={disabled || busy}
-        aria-label={`Remover ${document.fileName}`}
-        className={cn(
-          "grid size-7 shrink-0 place-items-center rounded-md text-medium transition-colors hover:bg-surface hover:text-danger disabled:opacity-50",
-          focusRing,
-        )}
-      >
-        <Trash2 aria-hidden="true" className="size-4" />
-      </button>
-    </li>
   );
 }
 

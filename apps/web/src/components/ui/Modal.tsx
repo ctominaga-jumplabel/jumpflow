@@ -15,6 +15,8 @@ export interface ModalProps {
   children: React.ReactNode;
   /** Optional footer area (e.g. action buttons). Pinned below the body. */
   footer?: React.ReactNode;
+  /** Optional controls rendered in the header, left of the close button. */
+  headerActions?: React.ReactNode;
   className?: string;
 }
 
@@ -33,6 +35,7 @@ export function Modal({
   description,
   children,
   footer,
+  headerActions,
   className,
 }: ModalProps) {
   const reduce = useReducedMotion();
@@ -148,17 +151,20 @@ export function Modal({
                   </p>
                 ) : null}
               </div>
-              <button
-                type="button"
-                onClick={onClose}
-                aria-label="Fechar"
-                className={cn(
-                  "grid size-9 shrink-0 place-items-center rounded-md text-medium transition-colors hover:bg-surface-muted hover:text-strong",
-                  focusRing,
-                )}
-              >
-                <X aria-hidden="true" className="size-5" />
-              </button>
+              <div className="flex shrink-0 items-center gap-1">
+                {headerActions}
+                <button
+                  type="button"
+                  onClick={onClose}
+                  aria-label="Fechar"
+                  className={cn(
+                    "grid size-9 shrink-0 place-items-center rounded-md text-medium transition-colors hover:bg-surface-muted hover:text-strong",
+                    focusRing,
+                  )}
+                >
+                  <X aria-hidden="true" className="size-5" />
+                </button>
+              </div>
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
