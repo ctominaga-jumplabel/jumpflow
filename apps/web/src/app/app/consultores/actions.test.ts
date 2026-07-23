@@ -129,6 +129,41 @@ vi.mock("@/lib/auth/guards", () => ({
     }
     return h.store.currentUser;
   }),
+  requireRoleOrPermission: vi.fn(
+    async (roles: string | string[], code: string) => {
+      const required = Array.isArray(roles) ? roles : [roles];
+      const roleOk =
+        required.length === 0 ||
+        required.some((role) => h.store.currentUser.roles.includes(role));
+      const grantOk = code
+        ? Boolean(
+            (h.store as { grantedCodes?: Set<string> }).grantedCodes?.has(code),
+          )
+        : false;
+      if (!roleOk && !grantOk) {
+        const redirectError = new Error("NEXT_REDIRECT");
+        Object.assign(redirectError, {
+          digest: "NEXT_REDIRECT;replace;/access-denied;307;",
+        });
+        throw redirectError;
+      }
+      return h.store.currentUser;
+    },
+  ),
+  hasRoleOrPermission: vi.fn(
+    async (_user: unknown, roles: string | string[], code: string) => {
+      const required = Array.isArray(roles) ? roles : [roles];
+      const roleOk =
+        required.length === 0 ||
+        required.some((role) => h.store.currentUser.roles.includes(role));
+      const grantOk = code
+        ? Boolean(
+            (h.store as { grantedCodes?: Set<string> }).grantedCodes?.has(code),
+          )
+        : false;
+      return roleOk || grantOk;
+    },
+  ),
 }));
 
 vi.mock("@/lib/db/users", () => ({

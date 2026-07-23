@@ -3,6 +3,8 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { ConsultantDirectory } from "@/components/consultants/ConsultantDirectory";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { FINANCIAL_ROLES, hasRole } from "@/lib/auth/route-permissions";
+import { hasRoleOrPermission } from "@/lib/auth/guards";
+import { CONSULTANT_COMPENSATION_CODE } from "@/lib/auth/permission-codes";
 import type { RoleName } from "@/lib/auth/types";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { listConsultantDirectory } from "@/lib/db/consultants";
@@ -23,6 +25,14 @@ export default async function ConsultoresPage({
     ? await listConsultantDirectory()
     : demoConsultants;
   const params = (await searchParams) ?? {};
+  // Remuneração é visível a papéis financeiros OU a quem a Matriz liberar
+  // (ex.: People/DP via CONSULTORES_REMUNERACAO), sem expor demais financeiros.
+  const canManageFinancials = await hasRoleOrPermission(
+    user,
+    FINANCIAL_ROLES,
+    CONSULTANT_COMPENSATION_CODE,
+    "view",
+  );
 
   return (
     <div className="space-y-6">
@@ -34,7 +44,7 @@ export default async function ConsultoresPage({
       <ConsultantDirectory
         consultants={consultants}
         canManagePeople={hasRole(user, PEOPLE_ROLES)}
-        canManageFinancials={hasRole(user, FINANCIAL_ROLES)}
+        canManageFinancials={canManageFinancials}
         initialConsultantId={params.novo}
       />
     </div>

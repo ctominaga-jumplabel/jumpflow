@@ -48,3 +48,38 @@ export async function requirePermission(
   if (!(await can(code, action))) redirect("/access-denied");
   return user;
 }
+
+/**
+ * Require an authenticated user who EITHER holds one of `roles` OR is granted
+ * `action` on the matrix `code`. This is the additive bridge between the static
+ * role lists and the configurable matrix: the static roles keep their historical
+ * access and the matrix can widen it to additional roles (e.g. granting People
+ * access to consultant compensation without adding them to FINANCIAL_ROLES).
+ * Redirects to `/login` if unauthenticated, `/access-denied` if neither holds.
+ */
+export async function requireRoleOrPermission(
+  roles: RoleName | RoleName[],
+  code: string,
+  action: PermissionAction = "view",
+): Promise<AppUser> {
+  const user = await requireUser();
+  if (hasRole(user, roles)) return user;
+  if (await can(code, action)) return user;
+  redirect("/access-denied");
+}
+
+/**
+ * Boolean, non-redirecting counterpart to {@link requireRoleOrPermission}: true
+ * if `user` holds one of `roles` OR the matrix grants `action` on `code`. Use for
+ * in-page/in-action field masking where lacking access degrades gracefully (e.g.
+ * skipping a financial field) rather than blocking the whole operation.
+ */
+export async function hasRoleOrPermission(
+  user: AppUser | null,
+  roles: RoleName | RoleName[],
+  code: string,
+  action: PermissionAction = "view",
+): Promise<boolean> {
+  if (hasRole(user, roles)) return true;
+  return can(code, action);
+}
