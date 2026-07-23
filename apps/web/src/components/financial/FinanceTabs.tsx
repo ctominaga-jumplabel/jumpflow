@@ -19,9 +19,12 @@ export interface FinanceTab {
 export function FinanceTabs({
   tabs,
   defaultTabId,
+  ariaLabel = "Visões do financeiro",
 }: {
   tabs: FinanceTab[];
   defaultTabId?: string;
+  /** Accessible label for the tablist (defaults to the financeiro wording). */
+  ariaLabel?: string;
 }) {
   const initial =
     tabs.find((tab) => tab.id === defaultTabId)?.id ?? tabs[0]?.id ?? "";
@@ -42,7 +45,7 @@ export function FinanceTabs({
     <div className="space-y-6">
       <div
         role="tablist"
-        aria-label="Visões do financeiro"
+        aria-label={ariaLabel}
         className="flex flex-wrap gap-2 border-b border-border"
       >
         {tabs.map((tab) => {

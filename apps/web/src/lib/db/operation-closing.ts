@@ -7,12 +7,39 @@ import {
   summarizeReadiness,
   type ConsultantReadiness,
   type OperationClosingDetail,
+  type OperationClosingDetailView,
   type OperationClosingOverview,
   type OperationClosingRow,
   type OperationConsultantDetail,
+  type OperationDetailConsultantOption,
+  type OperationDetailRow,
   type OperationEntryDetail,
   type OperationReadiness,
 } from "@/lib/operations/closing";
+
+/**
+ * Latest Approval datetime (createdAt) per TimeEntry, as an ISO string. Mirrors
+ * `loadLatestApprovalAt` in `lib/db/reports.ts` but kept local so this module
+ * stays self-contained. Approvals are ordered newest-first so the first hit per
+ * entity is the latest decision.
+ */
+async function loadDecidedAt(
+  entryIds: string[],
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (entryIds.length === 0) return out;
+  const approvals = await prisma.approval.findMany({
+    where: { entityType: "TIME_ENTRY", entityId: { in: entryIds } },
+    orderBy: { createdAt: "desc" },
+    select: { entityId: true, createdAt: true },
+  });
+  for (const approval of approvals) {
+    if (!out.has(approval.entityId)) {
+      out.set(approval.entityId, approval.createdAt.toISOString());
+    }
+  }
+  return out;
+}
 
 /**
  * DB read layer for the Operational Closing (Fechamento Operacional para o DP).
@@ -368,6 +395,105 @@ export async function getOperationClosingDetail(input: {
     month,
     year,
     consultants,
+    totalExceptions,
+  };
+}
+
+const round2 = (n: number): number => Math.round(n * 100) / 100;
+
+/**
+ * Flat, consultant-centric detail of the month for the "Detalhamento por
+ * consultor" tab: every time entry across ALL projects in the month, with the
+ * columns the DP asked for (date, consultant, client/project, activity, hours,
+ * billable, status and the decision datetime). Optionally narrowed to a single
+ * consultant; the consultant option list is always built from the UNFILTERED
+ * set so selecting one never collapses the dropdown.
+ *
+ * Same RBAC contract as the overview (gated by the page/route via
+ * `OPERACAO_FECHAMENTO` view). Bulk queries only (no N+1): one pass over the
+ * month's entries plus one batched Approval read for the decision dates.
+ */
+export async function listOperationClosingDetail(input: {
+  month: number;
+  year: number;
+  consultantId?: string;
+}): Promise<OperationClosingDetailView> {
+  const { month, year, consultantId } = input;
+  const { start, end } = monthBounds(month, year);
+
+  const entries = await prisma.timeEntry.findMany({
+    where: { date: { gte: start, lt: end } },
+    orderBy: [{ date: "asc" }, { consultantId: "asc" }],
+    select: {
+      id: true,
+      consultantId: true,
+      date: true,
+      hours: true,
+      status: true,
+      activityType: true,
+      billable: true,
+      attachment: { select: { id: true } },
+      consultant: { select: { name: true } },
+      project: {
+        select: { name: true, client: { select: { name: true } } },
+      },
+    },
+  });
+
+  // Consultant options come from the full (unfiltered) month so the filter never
+  // hides the consultant you just picked.
+  const optionMap = new Map<string, string>();
+  for (const e of entries) {
+    if (!optionMap.has(e.consultantId)) {
+      optionMap.set(e.consultantId, e.consultant?.name ?? "Consultor");
+    }
+  }
+  const consultantOptions: OperationDetailConsultantOption[] = [
+    ...optionMap.entries(),
+  ]
+    .map(([id, name]) => ({ id, name }))
+    .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+
+  const filtered = consultantId
+    ? entries.filter((e) => e.consultantId === consultantId)
+    : entries;
+
+  const decidedAt = await loadDecidedAt(filtered.map((e) => e.id));
+
+  let totalHours = 0;
+  let totalExceptions = 0;
+  const rows: OperationDetailRow[] = filtered.map((e) => {
+    const hasAttachment = e.attachment != null;
+    const isException = isExceptionEntry({
+      activityType: e.activityType,
+      hasAttachment,
+    });
+    const hours = round2(Number(e.hours ?? 0));
+    totalHours = round2(totalHours + hours);
+    if (isException) totalExceptions += 1;
+    return {
+      id: e.id,
+      date: toIsoDate(e.date),
+      consultantId: e.consultantId,
+      consultantName: e.consultant?.name ?? "Consultor",
+      clientName: e.project?.client?.name ?? "—",
+      projectName: e.project?.name ?? "—",
+      activityType: e.activityType,
+      hours,
+      billable: e.billable,
+      status: e.status,
+      hasAttachment,
+      decidedAt: decidedAt.get(e.id) ?? null,
+      isException,
+    };
+  });
+
+  return {
+    month,
+    year,
+    rows,
+    consultantOptions,
+    totalHours,
     totalExceptions,
   };
 }
