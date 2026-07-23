@@ -360,6 +360,43 @@ async function seedBillingTypes() {
   console.log(`Seeded ${BILLING_TYPES.length} billing types (catalog).`);
 }
 
+// Tipos de despesa nativos (item 12). Substituem o antigo enum ExpenseCategory;
+// `system: true` protege-os de remocao. Idempotente por `code` (@unique).
+const EXPENSE_TYPES = [
+  { code: "MILEAGE_REIMBURSEMENT", label: "Reembolso Quilometragem" },
+  { code: "AIR_TICKET", label: "Passagem Aérea" },
+  { code: "BUS_TICKET", label: "Passagem Rodoviária" },
+  { code: "CERTIFICATION", label: "Certificação" },
+  { code: "ACCOUNTING", label: "Accountech/Contabilidade" },
+  { code: "RIDE_SHARE", label: "Transporte/Uber" },
+  { code: "COURSES_TRAINING", label: "Cursos / Capacitação" },
+  { code: "LODGING", label: "Hospedagem" },
+  { code: "POSTAGE", label: "Correio" },
+  { code: "MEALS", label: "Alimentação" },
+  { code: "PERIPHERALS", label: "Periféricos" },
+  { code: "TOLL", label: "Pedágio" },
+  { code: "PARKING", label: "Estacionamento" },
+];
+
+async function seedExpenseTypes() {
+  for (let i = 0; i < EXPENSE_TYPES.length; i += 1) {
+    const t = EXPENSE_TYPES[i];
+    await prisma.expenseType.upsert({
+      where: { code: t.code },
+      // Nao sobrescreve label/active: o admin pode ter renomeado/desativado.
+      update: { system: true },
+      create: {
+        code: t.code,
+        label: t.label,
+        active: true,
+        system: true,
+        sortOrder: i,
+      },
+    });
+  }
+  console.log(`Seeded ${EXPENSE_TYPES.length} expense types (registry).`);
+}
+
 // --- Round 2 demo workspace (fictional validation data) -------------------
 //
 // Deterministic ids with the `seed-` prefix keep every upsert idempotent and
@@ -1451,6 +1488,7 @@ async function main() {
   await seedHolidayDefaults();
   await seedBootstrapAdmin();
   await seedBillingTypes();
+  await seedExpenseTypes();
   await seedDevUser();
   await seedDemoWorkspace();
   await seedDemoExpenses();

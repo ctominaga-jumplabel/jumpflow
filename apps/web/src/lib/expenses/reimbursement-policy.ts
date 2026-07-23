@@ -1,5 +1,6 @@
 import {
   expenseCategoryLabel,
+  expenseCategoryLabels,
   type ExpenseCategory,
 } from "./types";
 
@@ -93,13 +94,18 @@ export function evaluateExpensePolicy(
   expense: ExpenseForPolicy,
   rules: readonly PolicyRuleData[],
   todayIso: string,
+  /** Rótulos do registro de tipos (banco); default = rótulos nativos. */
+  categoryLabels: Record<string, string> = expenseCategoryLabels,
 ): PolicyViolation[] {
   const applicable = applicableRules(rules, expense.category);
   if (applicable.length === 0) return [];
 
   const expenseDay = parseDay(expense.date);
   const today = parseDay(todayIso);
-  const categoryLabel = expenseCategoryLabel(expense.category ?? null);
+  const categoryLabel = expenseCategoryLabel(
+    expense.category ?? null,
+    categoryLabels,
+  );
 
   const violations: PolicyViolation[] = [];
   const seen = new Set<string>();

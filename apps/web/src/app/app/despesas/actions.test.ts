@@ -251,6 +251,27 @@ const h = vi.hoisted(() => {
           .filter((r) => (where?.active !== undefined ? r.active === where.active : true))
           .map((r) => ({ ...r })),
     },
+    expenseType: {
+      // Item 12: assertCategoriesActive valida o codigo contra o registro ativo.
+      // O mock devolve os 13 tipos nativos, cobrindo as categorias usadas nos
+      // testes (RIDE_SHARE, AIR_TICKET, MEALS, …).
+      findMany: async () =>
+        [
+          "MILEAGE_REIMBURSEMENT",
+          "AIR_TICKET",
+          "BUS_TICKET",
+          "CERTIFICATION",
+          "ACCOUNTING",
+          "RIDE_SHARE",
+          "COURSES_TRAINING",
+          "LODGING",
+          "POSTAGE",
+          "MEALS",
+          "PERIPHERALS",
+          "TOLL",
+          "PARKING",
+        ].map((code) => ({ code })),
+    },
     approval: {
       create: async ({ data }: { data: Record<string, unknown> }) => {
         store.approvals.push(data);

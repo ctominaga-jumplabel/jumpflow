@@ -13,11 +13,17 @@ import {
   type Expense,
   type ExpenseAttachmentMeta,
   type ExpenseCategory,
+  type ExpenseTypeOption,
 } from "@/lib/expenses/types";
 import {
   evaluateExpensePolicy,
   type PolicyRuleData,
 } from "@/lib/expenses/reimbursement-policy";
+
+/** Tipos nativos como opções — fallback quando o registro não é fornecido. */
+const BUILTIN_EXPENSE_TYPES: ExpenseTypeOption[] = EXPENSE_CATEGORIES.map(
+  (code) => ({ code, label: expenseCategoryLabels[code] ?? code, active: true }),
+);
 
 export interface ExpenseFormProject {
   id: string;
@@ -66,6 +72,10 @@ export interface ExpenseFormProps {
   attachmentUnavailable?: boolean;
   /** Regras ATIVAS da Politica de Reembolso (P13): alerta bloqueante no form. */
   policyRules?: PolicyRuleData[];
+  /** Tipos de despesa ATIVOS (item 12) para o dropdown. Default = nativos. */
+  expenseTypes?: ExpenseTypeOption[];
+  /** Mapa código→rótulo (registro) para mensagens de política. Default nativo. */
+  categoryLabels?: Record<string, string>;
   /** Disable buttons while a server action is in flight. */
   busy?: boolean;
   /** Edit submit (single expense). */
@@ -127,6 +137,8 @@ export function ExpenseForm({
   initial = null,
   attachmentUnavailable = false,
   policyRules = [],
+  expenseTypes = BUILTIN_EXPENSE_TYPES,
+  categoryLabels = expenseCategoryLabels,
   busy = false,
   onSubmit,
   onSubmitBatch,
@@ -209,6 +221,7 @@ export function ExpenseForm({
         { category: cat, date: dateStr, amount: value },
         policyRules,
         defaultDate,
+        categoryLabels,
       )) {
         if (!messages.includes(v.message)) messages.push(v.message);
       }
@@ -221,7 +234,16 @@ export function ExpenseForm({
       }
     }
     return messages;
-  }, [policyRules, isEdit, category, date, amount, items, defaultDate]);
+  }, [
+    policyRules,
+    isEdit,
+    category,
+    date,
+    amount,
+    items,
+    defaultDate,
+    categoryLabels,
+  ]);
 
   const hasPolicyViolation = policyViolations.length > 0;
 
@@ -499,9 +521,15 @@ export function ExpenseForm({
                 className={inputClass(showErrors && editErrors.category)}
               >
                 <option value="">Selecione</option>
-                {EXPENSE_CATEGORIES.map((c) => (
-                  <option key={c} value={c}>
-                    {expenseCategoryLabels[c]}
+                {category && !expenseTypes.some((t) => t.code === category) ? (
+                  // Preserva o tipo atual (inativo/legado) ao editar.
+                  <option value={category}>
+                    {categoryLabels[category] ?? category}
+                  </option>
+                ) : null}
+                {expenseTypes.map((t) => (
+                  <option key={t.code} value={t.code}>
+                    {t.label}
                   </option>
                 ))}
               </select>
@@ -608,9 +636,9 @@ export function ExpenseForm({
                       className={inputClass(showErrors && it.category === "")}
                     >
                       <option value="">Selecione</option>
-                      {EXPENSE_CATEGORIES.map((c) => (
-                        <option key={c} value={c}>
-                          {expenseCategoryLabels[c]}
+                      {expenseTypes.map((t) => (
+                        <option key={t.code} value={t.code}>
+                          {t.label}
                         </option>
                       ))}
                     </select>

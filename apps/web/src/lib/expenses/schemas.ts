@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { parseIsoDateUtc } from "@/lib/timesheet/week";
-import { EXPENSE_CATEGORIES, type ExpenseCategory } from "./types";
 
 /**
  * Shared Zod schemas for the Despesas server actions (and their tests).
@@ -41,10 +40,14 @@ const invoiceNumberSchema = z
   .max(60, "Número da nota fiscal deve ter no máximo 60 caracteres.")
   .optional();
 
-const categorySchema = z.enum(
-  EXPENSE_CATEGORIES as unknown as [ExpenseCategory, ...ExpenseCategory[]],
-  { message: "Selecione o tipo de lançamento." },
-);
+// Categoria = código de um ExpenseType (registro no banco). A EXISTÊNCIA do
+// código (e se está ativo) é validada no servidor contra o registro; aqui só
+// garantimos que algo foi selecionado.
+const categorySchema = z
+  .string()
+  .trim()
+  .min(1, "Selecione o tipo de lançamento.")
+  .max(80, "Tipo de lançamento inválido.");
 
 export const expenseInputSchema = z.object({
   projectId: idSchema,

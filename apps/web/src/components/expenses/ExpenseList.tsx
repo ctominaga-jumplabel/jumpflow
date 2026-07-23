@@ -19,6 +19,8 @@ const thClass =
 
 export interface ExpenseListProps {
   expenses: Expense[];
+  /** Mapa código→rótulo do registro de tipos (item 12); resolve tipos custom. */
+  categoryLabels?: Record<string, string>;
   onViewAttachment: (expense: Expense) => void;
   /** Edit an editable expense (DRAFT/rejected). Omit to hide the action. */
   onEdit?: (expense: Expense) => void;
@@ -65,6 +67,7 @@ function RowAction({
  */
 export function ExpenseList({
   expenses,
+  categoryLabels,
   onViewAttachment,
   onEdit,
   onDelete,
@@ -164,7 +167,7 @@ export function ExpenseList({
                     <td className="px-4 py-3 align-middle text-medium">
                       {expense.category ? (
                         <span className="inline-block rounded-full border border-border bg-surface-muted px-2 py-0.5 text-xs">
-                          {expenseCategoryLabel(expense.category)}
+                          {expenseCategoryLabel(expense.category, categoryLabels)}
                         </span>
                       ) : (
                         <span className="text-xs text-soft">—</span>

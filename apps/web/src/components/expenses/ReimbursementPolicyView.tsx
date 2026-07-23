@@ -12,16 +12,15 @@ import { cn } from "@/lib/utils";
 import { focusRingInput } from "@/lib/styles";
 import { formatCurrency } from "@/lib/format";
 import {
+  createExpenseType,
   createReimbursementPolicyRule,
+  deleteExpenseType,
   deleteReimbursementPolicyRule,
+  updateExpenseType,
   updateReimbursementPolicyRule,
 } from "@/app/app/despesas/policy-actions";
-import {
-  EXPENSE_CATEGORIES,
-  expenseCategoryLabel,
-  expenseCategoryLabels,
-  type ExpenseCategory,
-} from "@/lib/expenses/types";
+import { expenseCategoryLabel, type ExpenseCategory } from "@/lib/expenses/types";
+import type { ExpenseTypeAdminView } from "@/lib/db/expense-types";
 import type { ReimbursementPolicyRuleView } from "@/lib/db/reimbursement-policy";
 
 const labelClass = "mb-1 block text-xs font-semibold text-medium";
@@ -50,24 +49,52 @@ const emptyForm: FormState = {
   notes: "",
 };
 
+interface TypeFormState {
+  id: string | null;
+  code: string | null;
+  label: string;
+  active: boolean;
+}
+
+const emptyTypeForm: TypeFormState = {
+  id: null,
+  code: null,
+  label: "",
+  active: true,
+};
+
 export interface ReimbursementPolicyViewProps {
   rules: ReimbursementPolicyRuleView[];
+  /** Registro de tipos de despesa (item 12): fonte das categorias/dropdowns. */
+  expenseTypes: ExpenseTypeAdminView[];
 }
 
 /**
- * Administracao da Politica de Reembolso (Onda 3, P12). Lista as categorias do
- * enum fixo + a regra Geral; para cada uma configura prazo (dias) e/ou teto
- * (R$). O CRUD chama as server actions (RBAC + auditoria no servidor).
+ * Administracao da Politica de Reembolso (Onda 3, P12 + item 12). Duas seções:
+ * (1) Tipos de despesa — cadastro (criar/renomear/ativar/remover) que substitui
+ * o antigo enum fixo; (2) Regras de reembolso — prazo/valor por tipo + Geral.
+ * Todo o CRUD chama server actions (RBAC + auditoria no servidor).
  */
 export function ReimbursementPolicyView({
   rules,
+  expenseTypes,
 }: ReimbursementPolicyViewProps) {
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [confirmDelete, setConfirmDelete] =
     useState<ReimbursementPolicyRuleView | null>(null);
+  const [typeFormOpen, setTypeFormOpen] = useState(false);
+  const [typeForm, setTypeForm] = useState<TypeFormState>(emptyTypeForm);
+  const [confirmDeleteType, setConfirmDeleteType] =
+    useState<ExpenseTypeAdminView | null>(null);
   const { feedback, notify } = useFeedback();
   const [isPending, startTransition] = useTransition();
+
+  // Rótulo por código (registro) + nomes p/ o motor; fallback nativo embutido.
+  const labelsByCode = useMemo(
+    () => Object.fromEntries(expenseTypes.map((t) => [t.code, t.label])),
+    [expenseTypes],
+  );
 
   const usedCategories = useMemo(
     () => new Set(rules.map((r) => r.category)),
@@ -133,9 +160,65 @@ export function ReimbursementPolicyView({
     });
   }
 
-  // Categorias ainda sem regra (para a criacao); a Geral so pode existir uma vez.
-  const availableCategories = EXPENSE_CATEGORIES.filter(
-    (c) => !usedCategories.has(c) || form.category === c,
+  // --- Tipos de despesa ------------------------------------------------------
+
+  function openNewType() {
+    setTypeForm(emptyTypeForm);
+    setTypeFormOpen(true);
+  }
+
+  function openEditType(type: ExpenseTypeAdminView) {
+    setTypeForm({
+      id: type.id,
+      code: type.code,
+      label: type.label,
+      active: type.active,
+    });
+    setTypeFormOpen(true);
+  }
+
+  function handleSaveType() {
+    const label = typeForm.label.trim();
+    if (label.length < 2) {
+      notify("warning", "Informe o nome do tipo de despesa.");
+      return;
+    }
+    startTransition(async () => {
+      const result = typeForm.id
+        ? await updateExpenseType({
+            id: typeForm.id,
+            label,
+            active: typeForm.active,
+          })
+        : await createExpenseType({ label, active: typeForm.active });
+      if (result.ok) {
+        notify("success", typeForm.id ? "Tipo atualizado." : "Tipo criado.");
+        setTypeFormOpen(false);
+        setTypeForm(emptyTypeForm);
+      } else {
+        notify("warning", result.message);
+      }
+    });
+  }
+
+  function handleDeleteType() {
+    const target = confirmDeleteType;
+    if (!target) return;
+    startTransition(async () => {
+      const result = await deleteExpenseType({ id: target.id });
+      if (result.ok) notify("success", "Tipo removido.");
+      else notify("warning", result.message);
+      setConfirmDeleteType(null);
+    });
+  }
+
+  // Tipos disponíveis para uma NOVA regra (ativos, ainda sem regra própria).
+  // Ao editar, mantém o tipo atualmente selecionado mesmo que já tenha regra ou
+  // esteja inativo, para não sumir da lista.
+  const availableTypes = expenseTypes.filter(
+    (t) =>
+      (t.active || t.code === form.category) &&
+      (!usedCategories.has(t.code) || form.category === t.code),
   );
   const canPickGeneral = !usedCategories.has(null) || form.category === "";
 
@@ -143,20 +226,103 @@ export function ReimbursementPolicyView({
     <div className="space-y-4">
       <FeedbackBanner message={feedback} />
 
+      {/* Cadastro de tipos de despesa (item 12) */}
+      <SectionPanel
+        title="Tipos de despesa"
+        description="Cadastro dos tipos de lançamento. Nativos podem ser renomeados ou desativados; personalizados podem ser removidos se não estiverem em uso."
+        action={
+          <ActionButton
+            variant="primary"
+            size="sm"
+            icon={Plus}
+            onClick={openNewType}
+          >
+            Novo tipo
+          </ActionButton>
+        }
+      >
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-sm">
+            <caption className="sr-only">Tipos de despesa</caption>
+            <thead>
+              <tr className="border-b border-border">
+                <th scope="col" className={thClass}>
+                  Tipo
+                </th>
+                <th scope="col" className={thClass}>
+                  Código
+                </th>
+                <th scope="col" className={thClass}>
+                  Situação
+                </th>
+                <th scope="col" className={thClass}>
+                  Ações
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {expenseTypes.map((type) => (
+                <tr key={type.id} className="hover:bg-surface-muted/60">
+                  <td className="px-4 py-3 align-middle font-medium text-strong">
+                    {type.label}
+                    {type.system ? (
+                      <span className="ml-2 align-middle text-[11px] font-normal text-soft">
+                        nativo
+                      </span>
+                    ) : null}
+                  </td>
+                  <td className="px-4 py-3 align-middle font-mono text-xs text-soft">
+                    {type.code}
+                  </td>
+                  <td className="px-4 py-3 align-middle">
+                    <StatusBadge tone={type.active ? "success" : "neutral"}>
+                      {type.active ? "Ativo" : "Inativo"}
+                    </StatusBadge>
+                  </td>
+                  <td className="px-4 py-3 align-middle">
+                    <div className="flex gap-1.5">
+                      <ActionButton
+                        variant="secondary"
+                        size="sm"
+                        icon={Pencil}
+                        disabled={isPending}
+                        onClick={() => openEditType(type)}
+                      >
+                        Editar
+                      </ActionButton>
+                      {!type.system ? (
+                        <ActionButton
+                          variant="secondary"
+                          size="sm"
+                          icon={Trash2}
+                          disabled={isPending}
+                          onClick={() => setConfirmDeleteType(type)}
+                        >
+                          Remover
+                        </ActionButton>
+                      ) : null}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </SectionPanel>
+
       <div className="flex items-start gap-2 rounded-md border border-border bg-surface-muted/40 px-3 py-2 text-xs text-medium">
         <TriangleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-soft" />
         <span>
-          As categorias sao fixas (enum do sistema). Aqui voce define os limites
-          de <strong>prazo</strong> (dias para lancar) e/ou <strong>valor</strong>{" "}
-          (teto por lancamento) para cada categoria, e uma regra{" "}
-          <strong>Geral</strong> que vale para todas. Lancamentos que violarem a
-          politica sao bloqueados.
+          Para cada tipo (ou a regra <strong>Geral</strong>, que vale para todos)
+          defina os limites de <strong>prazo</strong> (dias para lançar) e/ou{" "}
+          <strong>valor</strong> (teto por lançamento). Lançamentos que violarem a
+          política são bloqueados.
         </span>
       </div>
 
       <SectionPanel
         title="Regras de reembolso"
-        description="Prazo e teto por categoria de despesa, mais a regra Geral."
+        description="Prazo e teto por tipo de despesa, mais a regra Geral."
         action={
           <ActionButton
             variant="primary"
@@ -183,7 +349,7 @@ export function ReimbursementPolicyView({
               <thead>
                 <tr className="border-b border-border">
                   <th scope="col" className={thClass}>
-                    Categoria
+                    Tipo
                   </th>
                   <th scope="col" className={thClass}>
                     Prazo (dias)
@@ -205,7 +371,7 @@ export function ReimbursementPolicyView({
                     <td className="px-4 py-3 align-middle font-medium text-strong">
                       {rule.category === null
                         ? "Geral (todas)"
-                        : expenseCategoryLabel(rule.category)}
+                        : expenseCategoryLabel(rule.category, labelsByCode)}
                     </td>
                     <td className="px-4 py-3 align-middle tabular-nums text-medium">
                       {rule.maxAgeDays ?? "—"}
@@ -250,11 +416,12 @@ export function ReimbursementPolicyView({
         )}
       </SectionPanel>
 
+      {/* Modal: regra de reembolso */}
       <Modal
         open={formOpen}
         onClose={() => setFormOpen(false)}
         title={form.id ? "Editar regra" : "Nova regra"}
-        description="Defina o escopo (categoria ou Geral) e ao menos um limite."
+        description="Defina o escopo (tipo ou Geral) e ao menos um limite."
         footer={
           <>
             <ActionButton
@@ -294,9 +461,10 @@ export function ReimbursementPolicyView({
               {canPickGeneral ? (
                 <option value="">Geral (todas as categorias)</option>
               ) : null}
-              {availableCategories.map((c) => (
-                <option key={c} value={c}>
-                  {expenseCategoryLabels[c]}
+              {availableTypes.map((t) => (
+                <option key={t.code} value={t.code}>
+                  {t.label}
+                  {t.active ? "" : " (inativo)"}
                 </option>
               ))}
             </select>
@@ -367,6 +535,68 @@ export function ReimbursementPolicyView({
         </div>
       </Modal>
 
+      {/* Modal: tipo de despesa */}
+      <Modal
+        open={typeFormOpen}
+        onClose={() => setTypeFormOpen(false)}
+        title={typeForm.id ? "Editar tipo de despesa" : "Novo tipo de despesa"}
+        description="O nome aparece nos formulários de despesa. O código é gerado automaticamente e não muda."
+        footer={
+          <>
+            <ActionButton
+              variant="secondary"
+              size="sm"
+              onClick={() => setTypeFormOpen(false)}
+            >
+              Cancelar
+            </ActionButton>
+            <ActionButton
+              variant="primary"
+              size="sm"
+              disabled={isPending}
+              onClick={handleSaveType}
+            >
+              Salvar
+            </ActionButton>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div>
+            <label htmlFor="type-label" className={labelClass}>
+              Nome do tipo
+            </label>
+            <input
+              id="type-label"
+              type="text"
+              value={typeForm.label}
+              onChange={(e) =>
+                setTypeForm((f) => ({ ...f, label: e.target.value }))
+              }
+              placeholder="ex.: Alimentação em viagem"
+              className={inputClass}
+            />
+          </div>
+          {typeForm.code ? (
+            <p className="text-xs text-soft">
+              Código: <span className="font-mono">{typeForm.code}</span>
+            </p>
+          ) : null}
+          <label className="flex items-center gap-2 text-sm text-medium">
+            <input
+              type="checkbox"
+              checked={typeForm.active}
+              onChange={(e) =>
+                setTypeForm((f) => ({ ...f, active: e.target.checked }))
+              }
+              className="size-4 rounded border-border text-brand focus:ring-brand"
+            />
+            Ativo (disponível para novos lançamentos)
+          </label>
+        </div>
+      </Modal>
+
+      {/* Modal: remover regra */}
       <Modal
         open={confirmDelete !== null}
         onClose={() => setConfirmDelete(null)}
@@ -398,9 +628,43 @@ export function ReimbursementPolicyView({
             <strong>
               {confirmDelete.category === null
                 ? "Geral (todas)"
-                : expenseCategoryLabel(confirmDelete.category)}
+                : expenseCategoryLabel(confirmDelete.category, labelsByCode)}
             </strong>
             ?
+          </p>
+        ) : null}
+      </Modal>
+
+      {/* Modal: remover tipo */}
+      <Modal
+        open={confirmDeleteType !== null}
+        onClose={() => setConfirmDeleteType(null)}
+        title="Remover tipo de despesa"
+        description="Só é possível remover tipos personalizados que não estejam em uso."
+        footer={
+          <>
+            <ActionButton
+              variant="secondary"
+              size="sm"
+              onClick={() => setConfirmDeleteType(null)}
+            >
+              Cancelar
+            </ActionButton>
+            <ActionButton
+              variant="danger"
+              size="sm"
+              disabled={isPending}
+              onClick={handleDeleteType}
+            >
+              Remover
+            </ActionButton>
+          </>
+        }
+      >
+        {confirmDeleteType ? (
+          <p className="text-sm text-medium">
+            Remover o tipo <strong>{confirmDeleteType.label}</strong>? Se ele já
+            foi usado em despesas ou regras, desative-o em vez de remover.
           </p>
         ) : null}
       </Modal>

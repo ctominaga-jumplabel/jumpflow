@@ -39,6 +39,7 @@ import type {
   ExpenseStatus,
 } from "@/lib/expenses/types";
 import { getActivePolicyRules } from "@/lib/db/reimbursement-policy";
+import { getActiveExpenseTypeCodes } from "@/lib/db/expense-types";
 import { evaluateExpensePolicy } from "@/lib/expenses/reimbursement-policy";
 import {
   buildStorageKey,
@@ -184,6 +185,26 @@ async function assertPolicyOk(
   }
   if (messages.length > 0) {
     throw new ActionError("POLICY_VIOLATION", messages.join(" "));
+  }
+}
+
+/**
+ * Valida que cada código de categoria informado existe e está ATIVO no registro
+ * de tipos (ExpenseType). Substitui a antiga validação por enum fechado: agora
+ * os tipos são dinâmicos, então a checagem de domínio precisa consultar o banco.
+ */
+async function assertCategoriesActive(
+  codes: ReadonlyArray<string | null | undefined>,
+): Promise<void> {
+  const needed = [...new Set(codes.filter((c): c is string => Boolean(c)))];
+  if (needed.length === 0) return;
+  const active = await getActiveExpenseTypeCodes();
+  const invalid = needed.filter((c) => !active.has(c));
+  if (invalid.length > 0) {
+    throw new ActionError(
+      "INVALID_INPUT",
+      "Tipo de lançamento inválido ou inativo. Selecione um tipo disponível.",
+    );
   }
 }
 
@@ -334,6 +355,9 @@ export async function createExpenseBatch(
     const parsed = parseInput(createExpenseBatchSchema, input);
 
     const project = await ensureOpenProject(parsed.projectId);
+    // Item 12: os tipos de despesa são dinâmicos — valida os códigos contra o
+    // registro ATIVO antes da política e de qualquer escrita.
+    await assertCategoriesActive(parsed.items.map((it) => it.category));
     // P13: reforca a Politica de Reembolso item a item (cada item tem
     // categoria/data/valor). Falha o lote inteiro antes de qualquer escrita.
     await assertPolicyOk(
@@ -401,6 +425,9 @@ export async function updateExpense(
     const parsed = parseInput(updateExpenseInputSchema, input);
 
     const expense = await loadOwnedEditableExpense(consultant.id, parsed.id);
+
+    // Item 12: valida o código do tipo (quando enviado) contra o registro ativo.
+    if (parsed.category) await assertCategoriesActive([parsed.category]);
 
     const projectId = parsed.projectId ?? expense.projectId;
     const date = parsed.date ? parseIsoDateUtc(parsed.date)! : expense.date;

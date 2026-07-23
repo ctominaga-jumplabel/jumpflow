@@ -67,9 +67,13 @@ export default async function DespesasPage() {
   const { getActivePolicyRules } = await import(
     "@/lib/db/reimbursement-policy"
   );
+  const { listExpenseTypeOptions } = await import("@/lib/db/expense-types");
 
   const consultant = await getConsultantForUser(user);
-  const policyRules = await getActivePolicyRules();
+  const [policyRules, expenseTypes] = await Promise.all([
+    getActivePolicyRules(),
+    listExpenseTypeOptions(),
+  ]);
 
   // P14: aprovação operacional/financeira das despesas na própria tela.
   const unrestricted = hasRole(user, ["ADMIN", "AREA_MANAGER"]);
@@ -129,6 +133,7 @@ export default async function DespesasPage() {
         projects={projects}
         storageAvailable={isStorageConfigured()}
         policyRules={policyRules}
+        expenseTypes={expenseTypes}
       />
     </div>
   );

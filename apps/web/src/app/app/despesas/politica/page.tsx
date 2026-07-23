@@ -52,12 +52,16 @@ export default async function PoliticaReembolsoPage() {
   const { listReimbursementPolicyRules } = await import(
     "@/lib/db/reimbursement-policy"
   );
-  const rules = await listReimbursementPolicyRules();
+  const { listExpenseTypes } = await import("@/lib/db/expense-types");
+  const [rules, expenseTypes] = await Promise.all([
+    listReimbursementPolicyRules(),
+    listExpenseTypes(),
+  ]);
 
   return (
     <div className="space-y-6">
       {header}
-      <ReimbursementPolicyView rules={rules} />
+      <ReimbursementPolicyView rules={rules} expenseTypes={expenseTypes} />
     </div>
   );
 }

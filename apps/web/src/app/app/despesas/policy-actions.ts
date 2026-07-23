@@ -9,14 +9,22 @@ import { REIMBURSEMENT_POLICY_ROLES } from "@/lib/auth/route-permissions";
 import type { AppUser } from "@/lib/auth/types";
 import { buildAuditEventData } from "@/lib/db/audit";
 import { isDatabaseConfigured } from "@/lib/db/config";
+import { getExpenseTypeByCode } from "@/lib/db/expense-types";
 import { resolveDbUser } from "@/lib/db/users";
 import type { ExpenseCategory } from "@/lib/expenses/types";
 import {
+  createExpenseTypeSchema,
+  expenseTypeIdSchema,
   reimbursementPolicyIdSchema,
   reimbursementPolicyInputSchema,
+  slugifyExpenseTypeCode,
+  updateExpenseTypeSchema,
   updateReimbursementPolicySchema,
+  type CreateExpenseTypeInput,
+  type ExpenseTypeIdInput,
   type ReimbursementPolicyIdInput,
   type ReimbursementPolicyInput,
+  type UpdateExpenseTypeInput,
   type UpdateReimbursementPolicyInput,
 } from "@/lib/expenses/policy-schemas";
 
@@ -94,6 +102,20 @@ async function requireActor(user: AppUser): Promise<string | null> {
   return dbUser?.id ?? null;
 }
 
+/** Rejeita uma regra cuja categoria (código) não existe no registro de tipos. */
+async function ensureCategoryExists(
+  category: ExpenseCategory | null,
+): Promise<void> {
+  if (category === null) return; // Geral
+  const type = await getExpenseTypeByCode(category);
+  if (!type) {
+    throw new ActionError(
+      "INVALID_INPUT",
+      "Tipo de despesa inexistente. Selecione um tipo cadastrado.",
+    );
+  }
+}
+
 /** Recusa uma segunda regra para a mesma categoria (ou Geral). */
 async function ensureUniqueScope(
   category: ExpenseCategory | null,
@@ -120,6 +142,7 @@ export async function createReimbursementPolicyRule(
     ensureDatabase();
     const user = await requireRole(REIMBURSEMENT_POLICY_ROLES);
     const parsed = parseInput(reimbursementPolicyInputSchema, input);
+    await ensureCategoryExists(parsed.category);
     await ensureUniqueScope(parsed.category);
     const actorUserId = await requireActor(user);
 
@@ -173,6 +196,7 @@ export async function updateReimbursementPolicyRule(
     if (!before) {
       throw new ActionError("NOT_FOUND", "Regra nao encontrada.");
     }
+    await ensureCategoryExists(parsed.category);
     // Trocar a categoria de uma regra nao pode colidir com outra existente.
     await ensureUniqueScope(parsed.category, parsed.id);
 
@@ -206,6 +230,168 @@ export async function updateReimbursementPolicyRule(
             maxAmount: parsed.maxAmount,
             active: parsed.active,
           },
+        }),
+      });
+    });
+
+    revalidatePath(POLICY_PATH);
+    revalidatePath(DESPESAS_PATH);
+    return { ok: true, data: { id: parsed.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+// --- Cadastro de tipos de despesa (ExpenseType, item 12) --------------------
+
+/** Gera um código único (UPPER_SNAKE) a partir do rótulo, com sufixo _2/_3… */
+async function generateUniqueExpenseTypeCode(label: string): Promise<string> {
+  const base = slugifyExpenseTypeCode(label);
+  let code = base;
+  let suffix = 2;
+  // Loop curto na prática (colisões são raras); limita para evitar corrida infinita.
+  while (
+    await prisma.expenseType.findUnique({ where: { code }, select: { id: true } })
+  ) {
+    code = `${base}_${suffix++}`;
+    if (suffix > 1000) break;
+  }
+  return code;
+}
+
+export async function createExpenseType(
+  input: CreateExpenseTypeInput,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    const user = await requireRole(REIMBURSEMENT_POLICY_ROLES);
+    const parsed = parseInput(createExpenseTypeSchema, input);
+    const actorUserId = await requireActor(user);
+
+    const code = await generateUniqueExpenseTypeCode(parsed.label);
+    // Novo tipo entra no fim da ordem.
+    const maxSort = await prisma.expenseType.aggregate({
+      _max: { sortOrder: true },
+    });
+    const sortOrder = (maxSort._max.sortOrder ?? -1) + 1;
+
+    const created = await prisma.$transaction(async (tx) => {
+      const row = await tx.expenseType.create({
+        data: {
+          code,
+          label: parsed.label,
+          active: parsed.active,
+          system: false,
+          sortOrder,
+        },
+      });
+      await tx.auditEvent.create({
+        data: buildAuditEventData({
+          actorUserId,
+          entityType: "ExpenseType",
+          entityId: row.id,
+          action: "EXPENSE_TYPE_CREATED",
+          after: { code, label: parsed.label, active: parsed.active },
+        }),
+      });
+      return row;
+    });
+
+    revalidatePath(POLICY_PATH);
+    revalidatePath(DESPESAS_PATH);
+    return { ok: true, data: { id: created.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+export async function updateExpenseType(
+  input: UpdateExpenseTypeInput,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    const user = await requireRole(REIMBURSEMENT_POLICY_ROLES);
+    const parsed = parseInput(updateExpenseTypeSchema, input);
+    const actorUserId = await requireActor(user);
+
+    const before = await prisma.expenseType.findUnique({
+      where: { id: parsed.id },
+    });
+    if (!before) {
+      throw new ActionError("NOT_FOUND", "Tipo de despesa nao encontrado.");
+    }
+
+    await prisma.$transaction(async (tx) => {
+      // O código é imutável (é a chave estável armazenada nas despesas). Só o
+      // rótulo e o estado ativo mudam. Tipos nativos também podem ser editados.
+      await tx.expenseType.update({
+        where: { id: parsed.id },
+        data: { label: parsed.label, active: parsed.active },
+      });
+      await tx.auditEvent.create({
+        data: buildAuditEventData({
+          actorUserId,
+          entityType: "ExpenseType",
+          entityId: parsed.id,
+          action: "EXPENSE_TYPE_UPDATED",
+          before: { label: before.label, active: before.active },
+          after: { label: parsed.label, active: parsed.active },
+        }),
+      });
+    });
+
+    revalidatePath(POLICY_PATH);
+    revalidatePath(DESPESAS_PATH);
+    return { ok: true, data: { id: parsed.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+export async function deleteExpenseType(
+  input: ExpenseTypeIdInput,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    const user = await requireRole(REIMBURSEMENT_POLICY_ROLES);
+    const parsed = parseInput(expenseTypeIdSchema, input);
+    const actorUserId = await requireActor(user);
+
+    const before = await prisma.expenseType.findUnique({
+      where: { id: parsed.id },
+    });
+    if (!before) {
+      throw new ActionError("NOT_FOUND", "Tipo de despesa nao encontrado.");
+    }
+    // Tipos nativos nunca são removidos (podem ser desativados).
+    if (before.system) {
+      throw new ActionError(
+        "INVALID_INPUT",
+        "Tipos nativos não podem ser removidos. Desative-o se não quiser usá-lo.",
+      );
+    }
+    // Não remover um tipo em uso (despesas ou regras de política o referenciam):
+    // isso quebraria os rótulos históricos. Oriente a desativar.
+    const [usedByExpense, usedByRule] = await Promise.all([
+      prisma.expense.count({ where: { category: before.code } }),
+      prisma.reimbursementPolicyRule.count({ where: { category: before.code } }),
+    ]);
+    if (usedByExpense > 0 || usedByRule > 0) {
+      throw new ActionError(
+        "INVALID_INPUT",
+        "Este tipo está em uso (despesas ou regras). Desative-o em vez de remover.",
+      );
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.expenseType.delete({ where: { id: parsed.id } });
+      await tx.auditEvent.create({
+        data: buildAuditEventData({
+          actorUserId,
+          entityType: "ExpenseType",
+          entityId: parsed.id,
+          action: "EXPENSE_TYPE_DELETED",
+          before: { code: before.code, label: before.label },
         }),
       });
     });

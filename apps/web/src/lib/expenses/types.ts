@@ -27,9 +27,15 @@ export const EXPENSE_STATUSES = [
 export type ExpenseStatus = (typeof EXPENSE_STATUSES)[number];
 
 /**
- * Tipo de lançamento (categoria) de uma despesa. Mirrors `ExpenseCategory` no
- * schema Prisma. Ordem reflete a lista fornecida pelo negócio (e a do enum).
+ * Código do tipo de lançamento (categoria) de uma despesa. Desde o item 12 os
+ * tipos vivem no registro `ExpenseType` (banco), gerenciável na tela Política de
+ * Reembolso — por isso a categoria é uma STRING (código), não mais um enum
+ * fechado. As constantes abaixo são apenas os tipos NATIVOS (seed/fallback de
+ * rótulo); a fonte de verdade em runtime é o registro no banco.
  */
+export type ExpenseCategory = string;
+
+/** Códigos dos tipos nativos (semeados como `system` no registro ExpenseType). */
 export const EXPENSE_CATEGORIES = [
   "MILEAGE_REIMBURSEMENT",
   "AIR_TICKET",
@@ -46,9 +52,8 @@ export const EXPENSE_CATEGORIES = [
   "PARKING",
 ] as const;
 
-export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
-
-export const expenseCategoryLabels: Record<ExpenseCategory, string> = {
+/** Rótulos dos tipos nativos — fallback quando o registro não é consultado. */
+export const expenseCategoryLabels: Record<string, string> = {
   MILEAGE_REIMBURSEMENT: "Reembolso Quilometragem",
   AIR_TICKET: "Passagem Aérea",
   BUS_TICKET: "Passagem Rodoviária",
@@ -64,6 +69,17 @@ export const expenseCategoryLabels: Record<ExpenseCategory, string> = {
   PARKING: "Estacionamento",
 };
 
+/**
+ * Opção de tipo de despesa vinda do registro (banco), para dropdowns e mapas de
+ * rótulo. Puro (sem import de servidor) para ser reusável no cliente e nos testes.
+ */
+export interface ExpenseTypeOption {
+  code: string;
+  label: string;
+  active: boolean;
+}
+
+/** Whether a code is one of the native (built-in) types. */
 export function isExpenseCategory(value: unknown): value is ExpenseCategory {
   return (
     typeof value === "string" &&
@@ -71,9 +87,17 @@ export function isExpenseCategory(value: unknown): value is ExpenseCategory {
   );
 }
 
-/** Display label for a category, tolerating legacy rows without one. */
-export function expenseCategoryLabel(category?: ExpenseCategory | null): string {
-  return category ? expenseCategoryLabels[category] : "Sem categoria";
+/**
+ * Rótulo de exibição de uma categoria. Resolve pelo mapa do registro (`labels`,
+ * passado pela tela quando disponível), caindo para os rótulos nativos e, por
+ * fim, para o próprio código — nunca quebra em tipos customizados ou legados.
+ */
+export function expenseCategoryLabel(
+  category?: string | null,
+  labels: Record<string, string> = expenseCategoryLabels,
+): string {
+  if (!category) return "Sem categoria";
+  return labels[category] ?? expenseCategoryLabels[category] ?? category;
 }
 
 export const expenseStatusLabels: Record<ExpenseStatus, string> = {

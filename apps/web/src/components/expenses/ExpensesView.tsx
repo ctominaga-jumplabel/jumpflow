@@ -23,12 +23,15 @@ import {
 import { projects as allProjects } from "@/lib/mock-data/projects";
 import { expenses as seedExpenses } from "@/lib/mock-data/expenses";
 import {
+  EXPENSE_CATEGORIES,
+  expenseCategoryLabels,
   expenseStatusLabels,
   filterExpenses,
   summarizeExpenses,
   type Expense,
   type ExpenseFilter,
   type ExpenseStatus,
+  type ExpenseTypeOption,
 } from "@/lib/expenses/types";
 import type { PolicyRuleData } from "@/lib/expenses/reimbursement-policy";
 import { ExpenseSummaryCards } from "./ExpenseSummaryCards";
@@ -88,7 +91,17 @@ export interface ExpensesViewProps {
   storageAvailable?: boolean;
   /** db mode: regras ATIVAS da Politica de Reembolso (P13, alerta no form). */
   policyRules?: PolicyRuleData[];
+  /**
+   * Tipos de despesa do registro (item 12). Alimenta os dropdowns e os rótulos.
+   * Ausente em demo mode → cai para os tipos nativos.
+   */
+  expenseTypes?: ExpenseTypeOption[];
 }
+
+/** Tipos nativos como opções — fallback para demo mode (sem banco/registro). */
+const BUILTIN_EXPENSE_TYPES: ExpenseTypeOption[] = EXPENSE_CATEGORIES.map(
+  (code) => ({ code, label: expenseCategoryLabels[code] ?? code, active: true }),
+);
 
 /**
  * Despesas module orchestrator. In db mode every mutation goes through the
@@ -99,6 +112,17 @@ export interface ExpensesViewProps {
 export function ExpensesView(props: ExpensesViewProps) {
   const isDemo = props.mode === "demo";
   const storageAvailable = isDemo ? true : (props.storageAvailable ?? false);
+  // Item 12: tipos do registro (ou nativos em demo). Opções ativas para o form,
+  // mapa código→rótulo (todos, inclusive inativos) para exibir na lista.
+  const allTypes = props.expenseTypes ?? BUILTIN_EXPENSE_TYPES;
+  const activeTypeOptions = useMemo(
+    () => allTypes.filter((t) => t.active),
+    [allTypes],
+  );
+  const categoryLabels = useMemo(
+    () => Object.fromEntries(allTypes.map((t) => [t.code, t.label])),
+    [allTypes],
+  );
   const [localItems, setLocalItems] = useState<Expense[]>(seedExpenses);
   const [status, setStatus] = useState<ExpenseStatus | "ALL">("ALL");
   const [projectId, setProjectId] = useState<string>("ALL");
@@ -558,6 +582,7 @@ export function ExpensesView(props: ExpensesViewProps) {
 
       <ExpenseList
         expenses={filtered}
+        categoryLabels={categoryLabels}
         onViewAttachment={openAttachment}
         onEdit={openEdit}
         onDelete={handleDelete}
@@ -577,6 +602,8 @@ export function ExpensesView(props: ExpensesViewProps) {
         initial={editing}
         attachmentUnavailable={!isDemo && !storageAvailable}
         policyRules={props.policyRules ?? []}
+        expenseTypes={activeTypeOptions}
+        categoryLabels={categoryLabels}
         busy={isPending}
         onSubmit={handleFormSubmit}
         onSubmitBatch={handleBatchSubmit}
