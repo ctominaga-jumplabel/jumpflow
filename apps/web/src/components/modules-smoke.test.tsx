@@ -38,6 +38,7 @@ vi.mock("@/app/app/financeiro/actions", () => ({
   generatePreInvoice: vi.fn(),
   sendPreInvoiceEmail: vi.fn(),
   sendClientBillingSummary: vi.fn(),
+  loadClosingApuracao: vi.fn(),
 }));
 // FinancialOverview's "Contas a Receber" tab renders PeriodExceptionsPanel,
 // which wires the on-call attachment action (a server-only module).

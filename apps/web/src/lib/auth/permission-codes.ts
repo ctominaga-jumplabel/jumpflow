@@ -51,6 +51,33 @@ export const MANAGE_PERMISSIONS_CODE = "CONFIGURACOES_PERMISSOES";
 export const CONSULTANT_COMPENSATION_CODE = "CONSULTORES_REMUNERACAO";
 
 /**
+ * Per-group codes for the consultant registration, so People/DP and other roles
+ * can be granted each information block independently via the matrix (M1). All
+ * are children of `CONSULTORES`. `CONSULTORES_REMUNERACAO` (compensation) is the
+ * fifth group and is declared above. Personal + Currículo are the two groups the
+ * broader roles get by default; Documentos + Bancárias stay People/Finance.
+ */
+export const CONSULTANT_PERSONAL_CODE = "CONSULTORES_PESSOAIS";
+export const CONSULTANT_DOCUMENTS_CODE = "CONSULTORES_DOCUMENTOS";
+export const CONSULTANT_CURRICULUM_CODE = "CONSULTORES_CURRICULO";
+export const CONSULTANT_BANK_CODE = "CONSULTORES_BANCARIAS";
+
+/**
+ * The five consultant-registration groups (M1), each a matrix code. Order is the
+ * display order in the consultant detail. `CONSULTANT_COMPENSATION_CODE` keeps
+ * its historical name (`_REMUNERACAO`).
+ */
+export const CONSULTANT_GROUP_CODES = {
+  personal: CONSULTANT_PERSONAL_CODE,
+  documents: CONSULTANT_DOCUMENTS_CODE,
+  curriculum: CONSULTANT_CURRICULUM_CODE,
+  bank: CONSULTANT_BANK_CODE,
+  compensation: CONSULTANT_COMPENSATION_CODE,
+} as const;
+
+export type ConsultantGroupKey = keyof typeof CONSULTANT_GROUP_CODES;
+
+/**
  * Governs the broad ("all consultants") report scope — the consultant filter in
  * Relatórios. Historically implied by the broad report roles (ADMIN/AREA_MANAGER/
  * FINANCE); now ALSO grantable via the matrix. Child of `RELATORIOS`. Note: this

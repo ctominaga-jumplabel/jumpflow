@@ -4,12 +4,12 @@ import { useState, useTransition } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
-  Download,
   FileCheck2,
   FilePlus2,
-  FileText,
   Lock,
   Mail,
+  Maximize2,
+  Minimize2,
   Paperclip,
   RotateCw,
   Undo2,
@@ -40,11 +40,12 @@ import {
   advanceRevenueClosing,
   createFiscalDocumentDraft,
   generateMonthlyRevenueClosings,
-  generatePreInvoice,
+  loadClosingApuracao,
   requestFiscalDocumentIssue,
-  sendClientBillingSummary,
   sendPreInvoiceEmail,
+  type ClosingApuracaoView,
 } from "@/app/app/financeiro/actions";
+import { HoursReportTable } from "@/components/reports/HoursReportTable";
 import { getTimeEntryAttachmentUrl } from "@/app/app/horas/actions";
 import { activityLabelOf } from "@/lib/timesheet/types";
 import { opportunityTypeLabels } from "@/lib/projects/labels";
@@ -93,11 +94,15 @@ export function MonthlyClosingTable({
   const isDemo = mode === "demo";
   const [isPending, startTransition] = useTransition();
   const { feedback, notify } = useFeedback();
-  const [preview, setPreview] = useState<{
-    html: string;
-    downloadUrl: string | null;
-    stored: boolean;
+  // M3 (Apurar): modal com o detalhe do fechamento a nível de relatório — as
+  // MESMAS linhas da tela Relatórios → Horas, filtradas por este fechamento.
+  // Não envia e-mail (comportamento anterior removido).
+  const [apuracao, setApuracao] = useState<{
+    loading: boolean;
+    title: string;
+    data: ClosingApuracaoView | null;
   } | null>(null);
+  const [apuracaoFullscreen, setApuracaoFullscreen] = useState(false);
   // P5: drill-down das exceções de uma linha (cliente-projeto) do fechamento.
   const [exceptionsDialog, setExceptionsDialog] = useState<{
     title: string;
@@ -197,31 +202,6 @@ export function MonthlyClosingTable({
     });
   }
 
-  function handlePreInvoice(id: string) {
-    if (isDemo) {
-      notify("info", "Pre-fatura local simulada.");
-      return;
-    }
-    startTransition(async () => {
-      const result = await generatePreInvoice({ closingId: id });
-      if (result.ok) {
-        setPreview({
-          html: result.data.html,
-          downloadUrl: result.data.downloadUrl,
-          stored: result.data.stored,
-        });
-        notify(
-          result.data.stored ? "success" : "info",
-          result.data.stored
-            ? "Pré-fatura gerada e armazenada."
-            : "Pré-fatura gerada para visualização. Baixe o HTML para arquivar (o arquivamento automático está indisponível).",
-        );
-      } else {
-        notify("warning", result.message);
-      }
-    });
-  }
-
   function handleSendPreInvoice(id: string) {
     if (isDemo) {
       notify("info", "Envio de pre-fatura local simulado.");
@@ -254,17 +234,6 @@ export function MonthlyClosingTable({
         notify("warning", message);
       }
     });
-  }
-
-  function handleDownloadPreview() {
-    if (!preview) return;
-    const blob = new Blob([preview.html], { type: "text/html;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = "pre-fatura.html";
-    anchor.click();
-    URL.revokeObjectURL(url);
   }
 
   function handleGenerate() {
@@ -300,15 +269,22 @@ export function MonthlyClosingTable({
     });
   }
 
-  function handleSendApuracao(id: string) {
+  function handleOpenApuracao(row: RevenueClosingRow) {
     if (isDemo) {
-      notify("info", "Envio de apuração local simulado.");
+      notify("info", "Apuração indisponível no modo demonstração.");
       return;
     }
+    const title = `${row.projectName} — ${row.clientName}`;
+    setApuracaoFullscreen(false);
+    setApuracao({ loading: true, title, data: null });
     startTransition(async () => {
-      const result = await sendClientBillingSummary({ closingId: id });
-      if (result.ok) notify("success", "Apuração por consultor enviada ao cliente.");
-      else notify("warning", result.message);
+      const result = await loadClosingApuracao({ closingId: row.id });
+      if (result.ok) {
+        setApuracao({ loading: false, title, data: result.data });
+      } else {
+        setApuracao(null);
+        notify("warning", result.message);
+      }
     });
   }
 
@@ -507,17 +483,6 @@ export function MonthlyClosingTable({
             <ActionButton
               size="sm"
               variant="secondary"
-              icon={FileText}
-              disabled={isPending}
-              onClick={() => handlePreInvoice(r.id)}
-            >
-              Pre-fatura
-            </ActionButton>
-          ) : null}
-          {r.status === "CLOSED" ? (
-            <ActionButton
-              size="sm"
-              variant="secondary"
               icon={Mail}
               disabled={isPending}
               onClick={() => handleSendPreInvoice(r.id)}
@@ -531,9 +496,9 @@ export function MonthlyClosingTable({
               variant="secondary"
               icon={Users}
               disabled={isPending}
-              onClick={() => handleSendApuracao(r.id)}
+              onClick={() => handleOpenApuracao(r)}
             >
-              Apuração
+              Apurar
             </ActionButton>
           ) : null}
           {r.status === "CLOSED" && !r.fiscalDocument ? (
@@ -618,47 +583,47 @@ export function MonthlyClosingTable({
       </SectionPanel>
 
       <Modal
-        open={preview != null}
-        onClose={() => setPreview(null)}
-        title="Pre-fatura"
-        description="Validacao financeira antes da emissao fiscal. Nao constitui documento fiscal."
-        className="max-w-2xl"
-        footer={
-          <>
-            {preview?.downloadUrl ? (
-              <a
-                href={preview.downloadUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="text-sm font-medium text-accent underline"
-              >
-                Abrir artefato armazenado
-              </a>
-            ) : null}
-            <ActionButton
-              size="sm"
-              variant="secondary"
-              icon={Download}
-              onClick={handleDownloadPreview}
-            >
-              Baixar HTML
-            </ActionButton>
-          </>
+        open={apuracao != null}
+        onClose={() => setApuracao(null)}
+        title="Apuração por consultor"
+        description={
+          apuracao
+            ? `${apuracao.title}${apuracao.data ? ` · ${apuracao.data.monthLabel}` : ""}`
+            : undefined
         }
+        headerActions={
+          <button
+            type="button"
+            onClick={() => setApuracaoFullscreen((v) => !v)}
+            aria-label={
+              apuracaoFullscreen ? "Sair da tela cheia" : "Tela cheia"
+            }
+            aria-pressed={apuracaoFullscreen}
+            className="grid size-9 shrink-0 place-items-center rounded-md text-medium transition-colors hover:bg-surface-muted hover:text-strong"
+          >
+            {apuracaoFullscreen ? (
+              <Minimize2 aria-hidden="true" className="size-5" />
+            ) : (
+              <Maximize2 aria-hidden="true" className="size-5" />
+            )}
+          </button>
+        }
+        className={cn(
+          apuracaoFullscreen
+            ? "h-[calc(100vh-1rem)] max-h-[calc(100vh-1rem)] w-[calc(100vw-1rem)] max-w-none"
+            : "max-w-6xl",
+        )}
       >
-        {preview ? (
-          <div className="space-y-3">
-            {!preview.stored ? (
-              <p className="rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-xs font-medium text-warning">
-                Armazenamento não configurado: a pré-fatura foi gerada apenas
-                para visualização e não ficou arquivada. Use “Baixar HTML” para
-                guardar uma cópia.
-              </p>
-            ) : null}
-            <iframe
-              title="Pre-fatura"
-              srcDoc={preview.html}
-              className="h-[60vh] w-full rounded-md border border-border bg-white"
+        {apuracao?.loading ? (
+          <p className="py-8 text-center text-sm text-soft">
+            Carregando apuração…
+          </p>
+        ) : apuracao?.data ? (
+          <div className="overflow-x-auto">
+            <HoursReportTable
+              report={apuracao.data.report}
+              prevHref="#"
+              nextHref="#"
             />
           </div>
         ) : null}

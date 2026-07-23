@@ -999,6 +999,7 @@ model Consultant {
   payments            ConsultantPayment[]
   saleRates           ProjectSaleRate[]
   costRates           ConsultantAllocationCostRate[]
+  projectRates        ConsultantProjectRate[]
   feedbacks           Feedback[]                     @relation("FeedbackSubject")
   evaluations         Evaluation[]
   developmentPlans    DevelopmentPlan[]
@@ -1533,6 +1534,7 @@ model Project {
   holidays                    HolidayProject[]
   receivables                 ProjectReceivableSchedule[]
   adHocPayments               ConsultantAdHocPayment[]
+  consultantProjectRates      ConsultantProjectRate[]
   plannedProfiles             ProjectPlannedProfile[]
   createdAt                   DateTime                     @default(now())
   updatedAt                   DateTime                     @updatedAt
@@ -1718,6 +1720,32 @@ model ConsultantAllocationCostRate {
 
   @@index([consultantId, startsAt])
   @@index([allocationId, startsAt])
+}
+
+/// M2: valor/hora diferenciado de um consultor NUM projeto, com vigencia. Quando
+/// ativo para a data do lancamento, substitui o `ConsultantCompensation.hourlyRate`
+/// nos lancamentos daquele projeto — tanto no CUSTO/margem (precede o
+/// ConsultantAllocationCostRate) quanto no PAGAMENTO (generateConsultantPayments).
+/// Escopo consultor+projeto (nao por alocacao), gerenciado no cadastro do
+/// consultor (grupo "Valores e remuneracao").
+model ConsultantProjectRate {
+  id              String     @id @default(cuid())
+  consultantId    String
+  consultant      Consultant @relation(fields: [consultantId], references: [id], onDelete: Cascade)
+  projectId       String
+  project         Project    @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  hourlyRate      Decimal    @db.Decimal(12, 2)
+  currency        String     @default("BRL")
+  startsAt        DateTime   @db.Date
+  endsAt          DateTime?  @db.Date
+  note            String?
+  /// Referencia solta ao User que criou (mesmo padrao de ConsultantAdHocPayment).
+  createdByUserId String?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  @@index([consultantId, projectId, startsAt])
+  @@index([projectId])
 }
 
 /// Consultant-maintained weekly default for an active allocation. It powers the

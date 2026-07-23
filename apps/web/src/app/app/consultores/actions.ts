@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { Prisma, prisma } from "@jumpflow/database";
 import type { ZodType } from "zod";
 import type { ActionResult, ErrorCode } from "@/lib/actions/result";
@@ -11,7 +12,13 @@ import {
   requireUser,
 } from "@/lib/auth/guards";
 import { FINANCIAL_ROLES, hasRole } from "@/lib/auth/route-permissions";
-import { CONSULTANT_COMPENSATION_CODE } from "@/lib/auth/permission-codes";
+import {
+  CONSULTANT_BANK_CODE,
+  CONSULTANT_COMPENSATION_CODE,
+  CONSULTANT_CURRICULUM_CODE,
+  CONSULTANT_DOCUMENTS_CODE,
+  CONSULTANT_PERSONAL_CODE,
+} from "@/lib/auth/permission-codes";
 import type { RoleName } from "@/lib/auth/types";
 import { buildAuditEventData, recordAuditEvent } from "@/lib/db/audit";
 import { isDatabaseConfigured } from "@/lib/db/config";
@@ -50,6 +57,8 @@ import {
   compensationSchema,
   consultantDocumentDeleteSchema,
   deleteAdHocPaymentSchema,
+  deleteProjectRateSchema,
+  projectRateSchema,
   curriculumBioSchema,
   generateCurriculumSnapshotSchema,
   consultantDocumentUploadSchema,
@@ -93,6 +102,7 @@ import {
   type LegalRepresentativeInput,
   type PersonalInfoInput,
   type PjInfoInput,
+  type ProjectRateInput,
   type VacationInput,
   type VoucherBenefitsInput,
   type VoucherKey,
@@ -100,9 +110,39 @@ import {
 
 const CONSULTORES_PATH = "/app/consultores";
 const PEOPLE_ROLES: RoleName[] = ["ADMIN", "PEOPLE"];
-const BANK_ROLES: RoleName[] = ["ADMIN", "PEOPLE"];
 /** Papeis que podem CRIAR um consultor (identidade + acesso local). */
 const CREATE_CONSULTANT_ROLES: RoleName[] = ["ADMIN", "PEOPLE"];
+
+const CONSULTANT_PROFILE_VIEW_CODES = [
+  CONSULTANT_PERSONAL_CODE,
+  CONSULTANT_DOCUMENTS_CODE,
+  CONSULTANT_CURRICULUM_CODE,
+  CONSULTANT_BANK_CODE,
+];
+
+/**
+ * M1: escrita em um grupo do cadastro (papel de People OU permissão de matriz
+ * "edit" no code do grupo). Mantém o fallback histórico (ADMIN/PEOPLE editam) e
+ * amplia para quem a Matriz liberar (ex.: Financeiro em todos os grupos).
+ */
+function requireConsultantGroupEdit(code: string) {
+  return requireRoleOrPermission(PEOPLE_ROLES, code, "edit");
+}
+
+/**
+ * M1: leitura do perfil (qualquer grupo de perfil visível — papel OU matriz).
+ * O perfil carrega pessoais/documentos/currículo/bancárias de uma vez, então
+ * basta UM grupo visível para o load ser permitido; a exibição por grupo é
+ * refinada na tela.
+ */
+async function requireConsultantProfileView() {
+  const user = await requireUser();
+  if (hasRole(user, PEOPLE_ROLES)) return user;
+  for (const code of CONSULTANT_PROFILE_VIEW_CODES) {
+    if (await hasRoleOrPermission(user, [], code, "view")) return user;
+  }
+  redirect("/access-denied");
+}
 
 class ActionError extends Error {
   constructor(
@@ -226,7 +266,7 @@ export async function loadConsultantProfile(
 ): Promise<ActionResult<ConsultantProfile>> {
   try {
     ensureDatabase();
-    await requireRole(PEOPLE_ROLES);
+    await requireConsultantProfileView();
     const profile = await getConsultantProfile(consultantId);
     if (!profile) {
       throw new ActionError("NOT_FOUND", "Consultor nao encontrado.");
@@ -468,7 +508,7 @@ export async function saveConsultantIdentity(
 ): Promise<ActionResult<{ id: string }>> {
   try {
     ensureDatabase();
-    await requireRole(PEOPLE_ROLES);
+    await requireConsultantGroupEdit(CONSULTANT_PERSONAL_CODE);
     const parsed = parseInput(consultantIdentitySchema, input);
     const data = {
       name: parsed.name,
@@ -504,7 +544,7 @@ export async function savePersonalInfo(
 ): Promise<ActionResult<{ consultantId: string }>> {
   try {
     ensureDatabase();
-    await requireRole(PEOPLE_ROLES);
+    await requireConsultantGroupEdit(CONSULTANT_PERSONAL_CODE);
     const parsed = parseInput(personalInfoSchema, input);
     const previous = await prisma.consultantPersonalInfo.findUnique({
       where: { consultantId: parsed.consultantId },
@@ -548,7 +588,7 @@ export async function saveCompanyInfo(
 ): Promise<ActionResult<{ consultantId: string }>> {
   try {
     ensureDatabase();
-    await requireRole(PEOPLE_ROLES);
+    await requireConsultantGroupEdit(CONSULTANT_PERSONAL_CODE);
     const parsed = parseInput(companyInfoSchema, input);
     const previous = await prisma.consultantCompanyInfo.findUnique({
       where: { consultantId: parsed.consultantId },
@@ -586,7 +626,7 @@ export async function saveAddress(
 ): Promise<ActionResult<{ consultantId: string }>> {
   try {
     ensureDatabase();
-    await requireRole(PEOPLE_ROLES);
+    await requireConsultantGroupEdit(CONSULTANT_PERSONAL_CODE);
     const parsed = parseInput(addressSchema, input);
     const previous = await prisma.consultantAddress.findUnique({
       where: { consultantId: parsed.consultantId },
@@ -624,7 +664,7 @@ export async function saveBankAccount(
 ): Promise<ActionResult<{ id: string }>> {
   try {
     ensureDatabase();
-    await requireRole(BANK_ROLES);
+    await requireConsultantGroupEdit(CONSULTANT_BANK_CODE);
     const parsed = parseInput(bankAccountSchema, input);
     const data = {
       consultantId: parsed.consultantId,
@@ -861,7 +901,7 @@ export async function lookupConsultantCnpj(
 > {
   try {
     ensureDatabase();
-    await requireRole(PEOPLE_ROLES);
+    await requireConsultantGroupEdit(CONSULTANT_PERSONAL_CODE);
     const parsed = parseInput(lookupInputSchema, input);
     const result = await getCnpjProvider().lookup(parsed.value);
     if (!result) throw new ActionError("NOT_FOUND", "CNPJ nao encontrado.");
@@ -917,7 +957,7 @@ export async function lookupConsultantCep(
 > {
   try {
     ensureDatabase();
-    await requireRole(PEOPLE_ROLES);
+    await requireConsultantGroupEdit(CONSULTANT_PERSONAL_CODE);
     const parsed = parseInput(lookupInputSchema, input);
     const result = await getCepProvider().lookup(parsed.value);
     if (!result) throw new ActionError("NOT_FOUND", "CEP nao encontrado.");
@@ -975,7 +1015,7 @@ export async function uploadConsultantDocument(
 ): Promise<ActionResult<{ id: string }>> {
   try {
     ensureDatabase();
-    await requireRole(PEOPLE_ROLES);
+    await requireConsultantGroupEdit(CONSULTANT_DOCUMENTS_CODE);
     if (!isStorageConfigured()) {
       throw new ActionError(
         "NO_STORAGE",
@@ -1094,7 +1134,7 @@ export async function deleteConsultantDocument(
 ): Promise<ActionResult<{ id: string }>> {
   try {
     ensureDatabase();
-    await requireRole(PEOPLE_ROLES);
+    await requireConsultantGroupEdit(CONSULTANT_DOCUMENTS_CODE);
     const parsed = parseInput(consultantDocumentDeleteSchema, input);
     const doc = await prisma.consultantDocument.findUnique({
       where: { id: parsed.documentId },
@@ -1130,7 +1170,7 @@ export async function uploadConsultantPhoto(
 ): Promise<ActionResult<{ consultantId: string }>> {
   try {
     ensureDatabase();
-    await requireRole(PEOPLE_ROLES);
+    await requireConsultantGroupEdit(CONSULTANT_PERSONAL_CODE);
     if (!isStorageConfigured()) {
       throw new ActionError(
         "NO_STORAGE",
@@ -1210,7 +1250,7 @@ export async function saveConsultantLanguage(
 ): Promise<ActionResult<{ id: string }>> {
   try {
     ensureDatabase();
-    await requireRole(PEOPLE_ROLES);
+    await requireConsultantGroupEdit(CONSULTANT_CURRICULUM_CODE);
     const parsed = parseInput(languageSchema, input);
     const data = {
       consultantId: parsed.consultantId,
@@ -1243,7 +1283,7 @@ export async function deleteConsultantLanguage(
 ): Promise<ActionResult<{ id: string }>> {
   try {
     ensureDatabase();
-    await requireRole(PEOPLE_ROLES);
+    await requireConsultantGroupEdit(CONSULTANT_CURRICULUM_CODE);
     const parsed = parseInput(deleteLanguageSchema, input);
     const previous = await prisma.consultantLanguage.findUnique({
       where: { id: parsed.id },
@@ -1264,7 +1304,7 @@ export async function saveConsultantEducation(
 ): Promise<ActionResult<{ id: string }>> {
   try {
     ensureDatabase();
-    await requireRole(PEOPLE_ROLES);
+    await requireConsultantGroupEdit(CONSULTANT_CURRICULUM_CODE);
     const parsed = parseInput(educationSchema, input);
     const data = {
       consultantId: parsed.consultantId,
@@ -1301,7 +1341,7 @@ export async function deleteConsultantEducation(
 ): Promise<ActionResult<{ id: string }>> {
   try {
     ensureDatabase();
-    await requireRole(PEOPLE_ROLES);
+    await requireConsultantGroupEdit(CONSULTANT_CURRICULUM_CODE);
     const parsed = parseInput(deleteEducationSchema, input);
     const previous = await prisma.consultantEducation.findUnique({
       where: { id: parsed.id },
@@ -1327,7 +1367,7 @@ export async function loadConsultantExperiences(
 ): Promise<ActionResult<ConsultantExperienceView[]>> {
   try {
     ensureDatabase();
-    await requireRole(PEOPLE_ROLES);
+    await requireRoleOrPermission(PEOPLE_ROLES, CONSULTANT_CURRICULUM_CODE, "view");
     const rows = await listConsultantExperiences(consultantId);
     return { ok: true, data: rows };
   } catch (error) {
@@ -1341,7 +1381,7 @@ export async function saveConsultantExperience(
 ): Promise<ActionResult<{ id: string }>> {
   try {
     ensureDatabase();
-    await requireRole(PEOPLE_ROLES);
+    await requireConsultantGroupEdit(CONSULTANT_CURRICULUM_CODE);
     const parsed = parseInput(experienceSchema, input);
     const data = {
       consultantId: parsed.consultantId,
@@ -1381,7 +1421,7 @@ export async function deleteConsultantExperience(
 ): Promise<ActionResult<{ id: string }>> {
   try {
     ensureDatabase();
-    await requireRole(PEOPLE_ROLES);
+    await requireConsultantGroupEdit(CONSULTANT_CURRICULUM_CODE);
     const parsed = parseInput(deleteExperienceSchema, input);
     const previous = await prisma.consultantExperience.findUnique({
       where: { id: parsed.id },
@@ -1408,7 +1448,7 @@ export async function saveCltInfo(
 ): Promise<ActionResult<{ consultantId: string }>> {
   try {
     ensureDatabase();
-    await requireRole(PEOPLE_ROLES);
+    await requireConsultantGroupEdit(CONSULTANT_PERSONAL_CODE);
     const parsed = parseInput(cltInfoSchema, input);
     const previous = await prisma.consultantCltInfo.findUnique({
       where: { consultantId: parsed.consultantId },
@@ -1451,7 +1491,7 @@ export async function saveVacation(
 ): Promise<ActionResult<{ id: string }>> {
   try {
     ensureDatabase();
-    await requireRole(PEOPLE_ROLES);
+    await requireConsultantGroupEdit(CONSULTANT_PERSONAL_CODE);
     const parsed = parseInput(vacationSchema, input);
     const entitledDays = parsed.entitledDays ?? 30;
     const takenDays = parsed.takenDays ?? 0;
@@ -1490,7 +1530,7 @@ export async function deleteVacation(
 ): Promise<ActionResult<{ id: string }>> {
   try {
     ensureDatabase();
-    await requireRole(PEOPLE_ROLES);
+    await requireConsultantGroupEdit(CONSULTANT_PERSONAL_CODE);
     const parsed = parseInput(deleteVacationSchema, input);
     const previous = await prisma.consultantVacation.findUnique({
       where: { id: parsed.id },
@@ -1515,7 +1555,7 @@ export async function addHourBankEntry(
 ): Promise<ActionResult<{ id: string }>> {
   try {
     ensureDatabase();
-    await requireRole(PEOPLE_ROLES);
+    await requireConsultantGroupEdit(CONSULTANT_PERSONAL_CODE);
     const parsed = parseInput(hourBankEntrySchema, input);
     const signedHours = signedHourBankHours(parsed.kind, parsed.hours);
     const data = {
@@ -1551,7 +1591,7 @@ export async function deleteHourBankEntry(
 ): Promise<ActionResult<{ id: string }>> {
   try {
     ensureDatabase();
-    await requireRole(PEOPLE_ROLES);
+    await requireConsultantGroupEdit(CONSULTANT_PERSONAL_CODE);
     const parsed = parseInput(deleteHourBankEntrySchema, input);
     const previous = await prisma.consultantHourBankEntry.findUnique({
       where: { id: parsed.id },
@@ -1572,7 +1612,7 @@ export async function savePjInfo(
 ): Promise<ActionResult<{ consultantId: string }>> {
   try {
     ensureDatabase();
-    await requireRole(PEOPLE_ROLES);
+    await requireConsultantGroupEdit(CONSULTANT_PERSONAL_CODE);
     const parsed = parseInput(pjInfoSchema, input);
     const previous = await prisma.consultantPjInfo.findUnique({
       where: { consultantId: parsed.consultantId },
@@ -1612,7 +1652,7 @@ export async function saveLegalRepresentative(
 ): Promise<ActionResult<{ consultantId: string }>> {
   try {
     ensureDatabase();
-    await requireRole(PEOPLE_ROLES);
+    await requireConsultantGroupEdit(CONSULTANT_PERSONAL_CODE);
     const parsed = parseInput(legalRepresentativeSchema, input);
     const previous = await prisma.consultantLegalRepresentative.findUnique({
       where: { consultantId: parsed.consultantId },
@@ -1666,7 +1706,7 @@ export async function loadConsultantCurriculum(
 ): Promise<ActionResult<CurriculumView>> {
   try {
     ensureDatabase();
-    await requireRole(PEOPLE_ROLES);
+    await requireRoleOrPermission(PEOPLE_ROLES, CONSULTANT_CURRICULUM_CODE, "view");
     const curriculum = await buildConsultantCurriculum(consultantId);
     if (!curriculum) {
       throw new ActionError("NOT_FOUND", "Consultor nao encontrado.");
@@ -1706,7 +1746,7 @@ export async function saveCurriculumBio(
 ): Promise<ActionResult<{ consultantId: string }>> {
   try {
     ensureDatabase();
-    await requireRole(PEOPLE_ROLES);
+    await requireConsultantGroupEdit(CONSULTANT_CURRICULUM_CODE);
     const parsed = parseInput(curriculumBioSchema, input);
     const previous = await prisma.consultant.findUnique({
       where: { id: parsed.consultantId },
@@ -1747,7 +1787,7 @@ export async function generateCurriculumSnapshot(
 ): Promise<ActionResult<{ id: string }>> {
   try {
     ensureDatabase();
-    await requireRole(PEOPLE_ROLES);
+    await requireConsultantGroupEdit(CONSULTANT_CURRICULUM_CODE);
     const parsed = parseInput(generateCurriculumSnapshotSchema, input);
     const curriculum = await buildConsultantCurriculum(parsed.consultantId);
     if (!curriculum) {
@@ -1945,6 +1985,166 @@ export async function deleteConsultantAdHocPayment(
       "ConsultantAdHocPayment",
       parsed.id,
       "CONSULTANT_ADHOC_PAYMENT_DELETED",
+      previous,
+      null,
+    );
+    revalidatePath(CONSULTORES_PATH);
+    return { ok: true, data: { id: parsed.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+// -------------------------------------------------------------------------
+// M2: valor/hora diferenciado por projeto (custo + pagamento)
+// -------------------------------------------------------------------------
+
+export interface ConsultantProjectRateView {
+  id: string;
+  consultantId: string;
+  projectId: string;
+  projectName: string;
+  clientName: string;
+  hourlyRate: number;
+  startsAt: string;
+  endsAt: string | null;
+  note: string | null;
+}
+
+export interface ConsultantProjectRatesView {
+  rates: ConsultantProjectRateView[];
+  /** Mesmo seletor de projeto das remunerações pontuais (inclui CLOSED). */
+  projects: AdHocPaymentProjectOption[];
+}
+
+function projectRateView(row: {
+  id: string;
+  consultantId: string;
+  projectId: string;
+  project: { name: string; client: { name: string } } | null;
+  hourlyRate: Prisma.Decimal;
+  startsAt: Date;
+  endsAt: Date | null;
+  note: string | null;
+}): ConsultantProjectRateView {
+  return {
+    id: row.id,
+    consultantId: row.consultantId,
+    projectId: row.projectId,
+    projectName: row.project?.name ?? "Projeto",
+    clientName: row.project?.client.name ?? "",
+    hourlyRate: Number(row.hourlyRate),
+    startsAt: row.startsAt.toISOString().slice(0, 10),
+    endsAt: row.endsAt ? row.endsAt.toISOString().slice(0, 10) : null,
+    note: row.note,
+  };
+}
+
+/**
+ * Carrega os valores/hora por projeto do consultor + a lista de projetos para o
+ * seletor. Leitura do grupo de remuneração (role OU matriz).
+ */
+export async function loadConsultantProjectRates(
+  consultantId: string,
+): Promise<ActionResult<ConsultantProjectRatesView>> {
+  try {
+    ensureDatabase();
+    await requireRoleOrPermission(FINANCIAL_ROLES, CONSULTANT_COMPENSATION_CODE, "view");
+    const [rows, projects] = await Promise.all([
+      prisma.consultantProjectRate.findMany({
+        where: { consultantId },
+        include: { project: { select: { name: true, client: { select: { name: true } } } } },
+        orderBy: [{ startsAt: "desc" }, { createdAt: "desc" }],
+      }),
+      prisma.project.findMany({
+        select: { id: true, name: true, client: { select: { name: true } } },
+        orderBy: [{ status: "asc" }, { name: "asc" }],
+      }),
+    ]);
+    return {
+      ok: true,
+      data: {
+        rates: rows.map(projectRateView),
+        projects: projects.map((p) => ({
+          id: p.id,
+          name: p.name,
+          clientName: p.client.name,
+        })),
+      },
+    };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/** Cria ou atualiza um valor/hora por projeto. Grupo de remuneração, auditado. */
+export async function saveConsultantProjectRate(
+  input: ProjectRateInput,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    await requireRoleOrPermission(FINANCIAL_ROLES, CONSULTANT_COMPENSATION_CODE, "edit");
+    const parsed = parseInput(projectRateSchema, input);
+    const data = {
+      consultantId: parsed.consultantId,
+      projectId: parsed.projectId,
+      hourlyRate: parsed.hourlyRate,
+      startsAt: new Date(`${parsed.startsAt}T00:00:00.000Z`),
+      endsAt: parsed.endsAt ? new Date(`${parsed.endsAt}T00:00:00.000Z`) : null,
+      note: parsed.note ?? null,
+    };
+    const previous = parsed.id
+      ? await prisma.consultantProjectRate.findUnique({ where: { id: parsed.id } })
+      : null;
+    if (parsed.id && !previous) {
+      throw new ActionError("NOT_FOUND", "Valor/hora por projeto nao encontrado.");
+    }
+    let row;
+    if (parsed.id) {
+      row = await prisma.consultantProjectRate.update({
+        where: { id: parsed.id },
+        data,
+      });
+    } else {
+      const user = await requireUser();
+      const dbUser = await resolveDbUser(user);
+      row = await prisma.consultantProjectRate.create({
+        data: { ...data, createdByUserId: dbUser?.id ?? null },
+      });
+    }
+    await audit(
+      "ConsultantProjectRate",
+      row.id,
+      previous ? "CONSULTANT_PROJECT_RATE_UPDATED" : "CONSULTANT_PROJECT_RATE_CREATED",
+      previous,
+      { ...data, hourlyRate: parsed.hourlyRate },
+    );
+    revalidatePath(CONSULTORES_PATH);
+    return { ok: true, data: { id: row.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/** Remove um valor/hora por projeto. Grupo de remuneração, auditado. */
+export async function deleteConsultantProjectRate(
+  input: { id: string },
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    await requireRoleOrPermission(FINANCIAL_ROLES, CONSULTANT_COMPENSATION_CODE, "delete");
+    const parsed = parseInput(deleteProjectRateSchema, input);
+    const previous = await prisma.consultantProjectRate.findUnique({
+      where: { id: parsed.id },
+    });
+    if (!previous) {
+      throw new ActionError("NOT_FOUND", "Valor/hora por projeto nao encontrado.");
+    }
+    await prisma.consultantProjectRate.delete({ where: { id: parsed.id } });
+    await audit(
+      "ConsultantProjectRate",
+      parsed.id,
+      "CONSULTANT_PROJECT_RATE_DELETED",
       previous,
       null,
     );

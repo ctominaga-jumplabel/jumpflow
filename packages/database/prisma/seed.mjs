@@ -1092,6 +1092,11 @@ const PEOPLE_MANAGE = ["ADMIN", "PEOPLE"];
 // Financeiro + People/DP: mesmos que respondem pelo pagamento mais o DP, que
 // gerencia remuneração do consultor e acompanha relatórios por consultor.
 const FINANCIAL_PEOPLE = ["ADMIN", "AREA_MANAGER", "FINANCE", "PEOPLE"];
+// M1: leitura dos grupos "Pessoais" e "Currículo" do cadastro do consultor. A
+// gestão ampla (Financeiro + People) gerencia (create/edit); os demais papéis de
+// gestão/negócio têm apenas leitura desses dois grupos. CONSULTANT nunca vê o
+// cadastro de outro consultor (barrado pela allow-list, independentemente daqui).
+const CONSULTANT_PROFILE_VIEW = ["ADMIN", "AREA_MANAGER", "FINANCE", "PEOPLE", "PROJECT_MANAGER", "SALES"];
 const APPROVALS = ["ADMIN", "AREA_MANAGER", "PROJECT_MANAGER", "FINANCE"];
 const AUTOMATION = ["ADMIN", "AREA_MANAGER"];
 const ADMIN_ONLY = ["ADMIN"];
@@ -1146,6 +1151,14 @@ const PERMISSION_CATALOG = [
   { code: "COMERCIAL", name: "Comercial", module: "Comercial", sort: 50, view: SALE_RATE, create: SALE_RATE, edit: SALE_RATE },
 
   { code: "CONSULTORES", name: "Consultores", module: "Pessoas", sort: 60, view: ALL_ROLES, create: PEOPLE_MANAGE.concat("AREA_MANAGER"), edit: PEOPLE_MANAGE.concat("AREA_MANAGER"), del: ADMIN_ONLY },
+  // M1: grupos do cadastro do consultor, cada um liberável pela Matriz. "Pessoais"
+  // e "Currículo" têm leitura ampla (CONSULTANT_PROFILE_VIEW) e gestão por
+  // Financeiro+People; "Documentações" e "Contas bancárias" ficam restritos a
+  // Financeiro+People. "Remuneração" (abaixo) é a quinta divisão.
+  { code: "CONSULTORES_PESSOAIS", name: "Dados pessoais", module: "Pessoas", parent: "CONSULTORES", sort: 60, view: CONSULTANT_PROFILE_VIEW, create: FINANCIAL_PEOPLE, edit: FINANCIAL_PEOPLE, del: ADMIN_ONLY },
+  { code: "CONSULTORES_DOCUMENTOS", name: "Documentações", module: "Pessoas", parent: "CONSULTORES", sort: 60, view: FINANCIAL_PEOPLE, create: FINANCIAL_PEOPLE, edit: FINANCIAL_PEOPLE, del: FINANCIAL_PEOPLE },
+  { code: "CONSULTORES_CURRICULO", name: "Currículo", module: "Pessoas", parent: "CONSULTORES", sort: 60, view: CONSULTANT_PROFILE_VIEW, create: FINANCIAL_PEOPLE, edit: FINANCIAL_PEOPLE, del: FINANCIAL_PEOPLE },
+  { code: "CONSULTORES_BANCARIAS", name: "Contas bancárias", module: "Pessoas", parent: "CONSULTORES", sort: 60, view: FINANCIAL_PEOPLE, create: FINANCIAL_PEOPLE, edit: FINANCIAL_PEOPLE, del: FINANCIAL_PEOPLE },
   // Remuneração do consultor (pontual + acordada) dentro do cadastro. Sub-seção
   // financeira gerenciável pela Matriz: Financeiro + People/DP. Não expõe demais
   // campos financeiros (valor hora/custo/margem), que ficam em outros codes.

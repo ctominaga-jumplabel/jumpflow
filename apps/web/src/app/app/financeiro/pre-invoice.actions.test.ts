@@ -33,6 +33,20 @@ const h = vi.hoisted(() => {
       hours: number;
       consultant: { name: string };
     }>,
+    // M5: buildProjectHoursAttachment now delegates to getHoursReport (same rows
+    // as the Relatórios → Horas screen). We mock that read and drive it from here.
+    hoursReport: {
+      rows: [] as Any[],
+      totals: {
+        count: 0,
+        totalHours: 0,
+        hoursByStatus: {},
+        hoursByProject: [],
+        totalBilled: 0,
+      },
+      includeFinancials: true,
+      pagination: { total: 0, page: 1, pageSize: 50, totalPages: 1 },
+    } as Any,
   };
 
   const emailLogKey = (where: Any) => where.type_referenceKey;
@@ -142,7 +156,32 @@ vi.mock("@/lib/automation/email-transport", () => ({
   getEmailTransport: vi.fn(() => ({ send: sendMock })),
 }));
 
+vi.mock("@/lib/db/reports", () => ({
+  getHoursReport: vi.fn(async () => h.store.hoursReport),
+}));
+
 import { generatePreInvoice, sendPreInvoiceEmail } from "./actions";
+
+/** Minimal HoursReportRow for the attachment sheet (only the read columns). */
+function hoursRow(over: Partial<Any> = {}): Any {
+  return {
+    id: "te-1",
+    date: "2026-06-10",
+    weekLabel: "Semana 24 · 08–14 jun 2026",
+    consultantName: "Bia",
+    clientName: "Atlas Energia",
+    projectName: "Alfa",
+    activity: "Consultoria",
+    hours: 8,
+    billable: true,
+    status: "APPROVED",
+    submittedAt: "2026-06-10T12:00:00.000Z",
+    decidedAt: "2026-06-11T09:00:00.000Z",
+    billingRate: 200,
+    billedAmount: 1600,
+    ...over,
+  };
+}
 
 function closingFixture(over: Partial<Any> = {}): Any {
   return {
@@ -183,6 +222,18 @@ beforeEach(() => {
   h.store.uploadShouldFail = false;
   h.store.uploads = [];
   h.store.timeEntries = [];
+  h.store.hoursReport = {
+    rows: [],
+    totals: {
+      count: 0,
+      totalHours: 0,
+      hoursByStatus: {},
+      hoursByProject: [],
+      totalBilled: 0,
+    },
+    includeFinancials: true,
+    pagination: { total: 0, page: 1, pageSize: 50, totalPages: 1 },
+  };
   sendMock.mockClear();
 });
 
@@ -351,17 +402,40 @@ describe("sendPreInvoiceEmail — idempotency + degrade", () => {
     h.store.closing = closingFixture({
       project: { id: "p-1", name: "Alfa", billingAttachHours: true },
     });
-    h.store.timeEntries = [
-      { consultantId: "c-1", hours: 8, consultant: { name: "Bia" } },
-      { consultantId: "c-1", hours: 2, consultant: { name: "Bia" } },
-      { consultantId: "c-2", hours: 5, consultant: { name: "Ana" } },
-    ];
+    // M5: the attachment now mirrors the Relatórios → Horas rows (billable only)
+    // supplied by getHoursReport. Non-empty rows => an attachment is produced.
+    h.store.hoursReport = {
+      rows: [
+        hoursRow({ id: "te-1", consultantName: "Bia", hours: 8 }),
+        hoursRow({ id: "te-2", consultantName: "Ana", hours: 5 }),
+      ],
+      totals: {
+        count: 2,
+        totalHours: 13,
+        hoursByStatus: { APPROVED: 13 },
+        hoursByProject: [],
+        totalBilled: 2600,
+      },
+      includeFinancials: true,
+      pagination: { total: 2, page: 1, pageSize: 50, totalPages: 1 },
+    };
     const result = await sendPreInvoiceEmail({ closingId: "rc-1" });
     expect(result.ok).toBe(true);
     expect(h.store.lastMessage.attachments).toHaveLength(1);
     expect(h.store.lastMessage.attachments[0].filename).toBe("horas-alfa-2026-06.xlsx");
     expect(h.store.lastMessage.attachments[0].encoding).toBe("base64");
     expect(h.store.emailLogs[0]!.meta).toMatchObject({ attachedHours: true });
+  });
+
+  it("does not attach when there are no billable rows (empty report)", async () => {
+    h.store.closing = closingFixture({
+      project: { id: "p-1", name: "Alfa", billingAttachHours: true },
+    });
+    // Flag is on but getHoursReport returns no rows (e.g. nothing billable) =>
+    // no attachment, honest degrade.
+    const result = await sendPreInvoiceEmail({ closingId: "rc-1" });
+    expect(result.ok).toBe(true);
+    expect(h.store.lastMessage.attachments).toBeUndefined();
   });
 
   it("does not attach when the closing has no projectId (client-scoped)", async () => {
@@ -376,9 +450,18 @@ describe("sendPreInvoiceEmail — idempotency + degrade", () => {
       },
       project: null,
     });
-    h.store.timeEntries = [
-      { consultantId: "c-1", hours: 8, consultant: { name: "Bia" } },
-    ];
+    h.store.hoursReport = {
+      rows: [hoursRow()],
+      totals: {
+        count: 1,
+        totalHours: 8,
+        hoursByStatus: { APPROVED: 8 },
+        hoursByProject: [],
+        totalBilled: 1600,
+      },
+      includeFinancials: true,
+      pagination: { total: 1, page: 1, pageSize: 50, totalPages: 1 },
+    };
     const result = await sendPreInvoiceEmail({ closingId: "rc-1" });
     expect(result.ok).toBe(true);
     expect(h.store.lastMessage.attachments).toBeUndefined();

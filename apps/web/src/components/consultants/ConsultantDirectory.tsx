@@ -7,13 +7,16 @@ import {
   Building2,
   CreditCard,
   Edit,
+  FileText,
   Gift,
+  GraduationCap,
   Plus,
   Trash2,
   UserPlus,
   Users,
 } from "lucide-react";
 import { ActionButton } from "@/components/ui/ActionButton";
+import { CollapsibleGroup } from "@/components/ui/CollapsibleGroup";
 import { DataToolbar } from "@/components/ui/DataToolbar";
 import { DataTable, type DataTableColumn } from "@/components/ui/DataTable";
 import { FilterChip } from "@/components/ui/FilterChip";
@@ -33,15 +36,19 @@ import {
 } from "@/lib/mock-data/consultants";
 import {
   deleteConsultantAdHocPayment,
+  deleteConsultantProjectRate,
   loadConsultantAdHocPayments,
   loadConsultantProfile,
+  loadConsultantProjectRates,
   saveBankAccount,
   saveCompensation,
   saveConsultantAdHocPayment,
   saveConsultantIdentity,
+  saveConsultantProjectRate,
   saveVoucherBenefits,
   type AdHocPaymentsView,
   type AdHocPaymentView,
+  type ConsultantProjectRatesView,
 } from "@/app/app/consultores/actions";
 import {
   AD_HOC_PAYMENT_KINDS,
@@ -62,8 +69,11 @@ import type {
 } from "@/lib/db/consultants";
 import { computeCompensation } from "@/lib/consultants/compensation";
 import { ConsultantAvailabilityBadge } from "./ConsultantAvailabilityBadge";
+import { ConsultantCompetenciasSection } from "./ConsultantCompetenciasSection";
 import { ConsultantCurriculumSection } from "./ConsultantCurriculumSection";
+import { ConsultantDocumentsSection } from "./ConsultantDocumentsSection";
 import { ConsultantProfileSections } from "./ConsultantProfileSections";
+import { ConsultantProjectRatesSection } from "./ConsultantProjectRatesSection";
 
 const SENIORITY_FILTERS: (Seniority | "ALL")[] = [
   "ALL",
@@ -73,10 +83,31 @@ const SENIORITY_FILTERS: (Seniority | "ALL")[] = [
   "ESPECIALISTA",
 ];
 
+/** view/edit resolved (role OR matrix) for one consultant-registration group. */
+export interface ConsultantGroupPermission {
+  view: boolean;
+  edit: boolean;
+}
+
+/** Per-group permissions for the five consultant-registration groups (M1). */
+export interface ConsultantGroupPerms {
+  personal: ConsultantGroupPermission;
+  documents: ConsultantGroupPermission;
+  curriculum: ConsultantGroupPermission;
+  bank: ConsultantGroupPermission;
+  compensation: ConsultantGroupPermission;
+}
+
 export interface ConsultantDirectoryProps {
   consultants?: Consultant[];
   canManagePeople?: boolean;
   canManageFinancials?: boolean;
+  /**
+   * Per-group permissions (M1). When omitted (demo/tests), falls back to the
+   * legacy booleans: People groups follow `canManagePeople`, the compensation
+   * group follows `canManageFinancials`.
+   */
+  groupPerms?: ConsultantGroupPerms;
   /**
    * Consultor a abrir automaticamente ao montar (ex.: retorno da criacao em
    * `/app/consultores/novo?...`). Abre o perfil para completar os dados.
@@ -95,9 +126,27 @@ export function ConsultantDirectory({
   consultants = allConsultants,
   canManagePeople = false,
   canManageFinancials = false,
+  groupPerms,
   initialConsultantId,
 }: ConsultantDirectoryProps) {
   const router = useRouter();
+  // Resolve per-group perms. Without an explicit map (demo/tests), fall back to
+  // the legacy booleans so behavior is unchanged: People groups follow
+  // canManagePeople; the compensation group follows canManageFinancials.
+  const perms: ConsultantGroupPerms = groupPerms ?? {
+    personal: { view: canManagePeople, edit: canManagePeople },
+    documents: { view: canManagePeople, edit: canManagePeople },
+    curriculum: { view: canManagePeople, edit: canManagePeople },
+    bank: { view: canManagePeople, edit: canManagePeople },
+    compensation: { view: canManageFinancials, edit: canManageFinancials },
+  };
+  // The profile blob (personal/documents/curriculum/bank) backs four groups; load
+  // it if ANY of them is viewable (not just the legacy People flag).
+  const canViewProfile =
+    perms.personal.view ||
+    perms.documents.view ||
+    perms.curriculum.view ||
+    perms.bank.view;
   const [search, setSearch] = useState("");
   const [seniority, setSeniority] = useState<Seniority | "ALL">("ALL");
   const [skillId, setSkillId] = useState<string>("ALL");
@@ -105,6 +154,8 @@ export function ConsultantDirectory({
   const [profile, setProfile] = useState<ConsultantProfile | null>(null);
   const [loadingProfile, setLoadingProfile] = useState(false);
   const [adHoc, setAdHoc] = useState<AdHocPaymentsView | null>(null);
+  const [projectRates, setProjectRates] =
+    useState<ConsultantProjectRatesView | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
   // Carrega o perfil completo sob demanda (evita puxar todos os perfis na
@@ -113,17 +164,22 @@ export function ConsultantDirectory({
     setSelected(consultant);
     setProfile(null);
     setAdHoc(null);
+    setProjectRates(null);
     setMessage(null);
-    // Remuneracoes pontuais sao dado financeiro: carregadas sob demanda para
-    // quem pode gerenciar valores (independe de People). Leitura tambem gated
-    // server-side em loadConsultantAdHocPayments.
-    if (canManageFinancials) {
-      const adHocResult = await loadConsultantAdHocPayments(consultant.id);
+    // Remuneracoes pontuais + valor/hora por projeto sao dado financeiro:
+    // carregados sob demanda para quem pode ver o grupo de valores. Leitura
+    // tambem gated server-side nas actions.
+    if (perms.compensation.view) {
+      const [adHocResult, ratesResult] = await Promise.all([
+        loadConsultantAdHocPayments(consultant.id),
+        loadConsultantProjectRates(consultant.id),
+      ]);
       if (adHocResult.ok) setAdHoc(adHocResult.data);
+      if (ratesResult.ok) setProjectRates(ratesResult.data);
     }
-    // O perfil (dados pessoais/documentos) so e visivel/gerenciavel por People.
-    // Usuarios apenas-financeiro ainda editam compensacao/VA-VR-VT abaixo.
-    if (!canManagePeople) return;
+    // O perfil (pessoais/documentos/curriculo/bancarias) e carregado se QUALQUER
+    // um desses grupos for visivel. Usuarios so-financeiro veem apenas Valores.
+    if (!canViewProfile) return;
     setLoadingProfile(true);
     const result = await loadConsultantProfile(consultant.id);
     setLoadingProfile(false);
@@ -132,21 +188,28 @@ export function ConsultantDirectory({
   }
 
   async function reloadProfile() {
-    if (!selected || !canManagePeople) return;
+    if (!selected || !canViewProfile) return;
     const result = await loadConsultantProfile(selected.id);
     if (result.ok) setProfile(result.data);
   }
 
   async function reloadAdHoc() {
-    if (!selected || !canManageFinancials) return;
+    if (!selected || !perms.compensation.view) return;
     const result = await loadConsultantAdHocPayments(selected.id);
     if (result.ok) setAdHoc(result.data);
+  }
+
+  async function reloadProjectRates() {
+    if (!selected || !perms.compensation.view) return;
+    const result = await loadConsultantProjectRates(selected.id);
+    if (result.ok) setProjectRates(result.data);
   }
 
   function closeDetails() {
     setSelected(null);
     setProfile(null);
     setAdHoc(null);
+    setProjectRates(null);
   }
 
   // Abre o perfil do consultor recem-criado (retorno de /novo) uma unica vez. O
@@ -316,12 +379,13 @@ export function ConsultantDirectory({
         profile={profile}
         loadingProfile={loadingProfile}
         adHoc={adHoc}
-        canManagePeople={canManagePeople}
-        canManageFinancials={canManageFinancials}
+        projectRates={projectRates}
+        perms={perms}
         message={message}
         onMessage={setMessage}
         onReload={reloadProfile}
         onReloadAdHoc={reloadAdHoc}
+        onReloadProjectRates={reloadProjectRates}
         onClose={closeDetails}
       />
     </div>
@@ -333,24 +397,26 @@ function ConsultantDetailModal({
   profile,
   loadingProfile,
   adHoc,
-  canManagePeople,
-  canManageFinancials,
+  projectRates,
+  perms,
   message,
   onMessage,
   onReload,
   onReloadAdHoc,
+  onReloadProjectRates,
   onClose,
 }: {
   consultant: Consultant | null;
   profile: ConsultantProfile | null;
   loadingProfile: boolean;
   adHoc: AdHocPaymentsView | null;
-  canManagePeople: boolean;
-  canManageFinancials: boolean;
+  projectRates: ConsultantProjectRatesView | null;
+  perms: ConsultantGroupPerms;
   message: string | null;
   onMessage: (message: string | null) => void;
   onReload: () => void;
   onReloadAdHoc: () => void;
+  onReloadProjectRates: () => void;
   onClose: () => void;
 }) {
   const [identity, setIdentity] = useState<ConsultantIdentityInput | null>(null);
@@ -440,6 +506,25 @@ function ConsultantDetailModal({
       .map((amount) => ({ amount })),
   );
 
+  // Abre por padrão o primeiro grupo visível (os demais iniciam recolhidos).
+  const firstOpen: keyof ConsultantGroupPerms | null = perms.personal.view
+    ? "personal"
+    : perms.documents.view
+      ? "documents"
+      : perms.curriculum.view
+        ? "curriculum"
+        : perms.bank.view
+          ? "bank"
+          : perms.compensation.view
+            ? "compensation"
+            : null;
+
+  const loadingNote = (
+    <p className="rounded-md border border-border bg-surface-muted px-3 py-2 text-sm text-medium">
+      Carregando cadastro...
+    </p>
+  );
+
   return (
     <Modal
       open
@@ -453,128 +538,196 @@ function ConsultantDetailModal({
         </ActionButton>
       }
     >
-      <div className="space-y-4">
+      <div className="space-y-3">
         {message ? (
           <p className="rounded-md border border-border bg-surface-muted px-3 py-2 text-sm text-medium">
             {message}
           </p>
         ) : null}
-        <section className="space-y-3 rounded-md border border-border p-3">
-          <div className="flex items-center gap-2 text-sm font-semibold text-strong">
-            <Building2 aria-hidden="true" className="size-4" />
-            Identidade sincronizavel
-          </div>
-          <div className="grid gap-3 md:grid-cols-2">
-            <input
-              aria-label="Nome do consultor"
-              value={currentIdentity.name}
-              onChange={(event) =>
-                setIdentity({ ...currentIdentity, name: event.target.value })
-              }
-              className={fieldClass()}
-            />
-            <input
-              aria-label="Email do consultor"
-              value={currentIdentity.email}
-              onChange={(event) =>
-                setIdentity({ ...currentIdentity, email: event.target.value })
-              }
-              className={fieldClass()}
-            />
-            <input
-              aria-label="Cargo do consultor"
-              value={currentIdentity.jobTitle ?? ""}
-              onChange={(event) =>
-                setIdentity({ ...currentIdentity, jobTitle: event.target.value })
-              }
-              className={fieldClass()}
-            />
-            <input
-              aria-label="Area do consultor"
-              value={currentIdentity.area ?? ""}
-              onChange={(event) =>
-                setIdentity({ ...currentIdentity, area: event.target.value })
-              }
-              className={fieldClass()}
-            />
-            <label className="space-y-1 text-sm font-medium text-medium">
-              Tipo de contratacao
-              <select
-                aria-label="Tipo de contratacao"
-                value={currentIdentity.contractType ?? ""}
-                onChange={(event) =>
-                  setIdentity({
-                    ...currentIdentity,
-                    contractType:
-                      (event.target.value ||
-                        undefined) as ConsultantIdentityInput["contractType"],
-                  })
-                }
-                className={fieldClass()}
-              >
-                <option value="">Nao definido</option>
-                {CONTRACT_TYPES.map((type) => (
-                  <option key={type} value={type}>
-                    {contractTypeLabels[type]}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-          <ActionButton
-            size="sm"
-            disabled={!canManagePeople}
-            onClick={saveIdentity}
-            icon={Edit}
+
+        {perms.personal.view ? (
+          <CollapsibleGroup
+            title="Informações pessoais"
+            icon={Building2}
+            defaultOpen={firstOpen === "personal"}
+            hint={perms.personal.edit ? undefined : "Somente leitura"}
           >
-            Salvar identidade
-          </ActionButton>
-        </section>
+            <section className="space-y-3">
+              <div className="flex items-center gap-2 text-sm font-semibold text-strong">
+                <Building2 aria-hidden="true" className="size-4" />
+                Identidade sincronizavel
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <input
+                  aria-label="Nome do consultor"
+                  value={currentIdentity.name}
+                  onChange={(event) =>
+                    setIdentity({ ...currentIdentity, name: event.target.value })
+                  }
+                  className={fieldClass()}
+                />
+                <input
+                  aria-label="Email do consultor"
+                  value={currentIdentity.email}
+                  onChange={(event) =>
+                    setIdentity({ ...currentIdentity, email: event.target.value })
+                  }
+                  className={fieldClass()}
+                />
+                <input
+                  aria-label="Cargo do consultor"
+                  value={currentIdentity.jobTitle ?? ""}
+                  onChange={(event) =>
+                    setIdentity({
+                      ...currentIdentity,
+                      jobTitle: event.target.value,
+                    })
+                  }
+                  className={fieldClass()}
+                />
+                <input
+                  aria-label="Area do consultor"
+                  value={currentIdentity.area ?? ""}
+                  onChange={(event) =>
+                    setIdentity({ ...currentIdentity, area: event.target.value })
+                  }
+                  className={fieldClass()}
+                />
+                <label className="space-y-1 text-sm font-medium text-medium">
+                  Tipo de contratacao
+                  <select
+                    aria-label="Tipo de contratacao"
+                    value={currentIdentity.contractType ?? ""}
+                    onChange={(event) =>
+                      setIdentity({
+                        ...currentIdentity,
+                        contractType:
+                          (event.target.value ||
+                            undefined) as ConsultantIdentityInput["contractType"],
+                      })
+                    }
+                    className={fieldClass()}
+                  >
+                    <option value="">Nao definido</option>
+                    {CONTRACT_TYPES.map((type) => (
+                      <option key={type} value={type}>
+                        {contractTypeLabels[type]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <ActionButton
+                size="sm"
+                disabled={!perms.personal.edit}
+                onClick={saveIdentity}
+                icon={Edit}
+              >
+                Salvar identidade
+              </ActionButton>
+            </section>
 
-        {loadingProfile ? (
-          <p className="rounded-md border border-border bg-surface-muted px-3 py-2 text-sm text-medium">
-            Carregando cadastro...
-          </p>
-        ) : profile ? (
-          <ConsultantProfileSections
-            consultantId={consultantId}
-            profile={profile}
-            contractType={currentIdentity.contractType}
-            canManagePeople={canManagePeople}
-            onMessage={onMessage}
-            onReload={onReload}
-          />
+            {loadingProfile
+              ? loadingNote
+              : profile
+                ? (
+                    <ConsultantProfileSections
+                      consultantId={consultantId}
+                      profile={profile}
+                      contractType={currentIdentity.contractType}
+                      canManagePeople={perms.personal.edit}
+                      onMessage={onMessage}
+                      onReload={onReload}
+                    />
+                  )
+                : null}
+          </CollapsibleGroup>
         ) : null}
 
-        {canManagePeople ? (
-          <ConsultantCurriculumSection
-            consultantId={consultantId}
-            canManagePeople={canManagePeople}
-            onMessage={onMessage}
-          />
+        {perms.documents.view ? (
+          <CollapsibleGroup
+            title="Documentações"
+            icon={FileText}
+            defaultOpen={firstOpen === "documents"}
+            hint={perms.documents.edit ? undefined : "Somente leitura"}
+          >
+            {loadingProfile ? (
+              loadingNote
+            ) : profile ? (
+              <ConsultantDocumentsSection
+                consultantId={consultantId}
+                documents={profile.documents}
+                contractType={currentIdentity.contractType}
+                canEdit={perms.documents.edit}
+                onMessage={onMessage}
+                onReload={onReload}
+              />
+            ) : null}
+          </CollapsibleGroup>
         ) : null}
 
-        <section className="space-y-3 rounded-md border border-border p-3">
-          <div className="flex items-center gap-2 text-sm font-semibold text-strong">
-            <CreditCard aria-hidden="true" className="size-4" />
-            Contas bancárias
-          </div>
-          <BankAccountsSection
-            consultantId={consultantId}
-            contractType={currentIdentity.contractType}
-            accounts={profile?.bankAccounts ?? []}
-            canManagePeople={canManagePeople}
-            onMessage={onMessage}
-            onReload={onReload}
-          />
-        </section>
+        {perms.curriculum.view ? (
+          <CollapsibleGroup
+            title="Currículo"
+            icon={GraduationCap}
+            defaultOpen={firstOpen === "curriculum"}
+            hint={perms.curriculum.edit ? undefined : "Somente leitura"}
+          >
+            {loadingProfile ? (
+              loadingNote
+            ) : profile ? (
+              <ConsultantCompetenciasSection
+                consultantId={consultantId}
+                languages={profile.languages}
+                educations={profile.educations}
+                canManagePeople={perms.curriculum.edit}
+                onMessage={onMessage}
+                onReload={onReload}
+              />
+            ) : null}
+            <ConsultantCurriculumSection
+              consultantId={consultantId}
+              canManagePeople={perms.curriculum.edit}
+              onMessage={onMessage}
+            />
+          </CollapsibleGroup>
+        ) : null}
 
-        <section className="space-y-3 rounded-md border border-border p-3">
-          <div className="flex items-center gap-2 text-sm font-semibold text-strong">
-            <BadgeDollarSign aria-hidden="true" className="size-4" />
-            Valor acordado
-          </div>
-          <div className="grid gap-3 md:grid-cols-3">
+        {perms.bank.view ? (
+          <CollapsibleGroup
+            title="Contas bancárias"
+            icon={CreditCard}
+            defaultOpen={firstOpen === "bank"}
+            hint={perms.bank.edit ? undefined : "Somente leitura"}
+          >
+            {loadingProfile && !profile ? (
+              loadingNote
+            ) : (
+              <BankAccountsSection
+                consultantId={consultantId}
+                contractType={currentIdentity.contractType}
+                accounts={profile?.bankAccounts ?? []}
+                canManagePeople={perms.bank.edit}
+                onMessage={onMessage}
+                onReload={onReload}
+              />
+            )}
+          </CollapsibleGroup>
+        ) : null}
+
+        {perms.compensation.view ? (
+          <CollapsibleGroup
+            title="Valores e remuneração"
+            icon={BadgeDollarSign}
+            defaultOpen={firstOpen === "compensation"}
+            hint={perms.compensation.edit ? undefined : "Somente leitura"}
+          >
+            <section className="space-y-3">
+              <div className="flex items-center gap-2 text-sm font-semibold text-strong">
+                <BadgeDollarSign aria-hidden="true" className="size-4" />
+                Valor acordado
+              </div>
+              <div className="grid gap-3 md:grid-cols-3">
             <NumberInput
               label="Valor CLT"
               value={currentCompensation.cltAmount}
@@ -669,45 +822,66 @@ function ConsultantDetailModal({
             </dl>
           ) : null}
 
-          <div className="flex flex-wrap gap-2">
-            <ActionButton
-              size="sm"
-              disabled={!canManageFinancials}
-              onClick={saveFlex}
-              icon={BadgeDollarSign}
-            >
-              Salvar compensacao
-            </ActionButton>
-            <ActionButton
-              size="sm"
-              variant="secondary"
-              disabled={!canManageFinancials}
-              onClick={saveVouchers}
-              icon={CreditCard}
-            >
-              Salvar VA/VR/VT
-            </ActionButton>
-          </div>
-        </section>
+              <div className="flex flex-wrap gap-2">
+                <ActionButton
+                  size="sm"
+                  disabled={!perms.compensation.edit}
+                  onClick={saveFlex}
+                  icon={BadgeDollarSign}
+                >
+                  Salvar compensacao
+                </ActionButton>
+                <ActionButton
+                  size="sm"
+                  variant="secondary"
+                  disabled={!perms.compensation.edit}
+                  onClick={saveVouchers}
+                  icon={CreditCard}
+                >
+                  Salvar VA/VR/VT
+                </ActionButton>
+              </div>
+            </section>
 
-        {canManageFinancials ? (
-          <section className="space-y-3 rounded-md border border-border p-3">
-            <div className="flex items-center gap-2 text-sm font-semibold text-strong">
-              <Gift aria-hidden="true" className="size-4" />
-              Remuneracoes pontuais
-            </div>
-            <p className="text-xs text-soft">
-              Bonus, acertos e outros pagamentos avulsos. Cada pontual e
-              vinculada a um projeto e entra no custo realizado da margem daquele
-              projeto (aba Acompanhamento).
-            </p>
-            <AdHocPaymentsSection
-              consultantId={consultantId}
-              data={adHoc}
-              onMessage={onMessage}
-              onReload={onReloadAdHoc}
-            />
-          </section>
+            <section className="space-y-3 border-t border-border pt-4">
+              <div className="flex items-center gap-2 text-sm font-semibold text-strong">
+                <Gift aria-hidden="true" className="size-4" />
+                Remuneracoes pontuais
+              </div>
+              <p className="text-xs text-soft">
+                Bonus, acertos e outros pagamentos avulsos. Cada pontual e
+                vinculada a um projeto e entra no custo realizado da margem
+                daquele projeto (aba Acompanhamento).
+              </p>
+              <AdHocPaymentsSection
+                consultantId={consultantId}
+                data={adHoc}
+                canEdit={perms.compensation.edit}
+                onMessage={onMessage}
+                onReload={onReloadAdHoc}
+              />
+            </section>
+
+            <section className="space-y-3 border-t border-border pt-4">
+              <div className="flex items-center gap-2 text-sm font-semibold text-strong">
+                <BadgeDollarSign aria-hidden="true" className="size-4" />
+                Valor/hora por projeto
+              </div>
+              <p className="text-xs text-soft">
+                Define um valor/hora específico do consultor NESTE projeto. Com
+                vigência ativa, ele substitui o valor/hora acordado nos
+                lançamentos do projeto — tanto no custo/margem quanto no cálculo
+                de pagamento.
+              </p>
+              <ConsultantProjectRatesSection
+                consultantId={consultantId}
+                data={projectRates}
+                canEdit={perms.compensation.edit}
+                onMessage={onMessage}
+                onReload={onReloadProjectRates}
+              />
+            </section>
+          </CollapsibleGroup>
         ) : null}
       </div>
     </Modal>
@@ -762,11 +936,13 @@ function emptyAdHocDraft(consultantId: string): AdHocPaymentInput {
 function AdHocPaymentsSection({
   consultantId,
   data,
+  canEdit,
   onMessage,
   onReload,
 }: {
   consultantId: string;
   data: AdHocPaymentsView | null;
+  canEdit: boolean;
   onMessage: (message: string | null) => void;
   onReload: () => void;
 }) {
@@ -876,27 +1052,29 @@ function AdHocPaymentsSection({
                   {payment.projectName} · {payment.payAt} · {payment.reason}
                 </p>
               </div>
-              <div className="flex shrink-0 gap-2">
-                <ActionButton
-                  size="sm"
-                  variant="secondary"
-                  icon={Edit}
-                  onClick={() => startEdit(payment)}
-                >
-                  Editar
-                </ActionButton>
-                <ActionButton
-                  size="sm"
-                  variant="danger"
-                  icon={Trash2}
-                  onClick={() => {
-                    onMessage(null);
-                    setPendingDelete(payment);
-                  }}
-                >
-                  Excluir
-                </ActionButton>
-              </div>
+              {canEdit ? (
+                <div className="flex shrink-0 gap-2">
+                  <ActionButton
+                    size="sm"
+                    variant="secondary"
+                    icon={Edit}
+                    onClick={() => startEdit(payment)}
+                  >
+                    Editar
+                  </ActionButton>
+                  <ActionButton
+                    size="sm"
+                    variant="danger"
+                    icon={Trash2}
+                    onClick={() => {
+                      onMessage(null);
+                      setPendingDelete(payment);
+                    }}
+                  >
+                    Excluir
+                  </ActionButton>
+                </div>
+              ) : null}
             </li>
           ))}
         </ul>
@@ -1011,11 +1189,11 @@ function AdHocPaymentsSection({
             </ActionButton>
           </div>
         </div>
-      ) : (
+      ) : canEdit ? (
         <ActionButton size="sm" icon={Plus} onClick={startCreate}>
           Adicionar remuneracao pontual
         </ActionButton>
-      )}
+      ) : null}
 
       <Modal
         open={pendingDelete !== null}
