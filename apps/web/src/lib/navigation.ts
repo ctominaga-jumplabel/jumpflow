@@ -121,6 +121,18 @@ const primaryNavigationRaw: NavItemDef[] = [
     description: "Lançamento de despesas, comprovantes e reembolsos.",
   },
   {
+    // Política de Reembolso (P12 + item 12): tipos de despesa + limites de
+    // prazo/valor. Governança financeira/People — role-gated (sem permissionCode)
+    // para aparecer no menu direto, sem depender de célula na matriz. A tela já
+    // reforça o mesmo conjunto de papéis no servidor (requireRole).
+    label: "Política de Reembolso",
+    href: "/app/despesas/politica",
+    icon: Wallet,
+    description:
+      "Tipos de despesa e limites (prazo/valor) de reembolso por tipo.",
+    requiredRoles: ["ADMIN", "AREA_MANAGER", "FINANCE", "PEOPLE"],
+  },
+  {
     // Ausências (Onda D): o consultor solicita/cancela as próprias férias,
     // licenças e outras ausências; ADMIN/PEOPLE decidem. Visível a todos com a
     // permissão AUSENCIAS (inclui CONSULTANT, no allow-list); a decisão é
