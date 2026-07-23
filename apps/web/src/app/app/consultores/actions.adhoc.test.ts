@@ -37,6 +37,9 @@ const h = vi.hoisted(() => {
       email: "ana@jumplabel.com.br",
       roles: ["FINANCE"] as string[],
     },
+    // Matrix codes granted to the current user (additive layer). Empty by
+    // default so role-only tests are unaffected.
+    grantedCodes: new Set<string>(),
     seq: 0,
   };
   const nextId = (prefix: string) => `${prefix}-${++store.seq}`;
@@ -133,6 +136,32 @@ vi.mock("@/lib/auth/guards", () => ({
     }
     return h.store.currentUser;
   }),
+  requireRoleOrPermission: vi.fn(
+    async (roles: string | string[], code: string) => {
+      const required = Array.isArray(roles) ? roles : [roles];
+      const roleOk =
+        required.length === 0 ||
+        required.some((role) => h.store.currentUser.roles.includes(role));
+      const grantOk = code ? h.store.grantedCodes.has(code) : false;
+      if (!roleOk && !grantOk) {
+        const redirectError = new Error("NEXT_REDIRECT");
+        Object.assign(redirectError, {
+          digest: "NEXT_REDIRECT;replace;/access-denied;307;",
+        });
+        throw redirectError;
+      }
+      return h.store.currentUser;
+    },
+  ),
+  hasRoleOrPermission: vi.fn(
+    async (_user: unknown, roles: string | string[], code: string) => {
+      const required = Array.isArray(roles) ? roles : [roles];
+      const roleOk =
+        required.length === 0 ||
+        required.some((role) => h.store.currentUser.roles.includes(role));
+      return roleOk || (code ? h.store.grantedCodes.has(code) : false);
+    },
+  ),
 }));
 
 vi.mock("@/lib/db/users", () => ({
@@ -172,6 +201,7 @@ beforeEach(() => {
     email: "ana@jumplabel.com.br",
     roles: ["FINANCE"],
   };
+  h.store.grantedCodes = new Set<string>();
 });
 
 afterEach(() => {
@@ -292,6 +322,17 @@ describe("financial RBAC (server-side)", () => {
     ).rejects.toMatchObject({
       digest: expect.stringContaining("/access-denied"),
     });
+  });
+
+  it("allows a non-financial role granted CONSULTORES_REMUNERACAO via the matrix", async () => {
+    // People/DP with the matrix grant manages remuneração without FINANCIAL_ROLES.
+    h.store.currentUser.roles = ["PEOPLE"];
+    h.store.grantedCodes.add("CONSULTORES_REMUNERACAO");
+    const saved = await saveConsultantAdHocPayment(baseInput);
+    expect(saved.ok).toBe(true);
+    expect(h.store.adHoc).toHaveLength(1);
+    const loaded = await loadConsultantAdHocPayments(CONSULTANT_ID);
+    expect(loaded.ok).toBe(true);
   });
 
   it("fails closed with NO_DATABASE when no database is configured", async () => {

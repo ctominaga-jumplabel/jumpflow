@@ -1089,6 +1089,9 @@ const AVAILABILITY_READ = ["ADMIN", "PEOPLE", "AREA_MANAGER", "PROJECT_MANAGER",
 const TALENT_READ = ["ADMIN", "PEOPLE", "AREA_MANAGER", "PROJECT_MANAGER", "CONSULTANT"];
 const TALENT_MANAGE = ["ADMIN", "PEOPLE", "AREA_MANAGER", "PROJECT_MANAGER"];
 const PEOPLE_MANAGE = ["ADMIN", "PEOPLE"];
+// Financeiro + People/DP: mesmos que respondem pelo pagamento mais o DP, que
+// gerencia remuneração do consultor e acompanha relatórios por consultor.
+const FINANCIAL_PEOPLE = ["ADMIN", "AREA_MANAGER", "FINANCE", "PEOPLE"];
 const APPROVALS = ["ADMIN", "AREA_MANAGER", "PROJECT_MANAGER", "FINANCE"];
 const AUTOMATION = ["ADMIN", "AREA_MANAGER"];
 const ADMIN_ONLY = ["ADMIN"];
@@ -1143,6 +1146,10 @@ const PERMISSION_CATALOG = [
   { code: "COMERCIAL", name: "Comercial", module: "Comercial", sort: 50, view: SALE_RATE, create: SALE_RATE, edit: SALE_RATE },
 
   { code: "CONSULTORES", name: "Consultores", module: "Pessoas", sort: 60, view: ALL_ROLES, create: PEOPLE_MANAGE.concat("AREA_MANAGER"), edit: PEOPLE_MANAGE.concat("AREA_MANAGER"), del: ADMIN_ONLY },
+  // Remuneração do consultor (pontual + acordada) dentro do cadastro. Sub-seção
+  // financeira gerenciável pela Matriz: Financeiro + People/DP. Não expõe demais
+  // campos financeiros (valor hora/custo/margem), que ficam em outros codes.
+  { code: "CONSULTORES_REMUNERACAO", name: "Remuneração do consultor", module: "Pessoas", parent: "CONSULTORES", sort: 60, view: FINANCIAL_PEOPLE, create: FINANCIAL_PEOPLE, edit: FINANCIAL_PEOPLE, del: FINANCIAL_PEOPLE },
   { code: "SKILLS", name: "Skills", module: "Pessoas", sort: 61, view: ALL_ROLES, create: ALL_ROLES, edit: ALL_ROLES },
   { code: "COMPETENCIAS", name: "Competências", module: "Pessoas", sort: 62, view: COMPETENCY_READ, create: COMPETENCY_WRITE, edit: COMPETENCY_WRITE, del: COMPETENCY_WRITE },
   { code: "DISPONIBILIDADE", name: "Disponibilidade", module: "Pessoas", sort: 63, view: AVAILABILITY_READ },
@@ -1178,6 +1185,10 @@ const PERMISSION_CATALOG = [
   { code: "AUTOMACOES", name: "Automações", module: "Aprovações", sort: 91, view: AUTOMATION, edit: AUTOMATION },
 
   { code: "RELATORIOS", name: "Relatórios", module: "Relatórios", sort: 100, view: ALL_ROLES },
+  // Filtro por consultor nos relatórios = escopo amplo ("todos os consultores").
+  // Antes implícito nos papéis amplos (ADMIN/AREA_MANAGER/FINANCE); agora também
+  // liberável pela Matriz a People/DP. NÃO libera colunas financeiras.
+  { code: "RELATORIOS_CONSULTORES", name: "Filtro por consultor", module: "Relatórios", parent: "RELATORIOS", sort: 101, view: FINANCIAL_PEOPLE },
 
   { code: "FINANCEIRO", name: "Financeiro", module: "Financeiro", sort: 110, view: FINANCIAL, create: FINANCIAL, edit: FINANCIAL },
   { code: "FINANCEIRO_COBRANCA", name: "Cobrança de projetos", module: "Financeiro", parent: "FINANCEIRO", sort: 111, view: FINANCIAL, edit: FINANCIAL },

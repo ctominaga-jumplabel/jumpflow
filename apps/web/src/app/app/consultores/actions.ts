@@ -4,8 +4,14 @@ import { revalidatePath } from "next/cache";
 import { Prisma, prisma } from "@jumpflow/database";
 import type { ZodType } from "zod";
 import type { ActionResult, ErrorCode } from "@/lib/actions/result";
-import { requireRole, requireUser } from "@/lib/auth/guards";
+import {
+  hasRoleOrPermission,
+  requireRole,
+  requireRoleOrPermission,
+  requireUser,
+} from "@/lib/auth/guards";
 import { FINANCIAL_ROLES, hasRole } from "@/lib/auth/route-permissions";
+import { CONSULTANT_COMPENSATION_CODE } from "@/lib/auth/permission-codes";
 import type { RoleName } from "@/lib/auth/types";
 import { buildAuditEventData, recordAuditEvent } from "@/lib/db/audit";
 import { isDatabaseConfigured } from "@/lib/db/config";
@@ -249,7 +255,14 @@ export async function createConsultant(
     const actorUser = await requireRole(CREATE_CONSULTANT_ROLES);
     const parsed = parseInput(createConsultantSchema, input);
 
-    const canFinancials = hasRole(actorUser, FINANCIAL_ROLES);
+    // Remuneração (pontual + acordada) é liberável pela Matriz (People/DP) além
+    // dos papéis financeiros — mesma regra do painel de remuneração no cadastro.
+    const canFinancials = await hasRoleOrPermission(
+      actorUser,
+      FINANCIAL_ROLES,
+      CONSULTANT_COMPENSATION_CODE,
+      "edit",
+    );
     const isAdmin = hasRole(actorUser, ["ADMIN"]);
 
     // Anti-escalonamento: so ADMIN concede o perfil Administrador.
@@ -653,7 +666,7 @@ export async function saveCompensation(
 ): Promise<ActionResult<{ id: string }>> {
   try {
     ensureDatabase();
-    await requireRole(FINANCIAL_ROLES);
+    await requireRoleOrPermission(FINANCIAL_ROLES, CONSULTANT_COMPENSATION_CODE, "edit");
     const parsed = parseInput(compensationSchema, input);
     if (parsed.contractType === "CLT_FLEX") {
       await ensureFlexBankAccounts(parsed.consultantId);
@@ -700,7 +713,7 @@ export async function saveBenefit(
 ): Promise<ActionResult<{ id: string }>> {
   try {
     ensureDatabase();
-    await requireRole(FINANCIAL_ROLES);
+    await requireRoleOrPermission(FINANCIAL_ROLES, CONSULTANT_COMPENSATION_CODE, "edit");
     const parsed = parseInput(benefitSchema, input);
     const data = {
       consultantId: parsed.consultantId,
@@ -745,7 +758,7 @@ export async function saveVoucherBenefits(
 ): Promise<ActionResult<{ consultantId: string }>> {
   try {
     ensureDatabase();
-    await requireRole(FINANCIAL_ROLES);
+    await requireRoleOrPermission(FINANCIAL_ROLES, CONSULTANT_COMPENSATION_CODE, "edit");
     const parsed = parseInput(voucherBenefitsSchema, input);
     const startsAt = new Date(`${parsed.startsAt}T00:00:00.000Z`);
     const closedAt = new Date(startsAt.getTime() - 24 * 60 * 60 * 1000);
@@ -1832,7 +1845,7 @@ export async function loadConsultantAdHocPayments(
 ): Promise<ActionResult<AdHocPaymentsView>> {
   try {
     ensureDatabase();
-    await requireRole(FINANCIAL_ROLES);
+    await requireRoleOrPermission(FINANCIAL_ROLES, CONSULTANT_COMPENSATION_CODE, "view");
     const [rows, projects] = await Promise.all([
       prisma.consultantAdHocPayment.findMany({
         where: { consultantId },
@@ -1868,7 +1881,7 @@ export async function saveConsultantAdHocPayment(
 ): Promise<ActionResult<{ id: string }>> {
   try {
     ensureDatabase();
-    await requireRole(FINANCIAL_ROLES);
+    await requireRoleOrPermission(FINANCIAL_ROLES, CONSULTANT_COMPENSATION_CODE, "edit");
     const parsed = parseInput(adHocPaymentSchema, input);
     const data = {
       consultantId: parsed.consultantId,
@@ -1919,7 +1932,7 @@ export async function deleteConsultantAdHocPayment(
 ): Promise<ActionResult<{ id: string }>> {
   try {
     ensureDatabase();
-    await requireRole(FINANCIAL_ROLES);
+    await requireRoleOrPermission(FINANCIAL_ROLES, CONSULTANT_COMPENSATION_CODE, "delete");
     const parsed = parseInput(deleteAdHocPaymentSchema, input);
     const previous = await prisma.consultantAdHocPayment.findUnique({
       where: { id: parsed.id },

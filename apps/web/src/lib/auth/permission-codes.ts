@@ -42,6 +42,25 @@ export type PermissionMatrix = Record<string, PermissionGrant>;
  */
 export const MANAGE_PERMISSIONS_CODE = "CONFIGURACOES_PERMISSOES";
 
+/**
+ * Governs the compensation ("remuneração") section of the consultant registration
+ * (remuneração pontual + acordada). Historically gated only by FINANCIAL_ROLES;
+ * now ALSO grantable via the matrix so People/DP can manage it without seeing the
+ * rest of the financial surface. Child of `CONSULTORES` in the matrix.
+ */
+export const CONSULTANT_COMPENSATION_CODE = "CONSULTORES_REMUNERACAO";
+
+/**
+ * Governs the broad ("all consultants") report scope — the consultant filter in
+ * Relatórios. Historically implied by the broad report roles (ADMIN/AREA_MANAGER/
+ * FINANCE); now ALSO grantable via the matrix. Child of `RELATORIOS`. Note: this
+ * does NOT unlock the HOURS financial columns (billing rate/cost/margin), which
+ * stay gated by FINANCIAL_ROLES (`includeFinancials`). Expense/reimbursement
+ * values follow the broad scope by design (People/DP see them) — see the finance
+ * decision noted in `resolveReportScope`.
+ */
+export const REPORT_CONSULTANT_FILTER_CODE = "RELATORIOS_CONSULTORES";
+
 const EMPTY_GRANT: PermissionGrant = {
   view: false,
   create: false,

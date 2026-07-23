@@ -339,6 +339,13 @@ vi.mock("@jumpflow/database", () => ({
   Prisma: {},
 }));
 
+// Matrix layer: default DENY so role-based tests are unaffected; individual tests
+// opt into a grant to exercise the additive report-scope path (People/DP filter).
+vi.mock("@/lib/auth/permissions", () => ({
+  can: vi.fn().mockResolvedValue(false),
+}));
+
+import { can } from "@/lib/auth/permissions";
 import type { AppUser } from "@/lib/auth/types";
 import type { RoleName } from "@/lib/auth/roles";
 import type {
@@ -446,6 +453,22 @@ describe("resolveReportScope", () => {
     );
     expect(scope.managerUserId).toBe("user-1");
     expect(scope.ownConsultantId).toBeUndefined();
+  });
+
+  it("PEOPLE with matrix grant (RELATORIOS_CONSULTORES): broad WITHOUT financials", async () => {
+    vi.mocked(can).mockResolvedValueOnce(true);
+    const scope = await resolveReportScope(user(["PEOPLE"]));
+    expect(scope.broad).toBe(true);
+    // The consultant filter must NOT unlock the HOURS financial columns
+    // (billing rate/cost/margin) for People/DP — includeFinancials stays false.
+    expect(scope.includeFinancials).toBe(false);
+    expect(scope.financeHoursLimited).toBe(false);
+  });
+
+  it("PEOPLE without matrix grant: not broad (falls back to own consultant)", async () => {
+    const scope = await resolveReportScope(user(["PEOPLE"]));
+    expect(scope.broad).toBe(false);
+    expect(scope.includeFinancials).toBe(false);
   });
 });
 

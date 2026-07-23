@@ -1,5 +1,7 @@
 import { prisma } from "@jumpflow/database";
 import { FINANCIAL_ROLES, hasRole } from "@/lib/auth/route-permissions";
+import { can } from "@/lib/auth/permissions";
+import { REPORT_CONSULTANT_FILTER_CODE } from "@/lib/auth/permission-codes";
 import type { AppUser } from "@/lib/auth/types";
 import { getConsultantForUser } from "@/lib/db/timesheet";
 import { resolveDbUser } from "@/lib/db/users";
@@ -172,9 +174,21 @@ export async function resolveReportScope(user: AppUser): Promise<ReportScope> {
   const isFinance = hasRole(user, "FINANCE");
   const isProjectManager = hasRole(user, "PROJECT_MANAGER");
   const includeFinancials = hasRole(user, FINANCIAL_ROLES);
+  // Broad scope may ALSO be granted via the matrix (RELATORIOS_CONSULTORES), e.g.
+  // to People/DP, so the consultant filter appears. The HOURS financial columns
+  // (billing rate/cost/margin) stay gated by `includeFinancials`/FINANCIAL_ROLES,
+  // so a matrix-only viewer never sees them. Expense/reimbursement values DO
+  // follow the broad scope (conscious finance-ops decision: People/DP may see
+  // reimbursements). Fail-closed if the matrix can't be read.
+  let canFilterAllConsultants = false;
+  try {
+    canFilterAllConsultants = await can(REPORT_CONSULTANT_FILTER_CODE, "view");
+  } catch {
+    canFilterAllConsultants = false;
+  }
 
-  // Broad scope: any of ADMIN/AREA_MANAGER/FINANCE.
-  const broad = isAdmin || isAreaManager || isFinance;
+  // Broad scope: any of ADMIN/AREA_MANAGER/FINANCE, or the matrix grant above.
+  const broad = isAdmin || isAreaManager || isFinance || canFilterAllConsultants;
   // FINANCE limits hours to closing-relevant statuses, but only when it does
   // NOT also hold a wider hours role (ADMIN/AREA_MANAGER see all statuses).
   const financeHoursLimited = isFinance && !isAdmin && !isAreaManager;

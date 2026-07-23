@@ -4,6 +4,8 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { NewConsultantForm } from "@/components/consultants/NewConsultantForm";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { FINANCIAL_ROLES, hasRole } from "@/lib/auth/route-permissions";
+import { hasRoleOrPermission } from "@/lib/auth/guards";
+import { CONSULTANT_COMPENSATION_CODE } from "@/lib/auth/permission-codes";
 import type { RoleName } from "@/lib/auth/types";
 
 export const metadata: Metadata = { title: "Novo consultor" };
@@ -21,6 +23,12 @@ export default async function NovoConsultorPage() {
   if (!hasRole(user, CREATE_CONSULTANT_ROLES)) {
     redirect("/app/consultores");
   }
+  const canManageFinancials = await hasRoleOrPermission(
+    user,
+    FINANCIAL_ROLES,
+    CONSULTANT_COMPENSATION_CODE,
+    "view",
+  );
 
   return (
     <div className="space-y-6">
@@ -30,7 +38,7 @@ export default async function NovoConsultorPage() {
         description="Cadastre a identidade, o acesso e os dados principais. Você poderá completar o restante no perfil depois de criar."
       />
       <NewConsultantForm
-        canManageFinancials={hasRole(user, FINANCIAL_ROLES)}
+        canManageFinancials={canManageFinancials}
         canGrantAdmin={hasRole(user, ["ADMIN"])}
       />
     </div>
