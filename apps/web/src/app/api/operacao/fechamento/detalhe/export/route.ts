@@ -1,6 +1,7 @@
 import { requirePermission } from "@/lib/auth/guards";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { buildWorkbook, defineSheet, xlsxResponse } from "@/lib/export/xlsx";
+import { hoursReportFilterSchema } from "@/lib/reports/schemas";
 import {
   buildOperationDetailExportRows,
   operationDetailXlsxColumns,
@@ -9,46 +10,38 @@ import { noDatabaseResponse } from "../../../../relatorios/shared";
 
 export const dynamic = "force-dynamic";
 
-function clampInt(
-  raw: string | null,
-  min: number,
-  max: number,
-  fallback: number,
-): number {
-  const parsed = raw ? Number(raw) : fallback;
-  return Number.isInteger(parsed) && parsed >= min && parsed <= max
-    ? parsed
-    : fallback;
-}
-
 /**
  * `.xlsx` export of the "Detalhamento por consultor" tab of the Fechamento
  * Operacional. Same gate as the screen (`OPERACAO_FECHAMENTO` view) and reuses
- * `listOperationClosingDetail` for the selected month, honoring the consultant
- * filter (`consultant` param) so the file matches what is on screen. One row per
- * launch; no financial fields, so no masking. Audits
- * `OPERATION_CLOSING_EXPORTED`.
+ * `listOperationDetailRows` with the SAME filter contract as the screen (the
+ * `hoursReportFilterSchema` — período, cliente, projeto, consultor, status,
+ * atividade, faturável, status de cliente/projeto/consultor, ordenação). No
+ * pagination: the file carries every matching launch. No financial fields, so
+ * no masking. Audits `OPERATION_CLOSING_EXPORTED`.
  */
 export async function GET(request: Request) {
   const user = await requirePermission("OPERACAO_FECHAMENTO", "view");
   if (!isDatabaseConfigured()) return noDatabaseResponse();
 
   const url = new URL(request.url);
-  const now = new Date();
-  const month = clampInt(url.searchParams.get("m"), 1, 12, now.getMonth() + 1);
-  const year = clampInt(url.searchParams.get("y"), 2020, 2100, now.getFullYear());
-  const consultantId = url.searchParams.get("consultant") || undefined;
+  const raw: Record<string, string> = {};
+  for (const [key, value] of url.searchParams.entries()) raw[key] = value;
+  // page/pageSize never bound the export — it always covers the whole set.
+  delete raw.page;
+  delete raw.pageSize;
+  const parsed = hoursReportFilterSchema.safeParse(raw);
+  const filter = parsed.success ? parsed.data : {};
 
-  const { listOperationClosingDetail } = await import(
+  const { listOperationDetailRows } = await import(
     "@/lib/db/operation-closing"
   );
-  const detail = await listOperationClosingDetail({ month, year, consultantId });
-  const rows = buildOperationDetailExportRows(detail.rows);
+  const detailRows = await listOperationDetailRows(filter);
+  const rows = buildOperationDetailExportRows(detailRows);
 
-  const monthSlug = `${year}-${String(month).padStart(2, "0")}`;
+  const slug = new Date().toISOString().slice(0, 10);
   const buffer = await buildWorkbook([
     defineSheet({
-      name: `Detalhamento ${monthSlug}`,
+      name: "Detalhamento",
       columns: operationDetailXlsxColumns(),
       rows,
     }),
@@ -60,14 +53,14 @@ export async function GET(request: Request) {
   await recordAuditEvent({
     actorUserId: dbUser?.id ?? null,
     entityType: "OperationClosing",
-    entityId: monthSlug,
+    entityId: slug,
     action: "OPERATION_CLOSING_EXPORTED",
     after: {
       view: "detalhamento",
-      filter: { month, year, consultantId: consultantId ?? null },
+      filter: raw,
       rowCount: rows.length,
     },
   });
 
-  return xlsxResponse(buffer, `fechamento-detalhamento_${monthSlug}.xlsx`);
+  return xlsxResponse(buffer, `fechamento-detalhamento_${slug}.xlsx`);
 }

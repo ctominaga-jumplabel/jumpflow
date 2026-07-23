@@ -12,6 +12,8 @@
  * consultant still pending raises an alert and keeps the project unclosable.
  */
 
+import type { PaginationMeta } from "@/lib/reports/types";
+
 /** Operational status of a project's month. Only two states; reopening → OPEN. */
 export type OperationClosingStatus = "OPEN" | "CLOSED";
 
@@ -247,25 +249,25 @@ export interface OperationDetailRow {
   isException: boolean;
 }
 
-/** A consultant option for the detail tab filter. */
-export interface OperationDetailConsultantOption {
-  id: string;
-  name: string;
-}
-
 /**
- * The full "Detalhamento por consultor" view: the flat launch rows for the month
- * (optionally narrowed to one consultant) plus the unfiltered consultant option
- * list that feeds the filter dropdown.
+ * The "Detalhamento por consultor" view: the current page of flat launch rows
+ * (already filtered/sorted server-side) plus pagination meta and totals computed
+ * over the WHOLE filtered set (not just the page). The filter dropdown options
+ * come separately from {@link OperationFilterOptions}.
  */
 export interface OperationClosingDetailView {
-  month: number;
-  year: number;
   rows: OperationDetailRow[];
-  consultantOptions: OperationDetailConsultantOption[];
-  /** Total launches across the (filtered) rows and their exception count. */
+  pagination: PaginationMeta;
+  /** Totals over the whole filtered set (all pages). */
   totalHours: number;
   totalExceptions: number;
+}
+
+/** Clients/projects/consultants that feed the shared filter dropdowns. */
+export interface OperationFilterOptions {
+  clients: { id: string; name: string }[];
+  projects: { id: string; name: string; clientId: string }[];
+  consultants: { id: string; name: string }[];
 }
 
 export interface OperationClosingOverview {
