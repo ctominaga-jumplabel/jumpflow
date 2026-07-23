@@ -32,6 +32,25 @@ export const approvalKindLabels: Record<ApprovalKind, string> = {
 /** Where the item lives: real database rows or local demo data. */
 export type ApprovalSource = "db" | "mock";
 
+/**
+ * One individual day (TimeEntry) behind a HOURS approval item. A weekly
+ * submission aggregates several of these; the approval screen lists them so a
+ * manager can flag/unflag "Faturável" PER DAY (billable virou definição de
+ * gestão, decidida na aprovação). Only db-backed HOURS items carry this.
+ */
+export interface ApprovalHoursEntry {
+  /** TimeEntry id (payload for setEntryBillable). */
+  id: string;
+  /** ISO date (yyyy-mm-dd) of the logged day. */
+  date: string;
+  hours: number;
+  /** Display label of the activity. */
+  activityLabel: string;
+  billable: boolean;
+  /** Justification kept when a manager marked the day NON-billable. */
+  nonBillableReason?: string;
+}
+
 /** Which approval stage an EXPENSE item belongs to (two-stage chain). */
 export type ApprovalStage = "MANAGER" | "FINANCE";
 
@@ -52,6 +71,12 @@ export interface ApprovalItem {
   source: ApprovalSource;
   /** TimeEntry ids behind a db-backed HOURS item (decision payload). */
   entryIds?: string[];
+  /**
+   * Individual days behind a db-backed HOURS item, so the approval screen can
+   * flag "Faturável" per day (even when the submission was weekly). Absent for
+   * mock/EXPENSE items.
+   */
+  entries?: ApprovalHoursEntry[];
   /** Expense id behind a db-backed EXPENSE item (decision payload). */
   expenseId?: string;
   /** Approval stage of an EXPENSE item ("Gestor" or "Financeiro"). */

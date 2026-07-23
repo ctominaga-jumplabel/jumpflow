@@ -36,6 +36,18 @@ export interface AiCompleteOptions {
   entityId?: string;
 }
 
+/**
+ * A document attached to the request as CONTEXT for the model (e.g. an uploaded
+ * PDF). Carries the raw bytes as base64 with no `data:` prefix — the provider
+ * wraps it in the Messages API `document` content block.
+ */
+export interface AiDocumentSource {
+  /** Only PDF is supported today (the CV upload). */
+  mediaType: "application/pdf";
+  /** Raw file bytes encoded as base64 (no `data:` URI prefix). */
+  dataBase64: string;
+}
+
 export interface AiTextProvider {
   /**
    * Returns generated text, or `null` when disabled/unconfigured/failed.
@@ -43,6 +55,16 @@ export interface AiTextProvider {
    * caller degrades gracefully (same philosophy as DisabledCnpjProvider).
    */
   complete(prompt: string, opts?: AiCompleteOptions): Promise<string | null>;
+  /**
+   * Same contract as {@link complete}, but with a document (PDF) attached as
+   * context. Returns `null` when disabled/unconfigured/failed or when the
+   * provider cannot read documents. NEVER throws.
+   */
+  completeWithDocument(
+    prompt: string,
+    document: AiDocumentSource,
+    opts?: AiCompleteOptions,
+  ): Promise<string | null>;
 }
 
 /**
@@ -55,9 +77,109 @@ class DisabledAiTextProvider implements AiTextProvider {
   async complete(): Promise<string | null> {
     return null;
   }
+  async completeWithDocument(): Promise<string | null> {
+    return null;
+  }
 }
 
 const disabledProvider = new DisabledAiTextProvider();
+
+const ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages";
+const ANTHROPIC_VERSION = "2023-06-01";
+
+type AnthropicContentBlock =
+  | { type: "text"; text: string }
+  | {
+      type: "document";
+      source: { type: "base64"; media_type: string; data: string };
+    };
+
+/**
+ * Real Claude provider over the Anthropic Messages API via plain `fetch` (no
+ * SDK). It implements the SAME safe contract as the noop: on any failure it logs
+ * a terse, secret-free line and returns `null`, so the caller always degrades
+ * gracefully. Governance: the model only PROPOSES text/structured suggestions —
+ * persistence and validation are always a separate, human-confirmed step.
+ *
+ * Security: the API key and the raw document/response bodies are NEVER logged.
+ */
+class AnthropicAiTextProvider implements AiTextProvider {
+  constructor(private readonly apiKey: string) {}
+
+  async complete(
+    prompt: string,
+    opts?: AiCompleteOptions,
+  ): Promise<string | null> {
+    return this.request([{ type: "text", text: prompt }], opts, 1024);
+  }
+
+  async completeWithDocument(
+    prompt: string,
+    document: AiDocumentSource,
+    opts?: AiCompleteOptions,
+  ): Promise<string | null> {
+    return this.request(
+      [
+        {
+          type: "document",
+          source: {
+            type: "base64",
+            media_type: document.mediaType,
+            data: document.dataBase64,
+          },
+        },
+        { type: "text", text: prompt },
+      ],
+      opts,
+      4096,
+    );
+  }
+
+  private async request(
+    content: AnthropicContentBlock[],
+    opts: AiCompleteOptions | undefined,
+    defaultMaxTokens: number,
+  ): Promise<string | null> {
+    try {
+      const response = await fetch(ANTHROPIC_MESSAGES_URL, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": this.apiKey,
+          "anthropic-version": ANTHROPIC_VERSION,
+        },
+        body: JSON.stringify({
+          model: opts?.model ?? AI_MODELS.SONNET,
+          max_tokens: opts?.maxTokens ?? defaultMaxTokens,
+          ...(opts?.system ? { system: opts.system } : {}),
+          messages: [{ role: "user", content }],
+        }),
+      });
+      if (!response.ok) {
+        // Log the status only — never the key or the response body.
+        console.error("[ai] anthropic request failed", response.status);
+        return null;
+      }
+      const json = (await response.json()) as {
+        content?: Array<{ type: string; text?: string }>;
+      };
+      const text = (json.content ?? [])
+        .filter(
+          (block) => block.type === "text" && typeof block.text === "string",
+        )
+        .map((block) => block.text as string)
+        .join("\n")
+        .trim();
+      return text.length > 0 ? text : null;
+    } catch (error) {
+      console.error(
+        "[ai] anthropic request error",
+        error instanceof Error ? error.message : "unknown",
+      );
+      return null;
+    }
+  }
+}
 
 /**
  * Whether a real AI provider is configured. Today always false (no real provider
@@ -79,6 +201,11 @@ export function isAiProviderConfigured(): boolean {
  * (see lib/ai/log.ts) so AI usage is auditable.
  */
 export function getAiTextProvider(): AiTextProvider {
-  // No real provider implemented yet — always degrade to noop.
+  if (isAiProviderConfigured() && process.env.AI_PROVIDER === "anthropic") {
+    return new AnthropicAiTextProvider(
+      (process.env.ANTHROPIC_API_KEY as string).trim(),
+    );
+  }
+  // No real provider configured — degrade to the safe noop.
   return disabledProvider;
 }

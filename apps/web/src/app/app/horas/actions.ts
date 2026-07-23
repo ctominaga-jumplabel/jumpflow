@@ -43,6 +43,7 @@ import {
   decideHoursSchema,
   deleteTimeEntryInputSchema,
   saveTimesheetDefaultInputSchema,
+  setEntryBillableSchema,
   timeEntryInputSchema,
   updateTimeEntryInputSchema,
   weekActionInputSchema,
@@ -52,6 +53,7 @@ import {
   type DecideHoursInput,
   type DeleteTimeEntryInput,
   type SaveTimesheetDefaultInput,
+  type SetEntryBillableInput,
   type TimeEntryInput,
   type UpdateTimeEntryInput,
   type WeekActionInput,
@@ -1566,6 +1568,134 @@ export async function decideHours(
     revalidatePath(APROVACOES_PATH);
     revalidatePath(HORAS_PATH);
     return { ok: true, data: { decided, alreadyDecided } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/**
+ * Define o campo financeiro `billable` de UM lançamento específico (por dia), a
+ * partir da tela de APROVAÇÃO. "Faturável" é uma DEFINIÇÃO DE GESTÃO: só papéis
+ * de gestão/financeiro alteram (BILLABLE_MANAGER_ROLES). Um PROJECT_MANAGER só
+ * pode alterar lançamentos de projetos que gerencia; ADMIN/AREA_MANAGER/FINANCE
+ * são irrestritos.
+ *
+ * Marcar como NÃO faturável é uma ação sensível: exige justificativa não-vazia
+ * (reforçada no servidor, via resolveBillableDecision) — exceto ON_CALL, que já
+ * é regra de negócio. Voltar a faturável limpa o motivo e o anexo de
+ * justificativa (best-effort no storage). Idempotente: uma chamada que não muda
+ * nada não gera auditoria. Nunca altera lançamentos fechados (CLOSED terminal).
+ */
+export async function setEntryBillable(
+  input: SetEntryBillableInput,
+): Promise<ActionResult<{ id: string; billable: boolean }>> {
+  try {
+    ensureDatabase();
+    const user = await requireRole([...BILLABLE_MANAGER_ROLES]);
+    const parsed = parseInput(setEntryBillableSchema, input);
+
+    const entry = await prisma.timeEntry.findUnique({
+      where: { id: parsed.entryId },
+      include: {
+        period: { select: { status: true } },
+        project: { select: { managerUserId: true } },
+        billableJustificationAttachment: {
+          select: { storageKey: true, storageBucket: true },
+        },
+      },
+    });
+    if (!entry) throw new ActionError("NOT_FOUND", "Lançamento não encontrado.");
+    // CLOSED é terminal (lançamento ou período): campo financeiro imutável.
+    if (entry.status === "CLOSED" || entry.period.status === "CLOSED") {
+      throw new ActionError(
+        "PERIOD_CLOSED",
+        "Lançamentos fechados não podem ser alterados.",
+      );
+    }
+
+    // FK de auditoria/escopo precisa do id real do usuário no banco.
+    const dbUser = await requireDbUser(user);
+
+    // Escopo do PROJECT_MANAGER: só projetos que gerencia. ADMIN/AREA_MANAGER e
+    // FINANCE (papel financeiro) são irrestritos sobre o campo `billable`.
+    const unrestricted = hasRole(user, ["ADMIN", "AREA_MANAGER", "FINANCE"]);
+    if (!unrestricted && entry.project.managerUserId !== dbUser.id) {
+      throw new ActionError(
+        "FORBIDDEN",
+        "Você só pode alterar lançamentos de projetos que gerencia.",
+      );
+    }
+
+    // resolveBillableDecision reforça a justificativa obrigatória ao marcar NÃO
+    // faturável (COMMENT_REQUIRED quando falta motivo); ON_CALL não exige.
+    const decision = resolveBillableDecision(
+      user,
+      entry.activityType,
+      parsed.billable,
+      parsed.nonBillableReason,
+    );
+
+    // Idempotência: nada mudou → não persiste nem audita (chamadas repetidas
+    // são seguras).
+    if (
+      entry.billable === decision.billable &&
+      (entry.nonBillableReason ?? null) === decision.nonBillableReason
+    ) {
+      return { ok: true, data: { id: entry.id, billable: entry.billable } };
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.timeEntry.update({
+        where: { id: entry.id },
+        data: {
+          billable: decision.billable,
+          nonBillableReason: decision.nonBillableReason,
+        },
+      });
+      await tx.auditEvent.create({
+        data: buildAuditEventData({
+          actorUserId: dbUser.id,
+          entityType: "TimeEntry",
+          entityId: entry.id,
+          action: decision.managerMarkedNonBillable
+            ? "TIME_ENTRY_MARKED_NON_BILLABLE"
+            : "TIME_ENTRY_BILLABLE_CHANGED",
+          before: {
+            billable: entry.billable,
+            nonBillableReason: entry.nonBillableReason,
+          },
+          after: {
+            billable: decision.billable,
+            nonBillableReason: decision.nonBillableReason,
+          },
+        }),
+      });
+      // Voltou a ser faturável: o comprovante de NÃO faturável não faz sentido —
+      // remove o registro (limpeza do objeto é best-effort após a transação).
+      if (decision.billable) {
+        await tx.timeEntryBillableJustificationAttachment.deleteMany({
+          where: { timeEntryId: entry.id },
+        });
+      }
+    });
+
+    if (decision.billable && entry.billableJustificationAttachment) {
+      const att = entry.billableJustificationAttachment;
+      const provider = getStorageProvider(
+        att.storageBucket || BILLABLE_JUSTIFICATION_BUCKET,
+      );
+      if (provider) {
+        try {
+          await provider.delete(att.storageKey);
+        } catch (e) {
+          console.error("[horas] failed to delete orphan justification object", e);
+        }
+      }
+    }
+
+    revalidatePath(APROVACOES_PATH);
+    revalidatePath(HORAS_PATH);
+    return { ok: true, data: { id: entry.id, billable: decision.billable } };
   } catch (error) {
     return toFailure(error);
   }

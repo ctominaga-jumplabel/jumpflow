@@ -77,18 +77,30 @@ export default async function AppLayout({
   const { getNavigationOrder } = await import("@/lib/db/navigation-order");
   const navOrder = await getNavigationOrder();
 
-  let notificationCount = 0;
-  try {
-    const { mockLauncherBadges, sumBadgeCounts } = await import("@/lib/launcher");
-    if (dbConfigured) {
-      const { getLauncherBadges } = await import("@/lib/db/launcher-badges");
-      notificationCount = sumBadgeCounts(await getLauncherBadges(user));
-    } else {
-      notificationCount = sumBadgeCounts(mockLauncherBadges());
+  // Item 3: real in-app notification center. The bell now reflects the user's
+  // UNREAD notifications (not the actionable-pending count, which stays on the
+  // Início launcher). Fails safe to an empty inbox: a slow/absent database or an
+  // unresolvable user never blocks the shell.
+  let notifications: import("@/lib/db/notifications").NotificationView[] = [];
+  let unreadCount = 0;
+  if (dbConfigured) {
+    try {
+      const { resolveDbUser } = await import("@/lib/db/users");
+      const dbUser = await resolveDbUser(user);
+      if (dbUser) {
+        const { listUserNotifications, countUnreadNotifications } = await import(
+          "@/lib/db/notifications"
+        );
+        [notifications, unreadCount] = await Promise.all([
+          listUserNotifications(dbUser.id, { limit: 12 }),
+          countUnreadNotifications(dbUser.id),
+        ]);
+      }
+    } catch (error) {
+      console.error("[app-layout] notifications load failed", error);
+      notifications = [];
+      unreadCount = 0;
     }
-  } catch (error) {
-    console.error("[app-layout] notification count failed", error);
-    notificationCount = 0;
   }
 
   // Nathal.IA master switch. Read server-side so it can be flipped at runtime
@@ -108,7 +120,8 @@ export default async function AppLayout({
       databaseConfigured={isDatabaseConfigured()}
       viewableNavCodes={viewableNavCodes}
       navOrder={navOrder}
-      notificationCount={notificationCount}
+      notifications={notifications}
+      unreadCount={unreadCount}
     >
       {children}
       {/* Nathal.IA — contextual assistant, authenticated app only, gated by the

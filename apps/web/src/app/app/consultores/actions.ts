@@ -5,9 +5,9 @@ import { Prisma, prisma } from "@jumpflow/database";
 import type { ZodType } from "zod";
 import type { ActionResult, ErrorCode } from "@/lib/actions/result";
 import { requireRole, requireUser } from "@/lib/auth/guards";
-import { FINANCIAL_ROLES } from "@/lib/auth/route-permissions";
+import { FINANCIAL_ROLES, hasRole } from "@/lib/auth/route-permissions";
 import type { RoleName } from "@/lib/auth/types";
-import { recordAuditEvent } from "@/lib/db/audit";
+import { buildAuditEventData, recordAuditEvent } from "@/lib/db/audit";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import {
   getConsultantProfile,
@@ -49,6 +49,7 @@ import {
   consultantDocumentUploadSchema,
   consultantIdentitySchema,
   consultantPhotoDeleteSchema,
+  createConsultantSchema,
   cltInfoSchema,
   deleteEducationSchema,
   deleteExperienceSchema,
@@ -76,6 +77,7 @@ import {
   type CompanyInfoInput,
   type CompensationInput,
   type ConsultantIdentityInput,
+  type CreateConsultantInput,
   type CurriculumBioInput,
   type EducationInput,
   type ExperienceInput,
@@ -93,6 +95,8 @@ import {
 const CONSULTORES_PATH = "/app/consultores";
 const PEOPLE_ROLES: RoleName[] = ["ADMIN", "PEOPLE"];
 const BANK_ROLES: RoleName[] = ["ADMIN", "PEOPLE"];
+/** Papeis que podem CRIAR um consultor (identidade + acesso local). */
+const CREATE_CONSULTANT_ROLES: RoleName[] = ["ADMIN", "PEOPLE"];
 
 class ActionError extends Error {
   constructor(
@@ -222,6 +226,225 @@ export async function loadConsultantProfile(
       throw new ActionError("NOT_FOUND", "Consultor nao encontrado.");
     }
     return { ok: true, data: profile };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/**
+ * Cria um novo consultor a partir do formulario completo (`/app/consultores/novo`).
+ * Fluxo transacional que grava as linhas LOCAIS: AppUser (sem senha; sem
+ * provisionamento no Entra), associacao de papeis do RBAC (UserRole) e o
+ * Consultant, ja com os dados essenciais preenchidos (pessoais, empresa/CNPJ,
+ * conta bancaria/PIX e — apenas para papeis financeiros — a remuneracao
+ * acordada). Autorizacao no servidor por {@link CREATE_CONSULTANT_ROLES}
+ * (ADMIN/PEOPLE); somente ADMIN pode conceder o proprio perfil ADMIN. E-mail
+ * duplicado retorna erro claro. Toda a criacao e auditada.
+ */
+export async function createConsultant(
+  input: CreateConsultantInput,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    const actorUser = await requireRole(CREATE_CONSULTANT_ROLES);
+    const parsed = parseInput(createConsultantSchema, input);
+
+    const canFinancials = hasRole(actorUser, FINANCIAL_ROLES);
+    const isAdmin = hasRole(actorUser, ["ADMIN"]);
+
+    // Anti-escalonamento: so ADMIN concede o perfil Administrador.
+    if (parsed.roles.includes("ADMIN") && !isAdmin) {
+      throw new ActionError(
+        "FORBIDDEN",
+        "Apenas administradores podem conceder o perfil Administrador.",
+      );
+    }
+
+    const email = parsed.email.trim().toLowerCase();
+
+    // E-mail duplicado (consultor ja existente) — mensagem clara.
+    const existingConsultant = await prisma.consultant.findUnique({
+      where: { email },
+      select: { id: true },
+    });
+    if (existingConsultant) {
+      throw new ActionError(
+        "INVALID_INPUT",
+        "Ja existe um consultor com este e-mail.",
+      );
+    }
+
+    const actor = await resolveDbUser(actorUser);
+    const actorId = actor?.id ?? null;
+
+    // Remuneracao acordada e DADO FINANCEIRO: so persiste quando o operador tem
+    // papel financeiro e ha tipo de contratacao + algum valor (mascara de RBAC).
+    const hasCompensation =
+      canFinancials &&
+      Boolean(parsed.contractType) &&
+      (parsed.cltAmount !== undefined ||
+        parsed.pjAmount !== undefined ||
+        parsed.benefitCardAmount !== undefined);
+
+    const hasPersonal = Boolean(parsed.cpf || parsed.birthDate || parsed.phone);
+    const hasCompany = Boolean(
+      parsed.cnpj || parsed.legalName || parsed.tradeName,
+    );
+    const hasBank = Boolean(
+      parsed.bankName || parsed.agency || parsed.accountNumber || parsed.pixKey,
+    );
+    const bankKind =
+      parsed.contractType === "PJ"
+        ? "PJ"
+        : parsed.contractType === "CLT"
+          ? "CLT"
+          : "PRIMARY";
+
+    const consultantId = await prisma.$transaction(async (tx) => {
+      // Reaproveita um AppUser existente pelo e-mail; bloqueia se ja tiver
+      // consultor vinculado (Consultant.userId e unico).
+      const existingUser = await tx.user.findUnique({
+        where: { email },
+        select: { id: true, consultant: { select: { id: true } } },
+      });
+      if (existingUser?.consultant) {
+        throw new ActionError(
+          "INVALID_INPUT",
+          "Ja existe um consultor vinculado a este e-mail.",
+        );
+      }
+      const appUserId = existingUser
+        ? existingUser.id
+        : (
+            await tx.user.create({
+              data: { name: parsed.name, email, status: "ACTIVE" },
+              select: { id: true },
+            })
+          ).id;
+      if (!existingUser) {
+        await tx.auditEvent.create({
+          data: buildAuditEventData({
+            actorUserId: actorId,
+            entityType: "User",
+            entityId: appUserId,
+            action: "USER_CREATED",
+            after: { email, name: parsed.name, via: "consultant-create" },
+          }),
+        });
+      }
+
+      // Concede os perfis selecionados (idempotente por PK composta).
+      const roleRows = await tx.role.findMany({
+        where: { name: { in: parsed.roles } },
+        select: { id: true },
+      });
+      for (const role of roleRows) {
+        await tx.userRole.upsert({
+          where: { userId_roleId: { userId: appUserId, roleId: role.id } },
+          update: {},
+          create: { userId: appUserId, roleId: role.id },
+        });
+      }
+      await tx.auditEvent.create({
+        data: buildAuditEventData({
+          actorUserId: actorId,
+          entityType: "User",
+          entityId: appUserId,
+          action: "ROLE_GRANTED",
+          after: { roles: parsed.roles, via: "consultant-create" },
+        }),
+      });
+
+      const consultant = await tx.consultant.create({
+        data: {
+          userId: appUserId,
+          name: parsed.name,
+          email,
+          jobTitle: parsed.jobTitle ?? null,
+          seniority: parsed.seniority,
+          area: parsed.area ?? null,
+          status: parsed.status,
+          contractType: parsed.contractType ?? null,
+          personalInfo: hasPersonal
+            ? {
+                create: {
+                  cpf: parsed.cpf ?? null,
+                  birthDate: toDate(parsed.birthDate),
+                  phone: parsed.phone ?? null,
+                },
+              }
+            : undefined,
+          companyInfo: hasCompany
+            ? {
+                create: {
+                  cnpj: parsed.cnpj ?? null,
+                  legalName: parsed.legalName ?? null,
+                  tradeName: parsed.tradeName ?? null,
+                },
+              }
+            : undefined,
+          bankAccounts: hasBank
+            ? {
+                create: [
+                  {
+                    kind: bankKind,
+                    bankName: parsed.bankName ?? null,
+                    agency: parsed.agency ?? null,
+                    accountNumber: parsed.accountNumber ?? null,
+                    pixKey: parsed.pixKey ?? null,
+                    active: true,
+                  },
+                ],
+              }
+            : undefined,
+          compensations:
+            hasCompensation && parsed.contractType
+              ? {
+                  create: [
+                    {
+                      contractType: parsed.contractType,
+                      startsAt: parsed.compensationStartsAt
+                        ? new Date(
+                            `${parsed.compensationStartsAt}T00:00:00.000Z`,
+                          )
+                        : new Date(),
+                      cltAmount: parsed.cltAmount ?? null,
+                      pjAmount: parsed.pjAmount ?? null,
+                      benefitCardAmount: parsed.benefitCardAmount ?? null,
+                    },
+                  ],
+                }
+              : undefined,
+        },
+        select: { id: true },
+      });
+
+      await tx.auditEvent.create({
+        data: buildAuditEventData({
+          actorUserId: actorId,
+          entityType: "Consultant",
+          entityId: consultant.id,
+          action: "CONSULTANT_CREATED",
+          after: {
+            name: parsed.name,
+            email,
+            seniority: parsed.seniority,
+            status: parsed.status,
+            contractType: parsed.contractType ?? null,
+            roles: parsed.roles,
+            hasPersonal,
+            hasCompany,
+            hasBank,
+            hasCompensation,
+          },
+        }),
+      });
+
+      return consultant.id;
+    });
+
+    revalidatePath(CONSULTORES_PATH);
+    return { ok: true, data: { id: consultantId } };
   } catch (error) {
     return toFailure(error);
   }

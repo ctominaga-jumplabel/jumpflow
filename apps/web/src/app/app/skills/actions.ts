@@ -13,7 +13,16 @@ import {
   generateSkillSuggestionsFromActivities,
   type SuggestedSkillLevel,
 } from "@/lib/skills/suggestions";
-import { addDays, parseIsoDateUtc, weekStartOf } from "@/lib/timesheet/week";
+import { AI_MODELS } from "@/lib/ai/provider";
+import { recordAiUsage } from "@/lib/ai/log";
+import { isCurriculumAiImportEnabled } from "@/lib/skills/flags";
+import { extractCurriculumProposal } from "@/lib/skills/curriculum-import";
+import {
+  addDays,
+  parseIsoDateUtc,
+  startOfUtcDay,
+  weekStartOf,
+} from "@/lib/timesheet/week";
 import {
   buildConsultantCurriculum,
   type ConsultantCurriculum,
@@ -57,6 +66,89 @@ const updateInputSchema = z.object({
   level: skillLevelSchema,
 });
 const deleteInputSchema = z.object({ suggestionId: idSchema });
+
+// Autosserviço de skills do consultor (escopo de dono). O consultor declara as
+// PRÓPRIAS skills; entram sempre como validationStatus = PENDING (política).
+const yearsSchema = z.preprocess(
+  (value) =>
+    value === "" || value === null || value === undefined ? undefined : value,
+  z.coerce.number().min(0).max(80).optional(),
+);
+const mySkillSchema = z.object({
+  skillId: idSchema,
+  level: skillLevelSchema,
+  yearsExperience: yearsSchema,
+});
+const deleteMySkillSchema = z.object({ skillId: idSchema });
+
+// Leitura de currículo por IA (atrás de flag). O upload chega como base64; o
+// servidor valida tipo/tamanho ANTES de qualquer chamada de IA.
+const CV_PDF_MAX_BYTES = 6 * 1024 * 1024; // 6 MB (base64 ~8 MB < bodySizeLimit 15mb)
+const importFileSchema = z.object({
+  fileName: z.string().trim().min(1).max(255),
+  contentBase64: z.string().min(1),
+});
+
+const optionalNullText = (max: number) =>
+  z
+    .string()
+    .trim()
+    .max(max)
+    .optional()
+    .transform((value) => (value ? value : null));
+
+const isoDateStrict = z
+  .string()
+  .trim()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "Data invalida.");
+
+// Proposta editada que o consultor CONFIRMA. Nada aqui é gerado pela IA: são os
+// campos já revisados por um humano. Skills de catálogo viram ConsultantSkill
+// PENDING; skills fora do catálogo viram SkillSuggestion pendente de curadoria.
+const applyImportSchema = z.object({
+  headline: z
+    .string()
+    .trim()
+    .max(160)
+    .optional()
+    .transform((value) => (value ? value : undefined)),
+  summary: z
+    .string()
+    .trim()
+    .max(2000)
+    .optional()
+    .transform((value) => (value ? value : undefined)),
+  skills: z
+    .array(
+      z.object({
+        name: z.string().trim().min(1).max(120),
+        category: optionalNullText(80),
+        level: skillLevelSchema,
+        evidence: optionalNullText(400),
+        catalogSkillId: z
+          .string()
+          .trim()
+          .max(64)
+          .optional()
+          .transform((value) => (value ? value : null)),
+      }),
+    )
+    .max(40)
+    .default([]),
+  experiences: z
+    .array(
+      z.object({
+        company: z.string().trim().min(1).max(160),
+        role: z.string().trim().min(1).max(160),
+        startDate: isoDateStrict,
+        endDate: isoDateStrict.optional().nullable(),
+        description: optionalNullText(1000),
+        location: optionalNullText(160),
+      }),
+    )
+    .max(25)
+    .default([]),
+});
 
 // Escopo de dono: NAO aceitamos consultantId do cliente na bio propria; o
 // consultor sempre vem resolvido do usuario logado. Reusamos a validacao de
@@ -659,6 +751,526 @@ export async function deleteSkillSuggestion(
 
     revalidatePath(SKILLS_PATH);
     return { ok: true, data: { suggestionId: suggestion.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Minhas skills — autosserviço do consultor (escopo de DONO)
+// ---------------------------------------------------------------------------
+//
+// O consultor declara/edita as PRÓPRIAS skills. O consultor é SEMPRE resolvido
+// do usuário logado (requireConsultant); o cliente NUNCA informa o consultantId.
+// Governança: skill auto-declarada entra como validationStatus = PENDING — nunca
+// vira VALIDATED sozinha (validação é decisão de gestor/People). Auditado.
+
+export type MySkillLevel = z.infer<typeof skillLevelSchema>;
+
+export interface MySkillRow {
+  skillId: string;
+  name: string;
+  category: string | null;
+  level: MySkillLevel;
+  yearsExperience: number | null;
+  validationStatus: "PENDING" | "VALIDATED" | "REJECTED";
+}
+
+export interface CatalogSkillOption {
+  id: string;
+  name: string;
+  category: string | null;
+}
+
+export interface MySkillsView {
+  skills: MySkillRow[];
+  catalog: CatalogSkillOption[];
+}
+
+/** Lê as skills declaradas do PRÓPRIO consultor + o catálogo ativo para seleção. */
+export async function loadMySkills(): Promise<ActionResult<MySkillsView>> {
+  try {
+    ensureDatabase();
+    const { consultant } = await requireConsultant();
+    const [rows, catalog] = await Promise.all([
+      prisma.consultantSkill.findMany({
+        where: { consultantId: consultant.id },
+        select: {
+          skillId: true,
+          level: true,
+          yearsExperience: true,
+          validationStatus: true,
+          skill: { select: { name: true, category: true } },
+        },
+        orderBy: { skill: { name: "asc" } },
+      }),
+      prisma.skill.findMany({
+        where: { status: "ACTIVE" },
+        select: { id: true, name: true, category: true },
+        orderBy: { name: "asc" },
+      }),
+    ]);
+    return {
+      ok: true,
+      data: {
+        skills: rows.map((row) => ({
+          skillId: row.skillId,
+          name: row.skill.name,
+          category: row.skill.category,
+          level: row.level as MySkillLevel,
+          yearsExperience:
+            row.yearsExperience === null ? null : Number(row.yearsExperience),
+          validationStatus: row.validationStatus,
+        })),
+        catalog: catalog.map((row) => ({
+          id: row.id,
+          name: row.name,
+          category: row.category,
+        })),
+      },
+    };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/** Cria/atualiza uma skill do PRÓPRIO consultor. Entra como PENDING (política). */
+export async function saveMySkill(
+  input: z.input<typeof mySkillSchema>,
+): Promise<ActionResult<{ skillId: string }>> {
+  try {
+    ensureDatabase();
+    const parsed = mySkillSchema.parse(input);
+    const { user, consultant } = await requireConsultant();
+    const dbUser = await resolveDbUser(user);
+
+    const skill = await prisma.skill.findUnique({
+      where: { id: parsed.skillId },
+      select: { id: true, status: true },
+    });
+    if (!skill) {
+      throw new ActionError("NOT_FOUND", "Skill nao encontrada no catalogo.");
+    }
+    if (skill.status !== "ACTIVE") {
+      throw new ActionError(
+        "INVALID_INPUT",
+        "Selecione uma skill ativa do catalogo.",
+      );
+    }
+
+    const existing = await prisma.consultantSkill.findUnique({
+      where: {
+        consultantId_skillId: {
+          consultantId: consultant.id,
+          skillId: parsed.skillId,
+        },
+      },
+      select: { level: true, validationStatus: true },
+    });
+    // Editar apenas os anos de experiência não deve derrubar uma skill já
+    // validada; mudar o NÍVEL declarado volta a PENDING (nova revisão humana).
+    const validationStatus =
+      existing && existing.level === parsed.level
+        ? existing.validationStatus
+        : "PENDING";
+    const years = parsed.yearsExperience ?? null;
+
+    await prisma.$transaction(async (tx) => {
+      await tx.consultantSkill.upsert({
+        where: {
+          consultantId_skillId: {
+            consultantId: consultant.id,
+            skillId: parsed.skillId,
+          },
+        },
+        update: {
+          level: parsed.level as SuggestedSkillLevel,
+          yearsExperience: years,
+          validationStatus,
+        },
+        create: {
+          consultantId: consultant.id,
+          skillId: parsed.skillId,
+          level: parsed.level as SuggestedSkillLevel,
+          yearsExperience: years,
+          validationStatus: "PENDING",
+        },
+      });
+      await tx.auditEvent.create({
+        data: buildAuditEventData({
+          actorUserId: dbUser?.id ?? null,
+          entityType: "ConsultantSkill",
+          entityId: `${consultant.id}:${parsed.skillId}`,
+          action: existing
+            ? "CONSULTANT_SKILL_SELF_UPDATED"
+            : "CONSULTANT_SKILL_SELF_CREATED",
+          before: existing ?? null,
+          after: {
+            skillId: parsed.skillId,
+            level: parsed.level,
+            yearsExperience: years,
+            validationStatus,
+          },
+        }),
+      });
+    });
+
+    revalidatePath(SKILLS_PATH);
+    return { ok: true, data: { skillId: parsed.skillId } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/** Remove uma skill do PRÓPRIO consultor. */
+export async function deleteMySkill(
+  input: z.infer<typeof deleteMySkillSchema>,
+): Promise<ActionResult<{ skillId: string }>> {
+  try {
+    ensureDatabase();
+    const parsed = deleteMySkillSchema.parse(input);
+    const { user, consultant } = await requireConsultant();
+    const dbUser = await resolveDbUser(user);
+
+    const existing = await prisma.consultantSkill.findUnique({
+      where: {
+        consultantId_skillId: {
+          consultantId: consultant.id,
+          skillId: parsed.skillId,
+        },
+      },
+      select: { id: true, level: true, validationStatus: true },
+    });
+    if (!existing) {
+      throw new ActionError("NOT_FOUND", "Skill nao encontrada no seu perfil.");
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.consultantSkill.delete({ where: { id: existing.id } });
+      await tx.auditEvent.create({
+        data: buildAuditEventData({
+          actorUserId: dbUser?.id ?? null,
+          entityType: "ConsultantSkill",
+          entityId: `${consultant.id}:${parsed.skillId}`,
+          action: "CONSULTANT_SKILL_SELF_DELETED",
+          before: existing,
+          after: { consultantId: consultant.id, skillId: parsed.skillId },
+        }),
+      });
+    });
+
+    revalidatePath(SKILLS_PATH);
+    return { ok: true, data: { skillId: parsed.skillId } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Leitura de currículo em PDF por IA (atrás de flag) — SEMPRE proposta
+// ---------------------------------------------------------------------------
+//
+// Fluxo: upload .pdf → extractCurriculumFromPdf devolve uma PROPOSTA (nada é
+// persistido) → o consultor revisa/edita → applyCurriculumImport grava os dados
+// já confirmados. A IA nunca cria skill final/validada: skills de catálogo viram
+// ConsultantSkill PENDING; skills fora do catálogo viram SkillSuggestion pendente
+// de curadoria. Escopo de dono em todas as etapas.
+
+export interface ProposedSkillView {
+  name: string;
+  category: string | null;
+  level: MySkillLevel;
+  evidence: string | null;
+  /** Preenchido quando a skill casa com o catálogo ativo (por nome). */
+  catalogSkillId: string | null;
+}
+
+export interface ProposedExperienceView {
+  company: string;
+  role: string;
+  startDate: string | null;
+  endDate: string | null;
+  description: string | null;
+  location: string | null;
+}
+
+export interface CurriculumProposalView {
+  headline: string | null;
+  summary: string | null;
+  skills: ProposedSkillView[];
+  experiences: ProposedExperienceView[];
+}
+
+/**
+ * Lê o PDF por IA e devolve a PROPOSTA para revisão humana. Valida flag, escopo
+ * de dono, tipo e tamanho do arquivo no servidor ANTES de qualquer chamada de
+ * IA. Nunca persiste skill/bio; nunca lança a chave/o conteúdo bruto em log.
+ */
+export async function extractCurriculumFromPdf(
+  input: z.infer<typeof importFileSchema>,
+): Promise<ActionResult<CurriculumProposalView>> {
+  try {
+    ensureDatabase();
+    if (!isCurriculumAiImportEnabled()) {
+      throw new ActionError(
+        "FORBIDDEN",
+        "Leitura por IA indisponivel. Preencha o curriculo manualmente.",
+      );
+    }
+    const parsed = importFileSchema.parse(input);
+    const { user, consultant } = await requireConsultant();
+    const dbUser = await resolveDbUser(user);
+
+    if (!parsed.fileName.toLowerCase().endsWith(".pdf")) {
+      throw new ActionError("INVALID_FILE", "Envie um arquivo .pdf.");
+    }
+    const buffer = Buffer.from(parsed.contentBase64, "base64");
+    if (buffer.length === 0) {
+      throw new ActionError("INVALID_FILE", "Arquivo vazio ou invalido.");
+    }
+    if (buffer.length > CV_PDF_MAX_BYTES) {
+      throw new ActionError("FILE_TOO_LARGE", "PDF acima do limite de 6 MB.");
+    }
+    // Confere a assinatura do PDF (não confia só na extensão).
+    if (buffer.subarray(0, 5).toString("latin1") !== "%PDF-") {
+      throw new ActionError("INVALID_FILE", "O arquivo nao e um PDF valido.");
+    }
+
+    const proposal = await extractCurriculumProposal(parsed.contentBase64);
+    if (!proposal) {
+      await recordAiUsage({
+        feature: "CURRICULUM_EXTRACTION",
+        model: AI_MODELS.SONNET,
+        entityType: "Consultant",
+        entityId: consultant.id,
+        status: "FAILED",
+      });
+      throw new ActionError(
+        "UNEXPECTED",
+        "Nao foi possivel ler o PDF. Tente outro arquivo ou preencha manualmente.",
+      );
+    }
+
+    // Casa os nomes propostos com o catálogo ativo (case-insensitive).
+    const names = proposal.skills.map((skill) => skill.name);
+    const catalog =
+      names.length > 0
+        ? await prisma.skill.findMany({
+            where: {
+              status: "ACTIVE",
+              name: { in: names, mode: "insensitive" },
+            },
+            select: { id: true, name: true, category: true },
+          })
+        : [];
+    const byName = new Map(
+      catalog.map((skill) => [skill.name.toLowerCase(), skill]),
+    );
+    const skills: ProposedSkillView[] = proposal.skills.map((skill) => {
+      const match = byName.get(skill.name.toLowerCase());
+      return {
+        name: skill.name,
+        level: skill.level as MySkillLevel,
+        evidence: skill.evidence,
+        category: skill.category ?? match?.category ?? null,
+        catalogSkillId: match?.id ?? null,
+      };
+    });
+
+    await recordAiUsage({
+      feature: "CURRICULUM_EXTRACTION",
+      model: AI_MODELS.SONNET,
+      entityType: "Consultant",
+      entityId: consultant.id,
+      status: "SUCCESS",
+    });
+    // Auditoria SEM conteúdo bruto: só contagens e presença de bio.
+    await prisma.auditEvent.create({
+      data: buildAuditEventData({
+        actorUserId: dbUser?.id ?? null,
+        entityType: "Consultant",
+        entityId: consultant.id,
+        action: "CONSULTANT_CURRICULUM_AI_READ",
+        after: {
+          skills: skills.length,
+          experiences: proposal.experiences.length,
+          hasBio: Boolean(proposal.headline || proposal.summary),
+        },
+      }),
+    });
+
+    return {
+      ok: true,
+      data: {
+        headline: proposal.headline,
+        summary: proposal.summary,
+        skills,
+        experiences: proposal.experiences,
+      },
+    };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/**
+ * Aplica a proposta JÁ REVISADA pelo consultor (escopo de dono). Bio no próprio
+ * cadastro; experiências como ConsultantExperience; skills de catálogo como
+ * ConsultantSkill PENDING e skills fora do catálogo como SkillSuggestion
+ * pendente de curadoria. Nunca grava skill VALIDATED/ACTIVE automaticamente.
+ */
+export async function applyCurriculumImport(
+  input: z.input<typeof applyImportSchema>,
+): Promise<
+  ActionResult<{
+    appliedSkills: number;
+    pendingCatalog: number;
+    experiences: number;
+    bio: boolean;
+  }>
+> {
+  try {
+    ensureDatabase();
+    const parsed = applyImportSchema.parse(input);
+    const { user, consultant } = await requireConsultant();
+    const dbUser = await resolveDbUser(user);
+
+    const weekStart = weekStartOf(startOfUtcDay(new Date()));
+    const weekEnd = addDays(weekStart, 6);
+
+    let appliedSkills = 0;
+    let pendingCatalog = 0;
+    let experiencesCreated = 0;
+    let bioApplied = false;
+
+    await prisma.$transaction(async (tx) => {
+      if (parsed.headline !== undefined || parsed.summary !== undefined) {
+        await tx.consultant.update({
+          where: { id: consultant.id },
+          data: {
+            curriculumHeadline: parsed.headline ?? null,
+            curriculumSummary: parsed.summary ?? null,
+          },
+        });
+        bioApplied = true;
+      }
+
+      for (const exp of parsed.experiences) {
+        await tx.consultantExperience.create({
+          data: {
+            consultantId: consultant.id,
+            company: exp.company,
+            role: exp.role,
+            startDate: new Date(`${exp.startDate}T00:00:00.000Z`),
+            endDate: exp.endDate
+              ? new Date(`${exp.endDate}T00:00:00.000Z`)
+              : null,
+            description: exp.description,
+            location: exp.location,
+          },
+        });
+        experiencesCreated += 1;
+      }
+
+      for (const skill of parsed.skills) {
+        if (skill.catalogSkillId) {
+          const catalogSkill = await tx.skill.findUnique({
+            where: { id: skill.catalogSkillId },
+            select: { id: true, status: true },
+          });
+          if (!catalogSkill || catalogSkill.status !== "ACTIVE") continue;
+          const existing = await tx.consultantSkill.findUnique({
+            where: {
+              consultantId_skillId: {
+                consultantId: consultant.id,
+                skillId: skill.catalogSkillId,
+              },
+            },
+            select: { level: true, validationStatus: true },
+          });
+          const validationStatus =
+            existing && existing.level === skill.level
+              ? existing.validationStatus
+              : "PENDING";
+          await tx.consultantSkill.upsert({
+            where: {
+              consultantId_skillId: {
+                consultantId: consultant.id,
+                skillId: skill.catalogSkillId,
+              },
+            },
+            update: {
+              level: skill.level as SuggestedSkillLevel,
+              validationStatus,
+            },
+            create: {
+              consultantId: consultant.id,
+              skillId: skill.catalogSkillId,
+              level: skill.level as SuggestedSkillLevel,
+              validationStatus: "PENDING",
+            },
+          });
+          appliedSkills += 1;
+        } else {
+          // Fora do catálogo: fica como sugestão pendente de curadoria de admin/
+          // People, nunca cria linha de catálogo automaticamente.
+          await tx.skillSuggestion.upsert({
+            where: {
+              consultantId_weekStart_suggestedName: {
+                consultantId: consultant.id,
+                weekStart,
+                suggestedName: skill.name,
+              },
+            },
+            update: {
+              skillId: null,
+              suggestedCategory: skill.category,
+              suggestedLevel: skill.level,
+              evidenceSummary: skill.evidence,
+              status: "PENDING",
+              decidedAt: null,
+            },
+            create: {
+              consultantId: consultant.id,
+              weekStart,
+              weekEnd,
+              skillId: null,
+              suggestedName: skill.name,
+              suggestedCategory: skill.category,
+              suggestedLevel: skill.level,
+              evidenceSummary: skill.evidence,
+            },
+          });
+          pendingCatalog += 1;
+        }
+      }
+
+      await tx.auditEvent.create({
+        data: buildAuditEventData({
+          actorUserId: dbUser?.id ?? null,
+          entityType: "Consultant",
+          entityId: consultant.id,
+          action: "CONSULTANT_CURRICULUM_IMPORT_APPLIED",
+          after: {
+            appliedSkills,
+            pendingCatalog,
+            experiences: experiencesCreated,
+            bio: bioApplied,
+          },
+        }),
+      });
+    });
+
+    revalidatePath(SKILLS_PATH);
+    return {
+      ok: true,
+      data: {
+        appliedSkills,
+        pendingCatalog,
+        experiences: experiencesCreated,
+        bio: bioApplied,
+      },
+    };
   } catch (error) {
     return toFailure(error);
   }

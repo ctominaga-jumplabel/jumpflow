@@ -54,19 +54,19 @@ describe("TimeEntryForm — Fator de remuneração (multiplier)", () => {
     expect(screen.queryByLabelText(MULTIPLIER_LABEL)).toBeNull();
   });
 
-  it("mostra o campo ao selecionar Sobreaviso e desmarca Faturável por padrão", () => {
+  it("mostra o campo ao selecionar Sobreaviso e sugere o fator fracionário", () => {
     setup();
     fireEvent.change(screen.getByLabelText("Atividade"), {
       target: { value: "ON_CALL" },
     });
     const field = screen.getByLabelText(MULTIPLIER_LABEL) as HTMLInputElement;
     expect(field).not.toBeNull();
-    // Sugere o fator usual de sobreaviso e marca como não faturável.
+    // Sugere o fator usual de sobreaviso (fração da hora cheia). O valor de
+    // `billable` (false para ON_CALL, por regra de negócio) segue no submit,
+    // mas NÃO há mais controle de Faturável no apontamento.
     expect(Number(field.value)).toBeGreaterThan(0);
     expect(Number(field.value)).toBeLessThan(1);
-    expect((screen.getByLabelText("Faturável") as HTMLInputElement).checked).toBe(
-      false,
-    );
+    expect(screen.queryByLabelText("Faturável")).toBeNull();
   });
 
   it("submete o multiplier escolhido para um lançamento ON_CALL", () => {
@@ -129,27 +129,13 @@ describe("TimeEntryForm — Fator de remuneração (multiplier)", () => {
   });
 });
 
-describe("TimeEntryForm — Faturável oculto do consultor (Onda B)", () => {
-  it("esconde o controle Faturável para consultor puro (canEditBillable=false)", () => {
-    render(
-      <TimeEntryForm
-        open
-        onClose={() => {}}
-        projects={projects}
-        days={days}
-        onSubmit={vi.fn()}
-        canEditBillable={false}
-      />,
-    );
+describe("TimeEntryForm — Faturável removido do apontamento", () => {
+  it("não mostra o controle Faturável (virou definição de gestão na aprovação)", () => {
+    setup();
     expect(screen.queryByLabelText("Faturável")).toBeNull();
   });
 
-  it("mantém o controle visível para gestão (canEditBillable=true, default)", () => {
-    setup();
-    expect(screen.getByLabelText("Faturável")).toBeInTheDocument();
-  });
-
-  it("mesmo oculto, o valor billable (default true) segue no submit", () => {
+  it("o valor billable (default true) segue no submit de atividade normal", () => {
     const onSubmit = vi.fn();
     render(
       <TimeEntryForm
@@ -158,7 +144,6 @@ describe("TimeEntryForm — Faturável oculto do consultor (Onda B)", () => {
         projects={projects}
         days={days}
         onSubmit={onSubmit}
-        canEditBillable={false}
       />,
     );
     fireEvent.change(screen.getByLabelText("Projeto"), {

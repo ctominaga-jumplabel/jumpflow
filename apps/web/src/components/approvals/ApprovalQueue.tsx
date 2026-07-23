@@ -20,7 +20,11 @@ import { FeedbackBanner, useFeedback } from "@/components/ui/Feedback";
 import { cn } from "@/lib/utils";
 import { focusRing } from "@/lib/styles";
 import { formatCurrency, formatHours } from "@/lib/format";
-import { decideHours } from "@/app/app/horas/actions";
+import {
+  attachBillableJustificationFile,
+  decideHours,
+  setEntryBillable,
+} from "@/app/app/horas/actions";
 import { decideAsFinance, decideAsManager } from "@/app/app/despesas/actions";
 import {
   approvalItems as defaultItems,
@@ -121,6 +125,17 @@ export interface ApprovalQueueProps {
     clients: { id: string; name: string }[];
     consultants: { id: string; name: string }[];
   };
+  /**
+   * Whether the current user (gestão/financeiro) may flag "Faturável" per day on
+   * HOURS items. Server (setEntryBillable) is the authority; this only shows the
+   * control. Absent/false ⇒ no billable toggles.
+   */
+  canEditBillable?: boolean;
+  /**
+   * Object storage está configurado, então o anexo opcional da justificativa de
+   * não faturável pode ser oferecido no modal. Absent/false ⇒ só o motivo textual.
+   */
+  billableAttachmentsAvailable?: boolean;
 }
 
 const STATUS_VALUES: ReadonlySet<StatusFilter> = new Set(
@@ -174,6 +189,8 @@ export function ApprovalQueue({
   demoBanner = false,
   initialFilters,
   reportFilterOptions,
+  canEditBillable = false,
+  billableAttachmentsAvailable = false,
 }: ApprovalQueueProps) {
   // Local decisions apply only to mock items; db items refresh via the server.
   // PENDING here is a reopen (a decided item sent back to the pending queue).
@@ -516,6 +533,50 @@ export function ApprovalQueue({
         ? "Item aprovado (local). Nada é persistido sem banco configurado."
         : "Item reprovado com justificativa (local).",
     );
+  }
+
+  /**
+   * Define "Faturável" de UM lançamento (por dia). Autorização/regra vivem no
+   * servidor (setEntryBillable); ao marcar NÃO faturável com anexo, sobe o
+   * comprovante APÓS a mudança (mesmo padrão do apontamento). A rota revalida no
+   * servidor, então a lista reflete o novo estado.
+   */
+  function setBillable(
+    entryId: string,
+    billable: boolean,
+    reason: string,
+    file?: File,
+  ) {
+    startTransition(async () => {
+      const result = await setEntryBillable({
+        entryId,
+        billable,
+        nonBillableReason: reason || undefined,
+      });
+      if (!result.ok) {
+        notify("warning", result.message);
+        return;
+      }
+      if (!billable && file) {
+        const formData = new FormData();
+        formData.set("id", entryId);
+        formData.set("file", file);
+        const upload = await attachBillableJustificationFile(formData);
+        if (!upload.ok) {
+          notify(
+            "warning",
+            `Dia marcado como não faturável, mas o anexo falhou: ${upload.message}`,
+          );
+          return;
+        }
+      }
+      notify(
+        billable ? "success" : "info",
+        billable
+          ? "Dia marcado como faturável."
+          : "Dia marcado como não faturável com justificativa.",
+      );
+    });
   }
 
   return (
@@ -936,6 +997,9 @@ export function ApprovalQueue({
           busy={isPending}
           onApprove={(id, comment) => decide(id, "APPROVED", comment)}
           onReject={(id, comment) => decide(id, "REJECTED", comment)}
+          canEditBillable={canEditBillable}
+          attachmentsAvailable={billableAttachmentsAvailable}
+          onSetBillable={setBillable}
         />
       </div>
     </div>

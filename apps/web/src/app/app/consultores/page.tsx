@@ -12,12 +12,17 @@ export const metadata: Metadata = { title: "Consultores" };
 
 const PEOPLE_ROLES: RoleName[] = ["ADMIN", "PEOPLE"];
 
-export default async function ConsultoresPage() {
+export default async function ConsultoresPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ novo?: string }>;
+}) {
   const user = await getCurrentUser();
   const databaseReady = isDatabaseConfigured();
   const consultants = databaseReady
     ? await listConsultantDirectory()
     : demoConsultants;
+  const params = (await searchParams) ?? {};
 
   return (
     <div className="space-y-6">
@@ -30,6 +35,7 @@ export default async function ConsultoresPage() {
         consultants={consultants}
         canManagePeople={hasRole(user, PEOPLE_ROLES)}
         canManageFinancials={hasRole(user, FINANCIAL_ROLES)}
+        initialConsultantId={params.novo}
       />
     </div>
   );

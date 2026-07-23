@@ -9,6 +9,7 @@ import type { AppUser } from "@/lib/auth/types";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
 import { useSidebarCollapsed } from "./use-sidebar-collapsed";
+import type { NotificationView } from "@/lib/db/notifications";
 
 export interface AppShellProps {
   /** Current authenticated user (real or dev), resolved on the server. */
@@ -24,11 +25,13 @@ export interface AppShellProps {
   viewableNavCodes?: string[];
   /** Persisted `href → position` order for the primary rail (P28). */
   navOrder?: Record<string, number>;
+  /** Recent in-app notifications for the bell dropdown (item 3), newest first. */
+  notifications?: NotificationView[];
   /**
-   * Total count of actionable pending items for the user (P20). Drives the
-   * topbar notification badge; a number badge is shown only when > 0.
+   * Unread notification count (item 3). Drives the topbar bell badge; a number
+   * badge is shown only when > 0 (no phantom count).
    */
-  notificationCount?: number;
+  unreadCount?: number;
   children: React.ReactNode;
 }
 
@@ -42,7 +45,8 @@ export function AppShell({
   databaseConfigured = false,
   viewableNavCodes = [],
   navOrder = {},
-  notificationCount = 0,
+  notifications = [],
+  unreadCount = 0,
   children,
 }: AppShellProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -154,7 +158,8 @@ export function AppShell({
           user={user}
           logoutAction={logoutAction}
           onMenuClick={() => setMobileOpen(true)}
-          notificationCount={notificationCount}
+          notifications={notifications}
+          unreadCount={unreadCount}
         />
         <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
           {children}

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ROLE_NAMES } from "@/lib/auth/roles";
 
 // Entity ids are opaque strings. Prisma generates cuids for new rows, but
 // seeded/imported data may use readable ids. Referential integrity is enforced
@@ -78,27 +79,80 @@ const optionalEnum = <T extends readonly [string, ...string[]]>(values: T) =>
     z.enum(values).optional(),
   );
 
+/**
+ * Catalogo de senioridade (espelha o enum Prisma `Seniority`). Fonte unica
+ * usada pelo schema de identidade, pelo cadastro de novo consultor e pelos
+ * rotulos pt-BR em {@link labels}.
+ */
+export const SENIORITIES = [
+  "INTERN",
+  "JUNIOR",
+  "MID_LEVEL",
+  "SENIOR",
+  "SPECIALIST",
+  "PRINCIPAL",
+  "TRAINEE",
+  "TECH_LEAD",
+  "ARCHITECT",
+  "COORDINATOR",
+  "MANAGER",
+] as const;
+
+/** Situacao do consultor (espelha o enum Prisma `ConsultantStatus`). */
+export const CONSULTANT_STATUSES = ["ACTIVE", "INACTIVE", "ON_LEAVE"] as const;
+
 export const consultantIdentitySchema = z.object({
   id: optionalText(80),
   name: z.string().trim().min(2).max(120),
   email: z.string().trim().email().max(160),
   jobTitle: optionalText(120),
-  seniority: z.enum([
-    "INTERN",
-    "JUNIOR",
-    "MID_LEVEL",
-    "SENIOR",
-    "SPECIALIST",
-    "PRINCIPAL",
-    "TRAINEE",
-    "TECH_LEAD",
-    "ARCHITECT",
-    "COORDINATOR",
-    "MANAGER",
-  ]),
+  seniority: z.enum(SENIORITIES),
   area: optionalText(80),
-  status: z.enum(["ACTIVE", "INACTIVE", "ON_LEAVE"]),
+  status: z.enum(CONSULTANT_STATUSES),
   contractType: optionalEnum(CONTRACT_TYPES),
+});
+
+/**
+ * Cadastro de NOVO consultor (formulario completo). Diferente do
+ * {@link consultantIdentitySchema} (edicao), captura de uma vez a identidade, os
+ * perfis de acesso (RBAC), os dados pessoais essenciais, a empresa/CNPJ, os
+ * dados bancarios/PIX e a remuneracao acordada. Os campos opcionais so viram
+ * linhas nas tabelas-fonte quando preenchidos; o restante do cadastro e
+ * completado depois no perfil. A remuneracao (financeira) so e persistida pelo
+ * servidor quando o operador tem papel financeiro (mascara de RBAC).
+ */
+export const createConsultantSchema = z.object({
+  // Identidade
+  name: z.string().trim().min(2, "Informe o nome completo.").max(120),
+  email: z.string().trim().email("Informe um e-mail valido.").max(160),
+  jobTitle: optionalText(120),
+  seniority: z.enum(SENIORITIES),
+  area: optionalText(80),
+  status: z.enum(CONSULTANT_STATUSES).default("ACTIVE"),
+  contractType: optionalEnum(CONTRACT_TYPES),
+  // Perfis de acesso (RBAC). Default: apenas Consultor.
+  roles: z
+    .array(z.enum(ROLE_NAMES))
+    .min(1, "Selecione ao menos um perfil de acesso.")
+    .default(["CONSULTANT"]),
+  // Dados pessoais essenciais
+  cpf: optionalText(20),
+  birthDate: optionalDate,
+  phone: optionalText(30),
+  // Empresa (PJ)
+  cnpj: optionalText(20),
+  legalName: optionalText(160),
+  tradeName: optionalText(160),
+  // Dados bancarios / PIX (uma conta inicial)
+  bankName: optionalText(120),
+  agency: optionalText(30),
+  accountNumber: optionalText(40),
+  pixKey: optionalText(120),
+  // Remuneracao acordada (financeiro; gated no servidor)
+  compensationStartsAt: optionalDate,
+  cltAmount: optionalNumber,
+  pjAmount: optionalNumber,
+  benefitCardAmount: optionalNumber,
 });
 
 export const personalInfoSchema = z.object({
@@ -480,6 +534,10 @@ export const myExperienceSchema = z
 export const deleteExperienceSchema = z.object({ id: entityId });
 
 export type ConsultantIdentityInput = z.infer<typeof consultantIdentitySchema>;
+export type ConsultantSeniority = (typeof SENIORITIES)[number];
+export type ConsultantStatusValue = (typeof CONSULTANT_STATUSES)[number];
+// Tipo de ENTRADA (boundary da action): campos com default podem ser omitidos.
+export type CreateConsultantInput = z.input<typeof createConsultantSchema>;
 export type PersonalInfoInput = z.infer<typeof personalInfoSchema>;
 export type CompanyInfoInput = z.infer<typeof companyInfoSchema>;
 export type ConsultantDocumentUploadInput = z.infer<

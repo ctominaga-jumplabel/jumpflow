@@ -236,6 +236,22 @@ export const decideHoursSchema = z
 
 export type DecideHoursInput = z.infer<typeof decideHoursSchema>;
 
+/**
+ * Alteração do campo financeiro `billable` de UM lançamento específico, feita na
+ * tela de APROVAÇÃO por um gestor. "Faturável" deixou de ser definido no
+ * apontamento (consultor) e passou a ser uma DEFINIÇÃO DE GESTÃO, flagável por
+ * dia. O motivo só é exigido quando `billable=false` (obrigatoriedade reforçada
+ * no servidor via justificationSchema, exceto ON_CALL que é regra de negócio);
+ * o schema o mantém opcional para permitir voltar a faturável sem motivo.
+ */
+export const setEntryBillableSchema = z.object({
+  entryId: idSchema,
+  billable: z.boolean(),
+  nonBillableReason: nonBillableReasonSchema,
+});
+
+export type SetEntryBillableInput = z.infer<typeof setEntryBillableSchema>;
+
 /** Statuses a `decideHours` transition may legally start FROM, per target. */
 export const DECIDE_HOURS_SOURCE_STATUS: Record<
   DecideHoursInput["decision"],

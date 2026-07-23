@@ -1,11 +1,12 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import Link from "next/link";
-import { Bell, LogOut, Maximize, Menu, Minimize } from "lucide-react";
+import { LogOut, Maximize, Menu, Minimize } from "lucide-react";
 import type { AppUser } from "@/lib/auth/types";
 import { primaryRoleLabel } from "@/lib/auth/roles";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import { NotificationBell } from "./NotificationBell";
+import type { NotificationView } from "@/lib/db/notifications";
 import { cn } from "@/lib/utils";
 import { focusRing } from "@/lib/styles";
 
@@ -18,11 +19,13 @@ export interface TopbarProps {
   logoutAction: () => void | Promise<void>;
   /** Opens the mobile navigation drawer. */
   onMenuClick: () => void;
+  /** Recent in-app notifications for the bell dropdown (item 3), newest first. */
+  notifications?: NotificationView[];
   /**
-   * Total actionable pending items (P20). A numeric badge is shown only when
+   * Unread notification count (item 3). A numeric badge is shown only when
    * greater than zero; zero renders a plain bell with no badge.
    */
-  notificationCount?: number;
+  unreadCount?: number;
 }
 
 /** Build up to two-letter initials from a display name. */
@@ -41,11 +44,9 @@ export function Topbar({
   user,
   logoutAction,
   onMenuClick,
-  notificationCount = 0,
+  notifications = [],
+  unreadCount = 0,
 }: TopbarProps) {
-  const hasPending = notificationCount > 0;
-  const badgeLabel = notificationCount > 99 ? "99+" : String(notificationCount);
-
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-border bg-surface/90 px-4 backdrop-blur sm:px-6">
       <button
@@ -64,25 +65,13 @@ export function Topbar({
 
         <FullscreenButton />
 
-        {/* P20: notificações reais — leva ao Início, onde as pendências por
-            perfil estão detalhadas com seus badges. Sem ponto decorativo: o
-            número só aparece quando há pendências acionáveis (> 0). */}
-        <Link
-          href="/app"
-          aria-label={
-            hasPending
-              ? `Notificações: ${notificationCount} pendência(s)`
-              : "Notificações: nenhuma pendência"
-          }
-          className={cn(iconButton, focusRing, "relative")}
-        >
-          <Bell aria-hidden="true" className="size-5" />
-          {hasPending ? (
-            <span className="absolute -right-1.5 -top-1.5 grid min-w-[18px] place-items-center rounded-full border border-surface bg-danger px-1 text-[10px] font-bold leading-none text-white">
-              {badgeLabel}
-            </span>
-          ) : null}
-        </Link>
+        {/* Item 3: central de notificações real. O badge reflete apenas
+            notificações NÃO LIDAS e some quando não há nenhuma — nada de número
+            "fantasma". O sino abre a lista; ver todas em /app/notificacoes. */}
+        <NotificationBell
+          notifications={notifications}
+          unreadCount={unreadCount}
+        />
 
         <div className="flex items-center gap-3 rounded-md border border-transparent py-1 pl-2 sm:border-border sm:pl-1 sm:pr-3">
           <span className="grid size-8 place-items-center rounded-full border-2 border-ink bg-brand text-xs font-semibold text-white">

@@ -72,6 +72,16 @@ export default async function AprovacoesPage({
     | undefined;
   const databaseConfigured = isDatabaseConfigured();
   const initialFilters = readInitialFilters(await searchParams);
+  // "Faturável" virou definição de gestão, flagável por dia na aprovação. Só
+  // papéis de gestão/financeiro (BILLABLE_MANAGER_ROLES) editam — o mesmo
+  // conjunto que alcança esta tela; o servidor (setEntryBillable) reautoriza.
+  const canEditBillable = hasRole(user, [
+    "ADMIN",
+    "AREA_MANAGER",
+    "PROJECT_MANAGER",
+    "FINANCE",
+  ]);
+  let billableAttachmentsAvailable = false;
 
   if (databaseConfigured) {
     // Lazy import so Prisma is never loaded on code paths without a database.
@@ -79,6 +89,8 @@ export default async function AprovacoesPage({
     const { listExpenseApprovalItems } = await import("@/lib/db/expenses");
     const { resolveDbUser } = await import("@/lib/db/users");
     const { getReportFilterOptions } = await import("@/lib/db/reports");
+    const { isStorageConfigured } = await import("@/lib/storage/provider");
+    billableAttachmentsAvailable = isStorageConfigured();
 
     const unrestricted = hasRole(user, ["ADMIN", "AREA_MANAGER"]);
     const isProjectManager = hasRole(user, "PROJECT_MANAGER");
@@ -129,6 +141,8 @@ export default async function AprovacoesPage({
         demoBanner={!databaseConfigured}
         initialFilters={initialFilters}
         reportFilterOptions={reportFilterOptions}
+        canEditBillable={canEditBillable}
+        billableAttachmentsAvailable={billableAttachmentsAvailable}
       />
     </div>
   );
