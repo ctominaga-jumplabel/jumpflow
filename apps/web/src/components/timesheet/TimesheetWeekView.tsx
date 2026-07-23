@@ -842,14 +842,14 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
       const { created, skippedExisting, skippedOutOfAllocation, skippedNoDefault } =
         result.data;
       const parts = [`${created} lancamento(s) criado(s)`];
-      if (skippedExisting > 0) parts.push(`${skippedExisting} ja existia(m)`);
+      if (skippedExisting > 0) parts.push(`${skippedExisting} já existia(m)`);
       if (skippedOutOfAllocation > 0) {
-        parts.push(`${skippedOutOfAllocation} fora da vigencia`);
+        parts.push(`${skippedOutOfAllocation} fora da vigência`);
       }
-      if (skippedNoDefault > 0) parts.push("sem padrao configurado");
+      if (skippedNoDefault > 0) parts.push("sem padrão configurado");
       router.refresh();
       setDefaultOpen(false);
-      notify(created > 0 ? "success" : "info", `Padrao aplicado: ${parts.join(" · ")}.`);
+      notify(created > 0 ? "success" : "info", `Padrão aplicado: ${parts.join(" · ")}.`);
     });
   }
 
@@ -952,14 +952,14 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
           setFormOpen(false);
           const { created, skippedExisting, skippedOutOfAllocation } =
             result.data;
-          const parts = [`${created} lancamento(s) criado(s)`];
-          if (skippedExisting > 0) parts.push(`${skippedExisting} ja existia(m)`);
+          const parts = [`${created} lançamento(s) criado(s)`];
+          if (skippedExisting > 0) parts.push(`${skippedExisting} já existia(m)`);
           if (skippedOutOfAllocation > 0) {
-            parts.push(`${skippedOutOfAllocation} fora da vigencia`);
+            parts.push(`${skippedOutOfAllocation} fora da vigência`);
           }
           notify(
             created > 0 ? "success" : "info",
-            `Lancamento semanal: ${parts.join(" · ")}.`,
+            `Lançamento semanal: ${parts.join(" · ")}.`,
           );
         } else {
           notify("warning", result.message);
@@ -1308,7 +1308,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
               disabled={isPending || defaultOptions.length === 0}
               onClick={openDefault}
             >
-              Padrao da semana
+              Padrão da semana
             </ActionButton>
           ) : null}
           <ActionButton
@@ -1513,7 +1513,6 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
         onSubmit={handleSubmitEntry}
         onDelete={!isDemo && editingRow ? handleDeleteEntry : undefined}
         busy={isPending}
-        canEditBillable={canEditBillable}
         attachmentsAvailable={attachmentsAvailable}
         initialAttachment={editAttachment}
       />
@@ -1521,8 +1520,8 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
       <Modal
         open={defaultOpen}
         onClose={() => setDefaultOpen(false)}
-        title="Padrao da semana"
-        description="Configure a alocacao e aplique nos dias selecionados desta semana."
+        title="Padrão da semana"
+        description="Configure a alocação e aplique nos dias selecionados desta semana."
         footer={
           <>
             <ActionButton
@@ -1539,7 +1538,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
               disabled={isPending}
               onClick={saveDefault}
             >
-              Salvar padrao
+              Salvar padrão
             </ActionButton>
             <ActionButton
               variant="primary"
@@ -1562,7 +1561,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
 
           <div>
             <label htmlFor="default-allocation" className="mb-1 block text-xs font-semibold text-medium">
-              Alocacao
+              Alocação
             </label>
             <select
               id="default-allocation"
@@ -1616,7 +1615,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
 
           <fieldset>
             <legend className="mb-2 text-xs font-semibold text-medium">
-              Dias aplicaveis
+              Dias aplicáveis
             </legend>
             <div className="grid grid-cols-4 gap-2 sm:grid-cols-7">
               {WEEKDAY_OPTIONS.map((day) => (
@@ -1659,24 +1658,9 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
             />
           </div>
 
-          {/* "Faturável" do padrão semanal também é oculto para consultores
-              puros (Onda B); o valor segue no submit (default true). */}
-          {canEditBillable ? (
-            <label className="flex items-center gap-2 text-sm text-medium">
-              <input
-                type="checkbox"
-                checked={defaultValue.billable}
-                onChange={(event) =>
-                  setDefaultValue((value) => ({
-                    ...value,
-                    billable: event.target.checked,
-                  }))
-                }
-                className="size-4 rounded border-border text-brand focus:ring-brand"
-              />
-              Faturável
-            </label>
-          ) : null}
+          {/* "Faturável" NÃO é mais definido no apontamento/padrão: virou
+              definição de gestão, flagável por dia na tela de Aprovação. O
+              padrão entra como faturável (default true); a gestão decide depois. */}
 
           <p className="text-xs text-soft">
             Prévia: {selectedDefaultOption()?.name ?? "alocação"} ·{" "}

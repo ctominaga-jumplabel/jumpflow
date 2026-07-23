@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   BadgeDollarSign,
   Building2,
@@ -76,6 +77,11 @@ export interface ConsultantDirectoryProps {
   consultants?: Consultant[];
   canManagePeople?: boolean;
   canManageFinancials?: boolean;
+  /**
+   * Consultor a abrir automaticamente ao montar (ex.: retorno da criacao em
+   * `/app/consultores/novo?...`). Abre o perfil para completar os dados.
+   */
+  initialConsultantId?: string;
 }
 
 /**
@@ -89,7 +95,9 @@ export function ConsultantDirectory({
   consultants = allConsultants,
   canManagePeople = false,
   canManageFinancials = false,
+  initialConsultantId,
 }: ConsultantDirectoryProps) {
+  const router = useRouter();
   const [search, setSearch] = useState("");
   const [seniority, setSeniority] = useState<Seniority | "ALL">("ALL");
   const [skillId, setSkillId] = useState<string>("ALL");
@@ -140,6 +148,24 @@ export function ConsultantDirectory({
     setProfile(null);
     setAdHoc(null);
   }
+
+  // Abre o perfil do consultor recem-criado (retorno de /novo) uma unica vez. O
+  // openDetails e disparado num microtask para nao chamar setState de forma
+  // sincrona dentro do efeito (react-hooks/set-state-in-effect).
+  const autoOpenedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!initialConsultantId || autoOpenedRef.current === initialConsultantId) {
+      return;
+    }
+    const target = consultants.find((c) => c.id === initialConsultantId);
+    if (!target) return;
+    autoOpenedRef.current = initialConsultantId;
+    const timer = setTimeout(() => {
+      void openDetails(target);
+    }, 0);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialConsultantId, consultants]);
 
   const skillOptions = useMemo(
     () => distinctSkills(consultants),
@@ -254,9 +280,16 @@ export function ConsultantDirectory({
           </>
         }
         actions={
-          <ActionButton variant="primary" size="sm" icon={UserPlus}>
-            Novo consultor
-          </ActionButton>
+          canManagePeople ? (
+            <ActionButton
+              variant="primary"
+              size="sm"
+              icon={UserPlus}
+              onClick={() => router.push("/app/consultores/novo")}
+            >
+              Novo consultor
+            </ActionButton>
+          ) : null
         }
       />
 

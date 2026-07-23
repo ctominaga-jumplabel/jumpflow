@@ -7,6 +7,8 @@ import type {
   CltContractKind,
   ConsultantContractType,
   ConsultantDocumentType,
+  ConsultantSeniority,
+  ConsultantStatusValue,
   EducationDegree,
   Gender,
   HourBankEntryKind,
@@ -19,6 +21,28 @@ export const contractTypeLabels: Record<ConsultantContractType, string> = {
   CLT: "CLT",
   PJ: "PJ",
   CLT_FLEX: "CLT FLEX",
+};
+
+/** Rotulos pt-BR de senioridade (espelha o enum Prisma `Seniority`). */
+export const seniorityLabels: Record<ConsultantSeniority, string> = {
+  INTERN: "Estagiario",
+  JUNIOR: "Junior",
+  MID_LEVEL: "Pleno",
+  SENIOR: "Senior",
+  SPECIALIST: "Especialista",
+  PRINCIPAL: "Principal",
+  TRAINEE: "Trainee",
+  TECH_LEAD: "Tech Lead",
+  ARCHITECT: "Arquiteto",
+  COORDINATOR: "Coordenador",
+  MANAGER: "Gerente",
+};
+
+/** Rotulos pt-BR de situacao do consultor. */
+export const consultantStatusLabels: Record<ConsultantStatusValue, string> = {
+  ACTIVE: "Ativo",
+  INACTIVE: "Inativo",
+  ON_LEAVE: "Afastado",
 };
 
 export const genderLabels: Record<Gender, string> = {

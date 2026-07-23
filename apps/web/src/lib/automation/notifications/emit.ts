@@ -20,6 +20,7 @@ import {
   type ResolvedRecipient,
 } from "./dispatch";
 import { resolveRecipients, type ResolveContext } from "./resolve";
+import { persistInAppNotifications } from "./in-app";
 
 export type NotificationEventKey =
   | "HOURS_RELEASED"
@@ -117,6 +118,10 @@ export async function emitNotification(
     if (fragments.length === 0) return { ...empty, skipped };
 
     const results = await dispatchNotifications(fragments);
+
+    // Item 3: persist an in-app copy for recipients that map to a real user.
+    // Best-effort and isolated — never affects delivery, logging or the return.
+    await persistInAppNotifications(fragments, input.event);
 
     // Log each delivery for idempotency + observability.
     let sent = 0;

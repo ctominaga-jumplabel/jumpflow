@@ -806,6 +806,9 @@ model User {
   // Aceite dos Termos de Uso (EP-M08). Um registro por versao aceita; a versao
   // vigente exigida esta em apps/web/src/lib/terms (CURRENT_TERMS_VERSION).
   termsAcceptances            TermsAcceptance[]           @relation("TermsAcceptanceUser")
+  // Central de notificacoes in-app (item 3): notificacoes recebidas por este
+  // usuario. Removida em cascata com o usuario.
+  appNotifications            AppNotification[]           @relation("AppNotificationUser")
   createdAt                   DateTime                    @default(now())
   updatedAt                   DateTime                    @updatedAt
 }
@@ -2778,6 +2781,30 @@ model AutomationEmailLog {
 enum NotificationChannel {
   EMAIL
   TEAMS
+}
+
+/// Notificacao in-app por usuario — alimenta a central de notificacoes do topo
+/// (item 3). Criada em paralelo as entregas EMAIL/TEAMS sempre que um
+/// destinatario resolvido corresponde a um usuario real da plataforma. `readAt`
+/// nulo = nao lida (fonte do badge do sino). Best-effort: falha de criacao nunca
+/// interrompe a operacao de negocio nem o envio de e-mail.
+model AppNotification {
+  id        String            @id @default(cuid())
+  userId    String
+  user      User              @relation("AppNotificationUser", fields: [userId], references: [id], onDelete: Cascade)
+  event     NotificationEvent
+  /// Titulo curto exibido na lista (ex.: "Fechamento operacional concluido").
+  title     String
+  /// Texto complementar opcional (resumo em uma ou duas linhas).
+  body      String?
+  /// Deep-link relativo para a tela relevante (ex.: /app/aprovacoes). Opcional.
+  href      String?
+  /// Nulo enquanto nao lida; preenchido quando o usuario marca como lida.
+  readAt    DateTime?
+  createdAt DateTime          @default(now())
+
+  @@index([userId, readAt])
+  @@index([userId, createdAt])
 }
 
 /// Eventos operacionais que disparam notificacao. Estender conforme as ondas do

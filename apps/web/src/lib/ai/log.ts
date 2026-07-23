@@ -18,7 +18,11 @@ export type AiLlmFeature =
   | "SCORE_NARRATIVE"
   // Melhoria #4 (Checkpoint Intelligence, F4): extração de insights do corpo
   // do checkpoint (skills/oportunidades/cases) para curadoria humana.
-  | "CHECKPOINT_EXTRACTION";
+  | "CHECKPOINT_EXTRACTION"
+  // Skills Intelligence: leitura assistida de um currículo em PDF para PROPOR
+  // bio, experiências e skills — sempre com confirmação humana (nunca grava
+  // skill final sozinha).
+  | "CURRICULUM_EXTRACTION";
 
 export interface AiUsageLog {
   feature: AiLlmFeature;

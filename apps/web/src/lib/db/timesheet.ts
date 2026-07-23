@@ -1,7 +1,7 @@
 import { prisma, Prisma } from "@jumpflow/database";
 import { isDevAuthEnabled } from "@/lib/auth/dev";
 import type { AppUser } from "@/lib/auth/types";
-import type { ApprovalItem } from "@/lib/mock-data/approvals";
+import type { ApprovalHoursEntry, ApprovalItem } from "@/lib/mock-data/approvals";
 import {
   activityLabelOf,
   deriveWeekStatus,
@@ -661,6 +661,7 @@ export async function listHoursApprovalItems(
     clientName: string;
     periodStart: Date;
     entryIds: string[];
+    entries: ApprovalHoursEntry[];
     hours: number;
     activities: Set<string>;
     submittedAt: Date | null;
@@ -677,6 +678,7 @@ export async function listHoursApprovalItems(
         clientName: entry.project.client.name,
         periodStart: entry.period.startDate,
         entryIds: [],
+        entries: [],
         hours: 0,
         activities: new Set(),
         submittedAt: null,
@@ -684,6 +686,16 @@ export async function listHoursApprovalItems(
       groups.set(key, group);
     }
     group.entryIds.push(entry.id);
+    // Detalhe por DIA para a marcação de "Faturável" por dia na aprovação
+    // (mesmo quando o envio foi semanal, cada lançamento é um dia).
+    group.entries.push({
+      id: entry.id,
+      date: toIsoDate(entry.date),
+      hours: Number(entry.hours),
+      activityLabel: activityLabelFor(entry.activityType),
+      billable: entry.billable,
+      nonBillableReason: entry.nonBillableReason ?? undefined,
+    });
     group.hours += Number(entry.hours);
     group.activities.add(activityLabelFor(entry.activityType));
     if (
@@ -699,6 +711,7 @@ export async function listHoursApprovalItems(
     type: "HOURS",
     source: "db",
     entryIds: g.entryIds,
+    entries: [...g.entries].sort((a, b) => a.date.localeCompare(b.date)),
     consultantName: g.consultantName,
     projectName: g.projectName,
     clientName: g.clientName,
@@ -764,6 +777,16 @@ export async function listHoursApprovalItems(
       type: "HOURS",
       source: "db",
       entryIds: [entry.id],
+      entries: [
+        {
+          id: entry.id,
+          date: toIsoDate(entry.date),
+          hours: Number(entry.hours),
+          activityLabel: activityLabelFor(entry.activityType),
+          billable: entry.billable,
+          nonBillableReason: entry.nonBillableReason ?? undefined,
+        },
+      ],
       consultantName: entry.consultant.name,
       projectName: entry.project.name,
       clientName: entry.project.client.name,

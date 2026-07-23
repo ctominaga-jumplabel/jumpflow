@@ -529,6 +529,7 @@ import {
   getTimeEntryAttachmentUrl,
   removeTimeEntryAttachment,
   saveTimesheetDefault,
+  setEntryBillable,
   submitWeek,
   updateTimeEntry,
 } from "./actions";
@@ -918,6 +919,107 @@ describe("billable — enforcement server-side por papel", () => {
     expect(result.ok).toBe(true);
     expect(h.store.entries[0].billable).toBe(true);
     expect(h.store.entries[0].nonBillableReason).toBeNull();
+  });
+});
+
+// "Faturável" virou definição de gestão, flagável POR DIA na tela de Aprovação.
+// setEntryBillable altera billable/nonBillableReason de UM lançamento, com authz
+// de papel + escopo de projeto no servidor, auditoria e idempotência.
+describe("setEntryBillable — definição de gestão por dia (na aprovação)", () => {
+  it("gestor marca um dia como NÃO faturável COM justificativa → persiste + audita", async () => {
+    h.store.currentUser.roles = ["AREA_MANAGER"];
+    seedCurrentPeriod("SUBMITTED");
+    const entry = seedEntry({ status: "SUBMITTED", billable: true });
+    const result = await setEntryBillable({
+      entryId: entry.id,
+      billable: false,
+      nonBillableReason: "Retrabalho não cobrável",
+    });
+    expect(result.ok).toBe(true);
+    expect(h.store.entries[0].billable).toBe(false);
+    expect(h.store.entries[0].nonBillableReason).toBe("Retrabalho não cobrável");
+    expect(
+      h.store.audits.some((a) => a.action === "TIME_ENTRY_MARKED_NON_BILLABLE"),
+    ).toBe(true);
+  });
+
+  it("marca NÃO faturável SEM justificativa → recusa (COMMENT_REQUIRED), nada muda", async () => {
+    h.store.currentUser.roles = ["ADMIN"];
+    seedCurrentPeriod("SUBMITTED");
+    const entry = seedEntry({ status: "SUBMITTED", billable: true });
+    const result = await setEntryBillable({ entryId: entry.id, billable: false });
+    expect(result).toMatchObject({ ok: false, error: "COMMENT_REQUIRED" });
+    expect(h.store.entries[0].billable).toBe(true);
+  });
+
+  it("voltar a faturável limpa o motivo e remove o anexo de justificativa", async () => {
+    h.store.currentUser.roles = ["FINANCE"];
+    seedCurrentPeriod("SUBMITTED");
+    const entry = seedEntry({
+      status: "SUBMITTED",
+      billable: false,
+      nonBillableReason: "Motivo antigo",
+    });
+    h.store.justificationAttachments.push({
+      timeEntryId: entry.id,
+      fileName: "just.pdf",
+      contentType: "application/pdf",
+      size: 10,
+      storageBucket: "billable-justifications",
+      storageKey: `billable-justifications/${entry.id}/just.pdf`,
+      uploadedByUserId: "user-1",
+    });
+    const result = await setEntryBillable({ entryId: entry.id, billable: true });
+    expect(result.ok).toBe(true);
+    expect(h.store.entries[0].billable).toBe(true);
+    expect(h.store.entries[0].nonBillableReason).toBeNull();
+    expect(h.store.justificationAttachments).toHaveLength(0);
+  });
+
+  it("período CLOSED → recusa (PERIOD_CLOSED)", async () => {
+    h.store.currentUser.roles = ["ADMIN"];
+    seedCurrentPeriod("CLOSED");
+    const entry = seedEntry({ status: "APPROVED", billable: true });
+    const result = await setEntryBillable({
+      entryId: entry.id,
+      billable: false,
+      nonBillableReason: "Tarde demais",
+    });
+    expect(result).toMatchObject({ ok: false, error: "PERIOD_CLOSED" });
+    expect(h.store.entries[0].billable).toBe(true);
+  });
+
+  it("PROJECT_MANAGER de OUTRO projeto → recusa (FORBIDDEN)", async () => {
+    h.store.currentUser.roles = ["PROJECT_MANAGER"];
+    seedCurrentPeriod("SUBMITTED");
+    // proj-other é gerenciado por "someone-else" (≠ user-1 da Ana, via dev email).
+    const entry = seedEntry({
+      status: "SUBMITTED",
+      billable: true,
+      projectId: "proj-other",
+    });
+    const result = await setEntryBillable({
+      entryId: entry.id,
+      billable: false,
+      nonBillableReason: "Motivo",
+    });
+    expect(result).toMatchObject({ ok: false, error: "FORBIDDEN" });
+    expect(h.store.entries[0].billable).toBe(true);
+  });
+
+  it("idempotente: sem mudança real não gera auditoria", async () => {
+    h.store.currentUser.roles = ["ADMIN"];
+    seedCurrentPeriod("SUBMITTED");
+    const entry = seedEntry({ status: "SUBMITTED", billable: true });
+    const result = await setEntryBillable({ entryId: entry.id, billable: true });
+    expect(result.ok).toBe(true);
+    expect(
+      h.store.audits.some(
+        (a) =>
+          a.action === "TIME_ENTRY_BILLABLE_CHANGED" ||
+          a.action === "TIME_ENTRY_MARKED_NON_BILLABLE",
+      ),
+    ).toBe(false);
   });
 });
 

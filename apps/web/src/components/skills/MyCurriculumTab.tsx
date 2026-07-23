@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { FileText, Printer } from "lucide-react";
 import { ActionButton } from "@/components/ui/ActionButton";
 import { ConsultantCurriculumView } from "@/components/consultants/ConsultantCurriculumView";
+import { MySkillsEditor } from "@/components/skills/MySkillsEditor";
+import { CurriculumImportPanel } from "@/components/skills/CurriculumImportPanel";
 import {
   ConsultantExperienceEditor,
   type ExperienceDraft,
@@ -41,13 +43,19 @@ type Status =
  * financeiros. Sem geracao de snapshot (RH-only). Estado vazio amigavel quando
  * o usuario nao tem cadastro de consultor.
  */
-export function MyCurriculumTab() {
+export function MyCurriculumTab({
+  aiImportEnabled = false,
+}: {
+  aiImportEnabled?: boolean;
+}) {
   const [status, setStatus] = useState<Status>({ kind: "loading" });
   const [headline, setHeadline] = useState("");
   const [summary, setSummary] = useState("");
   const [experiences, setExperiences] = useState<ConsultantExperienceView[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  // Força remontar as skills próprias após aplicar um import (recarrega dados).
+  const [skillsRefreshKey, setSkillsRefreshKey] = useState(0);
 
   async function reloadExperiences() {
     const res = await loadMyExperiences();
@@ -183,6 +191,15 @@ export function MyCurriculumTab() {
 
       {message ? <p className="text-sm text-medium">{message}</p> : null}
 
+      {/* Importar currículo por IA (atrás de flag). Some quando indisponível. */}
+      <CurriculumImportPanel
+        enabled={aiImportEnabled}
+        onApplied={() => {
+          setSkillsRefreshKey((key) => key + 1);
+          void fetchCurriculum();
+        }}
+      />
+
       {/* Bio curada — unica parte editavel pelo proprio consultor. */}
       <div className="space-y-2 rounded-md border border-border p-3">
         <div className="text-sm font-semibold text-strong">Sua bio</div>
@@ -232,6 +249,9 @@ export function MyCurriculumTab() {
           onMessage={setMessage}
         />
       </div>
+
+      {/* Minhas skills — autosserviço (declaração própria, entra como PENDING). */}
+      <MySkillsEditor key={skillsRefreshKey} />
 
       <ConsultantCurriculumView cv={cv} />
     </section>
