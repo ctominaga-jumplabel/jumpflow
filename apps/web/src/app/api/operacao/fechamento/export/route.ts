@@ -21,12 +21,19 @@ function clampInt(
     : fallback;
 }
 
+/** Treat ""/"ALL" as absent. */
+function opt(value: string | null): string | undefined {
+  const v = value?.trim();
+  return v && v !== "ALL" ? v : undefined;
+}
+
 /**
  * `.xlsx` export of the Fechamento Operacional (Onda 6). Gated by the SAME
  * permission as the screen (`OPERACAO_FECHAMENTO` view) and reuses
- * `listOperationClosings` for the selected month (m/y params). The overview is
- * flattened to one row per allocated consultant (the DP follow-up view). No
- * financial fields, so no masking. Audits `OPERATION_CLOSING_EXPORTED`.
+ * `listOperationClosings` for the selected month (m/y params) honoring the
+ * shared filters (cliente/projeto/consultor/status de cliente e projeto). The
+ * overview is flattened to one row per allocated consultant (the DP follow-up
+ * view). No financial fields, so no masking. Audits `OPERATION_CLOSING_EXPORTED`.
  */
 export async function GET(request: Request) {
   const user = await requirePermission("OPERACAO_FECHAMENTO", "view");
@@ -38,7 +45,15 @@ export async function GET(request: Request) {
   const year = clampInt(url.searchParams.get("y"), 2020, 2100, now.getFullYear());
 
   const { listOperationClosings } = await import("@/lib/db/operation-closing");
-  const overview = await listOperationClosings({ month, year });
+  const overview = await listOperationClosings({
+    month,
+    year,
+    clientId: opt(url.searchParams.get("clientId")),
+    projectId: opt(url.searchParams.get("projectId")),
+    consultantId: opt(url.searchParams.get("consultantId")),
+    clientStatus: opt(url.searchParams.get("clientStatus")),
+    projectStatus: opt(url.searchParams.get("projectStatus")),
+  });
   const rows = buildOperationClosingExportRows(overview);
 
   const monthSlug = `${year}-${String(month).padStart(2, "0")}`;

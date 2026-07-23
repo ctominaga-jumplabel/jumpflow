@@ -7,6 +7,7 @@ import { DataTable, type DataTableColumn } from "@/components/ui/DataTable";
 import { FeedbackBanner, useFeedback } from "@/components/ui/Feedback";
 import { SectionPanel } from "@/components/ui/SectionPanel";
 import { StatusBadge, type StatusTone } from "@/components/ui/StatusBadge";
+import { ReportPagination } from "@/components/reports/ReportPagination";
 import { formatHours } from "@/lib/format";
 import {
   activityLabelOf,
@@ -48,31 +49,26 @@ function formatDecided(iso: string | null): string {
 
 export interface OperationConsultantDetailTableProps {
   detail: OperationClosingDetailView;
-  monthLabel: string;
-  /** Currently selected consultant id (from ?consultant=), for the filter. */
-  selectedConsultantId?: string;
-  /** Month/year query params, preserved when the filter navigates via GET. */
-  month: number;
-  year: number;
-  /** `.xlsx` export href reflecting the current consultant filter. */
+  /** `.xlsx` export href reflecting the current filters. */
   exportHref?: string;
+  /** Pagination hrefs (query string preserved) built by the page. */
+  prevHref: string;
+  nextHref: string;
 }
 
 /**
- * "Detalhamento por consultor" tab of the Fechamento Operacional: a flat table
- * of every launch in the month across all projects, with the columns the DP
+ * "Detalhamento por consultor" tab of the Fechamento Operacional: the current
+ * page of launches matching the shared filter panel, with the columns the DP
  * asked for (Data, Consultor, Cliente/Projeto, Atividade, Horas, Faturável,
- * Status, Decidido em). The consultant filter drives a GET navigation (server
- * re-reads), preserving the month and the active tab. Exception launches (fora
- * do Dia Útil ou com anexo) are highlighted to match the apuração.
+ * Status, Decidido em). Filters + sorting + pagination all live in the query
+ * string (driven by the panel above the tabs). Exception launches (fora do "Dia
+ * Útil" ou com anexo) are highlighted to match the apuração.
  */
 export function OperationConsultantDetailTable({
   detail,
-  monthLabel,
-  selectedConsultantId,
-  month,
-  year,
   exportHref,
+  prevHref,
+  nextHref,
 }: OperationConsultantDetailTableProps) {
   const { feedback, notify } = useFeedback();
   const [isPending, startTransition] = useTransition();
@@ -143,9 +139,7 @@ export function OperationConsultantDetailTable({
       key: "hours",
       header: "Horas",
       align: "right",
-      cell: (r) => (
-        <span className="tabular-nums">{formatHours(r.hours)}</span>
-      ),
+      cell: (r) => <span className="tabular-nums">{formatHours(r.hours)}</span>,
     },
     {
       key: "billable",
@@ -159,9 +153,7 @@ export function OperationConsultantDetailTable({
       key: "status",
       header: "Status",
       cell: (r) => (
-        <StatusBadge
-          tone={entryStatusTone[r.status as TimeEntryStatus] ?? "neutral"}
-        >
+        <StatusBadge tone={entryStatusTone[r.status as TimeEntryStatus] ?? "neutral"}>
           {statusLabel(r.status)}
         </StatusBadge>
       ),
@@ -184,46 +176,13 @@ export function OperationConsultantDetailTable({
 
       <SectionPanel
         title="Detalhamento por consultor"
-        description={`Todos os lançamentos do mês, por consultor — ${monthLabel}`}
-        action={
-          <div className="flex flex-wrap items-center gap-2">
-            {/* GET form: server re-reads narrowed to the consultant, keeping the
-                month and this tab active on reload. */}
-            <form className="flex items-center gap-2">
-              <input type="hidden" name="m" value={month} />
-              <input type="hidden" name="y" value={year} />
-              <input type="hidden" name="tab" value="detalhamento" />
-              <label className="sr-only" htmlFor="op-detail-consultant">
-                Consultor
-              </label>
-              <select
-                id="op-detail-consultant"
-                name="consultant"
-                defaultValue={selectedConsultantId ?? ""}
-                className="h-9 rounded-md border border-border bg-surface px-2.5 text-xs font-semibold text-medium"
-              >
-                <option value="">Todos os consultores</option>
-                {detail.consultantOptions.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="submit"
-                className="h-9 rounded-md border border-border bg-surface px-3 text-xs font-semibold text-strong shadow-[2px_2px_0_0_var(--color-ink)]"
-              >
-                Filtrar
-              </button>
-            </form>
-            {exportHref ? <ExportExcelButton href={exportHref} /> : null}
-          </div>
-        }
+        description="Lançamentos do período filtrado, por consultor."
+        action={exportHref ? <ExportExcelButton href={exportHref} /> : null}
       >
         <div className="flex flex-wrap gap-3 px-4 pb-3 text-xs text-soft">
           <span>
             <span className="font-semibold text-strong">
-              {detail.rows.length}
+              {detail.pagination.total}
             </span>{" "}
             lançamentos
           </span>
@@ -248,11 +207,14 @@ export function OperationConsultantDetailTable({
           caption="Detalhamento de lançamentos por consultor"
           empty={
             <p className="text-center text-sm text-soft">
-              {selectedConsultantId
-                ? "Nenhum lançamento deste consultor no mês."
-                : "Nenhum lançamento neste mês."}
+              Nenhum lançamento para os filtros aplicados.
             </p>
           }
+        />
+        <ReportPagination
+          pagination={detail.pagination}
+          prevHref={prevHref}
+          nextHref={nextHref}
         />
       </SectionPanel>
     </div>

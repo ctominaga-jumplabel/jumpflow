@@ -1,5 +1,15 @@
 import { prisma } from "@jumpflow/database";
 import { toIsoDate } from "@/lib/timesheet/week";
+import { buildHoursWhere, type ReportScope } from "@/lib/db/reports";
+import {
+  resolveDetailRange,
+  HOURS_DEFAULT_DIRECTION,
+  HOURS_DEFAULT_SORT,
+  DEFAULT_PAGE_SIZE,
+  type HoursReportFilter,
+  type HoursSortField,
+} from "@/lib/reports/schemas";
+import type { PaginationMeta } from "@/lib/reports/types";
 import {
   classifyConsultantReadiness,
   isExceptionEntry,
@@ -11,11 +21,52 @@ import {
   type OperationClosingOverview,
   type OperationClosingRow,
   type OperationConsultantDetail,
-  type OperationDetailConsultantOption,
   type OperationDetailRow,
   type OperationEntryDetail,
+  type OperationFilterOptions,
   type OperationReadiness,
 } from "@/lib/operations/closing";
+
+/**
+ * The operational screen shows ALL projects/consultants to anyone holding the
+ * OPERACAO_FECHAMENTO permission (RBAC is the page/route's job), so the detail
+ * query reuses the Hours report `where` builder under a BROAD scope with NO
+ * financial columns and NO status restriction.
+ */
+const OPERATION_SCOPE: ReportScope = {
+  broad: true,
+  includeFinancials: false,
+  financeHoursLimited: false,
+};
+
+/** Shared filters that narrow BOTH tabs (per-project closing + detail). */
+export interface OperationClosingFilters {
+  clientId?: string;
+  projectId?: string;
+  consultantId?: string;
+  clientStatus?: string;
+  projectStatus?: string;
+}
+
+/** Whitelisted detail sort → Prisma orderBy (mirrors hoursOrderBy in reports). */
+function detailOrderBy(
+  sort: HoursSortField,
+  direction: "asc" | "desc",
+): Record<string, unknown>[] {
+  switch (sort) {
+    case "hours":
+      return [{ hours: direction }, { date: "asc" }];
+    case "consultantName":
+      return [{ consultant: { name: direction } }, { date: "asc" }];
+    case "projectName":
+      return [{ project: { name: direction } }, { date: "asc" }];
+    case "status":
+      return [{ status: direction }, { date: "asc" }];
+    case "date":
+    default:
+      return [{ date: direction }, { createdAt: "asc" }];
+  }
+}
 
 /**
  * Latest Approval datetime (createdAt) per TimeEntry, as an ISO string. Mirrors
@@ -157,12 +208,18 @@ export async function getOperationReadiness(
  * Overview for the dedicated monthly screen: every relevant project with its
  * readiness and operational closing status. Relevant = ACTIVE projects, plus
  * any project that logged hours or already has a closing record this month.
+ *
+ * The shared filters narrow which projects appear: `clientId`/`projectId`/
+ * `clientStatus`/`projectStatus` push into the project query; `consultantId`
+ * keeps only projects where that consultant is on the month's team (allocated
+ * or logged). Readiness always reflects the WHOLE team (the closing is about the
+ * project's month, not one consultant).
  */
-export async function listOperationClosings(input: {
-  month: number;
-  year: number;
-}): Promise<OperationClosingOverview> {
-  const { month, year } = input;
+export async function listOperationClosings(
+  input: { month: number; year: number } & OperationClosingFilters,
+): Promise<OperationClosingOverview> {
+  const { month, year, clientId, projectId, consultantId, clientStatus, projectStatus } =
+    input;
   const { start, end } = monthBounds(month, year);
 
   const [allocations, entries, closings] = await Promise.all([
@@ -241,10 +298,26 @@ export async function listOperationClosings(input: {
     ...byProject.keys(),
     ...closingByProject.keys(),
   ]);
+
+  // Shared filters (both tabs). `consultantId` narrows to projects where that
+  // consultant is on the month's team; otherwise keep ACTIVE ∪ touched.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const constraints: Record<string, any>[] = [];
+  if (consultantId) {
+    const consultantProjectIds = [...byProject.entries()]
+      .filter(([, team]) => team.has(consultantId))
+      .map(([id]) => id);
+    constraints.push({ id: { in: consultantProjectIds } });
+  } else {
+    constraints.push({ OR: [{ status: "ACTIVE" }, { id: { in: [...touchedIds] } }] });
+  }
+  if (projectId) constraints.push({ id: projectId });
+  if (clientId) constraints.push({ clientId });
+  if (projectStatus) constraints.push({ status: projectStatus });
+  if (clientStatus) constraints.push({ client: { status: clientStatus } });
+
   const projects = await prisma.project.findMany({
-    where: {
-      OR: [{ status: "ACTIVE" }, { id: { in: [...touchedIds] } }],
-    },
+    where: { AND: constraints },
     select: { id: true, name: true, client: { select: { name: true } } },
     orderBy: [{ client: { name: "asc" } }, { name: "asc" }],
   });
@@ -401,76 +474,42 @@ export async function getOperationClosingDetail(input: {
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
-/**
- * Flat, consultant-centric detail of the month for the "Detalhamento por
- * consultor" tab: every time entry across ALL projects in the month, with the
- * columns the DP asked for (date, consultant, client/project, activity, hours,
- * billable, status and the decision datetime). Optionally narrowed to a single
- * consultant; the consultant option list is always built from the UNFILTERED
- * set so selecting one never collapses the dropdown.
- *
- * Same RBAC contract as the overview (gated by the page/route via
- * `OPERACAO_FECHAMENTO` view). Bulk queries only (no N+1): one pass over the
- * month's entries plus one batched Approval read for the decision dates.
- */
-export async function listOperationClosingDetail(input: {
-  month: number;
-  year: number;
-  consultantId?: string;
-}): Promise<OperationClosingDetailView> {
-  const { month, year, consultantId } = input;
-  const { start, end } = monthBounds(month, year);
+/** Cap for the "export all" path (mirrors reports' EXPORT_ALL_LIMIT). */
+const DETAIL_EXPORT_LIMIT = 50_000;
 
-  const entries = await prisma.timeEntry.findMany({
-    where: { date: { gte: start, lt: end } },
-    orderBy: [{ date: "asc" }, { consultantId: "asc" }],
-    select: {
-      id: true,
-      consultantId: true,
-      date: true,
-      hours: true,
-      status: true,
-      activityType: true,
-      billable: true,
-      attachment: { select: { id: true } },
-      consultant: { select: { name: true } },
-      project: {
-        select: { name: true, client: { select: { name: true } } },
-      },
-    },
-  });
+const DETAIL_SELECT = {
+  id: true,
+  consultantId: true,
+  date: true,
+  hours: true,
+  status: true,
+  activityType: true,
+  billable: true,
+  attachment: { select: { id: true } },
+  consultant: { select: { name: true } },
+  project: { select: { name: true, client: { select: { name: true } } } },
+} as const;
 
-  // Consultant options come from the full (unfiltered) month so the filter never
-  // hides the consultant you just picked.
-  const optionMap = new Map<string, string>();
-  for (const e of entries) {
-    if (!optionMap.has(e.consultantId)) {
-      optionMap.set(e.consultantId, e.consultant?.name ?? "Consultor");
-    }
-  }
-  const consultantOptions: OperationDetailConsultantOption[] = [
-    ...optionMap.entries(),
-  ]
-    .map(([id, name]) => ({ id, name }))
-    .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+// Raw row shape from DETAIL_SELECT (Prisma infers structurally); kept loose.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type DetailRaw = any;
 
-  const filtered = consultantId
-    ? entries.filter((e) => e.consultantId === consultantId)
-    : entries;
+/** Build the shared detail `where` from the report-style filter + period. */
+function detailWhere(
+  filter: HoursReportFilter,
+  now: Date,
+): Record<string, unknown> {
+  const range = resolveDetailRange(filter, now);
+  return buildHoursWhere(OPERATION_SCOPE, { ...filter, ...range });
+}
 
-  const decidedAt = await loadDecidedAt(filtered.map((e) => e.id));
-
-  let totalHours = 0;
-  let totalExceptions = 0;
-  const rows: OperationDetailRow[] = filtered.map((e) => {
+/** Map raw rows to DTOs, resolving the decision datetime in one batched read. */
+async function mapDetailRows(
+  raw: DetailRaw[],
+): Promise<OperationDetailRow[]> {
+  const decidedAt = await loadDecidedAt(raw.map((e: DetailRaw) => e.id));
+  return raw.map((e: DetailRaw) => {
     const hasAttachment = e.attachment != null;
-    const isException = isExceptionEntry({
-      activityType: e.activityType,
-      hasAttachment,
-    });
-    const hours = round2(Number(e.hours ?? 0));
-    totalHours = round2(totalHours + hours);
-    if (isException) totalExceptions += 1;
     return {
       id: e.id,
       date: toIsoDate(e.date),
@@ -479,21 +518,141 @@ export async function listOperationClosingDetail(input: {
       clientName: e.project?.client?.name ?? "—",
       projectName: e.project?.name ?? "—",
       activityType: e.activityType,
-      hours,
+      hours: round2(Number(e.hours ?? 0)),
       billable: e.billable,
       status: e.status,
       hasAttachment,
       decidedAt: decidedAt.get(e.id) ?? null,
-      isException,
+      isException: isExceptionEntry({
+        activityType: e.activityType,
+        hasAttachment,
+      }),
     };
   });
+}
+
+/**
+ * Flat, consultant-centric detail for the "Detalhamento por consultor" tab:
+ * every time entry matching the shared report-style filters (period/date range,
+ * cliente, projeto, consultor, status, atividade, faturável, status de
+ * cliente/projeto/consultor), ordered and PAGINATED. Reuses the Hours report
+ * `where`/range builders under a BROAD, non-financial scope — the SAME filter
+ * contract as Relatórios, so this screen and its Excel always agree.
+ *
+ * Totals (`totalHours`/`totalExceptions`) reflect the WHOLE filtered set, not
+ * just the page. Same RBAC contract as the overview (gated by the page/route via
+ * `OPERACAO_FECHAMENTO` view). No N+1: page read + a totals read + one batched
+ * Approval read for the decision dates of the page rows.
+ */
+export async function listOperationClosingDetail(
+  filter: HoursReportFilter,
+  now: Date = new Date(),
+): Promise<OperationClosingDetailView> {
+  const where = detailWhere(filter, now);
+
+  const sort = filter.sort ?? HOURS_DEFAULT_SORT;
+  const direction = filter.direction ?? HOURS_DEFAULT_DIRECTION;
+  const pageSize = filter.pageSize ?? DEFAULT_PAGE_SIZE;
+  const page = Math.max(1, filter.page ?? 1);
+
+  const total = await prisma.timeEntry.count({ where });
+
+  const pageRows = await prisma.timeEntry.findMany({
+    where,
+    orderBy: detailOrderBy(sort, direction),
+    skip: (page - 1) * pageSize,
+    take: pageSize,
+    select: DETAIL_SELECT,
+  });
+
+  // Totals over the WHOLE filtered set (hours + exceptions), not just the page.
+  const totalsRaw = await prisma.timeEntry.findMany({
+    where,
+    select: {
+      hours: true,
+      activityType: true,
+      attachment: { select: { id: true } },
+    },
+    take: DETAIL_EXPORT_LIMIT,
+  });
+  let totalHours = 0;
+  let totalExceptions = 0;
+  for (const e of totalsRaw) {
+    totalHours = round2(totalHours + Number(e.hours ?? 0));
+    if (
+      isExceptionEntry({
+        activityType: e.activityType,
+        hasAttachment: e.attachment != null,
+      })
+    ) {
+      totalExceptions += 1;
+    }
+  }
+
+  const rows = await mapDetailRows(pageRows);
+
+  const pagination: PaginationMeta = {
+    total,
+    page,
+    pageSize,
+    totalPages: Math.max(1, Math.ceil(total / pageSize)),
+  };
+
+  return { rows, pagination, totalHours, totalExceptions };
+}
+
+/**
+ * ALL detail rows matching the filter (no pagination), for the `.xlsx` export.
+ * Same filter contract as {@link listOperationClosingDetail}; capped at
+ * {@link DETAIL_EXPORT_LIMIT}. Sorted the same way the screen is.
+ */
+export async function listOperationDetailRows(
+  filter: HoursReportFilter,
+  now: Date = new Date(),
+): Promise<OperationDetailRow[]> {
+  const where = detailWhere(filter, now);
+  const sort = filter.sort ?? HOURS_DEFAULT_SORT;
+  const direction = filter.direction ?? HOURS_DEFAULT_DIRECTION;
+  const raw = await prisma.timeEntry.findMany({
+    where,
+    orderBy: detailOrderBy(sort, direction),
+    take: DETAIL_EXPORT_LIMIT,
+    select: DETAIL_SELECT,
+  });
+  return mapDetailRows(raw);
+}
+
+/**
+ * Clients/projects/consultants that feed the shared filter dropdowns on the
+ * Fechamento Operacional screen. The screen shows ALL of them (RBAC is the
+ * page's job), so unlike `getReportFilterOptions` this is not scoped to a
+ * report universe.
+ */
+export async function getOperationFilterOptions(): Promise<OperationFilterOptions> {
+  const [projects, consultants] = await Promise.all([
+    prisma.project.findMany({
+      select: {
+        id: true,
+        name: true,
+        clientId: true,
+        client: { select: { id: true, name: true } },
+      },
+      orderBy: { name: "asc" },
+    }),
+    prisma.consultant.findMany({
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    }),
+  ]);
+
+  const clientMap = new Map<string, string>();
+  for (const p of projects) clientMap.set(p.client.id, p.client.name);
 
   return {
-    month,
-    year,
-    rows,
-    consultantOptions,
-    totalHours,
-    totalExceptions,
+    clients: [...clientMap.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name, "pt-BR")),
+    projects: projects.map((p) => ({ id: p.id, name: p.name, clientId: p.clientId })),
+    consultants: consultants.map((c) => ({ id: c.id, name: c.name })),
   };
 }
