@@ -218,6 +218,56 @@ export interface OperationClosingDetail {
   totalExceptions: number;
 }
 
+/**
+ * One flat row of the "Detalhamento por consultor" tab: a single time entry of
+ * the month across ALL projects, framed from the consultant's angle. Mirrors the
+ * columns the DP asked for (Data, Consultor, Cliente/Projeto, Atividade, Horas,
+ * Faturável, Status, Decidido em). `decidedAt` is the latest Approval of the
+ * entry (null while still DRAFT/SUBMITTED). `isException` reuses
+ * {@link isExceptionEntry} so the tab can highlight the same launches as the
+ * apuração.
+ */
+export interface OperationDetailRow {
+  id: string;
+  /** ISO date (yyyy-mm-dd) of the launch. */
+  date: string;
+  consultantId: string;
+  consultantName: string;
+  clientName: string;
+  projectName: string;
+  /** Raw activityType code; label resolved in the UI (`activityLabelOf`). */
+  activityType: string;
+  hours: number;
+  billable: boolean;
+  status: string;
+  hasAttachment: boolean;
+  /** ISO datetime of the latest decision (approval/rejection), or null. */
+  decidedAt: string | null;
+  /** True when this entry falls under {@link isExceptionEntry}. */
+  isException: boolean;
+}
+
+/** A consultant option for the detail tab filter. */
+export interface OperationDetailConsultantOption {
+  id: string;
+  name: string;
+}
+
+/**
+ * The full "Detalhamento por consultor" view: the flat launch rows for the month
+ * (optionally narrowed to one consultant) plus the unfiltered consultant option
+ * list that feeds the filter dropdown.
+ */
+export interface OperationClosingDetailView {
+  month: number;
+  year: number;
+  rows: OperationDetailRow[];
+  consultantOptions: OperationDetailConsultantOption[];
+  /** Total launches across the (filtered) rows and their exception count. */
+  totalHours: number;
+  totalExceptions: number;
+}
+
 export interface OperationClosingOverview {
   month: number;
   year: number;

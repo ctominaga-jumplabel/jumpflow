@@ -2,13 +2,16 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { FinanceTabs } from "@/components/financial/FinanceTabs";
 import { OperationClosingTable } from "@/components/operations/OperationClosingTable";
+import { OperationConsultantDetailTable } from "@/components/operations/OperationConsultantDetailTable";
 import { requirePermission } from "@/lib/auth/guards";
 import { can } from "@/lib/auth/permissions";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { formatMonth } from "@/lib/format";
 import {
   summarizeOverview,
+  type OperationClosingDetailView,
   type OperationClosingOverview,
 } from "@/lib/operations/closing";
 
@@ -49,12 +52,27 @@ export default async function OperationClosingPage({ searchParams }: PageProps) 
   const params = await searchParams;
   const { month, year } = resolveMonthYear(params);
   const monthLabel = formatMonth(month, year);
+  const tab = first(params.tab);
+  const consultantId = first(params.consultant) || undefined;
 
   const databaseConfigured = isDatabaseConfigured();
   let overview: OperationClosingOverview = summarizeOverview(month, year, []);
+  let detail: OperationClosingDetailView = {
+    month,
+    year,
+    rows: [],
+    consultantOptions: [],
+    totalHours: 0,
+    totalExceptions: 0,
+  };
   if (databaseConfigured) {
-    const { listOperationClosings } = await import("@/lib/db/operation-closing");
-    overview = await listOperationClosings({ month, year });
+    const { listOperationClosings, listOperationClosingDetail } = await import(
+      "@/lib/db/operation-closing"
+    );
+    [overview, detail] = await Promise.all([
+      listOperationClosings({ month, year }),
+      listOperationClosingDetail({ month, year, consultantId }),
+    ]);
   }
 
   // Excel export (Onda 6) reflects the selected month; hidden without a
@@ -63,8 +81,19 @@ export default async function OperationClosingPage({ searchParams }: PageProps) 
     ? `/api/operacao/fechamento/export?m=${month}&y=${year}`
     : undefined;
 
+  // Detail export mirrors the consultant filter currently applied.
+  let detailExportHref: string | undefined;
+  if (databaseConfigured) {
+    const q = new URLSearchParams({ m: String(month), y: String(year) });
+    if (consultantId) q.set("consultant", consultantId);
+    detailExportHref = `/api/operacao/fechamento/detalhe/export?${q.toString()}`;
+  }
+
   const prev = shiftMonth(month, year, -1);
   const next = shiftMonth(month, year, 1);
+  // Preserve the active tab when navigating months (client tab state also
+  // mirrors ?tab=; server-driven month nav keeps whatever the URL carries).
+  const tabSuffix = tab ? `&tab=${tab}` : "";
 
   return (
     <div className="space-y-6">
@@ -75,7 +104,7 @@ export default async function OperationClosingPage({ searchParams }: PageProps) 
         actions={
           <nav className="flex items-center gap-1.5" aria-label="Selecionar mês">
             <Link
-              href={`/app/operacao/fechamento?m=${prev.month}&y=${prev.year}`}
+              href={`/app/operacao/fechamento?m=${prev.month}&y=${prev.year}${tabSuffix}`}
               className="inline-flex size-8 items-center justify-center rounded-md border border-border bg-surface text-medium hover:bg-surface-muted/60"
               aria-label="Mês anterior"
             >
@@ -85,7 +114,7 @@ export default async function OperationClosingPage({ searchParams }: PageProps) 
               {monthLabel}
             </span>
             <Link
-              href={`/app/operacao/fechamento?m=${next.month}&y=${next.year}`}
+              href={`/app/operacao/fechamento?m=${next.month}&y=${next.year}${tabSuffix}`}
               className="inline-flex size-8 items-center justify-center rounded-md border border-border bg-surface text-medium hover:bg-surface-muted/60"
               aria-label="Próximo mês"
             >
@@ -94,11 +123,37 @@ export default async function OperationClosingPage({ searchParams }: PageProps) 
           </nav>
         }
       />
-      <OperationClosingTable
-        overview={overview}
-        canManage={canManage}
-        monthLabel={monthLabel}
-        exportHref={exportHref}
+      <FinanceTabs
+        defaultTabId={tab}
+        ariaLabel="Visões do fechamento operacional"
+        tabs={[
+          {
+            id: "fechamento",
+            label: "Fechamento",
+            content: (
+              <OperationClosingTable
+                overview={overview}
+                canManage={canManage}
+                monthLabel={monthLabel}
+                exportHref={exportHref}
+              />
+            ),
+          },
+          {
+            id: "detalhamento",
+            label: "Detalhamento por consultor",
+            content: (
+              <OperationConsultantDetailTable
+                detail={detail}
+                monthLabel={monthLabel}
+                selectedConsultantId={consultantId}
+                month={month}
+                year={year}
+                exportHref={detailExportHref}
+              />
+            ),
+          },
+        ]}
       />
     </div>
   );
