@@ -2,18 +2,21 @@ import type { LucideIcon } from "lucide-react";
 import {
   Banknote,
   BotMessageSquare,
+  CircleDollarSign,
   ClipboardCheck,
   Clock,
   FolderKanban,
   GraduationCap,
   Receipt,
   ShieldCheck,
+  Upload,
   Wallet,
 } from "lucide-react";
 import type { AppUser } from "./auth/types";
 import {
   canAccess,
   FINANCIAL_ROLES,
+  hasRole,
   type RouteAccess,
 } from "./auth/route-permissions";
 import { currentWeek, statusCounts } from "./mock-data/timesheet";
@@ -138,6 +141,82 @@ export const launcherShortcuts: LauncherShortcut[] = [
 /** Shortcuts the given user is allowed to see, in launcher order. */
 export function shortcutsForUser(user: AppUser | null): LauncherShortcut[] {
   return launcherShortcuts.filter((s) => canAccess(user, s.access));
+}
+
+/**
+ * SECTOR HOME (Wave D — Item 1). For a FINANCE-ONLY user the launcher is NOT
+ * the consultant-first shortcut grid but a pair of large, centered "setor" cards
+ * (Contas a Receber / Contas a Pagar) — the next decision a finance user makes
+ * is *which sector*, not *which action*. The shortcut grid stays untouched for
+ * every other profile; only `page.tsx` chooses between the two variations.
+ */
+export type LauncherSectorTone = "receber" | "pagar";
+
+export interface LauncherSector {
+  key: string;
+  label: string;
+  description: string;
+  href: string;
+  icon: LucideIcon;
+  /** Drives the icon color (green = receber, blue = pagar). */
+  tone: LauncherSectorTone;
+  /**
+   * Optional key into the shared badge map (see {@link getLauncherBadges} /
+   * {@link mockLauncherBadges}) whose count annotates this sector. Reuses the
+   * existing finance counter so the sector card never invents its own source.
+   */
+  badgeKey?: string;
+  badge?: LauncherBadge;
+}
+
+/** The two financial sectors, in the order shown in the mockup (assets/01). */
+export const financialSectors: LauncherSector[] = [
+  {
+    key: "receber",
+    label: "Contas a Receber",
+    description: "Gerencie apurações e recebimentos",
+    href: "/app/financeiro?tab=receber",
+    icon: CircleDollarSign,
+    tone: "receber",
+    // Fechamentos prontos p/ fechar (demo) / pendências financeiras (db).
+    badgeKey: "financeiro",
+  },
+  {
+    key: "pagar",
+    label: "Contas a Pagar",
+    description: "Gerencie pagamentos e obrigações",
+    href: "/app/financeiro?tab=pagar",
+    icon: Upload,
+    tone: "pagar",
+  },
+];
+
+/**
+ * Whether the given user sees the sector home instead of the shortcut grid.
+ * Review MÉDIO #5: the sector home is for FINANCE-ONLY users. ADMIN and
+ * AREA_MANAGER are broad operational profiles that also need the consultant-first
+ * shortcut grid (Aprovações, Automações, Acessos, etc.), so they keep the grid
+ * even though they belong to FINANCIAL_ROLES. A user who is FINANCE *and* also a
+ * manager keeps the grid (the broader operational surface wins).
+ */
+export function isFinancialLauncher(user: AppUser | null): boolean {
+  if (!user) return false;
+  const isManager = hasRole(user, ["ADMIN", "AREA_MANAGER"]);
+  return hasRole(user, "FINANCE") && !isManager;
+}
+
+/**
+ * Merge a `key → badge` map onto sectors by their `badgeKey` (pure). Sectors
+ * without a matching badge stay unannotated, mirroring {@link withBadges}.
+ */
+export function sectorsWithBadges(
+  sectors: LauncherSector[],
+  badges: Record<string, LauncherBadge>,
+): LauncherSector[] {
+  return sectors.map((sector) => {
+    const badge = sector.badgeKey ? badges[sector.badgeKey] : undefined;
+    return badge ? { ...sector, badge } : sector;
+  });
 }
 
 /**

@@ -15,6 +15,8 @@ vi.mock("@/app/app/horas/actions", () => ({
   submitWeek: vi.fn(),
   decideHours: vi.fn(),
   getTimeEntryAttachmentUrl: vi.fn(),
+  // FinancialOverview's "Contas a Receber" tab wires the Faturar? toggle.
+  setEntryBillable: vi.fn(),
 }));
 // FinancialOverview renders ExpensesFinancePanel, which wires setPayment.
 vi.mock("@/app/app/despesas/actions", () => ({
@@ -29,7 +31,9 @@ vi.mock("@/app/app/despesas/actions", () => ({
   decideAsManager: vi.fn(),
   decideAsFinance: vi.fn(),
 }));
-// FinancialOverview renders MonthlyClosingTable, which wires revenue actions.
+// The Contas a Receber journey (Apuração/Envio) and the finance actions module
+// are server-only; mock it so the module graph resolves in jsdom even though
+// FinancialOverview itself no longer renders the old MonthlyClosingTable.
 vi.mock("@/app/app/financeiro/actions", () => ({
   generateMonthlyRevenueClosings: vi.fn(),
   advanceRevenueClosing: vi.fn(),
@@ -39,9 +43,11 @@ vi.mock("@/app/app/financeiro/actions", () => ({
   sendPreInvoiceEmail: vi.fn(),
   sendClientBillingSummary: vi.fn(),
   loadClosingApuracao: vi.fn(),
+  fecharApuracao: vi.fn(),
+  enviarApuracao: vi.fn(),
 }));
-// FinancialOverview's "Contas a Receber" tab renders PeriodExceptionsPanel,
-// which wires the on-call attachment action (a server-only module).
+// Defensive mock for the on-call attachment action (a server-only module) so any
+// transitive import stays free of server-only code in jsdom.
 vi.mock("@/app/app/sobreaviso/actions", () => ({
   getOnCallApprovalUrl: vi.fn(),
 }));
@@ -150,11 +156,13 @@ describe("Skills — matrix and coverage", () => {
 });
 
 describe("Financeiro — FinancialOverview", () => {
-  it("renders revenue KPIs and the closing table", () => {
+  it("renders the Contas a Receber journey (filtros + resumo + tabs)", () => {
     render(<FinancialOverview />);
-    expect(screen.getByText("Receita estimada")).toBeInTheDocument();
-    expect(screen.getByText("Fechamento mensal")).toBeInTheDocument();
-    // Atlas appears in the closing.
-    expect(screen.getByText("Atlas")).toBeInTheDocument();
+    // Nova jornada Contas a Receber (substitui o fechamento mensal).
+    expect(screen.getByText("Contas a Receber")).toBeInTheDocument();
+    expect(screen.getByText("Contas a Pagar")).toBeInTheDocument();
+    expect(screen.getByText("Horas no período")).toBeInTheDocument();
+    expect(screen.getByText("Valor a faturar")).toBeInTheDocument();
+    expect(screen.getByText("Alocados")).toBeInTheDocument();
   });
 });

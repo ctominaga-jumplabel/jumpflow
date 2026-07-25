@@ -5,7 +5,10 @@ import { getCurrentUser } from "@/lib/auth/current-user";
 import { landingPathFor } from "@/lib/auth/redirects";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import {
+  financialSectors,
+  isFinancialLauncher,
   mockLauncherBadges,
+  sectorsWithBadges,
   shortcutsForUser,
   withBadges,
 } from "@/lib/launcher";
@@ -40,6 +43,19 @@ export default async function AppIndex() {
     // Lazy import so Prisma is never loaded on code paths without a database.
     const { getLauncherBadges } = await import("@/lib/db/launcher-badges");
     badges = await getLauncherBadges(user);
+  }
+
+  // Item 1 (Wave D, review MÉDIO #5): FINANCE-only users get the centered
+  // per-sector home; ADMIN/AREA_MANAGER and every other profile keep the
+  // consultant-first shortcut grid.
+  if (isFinancialLauncher(user)) {
+    return (
+      <LauncherView
+        firstName={firstName}
+        shortcuts={[]}
+        sectors={sectorsWithBadges(financialSectors, badges)}
+      />
+    );
   }
 
   return (

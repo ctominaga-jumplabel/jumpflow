@@ -6,6 +6,7 @@ import { z, type ZodType } from "zod";
 import type { ActionResult, ErrorCode } from "@/lib/actions/result";
 import { requireRole } from "@/lib/auth/guards";
 import { FINANCIAL_ROLES } from "@/lib/auth/route-permissions";
+import type { RoleName } from "@/lib/auth/roles";
 import {
   notifyClientBillingSummary,
   notifyHoursReleased,
@@ -53,8 +54,23 @@ import type { HoursReport } from "@/lib/reports/types";
 import type { HoursReportFilter } from "@/lib/reports/schemas";
 import { timeEntryStatusLabels } from "@/lib/timesheet/types";
 import type { AppUser } from "@/lib/auth/types";
+import {
+  monthsInRange,
+  type CompetenceCloseResult,
+  type CompetenceSendResult,
+  type EnviarApuracaoResult,
+  type FecharApuracaoResult,
+} from "@/lib/financial/receivables-journey-core";
 
 const FINANCEIRO_PATH = "/app/financeiro";
+
+/**
+ * Papéis que podem FECHAR a apuração (transição CLOSE / liberar faturamento) na
+ * jornada Contas a Receber: passo explícito do GERENTE DE ÁREA (decisão do
+ * usuário — atualiza §0.7). FINANCE puro NÃO fecha; apenas ENVIA (após CLOSED).
+ * ADMIN participa por ser dono da plataforma.
+ */
+const APURACAO_CLOSE_ROLES: RoleName[] = ["ADMIN", "AREA_MANAGER"];
 
 class ActionError extends Error {
   constructor(
@@ -107,10 +123,129 @@ const closingIdInputSchema = z.object({
   closingId: z.string().min(1),
 });
 
+const isoDateInputSchema = z
+  .string()
+  .regex(/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/, {
+    message: "Data inválida (use o formato aaaa-mm-dd).",
+  });
+
+/** Competência (mês/ano) para reenvio explícito por competência. */
+const competenceInputSchema = z.object({
+  month: z.number().int().min(1).max(12),
+  year: z.number().int().min(2020).max(2100),
+});
+
+/**
+ * Entrada da jornada "Fechar Apuração" (Contas a Receber): passo do Gerente de
+ * Área que leva o(s) `RevenueClosing` do período até `CLOSED` (libera o
+ * faturamento). `clientId` é DERIVADO do projeto no servidor (review #6); aceito
+ * no payload apenas por compat, mas ignorado. `observacoes` é a justificativa
+ * OBRIGATÓRIA do CLOSE.
+ */
+const fecharApuracaoSchema = z
+  .object({
+    clientId: z.string().min(1).optional(),
+    projectId: z.string().min(1),
+    from: isoDateInputSchema,
+    to: isoDateInputSchema,
+    observacoes: z.string().trim().max(2000).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.to < value.from) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["to"],
+        message: "A data final deve ser maior ou igual à inicial.",
+      });
+    }
+  });
+
+/**
+ * Entrada da jornada "Enviar Apuração" (Contas a Receber): por projeto +
+ * período (range de datas). `clientId` é DERIVADO do projeto no servidor (review
+ * #6). O envio EXIGE que a competência já esteja `CLOSED` (fechamento é passo
+ * separado do Gerente de Área). `observacoes` segue no payload/auditoria do
+ * envio (não obrigatória — deixou de ser justificativa de close).
+ * `resendCompetences` lista EXPLICITAMENTE as competências a reenviar (fix do
+ * bug de reenvio multi-competência): sem ela, competências já `SENT` retornam
+ * `ALREADY_SENT` e a resposta sinaliza que precisam de confirmação.
+ */
+const enviarApuracaoSchema = z
+  .object({
+    clientId: z.string().min(1).optional(),
+    projectId: z.string().min(1),
+    from: isoDateInputSchema,
+    to: isoDateInputSchema,
+    observacoes: z.string().trim().max(2000).optional(),
+    resendCompetences: z.array(competenceInputSchema).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.to < value.from) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["to"],
+        message: "A data final deve ser maior ou igual à inicial.",
+      });
+    }
+  });
+
+/**
+ * Drive a RevenueClosing to `CLOSED`, reusing the existing state machine action
+ * `advanceRevenueClosing` for each hop (OPEN→IN_REVIEW→READY_TO_CLOSE→CLOSED).
+ * The mandatory justification is only demanded on the final `CLOSE` transition
+ * (the others don't require it). Each hop is audited by `advanceRevenueClosing`.
+ */
+async function ensureClosingClosed(
+  id: string,
+  status: string,
+  justification: string,
+): Promise<{ ok: boolean; message?: string }> {
+  let current = status;
+  for (let guard = 0; guard < 5 && current !== "CLOSED"; guard += 1) {
+    let action: RevenueClosingAdvanceAction;
+    if (current === "OPEN") action = "SUBMIT_REVIEW";
+    else if (current === "IN_REVIEW") action = "MARK_READY";
+    else if (current === "READY_TO_CLOSE") action = "CLOSE";
+    else {
+      return {
+        ok: false,
+        message: "Fechamento em status incompatível para envio.",
+      };
+    }
+    const result = await advanceRevenueClosing({
+      id,
+      action,
+      ...(action === "CLOSE" ? { justification } : {}),
+    });
+    if (!result.ok) return { ok: false, message: result.message };
+    current = result.data.status;
+  }
+  return current === "CLOSED"
+    ? { ok: true }
+    : { ok: false, message: "Não foi possível fechar o fechamento." };
+}
+
 function ensureDatabase(): void {
   if (!isDatabaseConfigured()) {
     throw new ActionError("NO_DATABASE", "Banco de dados nao configurado.");
   }
+}
+
+/**
+ * Deriva o `clientId` a partir do `projectId` NO SERVIDOR (review BAIXO #6): a
+ * jornada resolve o cliente pelo projeto, nunca confia no `clientId` vindo do
+ * cliente (evita NOT_FOUND silencioso por divergência). Lança NOT_FOUND quando o
+ * projeto não existe.
+ */
+async function resolveProjectClientId(projectId: string): Promise<string> {
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { clientId: true },
+  });
+  if (!project) {
+    throw new ActionError("NOT_FOUND", "Projeto nao encontrado.");
+  }
+  return project.clientId;
 }
 
 function parseInput<T>(schema: ZodType<T>, input: unknown): T {
@@ -1079,6 +1214,397 @@ export async function sendPreInvoiceEmail(input: {
 
     revalidatePath(FINANCEIRO_PATH);
     return { ok: true, data: { emailed: true, alreadySent: false } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/**
+ * "Fechar Apuração" da jornada Contas a Receber (decisão do usuário — atualiza
+ * §0.7): passo EXPLÍCITO e SEPARADO do GERENTE DE ÁREA que libera o faturamento.
+ * Por PROJETO, resolve o(s) `RevenueClosing` da(s) competência(s) do período
+ * `from..to` e, para cada uma:
+ *
+ *  1. Generate-if-missing: sem `RevenueClosing`, gera a partir do motor de
+ *     faturamento (`generateRevenueClosings` escopado ao projeto). Sem horas
+ *     faturáveis nada é gerado → `NOT_FOUND` (nada a fechar).
+ *  2. Guard de valor zero: `totalAmount <= 0` → `GENERATED_EMPTY` (não fecha nem
+ *     gera pré-fatura vazia).
+ *  3. Leva o fechamento até `CLOSED` reusando a máquina de estados
+ *     (`ensureClosingClosed`: SUBMIT_REVIEW→MARK_READY→CLOSE via
+ *     `advanceRevenueClosing`), com `observacoes` como justificativa OBRIGATÓRIA
+ *     do CLOSE. É AQUI que a notificação `HOURS_RELEASED` dispara (comportamento
+ *     do CLOSE, mantido). Já `CLOSED` → `ALREADY_CLOSED` (idempotente).
+ *
+ * `clientId` é derivado do projeto no servidor (review #6). Auditoria dedicada
+ * `RECEIVABLES_APURACAO_CLOSED` por competência (além da auditoria do CLOSE).
+ * Gated a ADMIN/AREA_MANAGER — FINANCE puro NÃO fecha.
+ */
+export async function fecharApuracao(input: {
+  clientId?: string;
+  projectId: string;
+  from: string;
+  to: string;
+  observacoes?: string;
+}): Promise<ActionResult<FecharApuracaoResult>> {
+  try {
+    ensureDatabase();
+    const user = await requireRole(APURACAO_CLOSE_ROLES);
+    const parsed = parseInput(fecharApuracaoSchema, input);
+    const dbUser = await resolveDbUser(user);
+    const observacoes = parsed.observacoes?.trim() ?? "";
+
+    // O CLOSE exige justificativa: sem observações, recusa antes de qualquer
+    // efeito colateral (evita fechamentos parciais).
+    if (!observacoes) {
+      throw new ActionError(
+        "INVALID_INPUT",
+        "Informe uma observação para liberar o faturamento (fechamento).",
+      );
+    }
+
+    const clientId = await resolveProjectClientId(parsed.projectId);
+    const months = monthsInRange(parsed.from, parsed.to);
+    const findClosing = (m: { month: number; year: number }) =>
+      prisma.revenueClosing.findFirst({
+        where: {
+          clientId,
+          projectId: parsed.projectId,
+          month: m.month,
+          year: m.year,
+        },
+        select: {
+          id: true,
+          status: true,
+          month: true,
+          year: true,
+          totalAmount: true,
+        },
+      });
+    const closings = await Promise.all(months.map(findClosing));
+
+    // Generate-if-missing (reusa o motor; sem caminho duplicado).
+    for (let i = 0; i < months.length; i += 1) {
+      if (closings[i]) continue;
+      const m = months[i];
+      await generateRevenueClosings({
+        month: m.month,
+        year: m.year,
+        projectId: parsed.projectId,
+        audit: {
+          actorUserId: dbUser?.id ?? null,
+          entityId: `${m.year}-${String(m.month).padStart(2, "0")}`,
+          action: "REVENUE_CLOSINGS_GENERATED",
+        },
+      });
+      closings[i] = await findClosing(m);
+    }
+
+    const competences: CompetenceCloseResult[] = [];
+    for (let i = 0; i < months.length; i += 1) {
+      const m = months[i];
+      const closing = closings[i];
+      if (!closing) {
+        competences.push({
+          month: m.month,
+          year: m.year,
+          closingId: null,
+          status: "NOT_FOUND",
+          message:
+            "Sem horas faturáveis na competência — nada a gerar nem fechar.",
+        });
+        continue;
+      }
+      const base = { month: m.month, year: m.year, closingId: closing.id };
+      if (closing.status === "CLOSED") {
+        competences.push({ ...base, status: "ALREADY_CLOSED" });
+        continue;
+      }
+      if (closing.status === "INVOICED" || closing.status === "CANCELLED") {
+        competences.push({
+          ...base,
+          status: "ERROR",
+          message:
+            closing.status === "INVOICED"
+              ? "Fechamento já faturado (fora do escopo desta jornada)."
+              : "Fechamento cancelado.",
+        });
+        continue;
+      }
+      // Guard de valor zero: não fecha nem gera pré-fatura vazia.
+      if (Number(closing.totalAmount) <= 0) {
+        competences.push({
+          ...base,
+          status: "GENERATED_EMPTY",
+          message: "Fechamento sem valor a faturar no período (não fechado).",
+        });
+        continue;
+      }
+
+      const closeResult = await ensureClosingClosed(
+        closing.id,
+        closing.status,
+        observacoes,
+      );
+      const status: CompetenceCloseResult["status"] = closeResult.ok
+        ? "CLOSED"
+        : "ERROR";
+      competences.push({
+        ...base,
+        status,
+        ...(closeResult.ok ? {} : { message: closeResult.message }),
+      });
+
+      // Auditoria dedicada da jornada (além da auditoria do CLOSE em
+      // advanceRevenueClosing). Observações no payload, sem nova coluna.
+      await prisma.auditEvent.create({
+        data: buildAuditEventData({
+          actorUserId: dbUser?.id ?? null,
+          entityType: "RevenueClosing",
+          entityId: closing.id,
+          action: "RECEIVABLES_APURACAO_CLOSED",
+          after: {
+            clientId,
+            projectId: parsed.projectId,
+            from: parsed.from,
+            to: parsed.to,
+            month: m.month,
+            year: m.year,
+            observacoes,
+            result: status,
+          },
+        }),
+      });
+    }
+
+    const relevant = competences.filter((c) => c.status !== "NOT_FOUND");
+    const allClosed =
+      relevant.length > 0 &&
+      relevant.every(
+        (c) => c.status === "CLOSED" || c.status === "ALREADY_CLOSED",
+      );
+
+    revalidatePath(FINANCEIRO_PATH);
+    return {
+      ok: true,
+      data: {
+        clientId,
+        projectId: parsed.projectId,
+        from: parsed.from,
+        to: parsed.to,
+        competences,
+        allClosed,
+      },
+    };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/**
+ * "Enviar Apuração" da jornada Contas a Receber (decisão do usuário — atualiza
+ * §0.7 + §3 item 7). O envio NÃO fecha mais o fechamento: EXIGE que o
+ * `RevenueClosing` da competência JÁ esteja `CLOSED` (fechamento é passo
+ * separado do Gerente de Área via `fecharApuracao`). Por PROJETO, resolve o(s)
+ * `RevenueClosing` da(s) competência(s) do período `from..to` e, para cada uma:
+ *
+ *  1. Se não existir closing ou não estiver `CLOSED` → `NOT_CLOSED` (não envia;
+ *     mensagem "Aguardando fechamento pelo Gerente de Área.").
+ *  2. `CLOSED`: envia a pré-fatura reusando `sendPreInvoiceEmail`
+ *     (dedupe/idempotência via `AutomationEmailLog` tipo PRE_INVOICE + auditoria).
+ *  3. Reenvio EXPLÍCITO por competência (fix do bug ALTO): sem
+ *     `resendCompetences`, competências já `SENT` retornam `ALREADY_SENT` (não
+ *     reenvia) e `needsConfirmResend=true` sinaliza quais pedem confirmação. Uma
+ *     2ª chamada reenvia SOMENTE as competências presentes em `resendCompetences`
+ *     (apaga o log PRE_INVOICE dessas e reenvia); nenhuma competência recém
+ *     enviada é reenviada sem intenção.
+ *
+ * `clientId` é derivado do projeto no servidor (review #6). Degrada honestamente
+ * em `NO_CONTACT_EMAIL`. Cada tentativa gera `AuditEvent` dedicado (observações
+ * no payload). Gated a FINANCIAL_ROLES.
+ */
+export async function enviarApuracao(input: {
+  clientId?: string;
+  projectId: string;
+  from: string;
+  to: string;
+  observacoes?: string;
+  resendCompetences?: Array<{ month: number; year: number }>;
+}): Promise<ActionResult<EnviarApuracaoResult>> {
+  try {
+    ensureDatabase();
+    const user = await requireRole(FINANCIAL_ROLES);
+    const parsed = parseInput(enviarApuracaoSchema, input);
+    const dbUser = await resolveDbUser(user);
+    const observacoes = parsed.observacoes?.trim() ?? "";
+
+    // Reenvio explícito por competência: chave "ano-mês".
+    const resendKey = (m: { month: number; year: number }) =>
+      `${m.year}-${m.month}`;
+    const resendSet = new Set(
+      (parsed.resendCompetences ?? []).map(resendKey),
+    );
+
+    const clientId = await resolveProjectClientId(parsed.projectId);
+    const months = monthsInRange(parsed.from, parsed.to);
+    // One RevenueClosing per (project, client, competence). Resolve them all.
+    // SEM generate-if-missing: o envio depende de um fechamento já CLOSED.
+    const closings = await Promise.all(
+      months.map((m) =>
+        prisma.revenueClosing.findFirst({
+          where: {
+            clientId,
+            projectId: parsed.projectId,
+            month: m.month,
+            year: m.year,
+          },
+          select: {
+            id: true,
+            status: true,
+            month: true,
+            year: true,
+            totalAmount: true,
+          },
+        }),
+      ),
+    );
+
+    const competences: CompetenceSendResult[] = [];
+    let needsConfirmResend = false;
+
+    for (let i = 0; i < months.length; i += 1) {
+      const m = months[i];
+      const closing = closings[i];
+
+      // Sem closing OU não CLOSED → aguardando o Gerente de Área fechar.
+      if (!closing || closing.status !== "CLOSED") {
+        competences.push({
+          month: m.month,
+          year: m.year,
+          closingId: closing?.id ?? null,
+          emailed: false,
+          alreadySent: false,
+          status: "NOT_CLOSED",
+          message: "Aguardando fechamento pelo Gerente de Área.",
+        });
+        continue;
+      }
+
+      const base = { month: m.month, year: m.year, closingId: closing.id };
+
+      // CLOSED sem valor a faturar (defensivo): não envia pré-fatura vazia.
+      if (Number(closing.totalAmount) <= 0) {
+        competences.push({
+          ...base,
+          emailed: false,
+          alreadySent: false,
+          status: "ERROR",
+          message: "Fechamento sem valor a faturar no período (nada a enviar).",
+        });
+        continue;
+      }
+
+      // Estado atual do envio (dedupe): um log PRE_INVOICE SENT já enviado.
+      const referenceKey = preInvoiceReferenceKey(closing);
+      const existingLog = await prisma.automationEmailLog.findUnique({
+        where: { type_referenceKey: { type: "PRE_INVOICE", referenceKey } },
+        select: { status: true },
+      });
+      const alreadySent = existingLog?.status === "SENT";
+      const isResend = resendSet.has(resendKey(m));
+
+      // Já enviado e NÃO listado para reenvio → não reenvia; pede confirmação.
+      if (alreadySent && !isResend) {
+        needsConfirmResend = true;
+        competences.push({
+          ...base,
+          emailed: false,
+          alreadySent: true,
+          status: "ALREADY_SENT",
+        });
+        continue;
+      }
+
+      // Reenvio confirmado desta competência: apaga o log SENT para novo envio.
+      if (alreadySent && isResend) {
+        await prisma.automationEmailLog.deleteMany({
+          where: { type: "PRE_INVOICE", referenceKey },
+        });
+      }
+
+      const sendResult = await sendPreInvoiceEmail({ closingId: closing.id });
+      let result: CompetenceSendResult;
+      if (sendResult.ok) {
+        const emailed = sendResult.data.emailed;
+        const stillAlready = sendResult.data.alreadySent;
+        result = {
+          ...base,
+          emailed,
+          alreadySent: stillAlready,
+          status: emailed
+            ? "SENT"
+            : stillAlready
+              ? "ALREADY_SENT"
+              : "SKIPPED_OFF",
+        };
+      } else {
+        result = {
+          ...base,
+          emailed: false,
+          alreadySent,
+          status:
+            sendResult.error === "NO_CONTACT_EMAIL"
+              ? "NO_CONTACT_EMAIL"
+              : "ERROR",
+          message: sendResult.message,
+        };
+      }
+      competences.push(result);
+
+      // Auditoria dedicada da jornada (observações no payload, sem nova coluna).
+      await prisma.auditEvent.create({
+        data: buildAuditEventData({
+          actorUserId: dbUser?.id ?? null,
+          entityType: "RevenueClosing",
+          entityId: closing.id,
+          action: "RECEIVABLES_APURACAO_SENT",
+          after: {
+            clientId,
+            projectId: parsed.projectId,
+            from: parsed.from,
+            to: parsed.to,
+            month: m.month,
+            year: m.year,
+            observacoes: observacoes || null,
+            resend: isResend,
+            result: result.status,
+          },
+        }),
+      });
+    }
+
+    // "Elegíveis" para o resumo allSent = tudo que não é NOT_CLOSED (aguardando
+    // fechamento não conta como falha de envio).
+    const relevant = competences.filter((c) => c.status !== "NOT_CLOSED");
+    const allSent =
+      relevant.length > 0 &&
+      relevant.every(
+        (c) => c.status === "SENT" || c.status === "ALREADY_SENT",
+      );
+
+    revalidatePath(FINANCEIRO_PATH);
+    return {
+      ok: true,
+      data: {
+        clientId,
+        projectId: parsed.projectId,
+        from: parsed.from,
+        to: parsed.to,
+        competences,
+        allSent,
+        needsConfirmResend,
+      },
+    };
   } catch (error) {
     return toFailure(error);
   }

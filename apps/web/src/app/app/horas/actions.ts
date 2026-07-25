@@ -6,6 +6,7 @@ import { z, type ZodType } from "zod";
 import { isDevAuthEnabled } from "@/lib/auth/dev";
 import { requireRole, requireUser } from "@/lib/auth/guards";
 import { hasRole } from "@/lib/auth/route-permissions";
+import { BILLABLE_MANAGER_ROLES } from "@/lib/auth/billable-roles";
 import type { AppUser } from "@/lib/auth/types";
 import { buildAuditEventData } from "@/lib/db/audit";
 import { isDatabaseConfigured } from "@/lib/db/config";
@@ -92,17 +93,6 @@ function clockToData(input: ClockTimes) {
     }),
   };
 }
-
-/**
- * Papéis de gestão que podem definir o campo financeiro `billable` livremente
- * (mesmo conjunto de MANAGER_ROLES usado em horas/page.tsx).
- */
-const BILLABLE_MANAGER_ROLES = [
-  "ADMIN",
-  "AREA_MANAGER",
-  "PROJECT_MANAGER",
-  "FINANCE",
-] as const;
 
 /**
  * Enforcement server-side do campo financeiro `billable` (CLAUDE.md: proteger

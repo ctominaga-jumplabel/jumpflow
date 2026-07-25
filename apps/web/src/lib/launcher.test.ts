@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  financialSectors,
+  isFinancialLauncher,
   launcherShortcuts,
+  sectorsWithBadges,
   shortcutsForUser,
   sumBadgeCounts,
   withBadges,
@@ -119,6 +122,53 @@ describe("launcher withBadges", () => {
       horas: { count: 1, tone: "warning", label: "a enviar" },
     });
     expect(shortcuts.every((s) => s.badge === undefined)).toBe(true);
+  });
+});
+
+describe("launcher sector home (Wave D — Item 1, review MÉDIO #5: FINANCE-only)", () => {
+  it("routes FINANCE-only users to the sector home", () => {
+    expect(isFinancialLauncher(user(["FINANCE"]))).toBe(true);
+  });
+
+  it("keeps managers on the shortcut grid even though they are FINANCIAL_ROLES", () => {
+    // ADMIN/AREA_MANAGER are broad operational profiles: they need the grid
+    // (Aprovações, Automações, Acessos), not the FINANCE-only sector home.
+    expect(isFinancialLauncher(user(["ADMIN"]))).toBe(false);
+    expect(isFinancialLauncher(user(["AREA_MANAGER"]))).toBe(false);
+    // A FINANCE user who is also a manager keeps the grid (broader surface wins).
+    expect(isFinancialLauncher(user(["FINANCE", "ADMIN"]))).toBe(false);
+    expect(isFinancialLauncher(user(["FINANCE", "AREA_MANAGER"]))).toBe(false);
+  });
+
+  it("keeps every other profile on the shortcut grid", () => {
+    expect(isFinancialLauncher(user(["CONSULTANT"]))).toBe(false);
+    expect(isFinancialLauncher(user(["PROJECT_MANAGER"]))).toBe(false);
+    expect(isFinancialLauncher(user(["SALES"]))).toBe(false);
+    expect(isFinancialLauncher(null)).toBe(false);
+  });
+
+  it("exposes exactly the two sectors pointing to the finance tabs", () => {
+    expect(financialSectors.map((s) => s.key)).toEqual(["receber", "pagar"]);
+    const byKey = new Map(financialSectors.map((s) => [s.key, s]));
+    expect(byKey.get("receber")?.href).toBe("/app/financeiro?tab=receber");
+    expect(byKey.get("pagar")?.href).toBe("/app/financeiro?tab=pagar");
+  });
+
+  it("annotates only the sector whose badgeKey matches (Contas a Receber)", () => {
+    const badges: Record<string, LauncherBadge> = {
+      financeiro: { count: 4, tone: "info", label: "prontos p/ fechar" },
+    };
+    const merged = sectorsWithBadges(financialSectors, badges);
+    const byKey = new Map(merged.map((s) => [s.key, s]));
+    expect(byKey.get("receber")?.badge).toEqual(badges.financeiro);
+    expect(byKey.get("pagar")?.badge).toBeUndefined();
+  });
+
+  it("does not mutate the input sectors", () => {
+    sectorsWithBadges(financialSectors, {
+      financeiro: { count: 1, tone: "info", label: "x" },
+    });
+    expect(financialSectors.every((s) => s.badge === undefined)).toBe(true);
   });
 });
 

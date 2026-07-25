@@ -1,108 +1,174 @@
-import { currentClosing, type MonthlyClosing } from "@/lib/mock-data/financial";
+import { Calculator, Clock, DollarSign, TriangleAlert, Users } from "lucide-react";
 import type { Expense } from "@/lib/expenses/types";
-import { formatMonth } from "@/lib/format";
+import { formatCurrencyPrecise, formatHours } from "@/lib/format";
+import { cn } from "@/lib/utils";
+import { focusRing } from "@/lib/styles";
+import { MetricCard } from "@/components/ui/MetricCard";
+import { ExportExcelButton } from "@/components/ui/ExportExcelButton";
+import type { ReceivablesOverview } from "@/lib/financial/receivables-journey-core";
 import {
-  summarizeRevenueClosing,
-  type RevenueClosingOverview,
-} from "@/lib/financial/types";
-import type {
-  PeriodExceptions,
-  RevenueExceptionsByProject,
-} from "@/lib/db/period-exceptions";
-import { RevenueSummaryCards } from "./RevenueSummaryCards";
-import { MonthlyClosingTable } from "./MonthlyClosingTable";
+  ReceivablesFilterBar,
+  type ReceivablesFilterOption,
+  type ReceivablesProjectOption,
+} from "./receivables/ReceivablesFilterBar";
+import { ReceivablesDayGroups } from "./receivables/ReceivablesDayGroups";
+import { BillingSignals } from "./receivables/BillingSignals";
 import { ExpensesFinancePanel } from "./ExpensesFinancePanel";
-import { PeriodExceptionsPanel } from "./PeriodExceptionsPanel";
 import { FinanceTabs } from "./FinanceTabs";
 
 export interface FinancialOverviewProps {
-  closing?: MonthlyClosing;
-  revenueClosing?: RevenueClosingOverview;
-  revenueMode?: "demo" | "db";
+  /** "db": jornada real de Contas a Receber; "demo": banco não configurado. */
+  receivablesMode?: "demo" | "db";
+  /** Lançamentos por dia + cards-resumo do recorte (db mode). */
+  receivables?: ReceivablesOverview;
+  /** Opções dos filtros (cliente/projeto), escopadas ao usuário (db mode). */
+  receivablesFilterOptions?: {
+    clients: ReceivablesFilterOption[];
+    projects: ReceivablesProjectOption[];
+  };
+  /** Valores correntes dos filtros, refletidos na barra e nas hrefs (db mode). */
+  receivablesValues?: {
+    from?: string;
+    to?: string;
+    clientId?: string;
+    projectIds: string[];
+  };
+  /** Se o usuário pode alternar a coluna Faturar? (gate real é server-side). */
+  canEditBillable?: boolean;
+  /** `.xlsx` de Relatórios (Timesheet) com os filtros da tela (db mode). */
+  timesheetExportHref?: string;
+  /** Navegação para a tela de Apuração (Wave C) com os filtros na query. */
+  apuracaoHref?: string;
   /** "db": expense rows come from listFinanceExpenses; "demo": local mock. */
   expensesMode?: "demo" | "db";
   /** db mode: expenses that reached finance. */
   financeExpenses?: Expense[];
   /** db mode: whether receipt storage is configured (P17 bulk download). */
   expensesStorageAvailable?: boolean;
-  /** Sobreaviso/hora extra do período (Contas a Receber). db mode. */
-  exceptions?: PeriodExceptions;
-  /** Time-entry exceptions per project (P5), for the closing table. db mode. */
-  exceptionsByProject?: RevenueExceptionsByProject;
   /** Tab pré-selecionada (?tab=), preservada no client. */
   defaultTab?: string;
-  /** `.xlsx` export href da aba Contas a Receber (Onda 6). db mode. */
-  receberExportHref?: string;
   /** `.xlsx` export href da aba Contas a Pagar (Onda 6). db mode. */
   pagarExportHref?: string;
 }
 
 /**
- * Monthly financial overview split into two tabs (P1): "Contas a Receber"
- * (revenue KPIs + closing table + period exceptions, the client/revenue side)
- * and "Contas a Pagar" (finance-approved expenses to pay). Composed by the
- * role-protected Financeiro page (requireRole), so all figures are authorized.
+ * Visão do Financeiro em duas abas (P1): "Contas a Receber" — a nova jornada
+ * (filtrar → lançamentos por dia → apurar), consumindo `getReceivablesOverview`
+ * — e "Contas a Pagar" (despesas aprovadas pelo financeiro). Composta pela
+ * página Financeiro protegida por `requireRole(FINANCIAL_ROLES)`, então todos os
+ * números já estão autorizados. NFS-e/status/exceções ficam fora do escopo desta
+ * iteração (ver docs/proposta-contas-a-receber/README.md §0/§7).
  */
 export function FinancialOverview({
-  closing = currentClosing,
-  revenueClosing,
-  revenueMode = "demo",
+  receivablesMode = "demo",
+  receivables,
+  receivablesFilterOptions,
+  receivablesValues,
+  canEditBillable = false,
+  timesheetExportHref,
+  apuracaoHref,
   expensesMode = "demo",
   financeExpenses,
   expensesStorageAvailable = false,
-  exceptions,
-  exceptionsByProject,
   defaultTab,
-  receberExportHref,
   pagarExportHref,
 }: FinancialOverviewProps) {
-  const overview =
-    revenueClosing ??
-    ({
-      month: closing.month,
-      year: closing.year,
-      rows: closing.rows.map((row) => ({
-        id: row.id,
-        projectId: null,
-        clientName: row.clientName,
-        projectName: row.projectName,
-        opportunityType: null,
-        approvedHours: row.approvedHours,
-        billingHourlyRate: row.billingHourlyRate,
-        amount: row.approvedHours * row.billingHourlyRate,
-        status:
-          row.status === "REVIEW"
-            ? "IN_REVIEW"
-            : row.status === "READY"
-              ? "READY_TO_CLOSE"
-              : row.status,
-        fiscalDocument: null,
-      })),
-    } satisfies RevenueClosingOverview);
-  const totals = summarizeRevenueClosing(overview);
-  const monthLabel = formatMonth(overview.month, overview.year);
+  const overview: ReceivablesOverview = receivables ?? {
+    days: [],
+    summary: {
+      totalHours: 0,
+      totalToInvoice: null,
+      allocatedCount: 0,
+      unratedBillableHours: 0,
+      hasNonHourlyBilling: false,
+    },
+    includeFinancials: false,
+  };
+  const values = receivablesValues ?? { projectIds: [] };
+  const options = receivablesFilterOptions ?? { clients: [], projects: [] };
+  const { summary } = overview;
 
   const receber = (
     <div className="space-y-6">
-      <RevenueSummaryCards
-        approvedHours={totals.approvedHours}
-        estimatedRevenue={totals.estimatedRevenue}
-        readyToClose={totals.readyToClose}
-        closed={totals.closed}
-        monthLabel={monthLabel}
-      />
-      <MonthlyClosingTable
-        mode={revenueMode}
-        rows={overview.rows}
-        month={overview.month}
-        year={overview.year}
-        monthLabel={monthLabel}
-        exceptionsByProject={exceptionsByProject}
-        exportHref={receberExportHref}
-      />
-      {exceptions ? (
-        <PeriodExceptionsPanel exceptions={exceptions} monthLabel={monthLabel} />
+      {receivablesMode === "demo" ? (
+        <div className="flex items-center gap-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm font-medium text-warning">
+          <TriangleAlert aria-hidden="true" className="size-4 shrink-0" />
+          <span>
+            Modo demonstração: banco não configurado. Nenhum lançamento real é
+            exibido.
+          </span>
+        </div>
+      ) : (
+        <ReceivablesFilterBar
+          clients={options.clients}
+          projects={options.projects}
+          values={values}
+        />
+      )}
+
+      <section
+        aria-label="Resumo do recorte"
+        className="grid gap-4 sm:grid-cols-3"
+      >
+        <MetricCard
+          label="Horas no período"
+          value={formatHours(summary.totalHours)}
+          icon={Clock}
+          index={0}
+        />
+        <MetricCard
+          label="Valor a faturar"
+          value={
+            summary.totalToInvoice != null
+              ? formatCurrencyPrecise(summary.totalToInvoice)
+              : "—"
+          }
+          icon={DollarSign}
+          index={1}
+        />
+        <MetricCard
+          label="Alocados"
+          value={String(summary.allocatedCount)}
+          icon={Users}
+          index={2}
+        />
+      </section>
+
+      {receivablesMode === "db" ? (
+        <BillingSignals
+          unratedBillableHours={summary.unratedBillableHours}
+          hasNonHourlyBilling={summary.hasNonHourlyBilling}
+        />
       ) : null}
+
+      {receivablesMode === "db" ? (
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {timesheetExportHref ? (
+            <ExportExcelButton
+              href={timesheetExportHref}
+              label="Exportar Timesheet"
+              className="h-10 px-4 text-sm"
+            />
+          ) : null}
+          {apuracaoHref ? (
+            <a
+              href={apuracaoHref}
+              className={cn(
+                "inline-flex h-10 items-center justify-center gap-2 rounded-md border-2 border-ink bg-brand px-5 text-sm font-semibold text-white shadow-[3px_3px_0_0_var(--color-ink)] transition-[transform,box-shadow] duration-150 hover:-translate-x-px hover:-translate-y-px hover:shadow-[4px_4px_0_0_var(--color-ink)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[1px_1px_0_0_var(--color-ink)]",
+                focusRing,
+              )}
+            >
+              <Calculator aria-hidden="true" className="size-4" />
+              Ver Apuração
+            </a>
+          ) : null}
+        </div>
+      ) : null}
+
+      <ReceivablesDayGroups
+        days={overview.days}
+        canEditBillable={canEditBillable}
+      />
     </div>
   );
 

@@ -49,13 +49,19 @@ import {
 /** Safe ceiling for "export all" reads (CSV) when no page is given. */
 const EXPORT_ALL_LIMIT = 50_000;
 
-interface ProjectRateContext {
+export interface ProjectRateContext {
   projectFallbackRate?: number | null;
   clientFallbackRate?: number | null;
   rates: SaleRateRange[];
 }
 
-async function loadProjectRateContexts(
+/**
+ * Load the sale-rate resolution context (vigent ProjectSaleRate ranges + project/
+ * client fallbacks) for a set of projects. Exported so other finance readers
+ * (e.g. the Contas a Receber journey) resolve the SAME sale rate as the reports
+ * layer, instead of re-deriving it. Pure over the given ids.
+ */
+export async function loadProjectRateContexts(
   projectIds: string[],
 ): Promise<Map<string, ProjectRateContext>> {
   const uniqueIds = [...new Set(projectIds)].filter(Boolean);
@@ -105,7 +111,14 @@ async function loadProjectRateContexts(
   );
 }
 
-function resolveBillingRate(
+/**
+ * Resolve the effective sale rate (BRL/hour) for a single time entry from the
+ * pre-loaded rate contexts. Exported alongside {@link loadProjectRateContexts}
+ * so finance readers share one source of truth for sale-rate precedence
+ * (allocation → consultant → project → project/client fallback). Returns null
+ * when no rate applies.
+ */
+export function resolveBillingRate(
   contexts: Map<string, ProjectRateContext>,
   entry: {
     projectId: string;
@@ -218,7 +231,7 @@ export async function resolveReportScope(user: AppUser): Promise<ReportScope> {
 }
 
 /** Whether a non-broad scope can resolve to ANY rows. */
-function scopeHasUniverse(scope: ReportScope): boolean {
+export function scopeHasUniverse(scope: ReportScope): boolean {
   if (scope.broad) return true;
   if (scope.ownConsultantId) return true;
   if (scope.managerUserId) return true;

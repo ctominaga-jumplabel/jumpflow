@@ -2,14 +2,14 @@ import type { Metadata } from "next";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { FinancialOverview } from "@/components/financial/FinancialOverview";
 import { requireRole } from "@/lib/auth/guards";
-import { FINANCIAL_ROLES } from "@/lib/auth/route-permissions";
+import { FINANCIAL_ROLES, hasRole } from "@/lib/auth/route-permissions";
+import { BILLABLE_MANAGER_ROLES } from "@/lib/auth/billable-roles";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { isStorageConfigured } from "@/lib/storage/provider";
 import {
-  revenueClosingStatusLabels,
-  type RevenueClosingOverview,
-  type RevenueClosingStatus,
-} from "@/lib/financial/types";
+  receivablesFilterSchema,
+  type ReceivablesFilter,
+} from "@/lib/financial/receivables-journey-core";
 
 export const metadata: Metadata = { title: "Financeiro" };
 
@@ -18,33 +18,19 @@ function parseSingle(value: string | string[] | undefined): string | undefined {
   return raw && raw.length > 0 ? raw : undefined;
 }
 
-function parseStatus(
-  value: string | string[] | undefined,
-): RevenueClosingStatus | undefined {
-  const raw = parseSingle(value);
-  return raw && raw in revenueClosingStatusLabels
-    ? (raw as RevenueClosingStatus)
-    : undefined;
+/** Serializa os filtros correntes preservando `projectIds` como params repetidos. */
+function buildQuery(
+  filter: ReceivablesFilter,
+  extra: Record<string, string> = {},
+): URLSearchParams {
+  const query = new URLSearchParams();
+  if (filter.from) query.set("from", filter.from);
+  if (filter.to) query.set("to", filter.to);
+  if (filter.clientId) query.set("clientId", filter.clientId);
+  for (const [key, value] of Object.entries(extra)) query.set(key, value);
+  for (const projectId of filter.projectIds) query.append("projectIds", projectId);
+  return query;
 }
-
-function parseMonth(value: string | string[] | undefined, fallback: number) {
-  const raw = parseSingle(value);
-  const parsed = raw ? Number(raw) : fallback;
-  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 12
-    ? parsed
-    : fallback;
-}
-
-function parseYear(value: string | string[] | undefined, fallback: number) {
-  const raw = parseSingle(value);
-  const parsed = raw ? Number(raw) : fallback;
-  return Number.isInteger(parsed) && parsed >= 2020 && parsed <= 2100
-    ? parsed
-    : fallback;
-}
-
-const inputClass =
-  "mt-1 h-10 rounded-md border border-border bg-surface px-3 text-sm text-strong";
 
 export default async function FinanceiroPage({
   searchParams,
@@ -52,78 +38,64 @@ export default async function FinanceiroPage({
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 } = {}) {
   // Financial data is role-protected; non-authorized users go to /access-denied.
-  await requireRole(FINANCIAL_ROLES);
+  const user = await requireRole(FINANCIAL_ROLES);
 
   const databaseConfigured = isDatabaseConfigured();
-  const now = new Date();
   const params = (await searchParams) ?? {};
-  const month = parseMonth(params.month, now.getMonth() + 1);
-  const year = parseYear(params.year, now.getFullYear());
-  const clientName = parseSingle(params.client);
-  const projectName = parseSingle(params.project);
-  const status = parseStatus(params.status);
   const tab = parseSingle(params.tab);
+  const canEditBillable = hasRole(user, BILLABLE_MANAGER_ROLES);
 
+  // Filtros da nova jornada Contas a Receber: período (from/to) + cliente +
+  // projeto (multi). O schema aceita `projectIds` como array OU valor único.
+  const parsedFilter = receivablesFilterSchema.safeParse({
+    from: params.from,
+    to: params.to,
+    clientId: params.clientId,
+    projectIds: params.projectIds,
+  });
+  const filter: ReceivablesFilter = parsedFilter.success
+    ? parsedFilter.data
+    : { projectIds: [] };
+
+  let receivables;
+  let receivablesFilterOptions;
   let financeExpenses;
-  let revenueClosing: RevenueClosingOverview | undefined;
-  let clientOptions: string[] = [];
-  let projectOptions: string[] = [];
-  let exceptions;
-  let exceptionsByProject;
+  let timesheetExportHref: string | undefined;
+  let apuracaoHref: string | undefined;
+
   if (databaseConfigured) {
     // Lazy import so Prisma is never loaded on code paths without a database.
     const { listFinanceExpenses } = await import("@/lib/db/expenses");
-    const { listRevenueClosings } = await import("@/lib/db/revenue");
-    const { listPeriodExceptions, listRevenueExceptionsByProject } =
-      await import("@/lib/db/period-exceptions");
-    financeExpenses = (await listFinanceExpenses()).expenses;
-    const overview = await listRevenueClosings({ month, year });
-    exceptions = await listPeriodExceptions({ month, year });
-    exceptionsByProject = await listRevenueExceptionsByProject({ month, year });
+    const { getReceivablesOverview } = await import(
+      "@/lib/financial/receivables-journey"
+    );
+    const { getReportFilterOptions } = await import("@/lib/db/reports");
 
-    // Filter options come from the full period (unfiltered) so a selected
-    // client/project does not collapse the dropdowns. Project options are
-    // scoped to the selected client when one is chosen.
-    clientOptions = [...new Set(overview.rows.map((r) => r.clientName))].sort();
-    projectOptions = [
-      ...new Set(
-        overview.rows
-          .filter((r) => !clientName || r.clientName === clientName)
-          .map((r) => r.projectName),
-      ),
-    ].sort();
+    [receivables, receivablesFilterOptions, financeExpenses] = await Promise.all(
+      [
+        getReceivablesOverview(user, filter),
+        getReportFilterOptions(user),
+        listFinanceExpenses().then((r) => r.expenses),
+      ],
+    );
 
-    // Cliente / projeto / status filter the table + summary; the period drives
-    // the DB query above.
-    revenueClosing = {
-      ...overview,
-      rows: overview.rows.filter(
-        (r) =>
-          (!clientName || r.clientName === clientName) &&
-          (!projectName || r.projectName === projectName) &&
-          (!status || r.status === status),
-      ),
-    };
-  }
+    // Exportar Timesheet: reaproveita o XLSX de Relatórios com os filtros da
+    // tela (status=APPROVED). Com exatamente 1 projeto, fixa `projectId`; com
+    // múltiplos, OMITE `projectId` para exportar o recorte cliente+período (o
+    // schema de Relatórios aceita um único projectId).
+    const timesheetQuery = new URLSearchParams();
+    if (filter.from) timesheetQuery.set("from", filter.from);
+    if (filter.to) timesheetQuery.set("to", filter.to);
+    if (filter.clientId) timesheetQuery.set("clientId", filter.clientId);
+    timesheetQuery.set("status", "APPROVED");
+    if (filter.projectIds.length === 1) {
+      timesheetQuery.set("projectId", filter.projectIds[0]);
+    }
+    timesheetExportHref = `/api/relatorios/horas/xlsx?${timesheetQuery.toString()}`;
 
-  const statusOptions = Object.keys(
-    revenueClosingStatusLabels,
-  ) as RevenueClosingStatus[];
-
-  // Excel export (Onda 6): Contas a Receber carrega o filtro corrente (período +
-  // cliente/projeto/status); Contas a Pagar espelha a fila do financeiro (sem
-  // filtro de período próprio). Ocultos sem banco.
-  let receberExportHref: string | undefined;
-  let pagarExportHref: string | undefined;
-  if (databaseConfigured) {
-    const receberQuery = new URLSearchParams();
-    receberQuery.set("month", String(month));
-    receberQuery.set("year", String(year));
-    if (clientName) receberQuery.set("client", clientName);
-    if (projectName) receberQuery.set("project", projectName);
-    if (status) receberQuery.set("status", status);
-    receberExportHref = `/api/financeiro/receber/export?${receberQuery.toString()}`;
-    pagarExportHref = "/api/financeiro/pagar/export";
+    // Ver Apuração (tela da Wave C): preserva os filtros na query (projectIds
+    // repetidos, um por projeto selecionado).
+    apuracaoHref = `/app/financeiro/apuracao?${buildQuery(filter).toString()}`;
   }
 
   return (
@@ -131,93 +103,26 @@ export default async function FinanceiroPage({
       <PageHeader
         eyebrow="Gestão"
         title="Financeiro"
-        description="Fechamento mensal de horas aprovadas, valor hora, receita estimada e pagamento de despesas."
+        description="Contas a Receber (horas aprovadas por dia, valor a faturar e apuração) e Contas a Pagar (pagamento de despesas)."
       />
-      <form className="flex flex-wrap items-end gap-3 rounded-md border border-border bg-surface p-4">
-        {/* Preserva a aba ativa (Contas a Receber/Pagar) ao filtrar via GET. */}
-        <input type="hidden" name="tab" value={tab ?? ""} />
-        <label className="text-sm font-medium text-medium">
-          Mês
-          <input
-            name="month"
-            type="number"
-            min={1}
-            max={12}
-            defaultValue={month}
-            className={`${inputClass} w-24`}
-          />
-        </label>
-        <label className="text-sm font-medium text-medium">
-          Ano
-          <input
-            name="year"
-            type="number"
-            min={2020}
-            max={2100}
-            defaultValue={year}
-            className={`${inputClass} w-28`}
-          />
-        </label>
-        <label className="text-sm font-medium text-medium">
-          Cliente
-          <select
-            name="client"
-            defaultValue={clientName ?? ""}
-            className={`${inputClass} w-48`}
-          >
-            <option value="">Todos</option>
-            {clientOptions.map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="text-sm font-medium text-medium">
-          Projeto
-          <select
-            name="project"
-            defaultValue={projectName ?? ""}
-            className={`${inputClass} w-48`}
-          >
-            <option value="">Todos</option>
-            {projectOptions.map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="text-sm font-medium text-medium">
-          Status
-          <select
-            name="status"
-            defaultValue={status ?? ""}
-            className={`${inputClass} w-44`}
-          >
-            <option value="">Todos</option>
-            {statusOptions.map((value) => (
-              <option key={value} value={value}>
-                {revenueClosingStatusLabels[value]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button className="h-10 rounded-md bg-surface px-4 text-sm font-semibold text-strong shadow-[2px_2px_0_0_var(--color-ink)]">
-          Filtrar
-        </button>
-      </form>
       <FinancialOverview
-        revenueMode={databaseConfigured ? "db" : "demo"}
-        revenueClosing={revenueClosing}
+        receivablesMode={databaseConfigured ? "db" : "demo"}
+        receivables={receivables}
+        receivablesFilterOptions={receivablesFilterOptions}
+        receivablesValues={{
+          from: filter.from,
+          to: filter.to,
+          clientId: filter.clientId,
+          projectIds: filter.projectIds,
+        }}
+        canEditBillable={canEditBillable}
+        timesheetExportHref={timesheetExportHref}
+        apuracaoHref={apuracaoHref}
         expensesMode={databaseConfigured ? "db" : "demo"}
         financeExpenses={financeExpenses}
         expensesStorageAvailable={databaseConfigured && isStorageConfigured()}
-        exceptions={exceptions}
-        exceptionsByProject={exceptionsByProject}
         defaultTab={tab}
-        receberExportHref={receberExportHref}
-        pagarExportHref={pagarExportHref}
+        pagarExportHref={databaseConfigured ? "/api/financeiro/pagar/export" : undefined}
       />
     </div>
   );
