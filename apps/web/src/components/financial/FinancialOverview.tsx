@@ -1,3 +1,5 @@
+"use client";
+
 import { Calculator, Clock, DollarSign, TriangleAlert, Users } from "lucide-react";
 import type { Expense } from "@/lib/expenses/types";
 import { formatCurrencyPrecise, formatHours } from "@/lib/format";
