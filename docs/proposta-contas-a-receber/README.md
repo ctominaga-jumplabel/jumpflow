@@ -1,7 +1,7 @@
 # Proposta de Ajustes — Contas a Receber (Financeiro)
 
 > **Fonte:** `Proposta de Ajustes na Plataforma.docx` (Financeiro — Vitória Henrique).
-> **Status:** ✅ **Implementado** (Waves A–F + 2 waves de correção + re-review). Itens 1–7 prontos; gates verdes (`tsc`/`build`/71 testes); bug ALTO de e-mail duplicado eliminado e reconfirmado. **Não commitado** (aguarda decisão de branch/commit). Item 8 (Acompanhamento de Projetos) permanece como wave separada. Ver §7 Follow-ups.
+> **Status:** ✅ **Implementado** (Waves A–F + 2 waves de correção + re-review). Itens 1–7 prontos; gates verdes (`tsc`/`build`/71 testes); bug ALTO de e-mail duplicado eliminado e reconfirmado. **Mergeado na `main`** (merge `5596422`, 2026-07-25) → auto-deploy Vercel; sem migration. Item 8 (Acompanhamento de Projetos) permanece como wave separada. Ver §7 Follow-ups.
 > **Data da análise:** 2026-07-24.
 > **Escopo:** aba **Contas a Receber** do módulo **Financeiro**, + Tela Inicial por setor + card de Acompanhamento de Projetos (à parte).
 
