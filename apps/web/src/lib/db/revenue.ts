@@ -364,6 +364,12 @@ export async function getRevenueClosingForPreInvoice(
 export async function generateRevenueClosings(input: {
   month: number;
   year: number;
+  /**
+   * Scope generation to a single project (generate-if-missing na jornada
+   * "Enviar Apuração"). Sem `projectId`, gera o mês inteiro (todos os projetos).
+   * Reaproveita a MESMA lógica de faturamento — não há caminho duplicado.
+   */
+  projectId?: string;
   audit?: {
     actorUserId: string | null;
     entityId: string;
@@ -384,6 +390,7 @@ export async function generateRevenueClosings(input: {
       status: "APPROVED",
       billable: true,
       date: { gte: start, lt: end },
+      ...(input.projectId ? { projectId: input.projectId } : {}),
     },
     include: { project: { include: projectInclude } },
     orderBy: [{ projectId: "asc" }, { date: "asc" }],
@@ -404,9 +411,12 @@ export async function generateRevenueClosings(input: {
   const fixedProjects = await prisma.project.findMany({
     where: {
       status: "ACTIVE",
-      id: { notIn: [...projects.keys()] },
       billingConfig: { isNot: null },
       billingType: { is: { chargeType: { in: FIXED_BILLING_TYPES } } },
+      // Escopo por projeto (generate-if-missing) OU exclusão dos que já têm horas.
+      ...(input.projectId
+        ? { id: input.projectId }
+        : { id: { notIn: [...projects.keys()] } }),
     },
     include: projectInclude,
   });
