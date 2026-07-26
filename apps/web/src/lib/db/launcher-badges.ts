@@ -1,5 +1,9 @@
 import { prisma } from "@jumpflow/database";
-import { hasRole, FINANCIAL_ROLES } from "@/lib/auth/route-permissions";
+import {
+  hasRole,
+  FINANCIAL_ROLES,
+  PENDING_CLOSING_ROLES,
+} from "@/lib/auth/route-permissions";
 import type { AppUser } from "@/lib/auth/types";
 import type { LauncherBadge } from "@/lib/launcher";
 import { getConsultantForUser } from "@/lib/db/timesheet";
@@ -103,6 +107,31 @@ export async function getLauncherBadges(
     });
     if (toPay > 0) {
       badges.financeiro = { count: toPay, tone: "info", label: "a pagar" };
+    }
+  }
+
+  // --- Pendentes de Fechamento counter (Melhorias v2) -----------------------
+  // Nº de projetos PENDENTES de liberação na competência ATUAL. Mesmo escopo/RBAC
+  // do loader (`listPendingClosings`): ADMIN/AREA_MANAGER/FINANCE. Anota o 3º
+  // card da home financeira (badgeKey `pendentesFechamento`).
+  if (hasRole(user, PENDING_CLOSING_ROLES)) {
+    // Lazy import: mantém o grafo estático deste módulo enxuto (a jornada de
+    // recebíveis puxa o escopo de Relatórios). Só carrega quando o usuário de
+    // fato vê o card de Pendentes de Fechamento.
+    const { countPendingClosings } = await import(
+      "@/lib/financial/receivables-journey"
+    );
+    const now = new Date();
+    const pendingClosings = await countPendingClosings(user, {
+      month: now.getMonth() + 1,
+      year: now.getFullYear(),
+    });
+    if (pendingClosings > 0) {
+      badges.pendentesFechamento = {
+        count: pendingClosings,
+        tone: "warning",
+        label: "a liberar",
+      };
     }
   }
 

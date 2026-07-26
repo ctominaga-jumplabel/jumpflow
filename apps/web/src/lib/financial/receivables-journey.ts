@@ -15,10 +15,17 @@ import { activityLabelOf } from "@/lib/timesheet/types";
 import { toIsoDate } from "@/lib/timesheet/week";
 import {
   buildApuracao,
+  classifyPendingStatus,
+  closingCompetenceKey,
+  competenceBounds,
+  countPendingRows,
+  filterReleasedEntries,
   groupEntriesByDay,
   monthsInRange,
   summarizeReceivables,
   type ApuracaoResult,
+  type PendingClosingRow,
+  type PendingClosingsResult,
   type ReceivablesEntry,
   type ReceivablesFilter,
   type ReceivablesOverview,
@@ -73,10 +80,61 @@ async function loadNonHourlyBillingMap(
 }
 
 /**
+ * Resolve, em UMA consulta, o conjunto de (projeto × competência) LIBERADAS —
+ * i.e., com `RevenueClosing` `CLOSED` — para os lançamentos dados. A competência
+ * é derivada da DATA de cada lançamento (não de `from`/`to`), então o filtro
+ * "só liberados" vale mesmo com período aberto. Retorna um `Set` de chaves
+ * `${projectId}:${yyyy}-${mm}` (ver `entryCompetenceKey`).
+ *
+ * § Melhorias v2 (decisão 2): Contas a Receber/Apuração passam a mostrar apenas
+ * o que o Gerente de Área já liberou. Um projeto/competência sem CLOSED some.
+ */
+async function loadReleasedCompetences(
+  entries: ReadonlyArray<ReceivablesEntry>,
+): Promise<Set<string>> {
+  const released = new Set<string>();
+  if (entries.length === 0) return released;
+
+  const projectIds = [...new Set(entries.map((e) => e.projectId))];
+  // Competências distintas presentes nos lançamentos (yyyy-mm → {month, year}).
+  const competenceMap = new Map<string, { month: number; year: number }>();
+  for (const entry of entries) {
+    const ym = entry.date.slice(0, 7); // yyyy-mm
+    if (!competenceMap.has(ym)) {
+      const [year, month] = ym.split("-").map(Number);
+      competenceMap.set(ym, { month, year });
+    }
+  }
+  const competences = [...competenceMap.values()];
+  if (projectIds.length === 0 || competences.length === 0) return released;
+
+  const closings = await prisma.revenueClosing.findMany({
+    where: {
+      status: "CLOSED",
+      projectId: { in: projectIds },
+      OR: competences.map((c) => ({ month: c.month, year: c.year })),
+    },
+    select: { projectId: true, month: true, year: true },
+  });
+  for (const closing of closings) {
+    if (!closing.projectId) continue; // fechamentos por cliente não se aplicam
+    released.add(
+      closingCompetenceKey(closing.projectId, closing.month, closing.year),
+    );
+  }
+  return released;
+}
+
+/**
  * Busca os lançamentos APPROVED do recorte (cliente/projeto(s)/período),
  * enriquecidos (horas efetivas, anexo, valor de venda). O filtro multi-projeto é
  * aplicado como `projectId in [...]`. Não filtra por `billable` (a lista por dia
  * mostra o toggle "Faturar?"); os agregadores decidem o que entra em cada card.
+ *
+ * "SÓ LIBERADOS" (§ Melhorias v2, decisão 2): após enriquecer, os lançamentos
+ * são filtrados para apenas os cuja (projeto, competência) tem `RevenueClosing`
+ * `CLOSED`. Assim TODA a jornada de recebíveis (dia + apuração) opera somente
+ * sobre o que o Gerente de Área liberou.
  */
 export async function loadReceivablesEntries(
   user: AppUser,
@@ -164,7 +222,12 @@ export async function loadReceivablesEntries(
     };
   });
 
-  return { entries, includeFinancials };
+  // "Só liberados": mantém apenas lançamentos de (projeto, competência) já
+  // CLOSED. Uma única consulta cruzada em memória (defesa: `entryCompetenceKey`).
+  const released = await loadReleasedCompetences(entries);
+  const releasedEntries = filterReleasedEntries(entries, released);
+
+  return { entries: releasedEntries, includeFinancials };
 }
 
 /**
@@ -334,4 +397,158 @@ export async function loadApuracaoStates(
   }
 
   return result;
+}
+
+/* -------------------------------------------------------------------------- */
+/* "Pendentes de Fechamento" (§ Melhorias v2) — loader server-side            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Lista, para uma competência (mês/ano), UMA linha por projeto ATIVO com horas
+ * lançadas (APPROVED) e o status de fechamento (LIBERADO/PENDENTE/SEM_LANCAMENTO)
+ * — a base da tela "Pendentes de Fechamento" (§ Melhorias v2). TODOS os projetos
+ * ativos entram (mesmo com 0h); a UI só habilita "Liberar" para `PENDENTE`.
+ *
+ * Escopo/RBAC (defesa em profundidade — a PÁGINA é gated por
+ * PENDING_CLOSING_ROLES em outra wave): usa o MESMO `resolveReportScope` de
+ * Relatórios. Consequências do escopo atual:
+ *  - ADMIN / AREA_MANAGER / FINANCE → `scope.broad` = true → veem TODOS os
+ *    projetos ativos (AREA_MANAGER NÃO é restrito a "seus" projetos aqui, pois
+ *    `resolveReportScope` o trata como broad, igual a Relatórios/Fechamento).
+ *  - PROJECT_MANAGER → restrito aos projetos que gerencia (`managerUserId`).
+ *  - CONSULTANT / sem escopo gerencial → sem universo de projetos → vazio
+ *    (nunca deveria chegar aqui: a rota é gated).
+ *
+ * `hours` = Σ horas EFETIVAS (`hours × multiplier`) dos lançamentos APPROVED da
+ * competência (mesma fonte única do resto da jornada). O status `PENDENTE`/
+ * `SEM_LANCAMENTO` é decidido pela EXISTÊNCIA de lançamento APPROVED (contagem),
+ * não por `hours == 0`. `LIBERADO` tem precedência (RevenueClosing `CLOSED`).
+ */
+export async function listPendingClosings(
+  user: AppUser,
+  period: { month: number; year: number },
+): Promise<PendingClosingsResult> {
+  const { month, year } = period;
+  const bounds = competenceBounds(month, year);
+  const empty: PendingClosingsResult = {
+    month,
+    year,
+    from: bounds.from,
+    to: bounds.to,
+    rows: [],
+    pendingCount: 0,
+  };
+
+  const scope = await resolveReportScope(user);
+  if (!scopeHasUniverse(scope)) return empty;
+  // Só perfis com universo de PROJETOS (broad ou gerente) listam projetos. Um
+  // escopo apenas-consultor não deve enumerar projetos (defesa; rota é gated).
+  if (!scope.broad && !scope.managerUserId) return empty;
+
+  // 1) Projetos ATIVOS no escopo (broad = todos; PROJECT_MANAGER = gerenciados).
+  const projectWhere: Record<string, unknown> = { status: "ACTIVE" };
+  if (!scope.broad && scope.managerUserId) {
+    projectWhere.managerUserId = scope.managerUserId;
+  }
+  const projects = await prisma.project.findMany({
+    where: projectWhere,
+    select: {
+      id: true,
+      name: true,
+      clientId: true,
+      client: { select: { name: true } },
+    },
+    orderBy: [{ client: { name: "asc" } }, { name: "asc" }],
+  });
+  if (projects.length === 0) return empty;
+
+  const projectIds = projects.map((p) => p.id);
+
+  // 2) Horas APPROVED da competência por projeto (reusa o where de Relatórios).
+  const hoursWhere = buildHoursWhere(scope, {
+    from: bounds.from,
+    to: bounds.to,
+    status: "APPROVED",
+  });
+  hoursWhere.projectId = { in: projectIds };
+  const timeRows = await prisma.timeEntry.findMany({
+    where: hoursWhere,
+    select: { projectId: true, hours: true, multiplier: true },
+  });
+  const hoursByProject = new Map<string, number>();
+  const hasEntries = new Set<string>();
+  for (const row of timeRows) {
+    hasEntries.add(row.projectId);
+    const effective = timeEntryEffectiveHours(
+      Number(row.hours),
+      Number(row.multiplier),
+    );
+    hoursByProject.set(
+      row.projectId,
+      (hoursByProject.get(row.projectId) ?? 0) + effective,
+    );
+  }
+
+  // 3) Fechamentos da competência por projeto (qualquer status → closingId;
+  //    LIBERADO só quando CLOSED).
+  const closings = await prisma.revenueClosing.findMany({
+    where: { projectId: { in: projectIds }, month, year },
+    select: { id: true, projectId: true, status: true },
+  });
+  const closingByProject = new Map<
+    string,
+    { id: string; status: string }
+  >();
+  for (const closing of closings) {
+    if (!closing.projectId) continue;
+    // Se houver mais de um (não deveria pelo unique), o CLOSED tem precedência.
+    const current = closingByProject.get(closing.projectId);
+    if (!current || closing.status === "CLOSED") {
+      closingByProject.set(closing.projectId, {
+        id: closing.id,
+        status: closing.status,
+      });
+    }
+  }
+
+  const rows: PendingClosingRow[] = projects.map((project) => {
+    const closing = closingByProject.get(project.id) ?? null;
+    const closed = closing?.status === "CLOSED";
+    const status = classifyPendingStatus(hasEntries.has(project.id), closed);
+    return {
+      projectId: project.id,
+      projectName: project.name,
+      clientId: project.clientId,
+      clientName: project.client.name,
+      hours: Math.round((hoursByProject.get(project.id) ?? 0) * 100) / 100,
+      status,
+      closingId: closing?.id ?? null,
+      month,
+      year,
+      from: bounds.from,
+      to: bounds.to,
+    };
+  });
+
+  return {
+    month,
+    year,
+    from: bounds.from,
+    to: bounds.to,
+    rows,
+    pendingCount: countPendingRows(rows),
+  };
+}
+
+/**
+ * Contador de projetos PENDENTES de fechamento na competência — base do badge
+ * da home (§ Melhorias v2). Deriva de `listPendingClosings` (sem lógica
+ * duplicada). Respeita o mesmo escopo/RBAC do loader.
+ */
+export async function countPendingClosings(
+  user: AppUser,
+  period: { month: number; year: number },
+): Promise<number> {
+  const { pendingCount } = await listPendingClosings(user, period);
+  return pendingCount;
 }

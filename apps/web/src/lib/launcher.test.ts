@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   financialSectors,
   isFinancialLauncher,
+  isPendingClosingLauncher,
   launcherShortcuts,
+  PENDING_CLOSING_PATH,
   sectorsWithBadges,
   shortcutsForUser,
   sumBadgeCounts,
@@ -125,33 +127,59 @@ describe("launcher withBadges", () => {
   });
 });
 
-describe("launcher sector home (Wave D — Item 1, review MÉDIO #5: FINANCE-only)", () => {
-  it("routes FINANCE-only users to the sector home", () => {
+describe("launcher sector home (Melhorias v2 — 3 cards: [ADMIN, FINANCE])", () => {
+  it("shows the 3-card sector home to ADMIN and FINANCE", () => {
     expect(isFinancialLauncher(user(["FINANCE"]))).toBe(true);
+    expect(isFinancialLauncher(user(["ADMIN"]))).toBe(true);
   });
 
-  it("keeps managers on the shortcut grid even though they are FINANCIAL_ROLES", () => {
-    // ADMIN/AREA_MANAGER are broad operational profiles: they need the grid
-    // (Aprovações, Automações, Acessos), not the FINANCE-only sector home.
-    expect(isFinancialLauncher(user(["ADMIN"]))).toBe(false);
+  it("shows the 3-card home to combos that include ADMIN/FINANCE (precedence)", () => {
+    // A user who is FINANCE/ADMIN *and* AREA_MANAGER still lands on the 3 cards
+    // — isFinancialLauncher wins over the Pendentes redirect.
+    expect(isFinancialLauncher(user(["FINANCE", "ADMIN"]))).toBe(true);
+    expect(isFinancialLauncher(user(["FINANCE", "AREA_MANAGER"]))).toBe(true);
+    expect(isFinancialLauncher(user(["ADMIN", "AREA_MANAGER"]))).toBe(true);
+  });
+
+  it("does NOT show the 3-card home to AREA_MANAGER pure or other profiles", () => {
+    // AREA_MANAGER pure is redirected to Pendentes (see isPendingClosingLauncher).
     expect(isFinancialLauncher(user(["AREA_MANAGER"]))).toBe(false);
-    // A FINANCE user who is also a manager keeps the grid (broader surface wins).
-    expect(isFinancialLauncher(user(["FINANCE", "ADMIN"]))).toBe(false);
-    expect(isFinancialLauncher(user(["FINANCE", "AREA_MANAGER"]))).toBe(false);
-  });
-
-  it("keeps every other profile on the shortcut grid", () => {
     expect(isFinancialLauncher(user(["CONSULTANT"]))).toBe(false);
     expect(isFinancialLauncher(user(["PROJECT_MANAGER"]))).toBe(false);
     expect(isFinancialLauncher(user(["SALES"]))).toBe(false);
     expect(isFinancialLauncher(null)).toBe(false);
   });
 
-  it("exposes exactly the two sectors pointing to the finance tabs", () => {
-    expect(financialSectors.map((s) => s.key)).toEqual(["receber", "pagar"]);
+  it("routes AREA_MANAGER-pure straight to Pendentes de Fechamento", () => {
+    expect(isPendingClosingLauncher(user(["AREA_MANAGER"]))).toBe(true);
+    expect(PENDING_CLOSING_PATH).toBe("/app/financeiro/pendentes");
+  });
+
+  it("does NOT redirect ADMIN/FINANCE combos to Pendentes (they get 3 cards)", () => {
+    // Precedence: anyone with ADMIN or FINANCE is excluded from the redirect.
+    expect(isPendingClosingLauncher(user(["FINANCE", "AREA_MANAGER"]))).toBe(false);
+    expect(isPendingClosingLauncher(user(["ADMIN", "AREA_MANAGER"]))).toBe(false);
+    expect(isPendingClosingLauncher(user(["ADMIN"]))).toBe(false);
+    expect(isPendingClosingLauncher(user(["FINANCE"]))).toBe(false);
+  });
+
+  it("keeps every other profile off the Pendentes redirect (they get the grid)", () => {
+    expect(isPendingClosingLauncher(user(["CONSULTANT"]))).toBe(false);
+    expect(isPendingClosingLauncher(user(["PROJECT_MANAGER"]))).toBe(false);
+    expect(isPendingClosingLauncher(user(["SALES"]))).toBe(false);
+    expect(isPendingClosingLauncher(null)).toBe(false);
+  });
+
+  it("exposes the three sectors pointing to the finance surfaces", () => {
+    expect(financialSectors.map((s) => s.key)).toEqual([
+      "receber",
+      "pagar",
+      "pendentes",
+    ]);
     const byKey = new Map(financialSectors.map((s) => [s.key, s]));
     expect(byKey.get("receber")?.href).toBe("/app/financeiro?tab=receber");
     expect(byKey.get("pagar")?.href).toBe("/app/financeiro?tab=pagar");
+    expect(byKey.get("pendentes")?.href).toBe("/app/financeiro/pendentes");
   });
 
   it("annotates only the sector whose badgeKey matches (Contas a Receber)", () => {

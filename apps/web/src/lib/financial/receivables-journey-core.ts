@@ -151,6 +151,137 @@ export function monthsInRange(
   return out;
 }
 
+/**
+ * Bounds ISO (primeiro/último dia) de UMA competência (mês/ano). Puro e
+ * determinístico (usa `Date.UTC` com argumentos explícitos — NUNCA `new Date()`
+ * sem argumento — para calcular o último dia, então é seguro em teste). Espelha
+ * `monthRangeIso` (privado em actions.ts); usado pela tela "Pendentes de
+ * Fechamento" para montar o `from`/`to` que alimenta `fecharApuracao` por
+ * competência (§ Melhorias v2). `month` é 1-based (1 = janeiro).
+ */
+export function competenceBounds(
+  month: number,
+  year: number,
+): { from: string; to: string } {
+  const mm = String(month).padStart(2, "0");
+  // day 0 do mês seguinte (1-based `month` = índice `month` 0-based) = último
+  // dia do mês corrente. Determinístico: só depende de month/year.
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return {
+    from: `${year}-${mm}-01`,
+    to: `${year}-${mm}-${String(lastDay).padStart(2, "0")}`,
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* "Só liberados": cruzamento lançamento × fechamento CLOSED (puro)            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Chave estável (projeto + competência) para cruzar um LANÇAMENTO com um
+ * FECHAMENTO. Deriva a competência do próprio lançamento (mês/ano da data), então
+ * o filtro "só liberados" independe de `from`/`to` do recorte. Formato:
+ * `${projectId}:${yyyy}-${mm}` (mesma competência que `preInvoiceReferenceKey`).
+ */
+export function entryCompetenceKey(projectId: string, isoDate: string): string {
+  // isoDate = yyyy-mm-dd → yyyy-mm (competência).
+  return `${projectId}:${isoDate.slice(0, 7)}`;
+}
+
+/**
+ * Mesma chave a partir de um fechamento (projeto + mês/ano). A camada de banco
+ * monta um `Set` dessas chaves para os `RevenueClosing` `CLOSED` do recorte.
+ */
+export function closingCompetenceKey(
+  projectId: string,
+  month: number,
+  year: number,
+): string {
+  const mm = String(month).padStart(2, "0");
+  return `${projectId}:${year}-${mm}`;
+}
+
+/**
+ * Filtra lançamentos mantendo APENAS os cuja (projeto, competência) está
+ * LIBERADA — i.e., existe um `RevenueClosing` `CLOSED` para aquele projeto na
+ * competência do lançamento (§ Melhorias v2, decisão 2). Puro/testável: a camada
+ * de banco resolve `releasedKeys` (uma consulta) e passa aqui. Um lançamento sem
+ * fechamento CLOSED na sua competência NÃO entra em Contas a Receber/Apuração.
+ */
+export function filterReleasedEntries(
+  entries: ReadonlyArray<ReceivablesEntry>,
+  releasedKeys: ReadonlySet<string>,
+): ReceivablesEntry[] {
+  return entries.filter((entry) =>
+    releasedKeys.has(entryCompetenceKey(entry.projectId, entry.date)),
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* "Pendentes de Fechamento" (§ Melhorias v2) — tipos + classificação pura     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Status de UM projeto na competência da tela "Pendentes de Fechamento":
+ * - `LIBERADO`: existe `RevenueClosing` `CLOSED` (aparece em Contas a Receber);
+ * - `PENDENTE`: há lançamento APPROVED na competência e ainda NÃO está `CLOSED`
+ *   → habilita "Liberar" (ADMIN/AREA_MANAGER);
+ * - `SEM_LANCAMENTO`: nenhum lançamento APPROVED (0h) → sem ação.
+ */
+export type PendingClosingStatus = "LIBERADO" | "PENDENTE" | "SEM_LANCAMENTO";
+
+/**
+ * Classifica o status de um projeto na competência. Puro: `closed` tem
+ * precedência (um fechamento CLOSED sempre é LIBERADO, mesmo que a leitura de
+ * horas do recorte não retorne linhas). Sem fechamento CLOSED, `hasEntries`
+ * separa PENDENTE de SEM_LANCAMENTO.
+ */
+export function classifyPendingStatus(
+  hasEntries: boolean,
+  closed: boolean,
+): PendingClosingStatus {
+  if (closed) return "LIBERADO";
+  if (hasEntries) return "PENDENTE";
+  return "SEM_LANCAMENTO";
+}
+
+/** Uma linha da tela "Pendentes de Fechamento" (um projeto ATIVO na competência). */
+export interface PendingClosingRow {
+  projectId: string;
+  projectName: string;
+  clientId: string;
+  clientName: string;
+  /** Σ horas efetivas APPROVED do projeto na competência (0 sem lançamento). */
+  hours: number;
+  status: PendingClosingStatus;
+  /** `RevenueClosing.id` da competência, quando existir (qualquer status). */
+  closingId: string | null;
+  /** Competência (para a UI reconstruir bounds / chamar `fecharApuracao`). */
+  month: number;
+  year: number;
+  /** Bounds ISO da competência: alimentam `fecharApuracao({projectId, from, to})`. */
+  from: string;
+  to: string;
+}
+
+/** Resultado do loader "Pendentes de Fechamento" (uma competência). */
+export interface PendingClosingsResult {
+  month: number;
+  year: number;
+  from: string;
+  to: string;
+  rows: PendingClosingRow[];
+  /** Nº de projetos `PENDENTE` (badge da home / contador). */
+  pendingCount: number;
+}
+
+/** Conta as linhas `PENDENTE` (base do badge/contador). Puro. */
+export function countPendingRows(
+  rows: ReadonlyArray<PendingClosingRow>,
+): number {
+  return rows.filter((row) => row.status === "PENDENTE").length;
+}
+
 /* -------------------------------------------------------------------------- */
 /* Tipos de retorno (consumidos pela UI — Wave B/C)                           */
 /* -------------------------------------------------------------------------- */

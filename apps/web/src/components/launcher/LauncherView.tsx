@@ -20,10 +20,14 @@ export interface LauncherViewProps {
   sectors?: LauncherSector[];
 }
 
-/** Solid icon circle color per sector: green = receber, blue = pagar. */
+/**
+ * Solid icon circle color per sector: green = receber, blue = pagar,
+ * marker/amber = pendentes de fechamento (fila de liberação).
+ */
 const sectorIconTone: Record<LauncherSectorTone, string> = {
   receber: "bg-success text-white",
   pagar: "bg-brand text-white",
+  pendentes: "bg-marker text-ink",
 };
 
 /**
@@ -131,7 +135,7 @@ function SectorLauncher({
         </p>
       </div>
 
-      <ul className="mx-auto grid max-w-3xl gap-6 sm:grid-cols-2">
+      <ul className="mx-auto grid max-w-5xl gap-6 sm:grid-cols-2 lg:grid-cols-3">
         {sectors.map((sector) => {
           const Icon = sector.icon;
           return (

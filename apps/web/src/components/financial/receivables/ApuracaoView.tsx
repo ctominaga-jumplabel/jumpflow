@@ -10,7 +10,6 @@ import {
   DollarSign,
   Info,
   Send,
-  Unlock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { focusRing, focusRingInput } from "@/lib/styles";
@@ -23,12 +22,10 @@ import { FeedbackBanner, useFeedback } from "@/components/ui/Feedback";
 import { BillingSignals } from "./BillingSignals";
 import type {
   ApuracaoConsultantRow,
-  CompetenceCloseResult,
   CompetenceSendResult,
   EnviarApuracaoResult,
-  FecharApuracaoResult,
 } from "@/lib/financial/receivables-journey-core";
-import { enviarApuracao, fecharApuracao } from "@/app/app/financeiro/actions";
+import { enviarApuracao } from "@/app/app/financeiro/actions";
 
 /** Horas decimais efetivas → "HH:MM" (ex.: 2.5 → "02:30"). */
 function toHHMM(hours: number): string {
@@ -86,11 +83,9 @@ export interface ApuracaoViewProps {
   includeFinancials: boolean;
   /** Ex.: "01/07/2026 até 31/07/2026" ou "Período não definido". */
   periodLabel: string;
-  /** ISO from/to do recorte; ausentes desabilitam fechar/enviar. */
+  /** ISO from/to do recorte; ausentes desabilitam o envio. */
   from?: string;
   to?: string;
-  /** ADMIN/AREA_MANAGER: pode FECHAR (liberar faturamento). Gate real é server. */
-  canClose: boolean;
   /** FINANCIAL_ROLES: pode ENVIAR a apuração. Gate real é server. */
   canSend: boolean;
   /** Volta para a aba Contas a Receber preservando os filtros. */
@@ -100,16 +95,15 @@ export interface ApuracaoViewProps {
 /**
  * Tela de Apuração (Contas a Receber). Multi-projeto EMPILHADO: cada projeto é um
  * card com cabeçalho (Período/Cliente/Projeto), Resumo dos alocados, totais,
- * sinais de subfaturamento/cobrança não-horária, Observações e o FLUXO DE DOIS
- * PASSOS:
+ * sinais de subfaturamento/cobrança não-horária, Observações e o ENVIO:
  *
- *   1. Fechar / Liberar faturamento (ADMIN/AREA_MANAGER) — `fecharApuracao`, pede
- *      Observações OBRIGATÓRIAS e leva a(s) competência(s) a `CLOSED`.
- *   2. Enviar Apuração (FINANCIAL_ROLES) — `enviarApuracao`, desabilitado até
- *      `CLOSED`; reenvio explícito por competência com confirmação.
+ *   Enviar Apuração (FINANCIAL_ROLES) — `enviarApuracao`, desabilitado até a
+ *   competência estar `CLOSED` (o fechamento/liberação é passo separado do
+ *   Gerente de Área, agora em "Pendentes de Fechamento"); reenvio explícito por
+ *   competência com confirmação.
  *
- * Os estados de fechamento/envio são HIDRATADOS do servidor no carregamento (um
- * projeto já fechado nasce com "Enviar" habilitado; um já enviado nasce como
+ * O estado de fechamento/envio é HIDRATADO do servidor no carregamento (um
+ * projeto já liberado nasce com "Enviar" habilitado; um já enviado nasce como
  * "Apuração Enviada"), sem exigir clique (§0.6).
  */
 export function ApuracaoView({
@@ -118,7 +112,6 @@ export function ApuracaoView({
   periodLabel,
   from,
   to,
-  canClose,
   canSend,
   backHref,
 }: ApuracaoViewProps) {
@@ -171,7 +164,6 @@ export function ApuracaoView({
             periodLabel={periodLabel}
             from={from}
             to={to}
-            canClose={canClose}
             canSend={canSend}
             backHref={backHref}
           />
@@ -187,7 +179,6 @@ interface ApuracaoProjectCardProps {
   periodLabel: string;
   from?: string;
   to?: string;
-  canClose: boolean;
   canSend: boolean;
   backHref: string;
 }
@@ -229,50 +220,6 @@ function summarizeSend(
   }
 }
 
-/** Mapeia o resultado do fechamento em uma mensagem honesta (tom + texto). */
-function summarizeClose(
-  result: FecharApuracaoResult,
-): { tone: "success" | "warning"; text: string } {
-  if (result.allClosed) {
-    return {
-      tone: "success",
-      text: "Faturamento liberado. Já é possível enviar a apuração.",
-    };
-  }
-  const problem = result.competences.find(
-    (c: CompetenceCloseResult) =>
-      c.status !== "CLOSED" && c.status !== "ALREADY_CLOSED",
-  );
-  if (!problem) {
-    return { tone: "success", text: "Faturamento liberado." };
-  }
-  switch (problem.status) {
-    case "GENERATED_EMPTY":
-      return {
-        tone: "warning",
-        text: "Fechamento sem valor a faturar no período (não liberado).",
-      };
-    case "NOT_FOUND":
-      return {
-        tone: "warning",
-        text: "Sem horas faturáveis na competência — nada a liberar.",
-      };
-    default:
-      return {
-        tone: "warning",
-        text: problem.message ?? "Não foi possível liberar o faturamento.",
-      };
-  }
-}
-
-const CLOSE_STATUS_LABEL: Record<CompetenceCloseResult["status"], string> = {
-  CLOSED: "Faturamento liberado",
-  ALREADY_CLOSED: "Já liberado",
-  GENERATED_EMPTY: "Sem valor a faturar",
-  NOT_FOUND: "Sem horas faturáveis",
-  ERROR: "Erro",
-};
-
 const SEND_STATUS_LABEL: Record<CompetenceSendResult["status"], string> = {
   SENT: "Enviado",
   ALREADY_SENT: "Já enviado",
@@ -281,10 +228,6 @@ const SEND_STATUS_LABEL: Record<CompetenceSendResult["status"], string> = {
   SKIPPED_OFF: "Notificação desligada",
   ERROR: "Erro",
 };
-
-function isGoodClose(status: CompetenceCloseResult["status"]): boolean {
-  return status === "CLOSED" || status === "ALREADY_CLOSED";
-}
 
 function isGoodSend(status: CompetenceSendResult["status"]): boolean {
   return status === "SENT" || status === "ALREADY_SENT";
@@ -330,7 +273,6 @@ function ApuracaoProjectCard({
   periodLabel,
   from,
   to,
-  canClose,
   canSend,
   backHref,
 }: ApuracaoProjectCardProps) {
@@ -342,16 +284,11 @@ function ApuracaoProjectCard({
   const [obsError, setObsError] = useState<string | null>(null);
 
   // Estados hidratados do servidor (review MÉDIO #2): habilitam Enviar / marcam
-  // "Apuração Enviada" sem exigir clique.
-  const [closed, setClosed] = useState(project.initialState.anyClosed);
+  // "Apuração Enviada" sem exigir clique. O fechamento (CLOSED) agora acontece em
+  // "Pendentes de Fechamento" (Gerente de Área), então aqui `closed` é só leitura.
+  const [closed] = useState(project.initialState.anyClosed);
   const [alreadySent, setAlreadySent] = useState(project.initialState.allSent);
   const [success, setSuccess] = useState(false);
-
-  // FECHAR (Gerente de Área): modal com Observações OBRIGATÓRIAS.
-  const [fecharOpen, setFecharOpen] = useState(false);
-  const [fecharObs, setFecharObs] = useState("");
-  const [fecharObsError, setFecharObsError] = useState<string | null>(null);
-  const [closeResults, setCloseResults] = useState<CompetenceCloseResult[]>([]);
 
   // ENVIAR: confirmação de reenvio + resultado por competência.
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -363,51 +300,6 @@ function ApuracaoProjectCard({
   >(project.initialState.sentCompetences);
 
   const hasPeriod = Boolean(from && to && project.clientId);
-
-  function doFechar() {
-    if (!from || !to || !project.clientId) {
-      notify(
-        "warning",
-        "Defina data inicial e final no filtro para liberar o faturamento.",
-      );
-      return;
-    }
-    const obs = fecharObs.trim();
-    if (obs.length === 0) {
-      setFecharObsError("Informe uma observação (justificativa do fechamento).");
-      return;
-    }
-    clear();
-    setFecharObsError(null);
-    startTransition(async () => {
-      const result = await fecharApuracao({
-        projectId: project.projectId,
-        from,
-        to,
-        observacoes: obs,
-      });
-
-      if (!result.ok) {
-        if (result.error === "INVALID_INPUT") {
-          setFecharObsError(result.message);
-        }
-        notify("warning", result.message);
-        return;
-      }
-
-      const data = result.data;
-      setCloseResults(data.competences);
-      // Se qualquer competência foi liberada, habilita o Enviar (as demais
-      // podem ser NOT_FOUND/GENERATED_EMPTY — sem valor a faturar).
-      if (data.competences.some((c) => isGoodClose(c.status))) {
-        setClosed(true);
-      }
-      setFecharOpen(false);
-      setFecharObs("");
-      const summary = summarizeClose(data);
-      notify(summary.tone, summary.text);
-    });
-  }
 
   function doSend(resendCompetences?: Array<{ month: number; year: number }>) {
     if (!from || !to || !project.clientId) {
@@ -630,22 +522,7 @@ function ApuracaoProjectCard({
 
       <FeedbackBanner message={feedback} />
 
-      {/* Resultado por competência da última ação (fechar/enviar). */}
-      {closeResults.length > 0 ? (
-        <div className="space-y-1.5">
-          <p className="text-xs font-semibold uppercase tracking-wide text-soft">
-            Liberação por competência
-          </p>
-          <CompetenceResultChips
-            results={closeResults.map((c) => ({
-              month: c.month,
-              year: c.year,
-              label: CLOSE_STATUS_LABEL[c.status],
-              good: isGoodClose(c.status),
-            }))}
-          />
-        </div>
-      ) : null}
+      {/* Resultado por competência do último envio. */}
       {sendResults.length > 0 ? (
         <div className="space-y-1.5">
           <p className="text-xs font-semibold uppercase tracking-wide text-soft">
@@ -665,8 +542,8 @@ function ApuracaoProjectCard({
       {!hasPeriod ? (
         <p className="flex items-center gap-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm font-medium text-warning">
           <Info aria-hidden="true" className="size-4 shrink-0" />
-          Defina data inicial e final no filtro de Contas a Receber para fechar e
-          enviar esta apuração.
+          Defina data inicial e final no filtro de Contas a Receber para enviar
+          esta apuração.
         </p>
       ) : showWaitingClose ? (
         <p className="flex items-center gap-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm font-medium text-warning">
@@ -683,19 +560,6 @@ function ApuracaoProjectCard({
           label="Exportar Excel"
           className="h-10 px-4 text-sm"
         />
-        {canClose ? (
-          <ActionButton
-            variant="secondary"
-            icon={Unlock}
-            onClick={() => {
-              setFecharObsError(null);
-              setFecharOpen(true);
-            }}
-            disabled={isPending || !hasPeriod}
-          >
-            Liberar faturamento
-          </ActionButton>
-        ) : null}
         {canSend ? (
           <ActionButton
             variant={alreadySent ? "success" : "primary"}
@@ -707,61 +571,6 @@ function ApuracaoProjectCard({
           </ActionButton>
         ) : null}
       </div>
-
-      {/* Modal FECHAR: Observações OBRIGATÓRIAS (justificativa). */}
-      <Modal
-        open={fecharOpen}
-        onClose={() => setFecharOpen(false)}
-        title="Liberar faturamento"
-        description="Leva o fechamento da(s) competência(s) do período para CLOSED e libera o envio da apuração."
-        footer={
-          <>
-            <ActionButton
-              variant="secondary"
-              size="sm"
-              onClick={() => setFecharOpen(false)}
-            >
-              Cancelar
-            </ActionButton>
-            <ActionButton
-              variant="primary"
-              size="sm"
-              disabled={isPending}
-              onClick={doFechar}
-            >
-              Liberar faturamento
-            </ActionButton>
-          </>
-        }
-      >
-        <label className="block text-sm font-medium text-medium">
-          Observações (obrigatório)
-          <textarea
-            value={fecharObs}
-            onChange={(e) => {
-              setFecharObs(e.target.value);
-              if (fecharObsError) setFecharObsError(null);
-            }}
-            rows={3}
-            placeholder="Justificativa da liberação do faturamento..."
-            className={cn(
-              "mt-1 w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-strong",
-              focusRingInput,
-              fecharObsError && "border-danger",
-            )}
-          />
-        </label>
-        {fecharObsError ? (
-          <p className="mt-1 text-xs font-medium text-danger">
-            {fecharObsError}
-          </p>
-        ) : (
-          <p className="mt-1 text-xs text-soft">
-            A justificativa fica registrada na auditoria do fechamento
-            (disparando a liberação de horas).
-          </p>
-        )}
-      </Modal>
 
       {/* Modal REENVIO: confirmação. */}
       <Modal

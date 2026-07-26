@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 
 import { requireRole } from "@/lib/auth/guards";
-import { FINANCIAL_ROLES, hasRole } from "@/lib/auth/route-permissions";
+import { RECEIVABLES_ROLES } from "@/lib/auth/route-permissions";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { formatDate } from "@/lib/format";
 import {
@@ -43,7 +43,7 @@ function projectExportHref(
 }
 
 /**
- * Tela de Apuração (Contas a Receber, Wave C / item 6). Gated a FINANCIAL_ROLES.
+ * Tela de Apuração (Contas a Receber, Wave C / item 6). Gated a RECEIVABLES_ROLES.
  * Parseia os MESMOS filtros da jornada (vindos do "Ver Apuração" da Wave B) e
  * consome `getReceivablesApuracao`. Renderiza os projetos empilhados; o envio e o
  * estado de sucesso vivem no client (`ApuracaoView`). NFS-e/status/exceções ficam
@@ -54,13 +54,15 @@ export default async function ApuracaoPage({
 }: {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 } = {}) {
-  const user = await requireRole(FINANCIAL_ROLES);
+  // Apuração é [ADMIN, FINANCE] (Melhorias v2, RECEIVABLES_ROLES): o
+  // AREA_MANAGER não apura/envia — só libera em Pendentes de Fechamento.
+  const user = await requireRole(RECEIVABLES_ROLES);
   const params = (await searchParams) ?? {};
 
-  // Gates de papel (a UI só ajusta affordance; o gate real é server-side nas
-  // actions). Fechar/Liberar faturamento = ADMIN/AREA_MANAGER; Enviar = todo
-  // FINANCIAL_ROLES (esta página já é gated por FINANCIAL_ROLES).
-  const canClose = hasRole(user, ["ADMIN", "AREA_MANAGER"]);
+  // Gates de papel (a UI só ajusta affordance; o gate real é server-side na
+  // action). A liberação/fechamento MIGROU para "Pendentes de Fechamento"
+  // (Gerente de Área); aqui só resta Enviar Apuração = RECEIVABLES_ROLES (esta
+  // página já é gated por RECEIVABLES_ROLES = [ADMIN, FINANCE]).
   const canSend = true;
 
   const parsedFilter = receivablesFilterSchema.safeParse({
@@ -147,7 +149,6 @@ export default async function ApuracaoPage({
         periodLabel={periodLabel}
         from={filter.from}
         to={filter.to}
-        canClose={canClose}
         canSend={canSend}
         backHref={backHref}
       />
