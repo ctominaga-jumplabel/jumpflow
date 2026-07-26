@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { FinancialOverview } from "@/components/financial/FinancialOverview";
 import { requireRole } from "@/lib/auth/guards";
-import { FINANCIAL_ROLES, hasRole } from "@/lib/auth/route-permissions";
+import { RECEIVABLES_ROLES, hasRole } from "@/lib/auth/route-permissions";
 import { BILLABLE_MANAGER_ROLES } from "@/lib/auth/billable-roles";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { isStorageConfigured } from "@/lib/storage/provider";
@@ -37,8 +37,9 @@ export default async function FinanceiroPage({
 }: {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 } = {}) {
-  // Financial data is role-protected; non-authorized users go to /access-denied.
-  const user = await requireRole(FINANCIAL_ROLES);
+  // Contas a Receber/Pagar é [ADMIN, FINANCE] (Melhorias v2): o AREA_MANAGER
+  // opera só Pendentes de Fechamento. Não-autorizados vão para /access-denied.
+  const user = await requireRole(RECEIVABLES_ROLES);
 
   const databaseConfigured = isDatabaseConfigured();
   const params = (await searchParams) ?? {};

@@ -27,6 +27,29 @@ export type RouteAccess = RoleName[] | "ALL";
 export const FINANCIAL_ROLES: RoleName[] = ["ADMIN", "AREA_MANAGER", "FINANCE"];
 
 /**
+ * Roles que ACESSAM Contas a Receber/Pagar e a jornada de apuração/envio
+ * (`/app/financeiro`, `/app/financeiro/apuracao`, home de 3 cards, rotas de
+ * export receber/pagar/apuração). Melhorias v2 (2026-07-25): o AREA_MANAGER
+ * SAI deste conjunto — ele passa a operar apenas a tela de Pendentes de
+ * Fechamento (liberar faturamento), não Contas a Receber/Pagar. NÃO confundir
+ * com {@link FINANCIAL_ROLES} (masking de valores/includeFinancials), que
+ * continua incluindo AREA_MANAGER: só o GATE de página/rota fica mais estrito.
+ */
+export const RECEIVABLES_ROLES: RoleName[] = ["ADMIN", "FINANCE"];
+
+/**
+ * Roles que ACESSAM a tela `/app/financeiro/pendentes` (Pendentes de
+ * Fechamento). O AREA_MANAGER e o ADMIN liberam o faturamento (CLOSE, via
+ * `fecharApuracao`, gate ADMIN/AREA_MANAGER inalterado); o FINANCE acompanha o
+ * que ainda falta liberar. Melhorias v2 (2026-07-25).
+ */
+export const PENDING_CLOSING_ROLES: RoleName[] = [
+  "ADMIN",
+  "AREA_MANAGER",
+  "FINANCE",
+];
+
+/**
  * Roles que administram a Politica de Reembolso (Onda 3, P12): cadastro dos
  * limites (prazo/valor) por categoria e da regra Geral. Governanca financeira +
  * People — os mesmos que respondem pelo pagamento (FINANCIAL_ROLES) mais PEOPLE
@@ -157,9 +180,17 @@ interface RouteRule {
  */
 export const routePermissions: RouteRule[] = [
   { prefix: "/app/pagamentos", access: FINANCIAL_ROLES },
+  // Pendentes de Fechamento (Melhorias v2): o Gerente de Área libera o
+  // faturamento por projeto/competência; FINANCE/ADMIN acompanham. Regra MAIS
+  // ESPECÍFICA que `/app/financeiro` — DEVE vir antes (o lookup casa o primeiro
+  // prefixo). PENDING_CLOSING_ROLES inclui AREA_MANAGER, que NÃO acessa Contas a
+  // Receber/Pagar (`/app/financeiro`).
+  { prefix: "/app/financeiro/pendentes", access: PENDING_CLOSING_ROLES },
   // Cobrança de projetos (motor de regras) é um subdomínio do Financeiro, já
-  // coberto pelo prefixo `/app/financeiro` abaixo.
-  { prefix: "/app/financeiro", access: FINANCIAL_ROLES },
+  // coberto pelo prefixo `/app/financeiro` abaixo. Melhorias v2: Contas a
+  // Receber/Pagar passam a ser SÓ [ADMIN, FINANCE] (RECEIVABLES_ROLES); o
+  // AREA_MANAGER perde acesso a `/app/financeiro`.
+  { prefix: "/app/financeiro", access: RECEIVABLES_ROLES },
   // Comercial: valores de venda, tipo de cobrança e budget por projeto.
   { prefix: "/app/comercial", access: SALE_RATE_ROLES },
   // Competências (Talentos): catálogo de skills, perfis de competência e matriz

@@ -65,18 +65,41 @@ describe("hasRole", () => {
 });
 
 describe("accessForPath", () => {
-  it("requires finance roles for the financeiro module", () => {
+  it("keeps Pagamentos on the full financial role set", () => {
+    // Pagamentos (consultant payments) is a separate module — Melhorias v2 did
+    // NOT tighten it; AREA_MANAGER still reaches it.
     expect(accessForPath("/app/pagamentos")).toEqual([
       "ADMIN",
       "AREA_MANAGER",
       "FINANCE",
     ]);
-    expect(accessForPath("/app/financeiro")).toEqual([
+  });
+
+  it("restricts Contas a Receber/Pagar to [ADMIN, FINANCE] (Melhorias v2)", () => {
+    // v2 decision 4: AREA_MANAGER loses access to /app/financeiro (Contas a
+    // Receber/Pagar). Now RECEIVABLES_ROLES = [ADMIN, FINANCE].
+    expect(accessForPath("/app/financeiro")).toEqual(["ADMIN", "FINANCE"]);
+    // Sub-routes without a dedicated rule fall through to /app/financeiro.
+    expect(accessForPath("/app/financeiro/apuracao")).toEqual([
+      "ADMIN",
+      "FINANCE",
+    ]);
+    expect(accessForPath("/app/financeiro/fechamento")).toEqual([
+      "ADMIN",
+      "FINANCE",
+    ]);
+  });
+
+  it("routes Pendentes de Fechamento to PENDING_CLOSING_ROLES, more specific first", () => {
+    // v2: /app/financeiro/pendentes MUST resolve BEFORE the broader
+    // /app/financeiro rule and include AREA_MANAGER.
+    expect(accessForPath("/app/financeiro/pendentes")).toEqual([
       "ADMIN",
       "AREA_MANAGER",
       "FINANCE",
     ]);
-    expect(accessForPath("/app/financeiro/fechamento")).toEqual([
+    // A deeper path under pendentes still matches the specific rule.
+    expect(accessForPath("/app/financeiro/pendentes/x")).toEqual([
       "ADMIN",
       "AREA_MANAGER",
       "FINANCE",
@@ -141,6 +164,49 @@ describe("canAccess / canAccessPath", () => {
     expect(canAccessPath(consultant, "/app/financeiro")).toBe(false);
     expect(canAccessPath(consultant, "/app/pagamentos")).toBe(false);
     expect(canAccessPath(noRoles, "/app/financeiro")).toBe(false);
+  });
+
+  describe("Melhorias v2 — Contas a Receber vs Pendentes de Fechamento", () => {
+    it("DENIES AREA_MANAGER on Contas a Receber/Pagar and Apuração", () => {
+      // v2 decision 4: AREA_MANAGER no longer accesses /app/financeiro.
+      expect(canAccessPath(areaManager, "/app/financeiro")).toBe(false);
+      expect(canAccessPath(areaManager, "/app/financeiro/apuracao")).toBe(false);
+      expect(canAccessPath(areaManager, "/app/financeiro/fechamento")).toBe(
+        false,
+      );
+    });
+
+    it("ALLOWS AREA_MANAGER on Pendentes de Fechamento", () => {
+      expect(canAccessPath(areaManager, "/app/financeiro/pendentes")).toBe(true);
+    });
+
+    it("gives ADMIN and FINANCE access to all three finance surfaces", () => {
+      for (const user of [admin, finance]) {
+        expect(canAccessPath(user, "/app/financeiro")).toBe(true);
+        expect(canAccessPath(user, "/app/financeiro/apuracao")).toBe(true);
+        expect(canAccessPath(user, "/app/financeiro/pendentes")).toBe(true);
+      }
+    });
+
+    it("keeps Pendentes closed to profiles outside PENDING_CLOSING_ROLES", () => {
+      expect(canAccessPath(consultant, "/app/financeiro/pendentes")).toBe(false);
+      expect(canAccessPath(projectManager, "/app/financeiro/pendentes")).toBe(
+        false,
+      );
+      expect(canAccessPath(noRoles, "/app/financeiro/pendentes")).toBe(false);
+    });
+
+    it("routes a combo AREA_MANAGER+FINANCE to both surfaces (union of roles)", () => {
+      const both: AppUser = {
+        id: "amf",
+        name: "AMF",
+        email: "amf@x.com",
+        roles: ["AREA_MANAGER", "FINANCE"],
+      };
+      // FINANCE grants Contas a Receber; AREA_MANAGER (and FINANCE) grant Pendentes.
+      expect(canAccessPath(both, "/app/financeiro")).toBe(true);
+      expect(canAccessPath(both, "/app/financeiro/pendentes")).toBe(true);
+    });
   });
 
   it("enforces roles on the aprovacoes route", () => {

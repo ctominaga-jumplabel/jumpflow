@@ -5,7 +5,7 @@ import { Prisma, prisma } from "@jumpflow/database";
 import { z, type ZodType } from "zod";
 import type { ActionResult, ErrorCode } from "@/lib/actions/result";
 import { requireRole } from "@/lib/auth/guards";
-import { FINANCIAL_ROLES } from "@/lib/auth/route-permissions";
+import { FINANCIAL_ROLES, RECEIVABLES_ROLES } from "@/lib/auth/route-permissions";
 import type { RoleName } from "@/lib/auth/roles";
 import {
   notifyClientBillingSummary,
@@ -1433,7 +1433,10 @@ export async function enviarApuracao(input: {
 }): Promise<ActionResult<EnviarApuracaoResult>> {
   try {
     ensureDatabase();
-    const user = await requireRole(FINANCIAL_ROLES);
+    // v2: envio é do Financeiro — alinhado ao gate da página (RECEIVABLES_ROLES
+    // = [ADMIN, FINANCE]). AREA_MANAGER só LIBERA (fecharApuracao), não envia.
+    // A action é o limite real (POST) — defesa em profundidade.
+    const user = await requireRole(RECEIVABLES_ROLES);
     const parsed = parseInput(enviarApuracaoSchema, input);
     const dbUser = await resolveDbUser(user);
     const observacoes = parsed.observacoes?.trim() ?? "";

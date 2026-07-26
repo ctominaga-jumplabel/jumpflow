@@ -7,7 +7,9 @@ import { isDatabaseConfigured } from "@/lib/db/config";
 import {
   financialSectors,
   isFinancialLauncher,
+  isPendingClosingLauncher,
   mockLauncherBadges,
+  PENDING_CLOSING_PATH,
   sectorsWithBadges,
   shortcutsForUser,
   withBadges,
@@ -33,6 +35,13 @@ export default async function AppIndex() {
   if (user) {
     const landing = landingPathFor(user.roles);
     if (landing !== "/app") redirect(landing);
+
+    // Melhorias v2: o AREA_MANAGER (sem ADMIN/FINANCE) não usa Contas a
+    // Receber/Pagar — sua entrada é a fila de liberação (Pendentes de
+    // Fechamento). Precedência: [ADMIN|FINANCE] veem os 3 cards abaixo; senão
+    // AREA_MANAGER é redirecionado; demais perfis seguem na grade. `redirect()`
+    // lança internamente, então fica antes de qualquer render/carga de badges.
+    if (isPendingClosingLauncher(user)) redirect(PENDING_CLOSING_PATH);
   }
 
   const firstName = user?.name.split(" ")[0] ?? "";
@@ -45,9 +54,9 @@ export default async function AppIndex() {
     badges = await getLauncherBadges(user);
   }
 
-  // Item 1 (Wave D, review MÉDIO #5): FINANCE-only users get the centered
-  // per-sector home; ADMIN/AREA_MANAGER and every other profile keep the
-  // consultant-first shortcut grid.
+  // Melhorias v2 (2026-07-25): [ADMIN, FINANCE] veem a home de 3 cards (Contas a
+  // Receber, Contas a Pagar, Pendentes de Fechamento). O AREA_MANAGER já foi
+  // redirecionado acima; os demais perfis mantêm a grade de atalhos.
   if (isFinancialLauncher(user)) {
     return (
       <LauncherView

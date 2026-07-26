@@ -150,7 +150,43 @@ Os agentes disponíveis **cobrem todo o ciclo** (produto→dados→backend→fro
 
 ---
 
+## Melhorias v2 — Pendentes de Fechamento & acesso por papel (2026-07-25)
+
+Novo passo no fluxo: o **Gerente de Área** libera o fechamento em uma tela dedicada; o **Financeiro** só apura/envia o que já foi liberado.
+
+### Decisões (usuário)
+1. **Pendentes de Fechamento** lista **todo projeto Ativo** (1 linha cada, mesmo sem lançamento), por competência, com status e horas do período. **Liberar** só aparece nos que têm lançamento e ainda não liberados; sem lançamento → 0h, sem ação.
+2. **Contas a Receber = só liberados** (RevenueClosing `CLOSED`). A ação **Liberar/Fechar sai da Apuração** e passa a existir só em Pendentes de Fechamento. Financeiro só apura e envia.
+3. **ADMIN acessa tudo.** Home de 3 cards para **[ADMIN, FINANCE]**; **AREA_MANAGER** (sem ADMIN/FINANCE) vai **direto para Pendentes de Fechamento**; demais perfis mantêm a grade.
+4. Contas a Receber/Pagar **apenas [ADMIN, FINANCE]** (AREA_MANAGER perde acesso a `/app/financeiro`).
+
+### Acesso (role sets)
+- `RECEIVABLES_ROLES = [ADMIN, FINANCE]` → `/app/financeiro` (receber/pagar), `/app/financeiro/apuracao`, home de 3 cards, rotas de export receber/pagar/apuração.
+- `PENDING_CLOSING_ROLES = [ADMIN, AREA_MANAGER, FINANCE]` → `/app/financeiro/pendentes` (FINANCE/ADMIN acompanham; AREA_MANAGER/ADMIN liberam).
+- Liberar (CLOSE) = `APURACAO_CLOSE_ROLES = [ADMIN, AREA_MANAGER]` (reusa `fecharApuracao`, inalterado).
+- `FINANCIAL_ROLES` (masking de valores/`includeFinancials`) **não muda** — só o gate das páginas fica mais estrito.
+
+### Tela Pendentes de Fechamento (`/app/financeiro/pendentes`)
+- Filtro de **competência** (mês/ano; default = mês atual). 1 linha por projeto **Ativo**: Projeto, Cliente, Horas lançadas (APPROVED no período), **Status**:
+  - **Liberado** = RevenueClosing `CLOSED` (aparece em Contas a Receber);
+  - **Pendente** = tem lançamento APPROVED, não `CLOSED` → botão **Liberar** (ADMIN/AREA_MANAGER);
+  - **Sem lançamento** = 0h → sem ação.
+- **Liberar** = `fecharApuracao({ projectId, from, to = bounds da competência, observacoes })` (justificativa curta em modal). Ao liberar, a linha vira "Liberado" e o projeto passa a Contas a Receber.
+
+### Home de 3 cards (`/app`)
+- [ADMIN, FINANCE]: **Contas a Receber**, **Contas a Pagar**, **Pendentes de Fechamento** (badge = nº de projetos pendentes).
+- AREA_MANAGER puro → redirect para `/app/financeiro/pendentes`.
+
+### Impacto
+- `getReceivablesOverview`/apuração filtram para lançamentos de (projeto, competência) **`CLOSED`**.
+- `FinancialOverview`/`ApuracaoView`: remover o botão **Fechar** (migra para Pendentes); Enviar (FINANCE) permanece e exige `CLOSED` (agora garantido pelo fluxo de Pendentes).
+- `route-permissions.ts` (+ `proxy.ts`): novos role sets e rota; gate de `/app/financeiro` muda para `RECEIVABLES_ROLES`.
+
 ## 7. Follow-ups conhecidos (fora deste ciclo)
+- **v2 — RBAC actions residuais:** `sendPreInvoiceEmail`/`advanceRevenueClosing` seguem em `FINANCIAL_ROLES` (caminho da `MonthlyClosingTable`, hoje morta). `enviarApuracao` já foi alinhado a `RECEIVABLES_ROLES` (fix M1). Alinhar as demais se o caminho fiscal for revivido.
+- **v2 — dead code:** `MonthlyClosingTable.tsx` órfão; rota `api/financeiro/receber/export` órfã (usa a leitura antiga por mês/ano, não "só liberados"); atalho `financeiro` no `launcher.ts` é affordance morta (ninguém no grid tem FINANCIAL_ROLES). Remover/religar conscientemente.
+- **v2 — escopo do AREA_MANAGER em Pendentes:** hoje `broad` (vê/libera qualquer projeto ativo, igual a Relatórios/Fechamento). Se quiser restringir à área dele, aplicar escopo por linha em `listPendingClosings`.
+- **v2 — testes de integração:** reenvio por competência e `NOT_CLOSED` (só cobertos por lógica pura); incluir `vitest run` de RBAC/financeiro no gate do ciclo (pegou regressão silenciosa de teste).
 - **Item 8 — Acompanhamento de Projetos** (card com indicadores/% de progresso): não construído; wave separada.
 - **Testes de regressão do reenvio por competência:** o fix ALTO foi confirmado por review + gates, mas falta cobertura automatizada (integração de `enviarApuracao`: 2ª chamada com `resendCompetences` parcial não reenvia a competência recém-enviada; `NOT_CLOSED` não envia; RBAC de `fecharApuracao`). Recomendado adicionar.
 - **UX reenvio multi-competência parcial:** pode encadear múltiplos prompts de confirmação; polir semeando `pendingResend` com todas as competências elegíveis ou detalhando no texto do modal.

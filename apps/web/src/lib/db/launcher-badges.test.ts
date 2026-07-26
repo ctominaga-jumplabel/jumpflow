@@ -38,6 +38,9 @@ const h = vi.hoisted(() => {
     projects: [] as ProjectRec[],
     entries: [] as EntryRec[],
     expenses: [] as ExpenseRec[],
+    // Nº de projetos PENDENTES de fechamento (retorno mockado de
+    // `countPendingClosings` — a jornada de recebíveis tem seus próprios testes).
+    pendingClosings: 0,
   };
 
   function projectMatches(projectId: string, where?: Where): boolean {
@@ -91,6 +94,12 @@ const h = vi.hoisted(() => {
 });
 
 vi.mock("@jumpflow/database", () => ({ prisma: h.prismaMock }));
+// A contagem de "Pendentes de Fechamento" é uma unidade própria (testada em
+// receivables-journey.test.ts) e puxa o escopo de Relatórios/auth. Aqui só
+// verificamos o WIRING do badge, então mockamos o contador.
+vi.mock("@/lib/financial/receivables-journey", () => ({
+  countPendingClosings: async () => h.store.pendingClosings,
+}));
 
 import { getLauncherBadges } from "./launcher-badges";
 
@@ -128,6 +137,7 @@ beforeEach(() => {
     { consultantId: "con-2", projectId: "proj-other", status: "MANAGER_APPROVED" },
     { consultantId: "con-1", projectId: "proj-1", status: "FINANCE_APPROVED" },
   ];
+  h.store.pendingClosings = 0;
 });
 
 afterEach(() => vi.unstubAllEnvs());
@@ -172,5 +182,23 @@ describe("getLauncherBadges", () => {
     h.store.expenses = [];
     const badges = await getLauncherBadges(appUser("user-admin", ["ADMIN"]));
     expect(badges).toEqual({});
+  });
+
+  it("annotates the Pendentes de Fechamento card for a Gerente de Área", async () => {
+    h.store.pendingClosings = 3;
+    const badges = await getLauncherBadges(
+      appUser("user-admin", ["AREA_MANAGER"]),
+    );
+    expect(badges.pendentesFechamento).toMatchObject({
+      count: 3,
+      tone: "warning",
+      label: "a liberar",
+    });
+  });
+
+  it("omits the Pendentes de Fechamento badge for roles outside the queue", async () => {
+    h.store.pendingClosings = 5;
+    const badges = await getLauncherBadges(appUser("user-con", ["CONSULTANT"]));
+    expect(badges.pendentesFechamento).toBeUndefined();
   });
 });

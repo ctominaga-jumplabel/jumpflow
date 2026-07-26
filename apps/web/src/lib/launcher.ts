@@ -7,6 +7,7 @@ import {
   Clock,
   FolderKanban,
   GraduationCap,
+  ListChecks,
   Receipt,
   ShieldCheck,
   Upload,
@@ -150,7 +151,7 @@ export function shortcutsForUser(user: AppUser | null): LauncherShortcut[] {
  * is *which sector*, not *which action*. The shortcut grid stays untouched for
  * every other profile; only `page.tsx` chooses between the two variations.
  */
-export type LauncherSectorTone = "receber" | "pagar";
+export type LauncherSectorTone = "receber" | "pagar" | "pendentes";
 
 export interface LauncherSector {
   key: string;
@@ -169,7 +170,12 @@ export interface LauncherSector {
   badge?: LauncherBadge;
 }
 
-/** The two financial sectors, in the order shown in the mockup (assets/01). */
+/**
+ * The financial sectors, in the order shown on the home. Melhorias v2
+ * (2026-07-25): passa a haver um 3º card — Pendentes de Fechamento — onde o
+ * Gerente de Área libera projetos para faturamento; Contas a Receber só mostra
+ * o que já foi liberado (RevenueClosing CLOSED).
+ */
 export const financialSectors: LauncherSector[] = [
   {
     key: "receber",
@@ -189,20 +195,45 @@ export const financialSectors: LauncherSector[] = [
     icon: Upload,
     tone: "pagar",
   },
+  {
+    key: "pendentes",
+    label: "Pendentes de Fechamento",
+    description: "Libere projetos para faturamento",
+    href: "/app/financeiro/pendentes",
+    icon: ListChecks,
+    tone: "pendentes",
+    // Nº de projetos pendentes de liberação. O contador real é ligado numa wave
+    // posterior; por ora sem badge (ausente = não anotado, não quebra a home).
+    badgeKey: "pendentesFechamento",
+  },
 ];
 
+/** Destino do redirect do AREA_MANAGER puro ao entrar em `/app`. */
+export const PENDING_CLOSING_PATH = "/app/financeiro/pendentes";
+
 /**
- * Whether the given user sees the sector home instead of the shortcut grid.
- * Review MÉDIO #5: the sector home is for FINANCE-ONLY users. ADMIN and
- * AREA_MANAGER are broad operational profiles that also need the consultant-first
- * shortcut grid (Aprovações, Automações, Acessos, etc.), so they keep the grid
- * even though they belong to FINANCIAL_ROLES. A user who is FINANCE *and* also a
- * manager keeps the grid (the broader operational surface wins).
+ * Whether the given user sees the 3-card financial sector home instead of the
+ * shortcut grid. Melhorias v2 (2026-07-25): passa a valer para [ADMIN, FINANCE]
+ * (antes era FINANCE puro). Esses veem os 3 cards (Contas a Receber, Contas a
+ * Pagar, Pendentes de Fechamento). O AREA_MANAGER NÃO cai aqui — vai direto para
+ * Pendentes (ver {@link isPendingClosingLauncher}). Precedência: esta checagem
+ * roda ANTES da de Pendentes.
  */
 export function isFinancialLauncher(user: AppUser | null): boolean {
+  return hasRole(user, ["ADMIN", "FINANCE"]);
+}
+
+/**
+ * Whether the given user is routed straight to Pendentes de Fechamento on
+ * `/app`. Melhorias v2: o AREA_MANAGER SEM ADMIN/FINANCE não vê Contas a
+ * Receber/Pagar — sua entrada é a fila de liberação. Combos [ADMIN|FINANCE +
+ * AREA_MANAGER] caem na home de 3 cards (isFinancialLauncher tem precedência),
+ * então esta função os exclui explicitamente.
+ */
+export function isPendingClosingLauncher(user: AppUser | null): boolean {
   if (!user) return false;
-  const isManager = hasRole(user, ["ADMIN", "AREA_MANAGER"]);
-  return hasRole(user, "FINANCE") && !isManager;
+  if (isFinancialLauncher(user)) return false;
+  return hasRole(user, "AREA_MANAGER");
 }
 
 /**
@@ -292,6 +323,19 @@ export function mockLauncherBadges(): Record<string, LauncherBadge> {
       count: readyToClose,
       tone: "info",
       label: "prontos p/ fechar",
+    };
+  }
+
+  // Pendentes de Fechamento (demo): projetos ainda NÃO liberados (qualquer status
+  // exceto CLOSED). Coerente com o card `pendentesFechamento` da home financeira.
+  const pendingClosings = currentClosing.rows.filter(
+    (r) => r.status !== "CLOSED",
+  ).length;
+  if (pendingClosings > 0) {
+    badges.pendentesFechamento = {
+      count: pendingClosings,
+      tone: "warning",
+      label: "a liberar",
     };
   }
 

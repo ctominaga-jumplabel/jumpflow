@@ -4,9 +4,16 @@ import {
   apuracaoExportRows,
   apuracaoResumoRows,
   buildApuracao,
+  classifyPendingStatus,
+  closingCompetenceKey,
+  competenceBounds,
+  countPendingRows,
+  entryCompetenceKey,
+  filterReleasedEntries,
   groupEntriesByDay,
   receivablesFilterSchema,
   summarizeReceivables,
+  type PendingClosingRow,
   type ReceivablesEntry,
 } from "./receivables-journey-core";
 
@@ -184,6 +191,124 @@ describe("apuracao export shaping", () => {
       "Total geral",
     ]);
     expect(rows.at(-1)).toMatchObject({ totalHours: 13, totalAmount: 2100 });
+  });
+});
+
+describe("competenceBounds", () => {
+  it("returns first/last ISO day of the competence (deterministic)", () => {
+    expect(competenceBounds(7, 2026)).toEqual({
+      from: "2026-07-01",
+      to: "2026-07-31",
+    });
+    // February (non-leap) and a leap year end correctly.
+    expect(competenceBounds(2, 2026)).toEqual({
+      from: "2026-02-01",
+      to: "2026-02-28",
+    });
+    expect(competenceBounds(2, 2024)).toEqual({
+      from: "2024-02-01",
+      to: "2024-02-29",
+    });
+    // Single-digit month is zero-padded.
+    expect(competenceBounds(1, 2026)).toEqual({
+      from: "2026-01-01",
+      to: "2026-01-31",
+    });
+    // December: `Date.UTC(year, 12, 0)` rolls to Dec 31 without leaking into the
+    // next year (guards the year-boundary math).
+    expect(competenceBounds(12, 2026)).toEqual({
+      from: "2026-12-01",
+      to: "2026-12-31",
+    });
+    // 30-day month.
+    expect(competenceBounds(4, 2026)).toEqual({
+      from: "2026-04-01",
+      to: "2026-04-30",
+    });
+  });
+});
+
+describe("filter 'só liberados' (released competences)", () => {
+  it("keys agree between entry (date) and closing (month/year)", () => {
+    expect(entryCompetenceKey("p1", "2026-07-15")).toBe("p1:2026-07");
+    expect(closingCompetenceKey("p1", 7, 2026)).toBe("p1:2026-07");
+    // Single-digit month padded on the closing side.
+    expect(closingCompetenceKey("p1", 3, 2026)).toBe("p1:2026-03");
+  });
+
+  it("keeps only entries whose (project, competence) is CLOSED", () => {
+    const rows = [
+      entry({ id: "a", projectId: "p1", date: "2026-07-10" }), // released
+      entry({ id: "b", projectId: "p1", date: "2026-08-10" }), // p1 Aug NOT released
+      entry({ id: "c", projectId: "p2", date: "2026-07-10" }), // p2 NOT released
+      entry({ id: "d", projectId: "p1", date: "2026-07-31" }), // released (same comp)
+    ];
+    const released = new Set([closingCompetenceKey("p1", 7, 2026)]);
+    const kept = filterReleasedEntries(rows, released);
+    expect(kept.map((e) => e.id)).toEqual(["a", "d"]);
+  });
+
+  it("drops everything when no competence is released", () => {
+    const rows = [entry({ id: "a", projectId: "p1", date: "2026-07-10" })];
+    expect(filterReleasedEntries(rows, new Set())).toEqual([]);
+  });
+
+  it("aggregators over released-only entries reflect just the released set", () => {
+    const rows = [
+      entry({ id: "a", projectId: "p1", date: "2026-07-10", effectiveHours: 8, saleRate: 200 }),
+      entry({ id: "b", projectId: "p1", date: "2026-08-10", effectiveHours: 8, saleRate: 200 }),
+    ];
+    const released = new Set([closingCompetenceKey("p1", 7, 2026)]);
+    const summary = summarizeReceivables(filterReleasedEntries(rows, released), true);
+    expect(summary.totalHours).toBe(8);
+    expect(summary.totalToInvoice).toBe(1600);
+  });
+});
+
+describe("classifyPendingStatus", () => {
+  it("CLOSED wins over having entries → LIBERADO", () => {
+    expect(classifyPendingStatus(true, true)).toBe("LIBERADO");
+    expect(classifyPendingStatus(false, true)).toBe("LIBERADO");
+  });
+  it("has entries but not closed → PENDENTE", () => {
+    expect(classifyPendingStatus(true, false)).toBe("PENDENTE");
+  });
+  it("no entries and not closed → SEM_LANCAMENTO", () => {
+    expect(classifyPendingStatus(false, false)).toBe("SEM_LANCAMENTO");
+  });
+});
+
+describe("countPendingRows", () => {
+  const row = (
+    overrides: Partial<PendingClosingRow> = {},
+  ): PendingClosingRow => ({
+    projectId: "p1",
+    projectName: "Atlas",
+    clientId: "cli1",
+    clientName: "Vix",
+    hours: 0,
+    status: "SEM_LANCAMENTO",
+    closingId: null,
+    month: 7,
+    year: 2026,
+    from: "2026-07-01",
+    to: "2026-07-31",
+    ...overrides,
+  });
+
+  it("counts only PENDENTE rows", () => {
+    const rows = [
+      row({ projectId: "p1", status: "PENDENTE" }),
+      row({ projectId: "p2", status: "LIBERADO" }),
+      row({ projectId: "p3", status: "SEM_LANCAMENTO" }),
+      row({ projectId: "p4", status: "PENDENTE" }),
+    ];
+    expect(countPendingRows(rows)).toBe(2);
+  });
+
+  it("is zero when nothing is pending", () => {
+    expect(countPendingRows([row({ status: "LIBERADO" })])).toBe(0);
+    expect(countPendingRows([])).toBe(0);
   });
 });
 

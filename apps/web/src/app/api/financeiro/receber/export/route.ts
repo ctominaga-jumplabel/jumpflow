@@ -1,5 +1,5 @@
 import { requireRole } from "@/lib/auth/guards";
-import { FINANCIAL_ROLES } from "@/lib/auth/route-permissions";
+import { RECEIVABLES_ROLES } from "@/lib/auth/route-permissions";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { buildWorkbook, defineSheet, xlsxResponse } from "@/lib/export/xlsx";
 import {
@@ -27,14 +27,14 @@ function clampInt(
 }
 
 /**
- * `.xlsx` export of "Contas a Receber" (Onda 6). Re-checks FINANCIAL_ROLES (the
- * SAME gate as /app/financeiro) and reapplies the exact screen filter: period
+ * `.xlsx` export of "Contas a Receber" (Onda 6). Re-checks RECEIVABLES_ROLES
+ * (the SAME gate as /app/financeiro) and reapplies the exact screen filter: period
  * (mês/ano) drives `listRevenueClosings`, then cliente/projeto/status filter the
  * rows just like the page. Every column is financial and authorized for this
  * role, so there is no per-column masking. Audits `REVENUE_CLOSINGS_EXPORTED`.
  */
 export async function GET(request: Request) {
-  const user = await requireRole(FINANCIAL_ROLES);
+  const user = await requireRole(RECEIVABLES_ROLES);
   if (!isDatabaseConfigured()) return noDatabaseResponse();
 
   const url = new URL(request.url);

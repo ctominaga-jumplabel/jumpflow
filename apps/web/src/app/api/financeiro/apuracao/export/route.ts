@@ -1,5 +1,5 @@
 import { requireRole } from "@/lib/auth/guards";
-import { FINANCIAL_ROLES } from "@/lib/auth/route-permissions";
+import { RECEIVABLES_ROLES } from "@/lib/auth/route-permissions";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { xlsxResponse } from "@/lib/export/xlsx";
 import { apuracaoFilterSchema } from "@/lib/financial/receivables-journey-core";
@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 
 /**
  * `.xlsx` export da Tela de Apuração (Contas a Receber, Wave C / item 6). Recheca
- * FINANCIAL_ROLES (mesmo gate da página e da action), parseia os MESMOS filtros
+ * RECEIVABLES_ROLES (mesmo gate da página), parseia os MESMOS filtros
  * da jornada com PERÍODO OBRIGATÓRIO (`apuracaoFilterSchema`: from/to exigidos +
  * cliente + projetos; sem período → invalidInputResponse, nunca all-time) e reusa
  * a MESMA leitura `getReceivablesApuracao` — o escopo/RBAC e o `includeFinancials`
@@ -22,7 +22,7 @@ export const dynamic = "force-dynamic";
  * `RECEIVABLES_APURACAO_EXPORTED` com o filtro usado.
  */
 export async function GET(request: Request) {
-  const user = await requireRole(FINANCIAL_ROLES);
+  const user = await requireRole(RECEIVABLES_ROLES);
   if (!isDatabaseConfigured()) return noDatabaseResponse();
 
   const searchParams = new URL(request.url).searchParams;
