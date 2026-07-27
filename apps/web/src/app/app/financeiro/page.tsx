@@ -7,11 +7,28 @@ import { BILLABLE_MANAGER_ROLES } from "@/lib/auth/billable-roles";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { isStorageConfigured } from "@/lib/storage/provider";
 import {
+  competenceBounds,
   receivablesFilterSchema,
   type ReceivablesFilter,
 } from "@/lib/financial/receivables-journey-core";
 
 export const metadata: Metadata = { title: "Financeiro" };
+
+/**
+ * Período default da aba Contas a Receber = MÊS ATUAL (mockup 02: "01/07 até
+ * 31/07"). Sem isso, `from`/`to` ficavam vazios e o "Ver Apuração" abria a
+ * Apuração sem período → "Nada a apurar", mesmo havendo projetos liberados.
+ * Aplica o default só quando o usuário não informou nenhum limite; um filtro
+ * parcial (só `from` ou só `to`) é respeitado como veio.
+ */
+function withDefaultPeriod(
+  filter: ReceivablesFilter,
+  now: Date,
+): ReceivablesFilter {
+  if (filter.from || filter.to) return filter;
+  const { from, to } = competenceBounds(now.getMonth() + 1, now.getFullYear());
+  return { ...filter, from, to };
+}
 
 function parseSingle(value: string | string[] | undefined): string | undefined {
   const raw = Array.isArray(value) ? value[0] : value;
@@ -83,9 +100,10 @@ export default async function FinanceiroPage({
     clientId: params.clientId,
     projectIds: params.projectIds,
   });
-  const filter: ReceivablesFilter = parsedFilter.success
-    ? parsedFilter.data
-    : { projectIds: [] };
+  const filter: ReceivablesFilter = withDefaultPeriod(
+    parsedFilter.success ? parsedFilter.data : { projectIds: [] },
+    new Date(),
+  );
 
   let receivables;
   let receivablesFilterOptions;

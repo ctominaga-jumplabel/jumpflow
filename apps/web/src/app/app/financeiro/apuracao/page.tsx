@@ -5,6 +5,7 @@ import { RECEIVABLES_ROLES } from "@/lib/auth/route-permissions";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { formatDate } from "@/lib/format";
 import {
+  competenceBounds,
   receivablesFilterSchema,
   type ReceivablesFilter,
 } from "@/lib/financial/receivables-journey-core";
@@ -71,9 +72,22 @@ export default async function ApuracaoPage({
     clientId: params.clientId,
     projectIds: params.projectIds,
   });
-  const filter: ReceivablesFilter = parsedFilter.success
+  const baseFilter: ReceivablesFilter = parsedFilter.success
     ? parsedFilter.data
     : { projectIds: [] };
+  // Default = mês atual quando o "Ver Apuração" chega sem período (a aba Contas
+  // a Receber agora também aplica esse default). Evita "Nada a apurar" com o
+  // recorte vazio quando há projetos liberados no mês corrente.
+  const filter: ReceivablesFilter =
+    baseFilter.from || baseFilter.to
+      ? baseFilter
+      : {
+          ...baseFilter,
+          ...competenceBounds(
+            new Date().getMonth() + 1,
+            new Date().getFullYear(),
+          ),
+        };
 
   const backHref = `/app/financeiro?${buildQuery(filter, { tab: "receber" }).toString()}`;
   const periodLabel =
