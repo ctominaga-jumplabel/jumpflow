@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   financialSectors,
-  isFinancialLauncher,
-  isPendingClosingLauncher,
+  isAdminLauncher,
+  isExclusivelyFinance,
   launcherShortcuts,
-  PENDING_CLOSING_PATH,
   sectorsWithBadges,
   shortcutsForUser,
   sumBadgeCounts,
@@ -127,47 +126,54 @@ describe("launcher withBadges", () => {
   });
 });
 
-describe("launcher sector home (Melhorias v2 — 3 cards: [ADMIN, FINANCE])", () => {
-  it("shows the 3-card sector home to ADMIN and FINANCE", () => {
-    expect(isFinancialLauncher(user(["FINANCE"]))).toBe(true);
-    expect(isFinancialLauncher(user(["ADMIN"]))).toBe(true);
+describe("launcher landing por papel (correções de navegação — 2026-07-27)", () => {
+  it("routes ADMIN to the operational shortcut GRID (not the 3 cards)", () => {
+    expect(isAdminLauncher(user(["ADMIN"]))).toBe(true);
+    // ADMIN não é Financeiro-exclusivo — cai na grade, nunca nos 3 cards.
+    expect(isExclusivelyFinance(user(["ADMIN"]))).toBe(false);
   });
 
-  it("shows the 3-card home to combos that include ADMIN/FINANCE (precedence)", () => {
-    // A user who is FINANCE/ADMIN *and* AREA_MANAGER still lands on the 3 cards
-    // — isFinancialLauncher wins over the Pendentes redirect.
-    expect(isFinancialLauncher(user(["FINANCE", "ADMIN"]))).toBe(true);
-    expect(isFinancialLauncher(user(["FINANCE", "AREA_MANAGER"]))).toBe(true);
-    expect(isFinancialLauncher(user(["ADMIN", "AREA_MANAGER"]))).toBe(true);
+  it("shows the 3-card home ONLY to an exclusively-FINANCE user", () => {
+    expect(isExclusivelyFinance(user(["FINANCE"]))).toBe(true);
+    // Não é ADMIN, então não cai na grade.
+    expect(isAdminLauncher(user(["FINANCE"]))).toBe(false);
   });
 
-  it("does NOT show the 3-card home to AREA_MANAGER pure or other profiles", () => {
-    // AREA_MANAGER pure is redirected to Pendentes (see isPendingClosingLauncher).
-    expect(isFinancialLauncher(user(["AREA_MANAGER"]))).toBe(false);
-    expect(isFinancialLauncher(user(["CONSULTANT"]))).toBe(false);
-    expect(isFinancialLauncher(user(["PROJECT_MANAGER"]))).toBe(false);
-    expect(isFinancialLauncher(user(["SALES"]))).toBe(false);
-    expect(isFinancialLauncher(null)).toBe(false);
+  it("gives ADMIN+FINANCE(+…) the grade (Admin has precedence)", () => {
+    // isAdminLauncher é checado ANTES de isExclusivelyFinance no page.tsx; e um
+    // combo nunca é "exclusivamente FINANCE".
+    expect(isAdminLauncher(user(["FINANCE", "ADMIN"]))).toBe(true);
+    expect(isExclusivelyFinance(user(["FINANCE", "ADMIN"]))).toBe(false);
+    expect(isAdminLauncher(user(["ADMIN", "AREA_MANAGER"]))).toBe(true);
   });
 
-  it("routes AREA_MANAGER-pure straight to Pendentes de Fechamento", () => {
-    expect(isPendingClosingLauncher(user(["AREA_MANAGER"]))).toBe(true);
-    expect(PENDING_CLOSING_PATH).toBe("/app/financeiro/pendentes");
+  it("treats AREA_MANAGER-pure as neither Admin nor Finance-exclusive (→ Feed)", () => {
+    expect(isAdminLauncher(user(["AREA_MANAGER"]))).toBe(false);
+    expect(isExclusivelyFinance(user(["AREA_MANAGER"]))).toBe(false);
   });
 
-  it("does NOT redirect ADMIN/FINANCE combos to Pendentes (they get 3 cards)", () => {
-    // Precedence: anyone with ADMIN or FINANCE is excluded from the redirect.
-    expect(isPendingClosingLauncher(user(["FINANCE", "AREA_MANAGER"]))).toBe(false);
-    expect(isPendingClosingLauncher(user(["ADMIN", "AREA_MANAGER"]))).toBe(false);
-    expect(isPendingClosingLauncher(user(["ADMIN"]))).toBe(false);
-    expect(isPendingClosingLauncher(user(["FINANCE"]))).toBe(false);
+  it("sends PM/SALES/PEOPLE/CONSULTANT to neither launcher variation (→ Feed)", () => {
+    for (const role of [
+      "PROJECT_MANAGER",
+      "SALES",
+      "PEOPLE",
+      "CONSULTANT",
+    ] as const) {
+      expect(isAdminLauncher(user([role]))).toBe(false);
+      expect(isExclusivelyFinance(user([role]))).toBe(false);
+    }
   });
 
-  it("keeps every other profile off the Pendentes redirect (they get the grid)", () => {
-    expect(isPendingClosingLauncher(user(["CONSULTANT"]))).toBe(false);
-    expect(isPendingClosingLauncher(user(["PROJECT_MANAGER"]))).toBe(false);
-    expect(isPendingClosingLauncher(user(["SALES"]))).toBe(false);
-    expect(isPendingClosingLauncher(null)).toBe(false);
+  it("does NOT treat a FINANCE combo with another role as Finance-exclusive", () => {
+    // FINANCE + AREA_MANAGER → não é exclusivo (vai para o Feed, não 3 cards).
+    expect(isExclusivelyFinance(user(["FINANCE", "AREA_MANAGER"]))).toBe(false);
+    expect(isExclusivelyFinance(user(["FINANCE", "SALES"]))).toBe(false);
+  });
+
+  it("returns false for a null or role-less user (no launcher variation)", () => {
+    expect(isAdminLauncher(null)).toBe(false);
+    expect(isExclusivelyFinance(null)).toBe(false);
+    expect(isExclusivelyFinance(user([]))).toBe(false);
   });
 
   it("exposes the three sectors pointing to the finance surfaces", () => {
@@ -179,7 +185,9 @@ describe("launcher sector home (Melhorias v2 — 3 cards: [ADMIN, FINANCE])", ()
     const byKey = new Map(financialSectors.map((s) => [s.key, s]));
     expect(byKey.get("receber")?.href).toBe("/app/financeiro?tab=receber");
     expect(byKey.get("pagar")?.href).toBe("/app/financeiro?tab=pagar");
-    expect(byKey.get("pendentes")?.href).toBe("/app/financeiro/pendentes");
+    // A aba Pendentes vive dentro do Financeiro (o Financeiro-exclusivo acessa
+    // por ?tab=pendentes); a rota standalone segue para o AREA_MANAGER.
+    expect(byKey.get("pendentes")?.href).toBe("/app/financeiro?tab=pendentes");
   });
 
   it("annotates only the sector whose badgeKey matches (Contas a Receber)", () => {

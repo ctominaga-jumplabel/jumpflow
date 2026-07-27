@@ -18,6 +18,29 @@ function parseSingle(value: string | string[] | undefined): string | undefined {
   return raw && raw.length > 0 ? raw : undefined;
 }
 
+/**
+ * Competência (mês/ano) da aba "Pendentes de Fechamento". Usa params PRÓPRIOS
+ * (`pmonth`/`pyear`) para NÃO colidir com os filtros da aba Contas a Receber
+ * (from/to). Default = mês atual (`now` resolvido no server). Valores fora do
+ * intervalo caem no default.
+ */
+function resolvePendingCompetence(
+  params: Record<string, string | string[] | undefined>,
+  now: Date,
+): { month: number; year: number } {
+  const rawMonth = Number(parseSingle(params.pmonth));
+  const rawYear = Number(parseSingle(params.pyear));
+  const month =
+    Number.isInteger(rawMonth) && rawMonth >= 1 && rawMonth <= 12
+      ? rawMonth
+      : now.getMonth() + 1;
+  const year =
+    Number.isInteger(rawYear) && rawYear >= 2000 && rawYear <= 2100
+      ? rawYear
+      : now.getFullYear();
+  return { month, year };
+}
+
 /** Serializa os filtros correntes preservando `projectIds` como params repetidos. */
 function buildQuery(
   filter: ReceivablesFilter,
@@ -45,6 +68,12 @@ export default async function FinanceiroPage({
   const params = (await searchParams) ?? {};
   const tab = parseSingle(params.tab);
   const canEditBillable = hasRole(user, BILLABLE_MANAGER_ROLES);
+  // A liberação (CLOSE) é do Gerente de Área/ADMIN; o gate real é server-side na
+  // action `fecharApuracao`. Aqui a UI só decide a affordance do botão "Liberar".
+  // Como `/app/financeiro` é [ADMIN, FINANCE], na prática só o ADMIN vê o botão;
+  // o FINANCE acompanha a aba em somente leitura.
+  const canClosePending = hasRole(user, ["ADMIN", "AREA_MANAGER"]);
+  const pendingCompetence = resolvePendingCompetence(params, new Date());
 
   // Filtros da nova jornada Contas a Receber: período (from/to) + cliente +
   // projeto (multi). O schema aceita `projectIds` como array OU valor único.
@@ -63,22 +92,43 @@ export default async function FinanceiroPage({
   let financeExpenses;
   let timesheetExportHref: string | undefined;
   let apuracaoHref: string | undefined;
+  let pendingClosings:
+    | {
+        rows: import("@/lib/financial/receivables-journey-core").PendingClosingRow[];
+        month: number;
+        year: number;
+        pendingCount: number;
+      }
+    | undefined;
 
   if (databaseConfigured) {
     // Lazy import so Prisma is never loaded on code paths without a database.
     const { listFinanceExpenses } = await import("@/lib/db/expenses");
-    const { getReceivablesOverview } = await import(
+    const { getReceivablesOverview, listPendingClosings } = await import(
       "@/lib/financial/receivables-journey"
     );
     const { getReportFilterOptions } = await import("@/lib/db/reports");
 
-    [receivables, receivablesFilterOptions, financeExpenses] = await Promise.all(
-      [
-        getReceivablesOverview(user, filter),
-        getReportFilterOptions(user),
-        listFinanceExpenses().then((r) => r.expenses),
-      ],
-    );
+    const [
+      receivablesResult,
+      filterOptionsResult,
+      financeExpensesResult,
+      pendingResult,
+    ] = await Promise.all([
+      getReceivablesOverview(user, filter),
+      getReportFilterOptions(user),
+      listFinanceExpenses().then((r) => r.expenses),
+      listPendingClosings(user, pendingCompetence),
+    ]);
+    receivables = receivablesResult;
+    receivablesFilterOptions = filterOptionsResult;
+    financeExpenses = financeExpensesResult;
+    pendingClosings = {
+      rows: pendingResult.rows,
+      month: pendingResult.month,
+      year: pendingResult.year,
+      pendingCount: pendingResult.pendingCount,
+    };
 
     // Exportar Timesheet: reaproveita o XLSX de Relatórios com os filtros da
     // tela (status=APPROVED). Com exatamente 1 projeto, fixa `projectId`; com
@@ -124,6 +174,8 @@ export default async function FinanceiroPage({
         expensesStorageAvailable={databaseConfigured && isStorageConfigured()}
         defaultTab={tab}
         pagarExportHref={databaseConfigured ? "/api/financeiro/pagar/export" : undefined}
+        pendingClosings={pendingClosings}
+        canClosePending={canClosePending}
       />
     </div>
   );

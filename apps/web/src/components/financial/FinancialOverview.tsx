@@ -1,13 +1,24 @@
 "use client";
 
-import { Calculator, Clock, DollarSign, TriangleAlert, Users } from "lucide-react";
+import {
+  Calculator,
+  Clock,
+  Database,
+  DollarSign,
+  TriangleAlert,
+  Users,
+} from "lucide-react";
 import type { Expense } from "@/lib/expenses/types";
 import { formatCurrencyPrecise, formatHours } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { focusRing } from "@/lib/styles";
 import { MetricCard } from "@/components/ui/MetricCard";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { ExportExcelButton } from "@/components/ui/ExportExcelButton";
-import type { ReceivablesOverview } from "@/lib/financial/receivables-journey-core";
+import type {
+  PendingClosingRow,
+  ReceivablesOverview,
+} from "@/lib/financial/receivables-journey-core";
 import {
   ReceivablesFilterBar,
   type ReceivablesFilterOption,
@@ -15,6 +26,7 @@ import {
 } from "./receivables/ReceivablesFilterBar";
 import { ReceivablesDayGroups } from "./receivables/ReceivablesDayGroups";
 import { BillingSignals } from "./receivables/BillingSignals";
+import { PendingClosingsView } from "./receivables/PendingClosingsView";
 import { ExpensesFinancePanel } from "./ExpensesFinancePanel";
 import { FinanceTabs } from "./FinanceTabs";
 
@@ -51,6 +63,19 @@ export interface FinancialOverviewProps {
   defaultTab?: string;
   /** `.xlsx` export href da aba Contas a Pagar (Onda 6). db mode. */
   pagarExportHref?: string;
+  /**
+   * Fila da aba "Pendentes de Fechamento" (competência corrente), quando há
+   * banco. Reaproveita o `PendingClosingsView` da rota standalone. Ausente em
+   * modo demo → a aba degrada com um EmptyState honesto.
+   */
+  pendingClosings?: {
+    rows: PendingClosingRow[];
+    month: number;
+    year: number;
+    pendingCount: number;
+  };
+  /** ADMIN/AREA_MANAGER pode LIBERAR (na aba, na prática só ADMIN chega aqui). */
+  canClosePending?: boolean;
 }
 
 /**
@@ -74,6 +99,8 @@ export function FinancialOverview({
   expensesStorageAvailable = false,
   defaultTab,
   pagarExportHref,
+  pendingClosings,
+  canClosePending = false,
 }: FinancialOverviewProps) {
   const overview: ReceivablesOverview = receivables ?? {
     days: [],
@@ -183,12 +210,41 @@ export function FinancialOverview({
     />
   );
 
+  // Pendentes de Fechamento: mesma fila da rota standalone (`PendingClosingsView`),
+  // agora dentro do Financeiro. Params de competência próprios (`pmonth`/`pyear`)
+  // e `tab=pendentes` preservada no GET para não colidir com os filtros de
+  // Contas a Receber (from/to/clientId/projectIds). Sem banco → EmptyState.
+  const pendentes = pendingClosings ? (
+    <PendingClosingsView
+      rows={pendingClosings.rows}
+      month={pendingClosings.month}
+      year={pendingClosings.year}
+      pendingCount={pendingClosings.pendingCount}
+      canClose={canClosePending}
+      formAction="/app/financeiro"
+      monthParam="pmonth"
+      yearParam="pyear"
+      hiddenFields={{ tab: "pendentes" }}
+    />
+  ) : (
+    <EmptyState
+      icon={Database}
+      title="Disponível com banco de dados"
+      description="A fila de liberação de faturamento por projeto/competência usa dados reais (projetos ativos e fechamentos). Configure o banco para usá-la."
+    />
+  );
+
   return (
     <FinanceTabs
       defaultTabId={defaultTab}
       tabs={[
         { id: "receber", label: "Contas a Receber", content: receber },
         { id: "pagar", label: "Contas a Pagar", content: pagar },
+        {
+          id: "pendentes",
+          label: "Pendentes de Fechamento",
+          content: pendentes,
+        },
       ]}
     />
   );
