@@ -29,9 +29,15 @@ const created = {
   lines: [] as AnyRow[],
 };
 
+// Default: nenhum fechamento existente (caminho create). Testes de reconcile
+// sobrescrevem com mockResolvedValueOnce para simular um CLOSED/INVOICED.
+const revenueClosingFindFirst = vi.fn(
+  async (): Promise<AnyRow | null> => null,
+);
+
 const txMock = {
   revenueClosing: {
-    findFirst: async () => null,
+    findFirst: () => revenueClosingFindFirst(),
     create: async ({ data }: { data: AnyRow }) => {
       const row = { id: `rc-${created.closings.length + 1}`, ...data };
       created.closings.push(row);
@@ -169,5 +175,73 @@ describe("generateRevenueClosings — base faturável é o equivalente", () => {
     // 10 + 3 = 13 horas efetivas faturáveis -> 13 * 200 = 2600
     expect(Number(closing.totalHours)).toBe(13);
     expect(Number(closing.totalAmount)).toBeCloseTo(2600, 6);
+  });
+});
+
+describe("generateRevenueClosings — reconcileClosed (fix pré-fatura defasada)", () => {
+  it("recomputa um fechamento CLOSED quando reconcileClosed=true (totais atualizados, status mantido, ajuste preservado)", async () => {
+    // Snapshot antigo: 40h fechadas. Agora existem 120h aprovadas (mock abaixo).
+    revenueClosingFindFirst.mockResolvedValueOnce({
+      id: "rc-existing",
+      status: "CLOSED",
+    });
+    timeEntryFindMany.mockResolvedValue([
+      entry({ hours: 120, multiplier: 1.0, id: "te-full" }),
+    ]);
+
+    const result = await generateRevenueClosings({
+      month: MONTH,
+      year: YEAR,
+      projectId: "p1",
+      reconcileClosed: true,
+    });
+
+    expect(result).toEqual({ generated: 1, skippedClosed: 0 });
+    const updated = created.closings[0]!;
+    expect(Number(updated.totalHours)).toBe(120);
+    expect(Number(updated.totalAmount)).toBeCloseTo(24000, 6);
+    // O update NÃO regride o status (não escreve status) nem zera o ajuste
+    // manual (adjustmentAmount ausente do payload = preservado).
+    expect(updated.status).toBeUndefined();
+    expect(updated).not.toHaveProperty("adjustmentAmount");
+  });
+
+  it("PULA um fechamento CLOSED quando reconcileClosed é omitido (snapshot preservado)", async () => {
+    revenueClosingFindFirst.mockResolvedValueOnce({
+      id: "rc-existing",
+      status: "CLOSED",
+    });
+    timeEntryFindMany.mockResolvedValue([
+      entry({ hours: 120, multiplier: 1.0, id: "te-full" }),
+    ]);
+
+    const result = await generateRevenueClosings({
+      month: MONTH,
+      year: YEAR,
+      projectId: "p1",
+    });
+
+    expect(result).toEqual({ generated: 0, skippedClosed: 1 });
+    expect(created.closings).toHaveLength(0);
+  });
+
+  it("NUNCA toca INVOICED/CANCELLED, mesmo com reconcileClosed=true (imutáveis)", async () => {
+    revenueClosingFindFirst.mockResolvedValueOnce({
+      id: "rc-existing",
+      status: "INVOICED",
+    });
+    timeEntryFindMany.mockResolvedValue([
+      entry({ hours: 120, multiplier: 1.0, id: "te-full" }),
+    ]);
+
+    const result = await generateRevenueClosings({
+      month: MONTH,
+      year: YEAR,
+      projectId: "p1",
+      reconcileClosed: true,
+    });
+
+    expect(result).toEqual({ generated: 0, skippedClosed: 1 });
+    expect(created.closings).toHaveLength(0);
   });
 });

@@ -1057,7 +1057,7 @@ export async function sendPreInvoiceEmail(input: {
     const parsed = parseInput(closingIdInputSchema, input);
     const dbUser = await resolveDbUser(user);
 
-    const data = await getRevenueClosingForPreInvoice(parsed.closingId);
+    let data = await getRevenueClosingForPreInvoice(parsed.closingId);
     if (!data) {
       throw new ActionError("NOT_FOUND", "Fechamento nao encontrado.");
     }
@@ -1084,6 +1084,45 @@ export async function sendPreInvoiceEmail(input: {
     });
     if (existing?.status === "SENT") {
       return { ok: true, data: { emailed: false, alreadySent: true } };
+    }
+
+    // Reconcilia o snapshot do fechamento com as horas APPROVED+billable atuais
+    // antes de montar a pré-fatura. Horas aprovadas DEPOIS do "Fechar" não
+    // atualizavam os totais gravados (RevenueClosing.totalHours/totalAmount),
+    // fazendo o corpo do e-mail divergir da Apuração e do Excel anexo (que
+    // recalculam ao vivo). Reusa o motor de faturamento escopado ao projeto; o
+    // status permanece CLOSED. Só em fechamento por projeto — o por cliente não
+    // tem um projeto único a recomputar (INVOICED/CANCELLED são intocáveis no
+    // motor). Roda DEPOIS do short-circuit de "já enviado": um fechamento cuja
+    // pré-fatura já foi SENT não é remexido (evita mutar totais/auditar sem
+    // reenviar). Reenvio = apagar a linha SENT do AutomationEmailLog.
+    if (data.closing.projectId) {
+      await generateRevenueClosings({
+        month: data.closing.month,
+        year: data.closing.year,
+        projectId: data.closing.projectId,
+        reconcileClosed: true,
+        audit: {
+          actorUserId: dbUser?.id ?? null,
+          entityId: data.closing.id,
+          action: "REVENUE_CLOSING_RECONCILED",
+        },
+      });
+      const refreshed = await getRevenueClosingForPreInvoice(parsed.closingId);
+      if (refreshed) data = refreshed;
+
+      // Guard de valor zero: se a reconciliação derrubou o total a 0 (ex.: horas
+      // desaprovadas/removidas entre Fechar e Enviar), não envia pré-fatura
+      // vazia ao cliente — mesma proteção do fluxo de Fechar.
+      const reconciledTotal =
+        data.lines.reduce((sum, line) => sum + line.amount, 0) +
+        data.closing.adjustmentAmount;
+      if (reconciledTotal <= 0) {
+        throw new ActionError(
+          "GENERATED_EMPTY",
+          "Fechamento sem valor a faturar após reconciliação — nada a enviar.",
+        );
+      }
     }
 
     const preInvoice = buildPreInvoice({
@@ -1283,9 +1322,13 @@ export async function fecharApuracao(input: {
       });
     const closings = await Promise.all(months.map(findClosing));
 
-    // Generate-if-missing (reusa o motor; sem caminho duplicado).
+    // Generate-or-refresh (reusa o motor; sem caminho duplicado): sempre roda o
+    // motor na competência escopada. Fechamento inexistente é gerado; um DRAFT
+    // já existente tem os totais RECALCULADOS a partir das horas atuais antes de
+    // fechar — evita fechar sobre um snapshot desatualizado (horas aprovadas
+    // depois de uma apuração anterior). CLOSED/INVOICED/CANCELLED são pulados
+    // pelo próprio motor (sem reconcileClosed), preservando fechamentos prontos.
     for (let i = 0; i < months.length; i += 1) {
-      if (closings[i]) continue;
       const m = months[i];
       await generateRevenueClosings({
         month: m.month,

@@ -93,7 +93,12 @@ const h = vi.hoisted(() => {
     },
   };
 
-  return { store, prismaMock };
+  const generateRevenueClosingsMock = vi.fn(async () => ({
+    generated: 1,
+    skippedClosed: 0,
+  }));
+
+  return { store, prismaMock, generateRevenueClosingsMock };
 });
 
 vi.mock("@jumpflow/database", () => ({
@@ -128,6 +133,10 @@ vi.mock("@/lib/db/revenue", async (importOriginal) => {
   return {
     ...actual,
     getRevenueClosingForPreInvoice: vi.fn(async () => h.store.closing),
+    // O reconcile pré-envio delega ao motor real (comportamento reconcileClosed
+    // coberto em revenue.effective-hours.test.ts); aqui isolamos a action,
+    // apenas registrando a chamada e seus argumentos.
+    generateRevenueClosings: h.generateRevenueClosingsMock,
   };
 });
 
@@ -235,6 +244,7 @@ beforeEach(() => {
     pagination: { total: 0, page: 1, pageSize: 50, totalPages: 1 },
   };
   sendMock.mockClear();
+  h.generateRevenueClosingsMock.mockClear();
 });
 
 afterEach(() => {
@@ -436,6 +446,41 @@ describe("sendPreInvoiceEmail — idempotency + degrade", () => {
     const result = await sendPreInvoiceEmail({ closingId: "rc-1" });
     expect(result.ok).toBe(true);
     expect(h.store.lastMessage.attachments).toBeUndefined();
+  });
+
+  it("reconciles the closing snapshot before sending (project-scoped)", async () => {
+    // Regressão: horas aprovadas DEPOIS do "Fechar" não atualizavam os totais
+    // gravados, fazendo o e-mail (snapshot) divergir da Apuração/Excel (ao vivo).
+    // O envio agora recomputa o fechamento (reconcileClosed) antes de montar a
+    // pré-fatura, na competência/projeto corretos, mantendo o status CLOSED.
+    const result = await sendPreInvoiceEmail({ closingId: "rc-1" });
+    expect(result.ok).toBe(true);
+    expect(h.generateRevenueClosingsMock).toHaveBeenCalledTimes(1);
+    expect(h.generateRevenueClosingsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        month: 6,
+        year: 2026,
+        projectId: "p-1",
+        reconcileClosed: true,
+      }),
+    );
+  });
+
+  it("does not reconcile a client-scoped closing (no single project)", async () => {
+    h.store.closing = closingFixture({
+      closing: {
+        id: "rc-1",
+        month: 6,
+        year: 2026,
+        status: "CLOSED",
+        adjustmentAmount: 0,
+        projectId: null,
+      },
+      project: null,
+    });
+    const result = await sendPreInvoiceEmail({ closingId: "rc-1" });
+    expect(result.ok).toBe(true);
+    expect(h.generateRevenueClosingsMock).not.toHaveBeenCalled();
   });
 
   it("does not attach when the closing has no projectId (client-scoped)", async () => {

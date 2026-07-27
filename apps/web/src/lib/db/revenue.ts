@@ -370,6 +370,14 @@ export async function generateRevenueClosings(input: {
    * Reaproveita a MESMA lógica de faturamento — não há caminho duplicado.
    */
   projectId?: string;
+  /**
+   * Quando `true`, um fechamento já `CLOSED` é RE-COMPUTADO (totais atualizados
+   * a partir das horas APPROVED+billable atuais) em vez de pulado. O status
+   * permanece `CLOSED` — nunca regride. `INVOICED`/`CANCELLED` continuam
+   * intocáveis (imutáveis). Usado para reconciliar um fechamento cujas horas
+   * foram aprovadas DEPOIS do "Fechar" (pré-fatura divergindo da apuração).
+   */
+  reconcileClosed?: boolean;
   audit?: {
     actorUserId: string | null;
     entityId: string;
@@ -449,10 +457,14 @@ export async function generateRevenueClosings(input: {
         },
         select: { id: true, status: true },
       });
-      if (
-        existing &&
-        ["CLOSED", "INVOICED", "CANCELLED"].includes(existing.status)
-      ) {
+      // INVOICED/CANCELLED são imutáveis: nunca recomputados.
+      if (existing && ["INVOICED", "CANCELLED"].includes(existing.status)) {
+        skippedClosed += 1;
+        continue;
+      }
+      // CLOSED só é recomputado sob reconciliação explícita (reconcileClosed);
+      // caso contrário o snapshot do fechamento é preservado.
+      if (existing && existing.status === "CLOSED" && !input.reconcileClosed) {
         skippedClosed += 1;
         continue;
       }
@@ -513,7 +525,9 @@ export async function generateRevenueClosings(input: {
               totalHours: billing.hours,
               grossAmount: billing.subtotal,
               totalAmount: billing.amount,
-              adjustmentAmount: 0,
+              // adjustmentAmount é ajuste MANUAL (cliente-facing na pré-fatura);
+              // NÃO é recomputado pelo motor. Preserva-se no update para não
+              // apagar silenciosamente um ajuste ao regenerar/reconciliar.
               notes,
             },
           })
