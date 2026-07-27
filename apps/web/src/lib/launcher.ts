@@ -145,11 +145,13 @@ export function shortcutsForUser(user: AppUser | null): LauncherShortcut[] {
 }
 
 /**
- * SECTOR HOME (Wave D — Item 1). For a FINANCE-ONLY user the launcher is NOT
- * the consultant-first shortcut grid but a pair of large, centered "setor" cards
- * (Contas a Receber / Contas a Pagar) — the next decision a finance user makes
- * is *which sector*, not *which action*. The shortcut grid stays untouched for
- * every other profile; only `page.tsx` chooses between the two variations.
+ * SECTOR HOME (Wave D — Item 1). For an EXCLUSIVELY-FINANCE user the launcher is
+ * NOT the consultant-first shortcut grid but three large, centered "setor" cards
+ * (Contas a Receber / Contas a Pagar / Pendentes de Fechamento) — the next
+ * decision a finance user makes is *which sector*, not *which action*. The
+ * ADMIN gets the operational grid and every other profile is redirected to the
+ * Feed; only `page.tsx` chooses between these variations (see
+ * {@link isAdminLauncher} / {@link isExclusivelyFinance}).
  */
 export type LauncherSectorTone = "receber" | "pagar" | "pendentes";
 
@@ -199,7 +201,10 @@ export const financialSectors: LauncherSector[] = [
     key: "pendentes",
     label: "Pendentes de Fechamento",
     description: "Libere projetos para faturamento",
-    href: "/app/financeiro/pendentes",
+    // Correções de navegação (2026-07-27): a aba Pendentes agora vive DENTRO do
+    // Financeiro; o Financeiro-exclusivo (que vê estes cards) acessa por
+    // `?tab=pendentes`. A rota standalone segue existindo para o AREA_MANAGER.
+    href: "/app/financeiro?tab=pendentes",
     icon: ListChecks,
     tone: "pendentes",
     // Nº de projetos pendentes de liberação. O contador real é ligado numa wave
@@ -208,32 +213,28 @@ export const financialSectors: LauncherSector[] = [
   },
 ];
 
-/** Destino do redirect do AREA_MANAGER puro ao entrar em `/app`. */
-export const PENDING_CLOSING_PATH = "/app/financeiro/pendentes";
-
 /**
- * Whether the given user sees the 3-card financial sector home instead of the
- * shortcut grid. Melhorias v2 (2026-07-25): passa a valer para [ADMIN, FINANCE]
- * (antes era FINANCE puro). Esses veem os 3 cards (Contas a Receber, Contas a
- * Pagar, Pendentes de Fechamento). O AREA_MANAGER NÃO cai aqui — vai direto para
- * Pendentes (ver {@link isPendingClosingLauncher}). Precedência: esta checagem
- * roda ANTES da de Pendentes.
+ * Whether the given user sees the operational shortcut GRID on `/app`.
+ * Correções de navegação (2026-07-27): o ADMIN volta a entrar pela grade de
+ * atalhos operacional (não pela home de 3 cards). Precedência: esta checagem
+ * roda ANTES de {@link isExclusivelyFinance}, então um combo ADMIN+FINANCE(+…)
+ * cai na grade, e nunca nos 3 cards.
  */
-export function isFinancialLauncher(user: AppUser | null): boolean {
-  return hasRole(user, ["ADMIN", "FINANCE"]);
+export function isAdminLauncher(user: AppUser | null): boolean {
+  return hasRole(user, "ADMIN");
 }
 
 /**
- * Whether the given user is routed straight to Pendentes de Fechamento on
- * `/app`. Melhorias v2: o AREA_MANAGER SEM ADMIN/FINANCE não vê Contas a
- * Receber/Pagar — sua entrada é a fila de liberação. Combos [ADMIN|FINANCE +
- * AREA_MANAGER] caem na home de 3 cards (isFinancialLauncher tem precedência),
- * então esta função os exclui explicitamente.
+ * Whether the given user is EXCLUSIVELY Financeiro (papel FINANCE e nenhum
+ * outro). Só esse perfil vê a home de 3 cards (Contas a Receber, Contas a Pagar,
+ * Pendentes de Fechamento). Um usuário FINANCE que também seja ADMIN cai na
+ * grade (isAdminLauncher tem precedência); um FINANCE que também seja
+ * AREA_MANAGER/PM/etc. NÃO é exclusivo aqui e vai para o Feed. `roles.length>0`
+ * evita tratar um usuário sem papéis como "todos FINANCE".
  */
-export function isPendingClosingLauncher(user: AppUser | null): boolean {
+export function isExclusivelyFinance(user: AppUser | null): boolean {
   if (!user) return false;
-  if (isFinancialLauncher(user)) return false;
-  return hasRole(user, "AREA_MANAGER");
+  return user.roles.length > 0 && user.roles.every((r) => r === "FINANCE");
 }
 
 /**

@@ -19,6 +19,7 @@ import {
   Home,
   KeyRound,
   LayoutDashboard,
+  ListChecks,
   ListOrdered,
   MessageSquareHeart,
   MessagesSquare,
@@ -437,6 +438,20 @@ const primaryNavigationRaw: NavItemDef[] = [
     description: "Relatórios de horas, despesas e consolidado, com exportação.",
   },
   {
+    // Pendentes de Fechamento (Melhorias v2 / correções de navegação): o Gerente
+    // de Área libera o faturamento por projeto/competência; FINANCE/ADMIN
+    // acompanham. Role-gated (sem permissionCode) para aparecer no menu direto,
+    // sem depender de célula na matriz — como o AREA_MANAGER cai no Feed em
+    // `/app`, é por aqui que ele alcança a fila. A rota (PENDING_CLOSING_ROLES) e
+    // a action de liberar (ADMIN/AREA_MANAGER) reforçam o acesso no servidor.
+    label: "Pendentes de Fechamento",
+    href: "/app/financeiro/pendentes",
+    icon: ListChecks,
+    description:
+      "Liberação de faturamento por projeto e competência para o Financeiro.",
+    requiredRoles: ["ADMIN", "AREA_MANAGER", "FINANCE"],
+  },
+  {
     label: "Financeiro",
     href: "/app/financeiro",
     permissionCode: "FINANCEIRO",
@@ -490,6 +505,19 @@ export const adminNavigation: NavItemDef[] = [
     icon: BellRing,
     description:
       "Define, por evento, quem é notificado e por qual canal (e-mail ou Teams).",
+    requiredRoles: ["ADMIN"],
+  },
+  {
+    // Regras de aprovação automática: configuração, exceções e pendências do
+    // motor de auto-aprovação. Gate SÓ por papel (ADMIN) e sem permissionCode
+    // (evita semear um novo código na matriz); a rota `/app/automacoes` reforça
+    // ADMIN/AREA_MANAGER no servidor e a página, o acesso. A princípio, só o
+    // ADMIN a descobre pelo menu de Administração.
+    label: "Regras de aprovação automática",
+    href: "/app/automacoes/aprovacao-automatica",
+    icon: Sparkles,
+    description:
+      "Configuração, exceções e pendências da aprovação automática de horas e despesas.",
     requiredRoles: ["ADMIN"],
   },
   {

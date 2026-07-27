@@ -2,14 +2,13 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { LauncherView } from "@/components/launcher/LauncherView";
 import { getCurrentUser } from "@/lib/auth/current-user";
-import { landingPathFor } from "@/lib/auth/redirects";
+import { feedHomePath } from "@/lib/auth/redirects";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import {
   financialSectors,
-  isFinancialLauncher,
-  isPendingClosingLauncher,
+  isAdminLauncher,
+  isExclusivelyFinance,
   mockLauncherBadges,
-  PENDING_CLOSING_PATH,
   sectorsWithBadges,
   shortcutsForUser,
   withBadges,
@@ -29,19 +28,16 @@ export const metadata: Metadata = { title: "Início" };
 export default async function AppIndex() {
   const user = await getCurrentUser();
 
-  // EP-M09: o Consultor não usa o launcher — sua home é o Feed (ou o fallback
-  // seguro quando a flag do Feed está off). `redirect()` lança internamente,
-  // então fica antes de qualquer render. Demais perfis seguem no launcher.
-  if (user) {
-    const landing = landingPathFor(user.roles);
-    if (landing !== "/app") redirect(landing);
-
-    // Melhorias v2: o AREA_MANAGER (sem ADMIN/FINANCE) não usa Contas a
-    // Receber/Pagar — sua entrada é a fila de liberação (Pendentes de
-    // Fechamento). Precedência: [ADMIN|FINANCE] veem os 3 cards abaixo; senão
-    // AREA_MANAGER é redirecionado; demais perfis seguem na grade. `redirect()`
-    // lança internamente, então fica antes de qualquer render/carga de badges.
-    if (isPendingClosingLauncher(user)) redirect(PENDING_CLOSING_PATH);
+  // Tela inicial (`/app`) por papel (correções de navegação, 2026-07-27):
+  //  - ADMIN → grade de atalhos operacional (isAdminLauncher, tem precedência);
+  //  - Financeiro-exclusivo (só FINANCE) → home de 3 cards (setores);
+  //  - todos os demais (AREA_MANAGER, PM, SALES, PEOPLE, CONSULTANT e combos que
+  //    não sejam Admin nem Financeiro-exclusivo) → Feed (ou fallback Horas).
+  // `redirect()` lança internamente, então o redirect fica antes de qualquer
+  // render/carga de badges. Como isExclusivelyFinance exige TODOS os papéis ==
+  // FINANCE, um ADMIN+FINANCE cai na grade (Admin) sem conflito de precedência.
+  if (user && !isAdminLauncher(user) && !isExclusivelyFinance(user)) {
+    redirect(feedHomePath());
   }
 
   const firstName = user?.name.split(" ")[0] ?? "";
@@ -54,10 +50,10 @@ export default async function AppIndex() {
     badges = await getLauncherBadges(user);
   }
 
-  // Melhorias v2 (2026-07-25): [ADMIN, FINANCE] veem a home de 3 cards (Contas a
-  // Receber, Contas a Pagar, Pendentes de Fechamento). O AREA_MANAGER já foi
-  // redirecionado acima; os demais perfis mantêm a grade de atalhos.
-  if (isFinancialLauncher(user)) {
+  // Financeiro-exclusivo: home de 3 cards (Contas a Receber, Contas a Pagar,
+  // Pendentes de Fechamento). O ADMIN e os demais perfis já foram tratados acima
+  // (grade / redirect ao Feed).
+  if (isExclusivelyFinance(user)) {
     return (
       <LauncherView
         firstName={firstName}

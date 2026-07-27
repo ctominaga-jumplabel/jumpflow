@@ -26,6 +26,17 @@ export function safeAppPath(value: string | string[] | undefined): string {
 }
 
 /**
+ * Home do Feed (mural interno) com o fallback seguro quando a flag do Feed está
+ * off (Horas). É a home do Consultor (EP-M09) e, a partir das correções de
+ * navegação do Financeiro, também o destino de qualquer perfil que não seja
+ * ADMIN nem Financeiro-exclusivo em `/app` (ver `src/app/app/page.tsx`). Pura e
+ * reutilizável — centraliza a decisão Feed × fallback num único ponto.
+ */
+export function feedHomePath(): string {
+  return isFeedEnabled() ? CONSULTANT_HOME : CONSULTANT_HOME_FALLBACK;
+}
+
+/**
  * Landing pós-login por perfil (EP-M09). O CONSULTANT cai no Feed (sua home);
  * quando a feature flag do Feed está off, cai num fallback seguro (Horas).
  * Todos os demais perfis continuam no launcher `/app`. Pura e testável — as
@@ -35,7 +46,7 @@ export function landingPathFor(roles: readonly RoleName[]): string {
   const isConsultantOnly =
     roles.length > 0 && roles.every((r) => r === "CONSULTANT");
   if (isConsultantOnly) {
-    return isFeedEnabled() ? CONSULTANT_HOME : CONSULTANT_HOME_FALLBACK;
+    return feedHomePath();
   }
   return DEFAULT_APP_PATH;
 }

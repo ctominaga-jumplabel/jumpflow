@@ -62,6 +62,21 @@ export interface PendingClosingsViewProps {
   pendingCount: number;
   /** ADMIN/AREA_MANAGER: pode LIBERAR faturamento. O gate real é server-side. */
   canClose: boolean;
+  /**
+   * Destino (GET) do formulário de competência. Default: a rota standalone
+   * `/app/financeiro/pendentes` (usada pelo AREA_MANAGER). Dentro da aba
+   * Pendentes do Financeiro é `/app/financeiro`, preservando `tab=pendentes`.
+   */
+  formAction?: string;
+  /** Nome do param de mês (default `month`; na aba usa `pmonth` p/ não colidir). */
+  monthParam?: string;
+  /** Nome do param de ano (default `year`; na aba usa `pyear`). */
+  yearParam?: string;
+  /**
+   * Campos ocultos extra no GET (renderizados como `<input type="hidden">`),
+   * ex.: `{ tab: "pendentes" }` para reabrir a aba certa após o reload.
+   */
+  hiddenFields?: Record<string, string>;
 }
 
 /**
@@ -82,6 +97,10 @@ export function PendingClosingsView({
   year,
   pendingCount,
   canClose,
+  formAction = "/app/financeiro/pendentes",
+  monthParam = "month",
+  yearParam = "year",
+  hiddenFields,
 }: PendingClosingsViewProps) {
   const router = useRouter();
   const { feedback, notify, clear } = useFeedback();
@@ -180,9 +199,14 @@ export function PendingClosingsView({
       <div className="flex flex-col gap-4 rounded-[var(--radius-card)] border-2 border-ink bg-surface p-5 shadow-[4px_4px_0_0_var(--color-ink)] sm:flex-row sm:items-end sm:justify-between">
         <form
           method="get"
-          action="/app/financeiro/pendentes"
+          action={formAction}
           className="flex flex-wrap items-end gap-3"
         >
+          {hiddenFields
+            ? Object.entries(hiddenFields).map(([name, value]) => (
+                <input key={name} type="hidden" name={name} value={value} />
+              ))
+            : null}
           <div>
             <label
               htmlFor="pc-month"
@@ -192,7 +216,7 @@ export function PendingClosingsView({
             </label>
             <select
               id="pc-month"
-              name="month"
+              name={monthParam}
               defaultValue={String(month)}
               className={cn(
                 "h-9 w-40 rounded-md border border-border bg-surface px-3 text-sm text-strong",
@@ -215,7 +239,7 @@ export function PendingClosingsView({
             </label>
             <select
               id="pc-year"
-              name="year"
+              name={yearParam}
               defaultValue={String(year)}
               className={cn(
                 "h-9 w-28 rounded-md border border-border bg-surface px-3 text-sm text-strong",
