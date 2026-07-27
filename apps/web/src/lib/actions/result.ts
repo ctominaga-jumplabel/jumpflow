@@ -24,6 +24,8 @@ export type ErrorCode =
   // Fase G (pre-fatura): degrade honesto de e-mail ao cliente.
   | "NO_EMAIL"
   | "NO_CONTACT_EMAIL"
+  // Reconciliação pré-envio derrubou o total a 0 (nada a faturar).
+  | "GENERATED_EMPTY"
   | "INVALID_FILE"
   | "FILE_TOO_LARGE"
   | "ATTACHMENT_LOCKED"
