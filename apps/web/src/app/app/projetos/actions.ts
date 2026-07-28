@@ -5,6 +5,7 @@ import { Prisma, prisma } from "@jumpflow/database";
 import type { ZodType } from "zod";
 import type { ActionResult, ErrorCode } from "@/lib/actions/result";
 import { requireRole, requireUser } from "@/lib/auth/guards";
+import type { RoleName } from "@/lib/auth/roles";
 import {
   FINANCIAL_ROLES,
   hasRole,
@@ -35,6 +36,7 @@ import {
   removeConsultantAutoApprovalRuleSchema,
   setConsultantAutoApprovalActiveSchema,
   setProjectAutoApprovalActiveSchema,
+  setProjectDailyEntryRequiredSchema,
   saleRateInputSchema,
   saleRateUpdateSchema,
   projectPaymentTypeSchema,
@@ -65,6 +67,7 @@ import {
   type ProjectAutoApprovalRuleInput,
   type SetConsultantAutoApprovalActiveInput,
   type SetProjectAutoApprovalActiveInput,
+  type SetProjectDailyEntryRequiredInput,
   type ProjectBillingConfigInput,
   type ProjectBillingTypeInput,
   type ProjectBillingAttachHoursInput,
@@ -867,6 +870,82 @@ export async function setConsultantAutoApprovalActive(
     }
     revalidateProjectViews();
     return { ok: true, data: { active: parsed.active } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+// Quem pode alternar a obrigatoriedade de lançamento diário do projeto. É uma
+// regra operacional (não financeira): dono da operação do projeto. Espelha o
+// escopo de OPERATION_CLOSING_WRITE_ROLES; SALES (que entra em PROJECT_WRITE
+// para cadastrar) NÃO decide regra operacional.
+const DAILY_ENTRY_FLAG_ROLES: RoleName[] = [
+  "ADMIN",
+  "AREA_MANAGER",
+  "PROJECT_MANAGER",
+];
+
+/**
+ * Liga/desliga `Project.dailyEntryRequired`. Com `false`, o projeto sai da
+ * cobrança semanal de horas não lançadas (motor MISSING_TIMESHEET_REPORT) e não
+ * gera pendência cobrável; `true` (default) mantém o comportamento atual.
+ *
+ * RBAC: ADMIN/AREA_MANAGER/PROJECT_MANAGER. Um PROJECT_MANAGER só altera
+ * projetos que gerencia (segregação idêntica à de `decideHours`). A mudança é
+ * auditada (PROJECT_DAILY_ENTRY_REQUIRED_CHANGED) com valor antigo→novo.
+ * Idempotente: se a flag já está no valor pedido, retorna sem gravar/auditar.
+ */
+export async function setProjectDailyEntryRequired(
+  input: SetProjectDailyEntryRequiredInput,
+): Promise<ActionResult<{ required: boolean }>> {
+  try {
+    ensureDatabase();
+    const user = await requireRole(DAILY_ENTRY_FLAG_ROLES);
+    const parsed = parseInput(setProjectDailyEntryRequiredSchema, input);
+    const previous = await prisma.project.findUnique({
+      where: { id: parsed.projectId },
+      select: { id: true, dailyEntryRequired: true, managerUserId: true },
+    });
+    if (!previous) throw new ActionError("NOT_FOUND", "Projeto nao encontrado.");
+
+    // Segregação: PROJECT_MANAGER só age nos próprios projetos.
+    // ADMIN/AREA_MANAGER são irrestritos (mesmo critério de `decideHours`).
+    const restricted =
+      !user.roles.includes("ADMIN") && !user.roles.includes("AREA_MANAGER");
+    if (restricted) {
+      const dbUser = await resolveDbUser(user);
+      if (!dbUser) {
+        throw new ActionError(
+          "FORBIDDEN",
+          "Usuario nao encontrado no banco de dados.",
+        );
+      }
+      if (previous.managerUserId !== dbUser.id) {
+        throw new ActionError(
+          "FORBIDDEN",
+          "Voce so pode alterar projetos que gerencia.",
+        );
+      }
+    }
+
+    // Idempotente: sem transição, sem escrita nem auditoria.
+    if (previous.dailyEntryRequired === parsed.required) {
+      return { ok: true, data: { required: previous.dailyEntryRequired } };
+    }
+
+    await prisma.project.update({
+      where: { id: parsed.projectId },
+      data: { dailyEntryRequired: parsed.required },
+    });
+    await audit(
+      "Project",
+      previous.id,
+      "PROJECT_DAILY_ENTRY_REQUIRED_CHANGED",
+      { dailyEntryRequired: previous.dailyEntryRequired },
+      { dailyEntryRequired: parsed.required },
+    );
+    revalidateProjectViews();
+    return { ok: true, data: { required: parsed.required } };
   } catch (error) {
     return toFailure(error);
   }

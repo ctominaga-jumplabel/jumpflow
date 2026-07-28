@@ -11,6 +11,7 @@ import {
   CalendarRange,
   ClipboardCheck,
   Clock,
+  Compass,
   Flag,
   FolderKanban,
   Gauge,
@@ -416,6 +417,22 @@ const primaryNavigationRaw: NavItemDef[] = [
     permissionCode: "APROVACOES",
     icon: ClipboardCheck,
     description: "Fluxo de aprovação e reprovação de horas.",
+  },
+  {
+    // Cockpit do Gestor de Área (proposta Fase 4a): ponto único onde o gestor
+    // acompanha, por projeto/consultor, o que falta e libera os dois eixos
+    // (Financeiro + DP). Role-gated (sem permissionCode) para o AREA_MANAGER
+    // alcançá-lo pelo menu sem depender de célula na matriz; a rota reforça o
+    // acesso no servidor (COCKPIT_ROLES = ADMIN/AREA_MANAGER/PROJECT_MANAGER;
+    // FINANCE/PEOPLE não entram). Fase 4a apenas ADICIONA o item — a decisão de
+    // repontar/ocultar "Pendentes de Fechamento" e "Fechamento Operacional" (que
+    // o cockpit unifica) fica para a revisão da Fase 6.
+    label: "Cockpit do Gestor",
+    href: "/app/operacao/cockpit",
+    icon: Compass,
+    description:
+      "Acompanhamento por projeto e consultor com as liberações Financeiro e DP em um só lugar.",
+    requiredRoles: ["ADMIN", "AREA_MANAGER", "PROJECT_MANAGER"],
   },
   {
     // Fechamento Operacional para o DP: por mês, marca que toda a equipe do

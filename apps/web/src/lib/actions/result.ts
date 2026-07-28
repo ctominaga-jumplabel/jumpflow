@@ -17,6 +17,10 @@ export type ErrorCode =
   | "NOT_EDITABLE"
   | "DUPLICATE_ENTRY"
   | "PERIOD_CLOSED"
+  // Trava A (Cockpit do Gestor de Área): a competência (projeto + mês/ano) já
+  // teve o faturamento liberado (RevenueClosing CLOSED/INVOICED) — lançamento e
+  // edição ficam congelados até o Financeiro reabrir.
+  | "BILLING_RELEASED"
   | "NOTHING_TO_SUBMIT"
   | "ALREADY_DECIDED"
   | "COMMENT_REQUIRED"

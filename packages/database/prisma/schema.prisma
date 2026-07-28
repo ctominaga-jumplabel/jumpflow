@@ -1491,6 +1491,9 @@ model Project {
   billingConfig               ProjectBillingConfig?
   billingHourlyRate           Decimal?                     @db.Decimal(12, 2)
   budgetHours                 Decimal?                     @db.Decimal(10, 2)
+  /// Quando true, o consultor deve lancar em todo dia util e e cobrado semanalmente
+  /// (motor MISSING_TIMESHEET_REPORT); quando false, sem cobranca, apenas indicador informativo.
+  dailyEntryRequired          Boolean                      @default(true)
   /// P4: anexar a planilha de horas realizadas por consultor (competencia do
   /// fechamento) ao e-mail de cobranca da pre-fatura deste projeto. Editado pelo
   /// Financeiro junto da regra de cobranca; nao afeta calculo de receita.

@@ -60,7 +60,14 @@ import {
   type WeekActionInput,
   type WeeklyTimeEntryInput,
 } from "@/lib/timesheet/schemas";
-import type { ActionResult, ErrorCode } from "@/lib/timesheet/types";
+import type { ActionResult } from "@/lib/timesheet/types";
+import { ActionError } from "@/lib/timesheet/action-error";
+import {
+  assertCompetenceBillingOpen,
+  isCompetenceBillingReleased,
+  listBillingLockedCompetenceKeys,
+} from "@/lib/timesheet/billing-lock";
+import { entryCompetenceKey } from "@/lib/financial/receivables-journey-core";
 import {
   computeHoursFromClock,
   normalizeBreak,
@@ -186,16 +193,6 @@ function resolveBillableDecision(
 
 const HORAS_PATH = "/app/horas";
 const APROVACOES_PATH = "/app/aprovacoes";
-
-/** Internal typed failure; converted to ActionResult at the boundary. */
-class ActionError extends Error {
-  constructor(
-    readonly code: ErrorCode,
-    message: string,
-  ) {
-    super(message);
-  }
-}
 
 function ensureDatabase(): void {
   if (!isDatabaseConfigured()) {
@@ -365,6 +362,9 @@ export async function createTimeEntry(
       parsed.activityType,
       date,
     );
+    // Trava A: competência com faturamento liberado (RevenueClosing CLOSED/
+    // INVOICED) não aceita lançamento.
+    await assertCompetenceBillingOpen(prisma, project.id, date);
 
     // Resolve the REAL db user BEFORE the transaction (the audit FK cannot use
     // the synthetic dev session id).
@@ -581,6 +581,9 @@ export async function createWeeklyTimeEntries(
           parsed.activityType,
           date,
         );
+        // Trava A: por dia, pois a semana pode cruzar dois meses (competências
+        // distintas). Uma competência liberada aborta a criação da semana.
+        await assertCompetenceBillingOpen(tx, project.id, date);
         period ??= await upsertOpenPeriod(tx, consultant.id, weekStart);
         const created = await tx.timeEntry.create({
           data: {
@@ -736,6 +739,15 @@ export async function updateTimeEntry(
       entry.activityType,
       date,
     );
+    // Trava A: valida a competência da data de DESTINO (`date` já reflete a
+    // eventual mudança de mês) — editar para dentro de uma competência liberada
+    // é bloqueado do mesmo modo que criar. Se a edição MOVE o lançamento entre
+    // meses, valida também a competência de ORIGEM: uma competência liberada não
+    // pode ter horas retiradas dela (o valor faturado já foi congelado).
+    await assertCompetenceBillingOpen(prisma, entry.projectId, date);
+    if (date.getTime() !== entry.date.getTime()) {
+      await assertCompetenceBillingOpen(prisma, entry.projectId, entry.date);
+    }
 
     // Resolve the REAL db user BEFORE the transaction (audit FK).
     const dbUser = await requireDbUser(user);
@@ -865,6 +877,9 @@ export async function deleteTimeEntry(
         "Apenas rascunhos ou lançamentos reprovados podem ser excluídos.",
       );
     }
+    // Trava A: excluir horas de uma competência já liberada para o Financeiro
+    // divergiria o faturado do lançado — bloqueado até o Financeiro reabrir.
+    await assertCompetenceBillingOpen(prisma, entry.projectId, entry.date);
 
     await prisma.$transaction(async (tx) => {
       await tx.timeEntry.delete({ where: { id: entry.id } });
@@ -1095,6 +1110,8 @@ export async function applyTimesheetDefault(
           allocation.timesheetDefault!.activityType,
           date,
         );
+        // Trava A: um padrão semanal não materializa em competência liberada.
+        await assertCompetenceBillingOpen(tx, allocation.projectId, date);
         const def = allocation.timesheetDefault!;
         const created = await tx.timeEntry.create({
           data: {
@@ -1255,6 +1272,15 @@ export async function copyPreviousWeek(
           counts.skippedIneligible += 1;
           continue;
         }
+        // Trava A: não copia para dentro de uma competência já liberada ao
+        // Financeiro. Pula silenciosamente (com contagem), no mesmo estilo do
+        // skip de projeto encerrado acima — a cópia é best-effort por dia.
+        if (
+          await isCompetenceBillingReleased(tx, entry.projectId, destDate)
+        ) {
+          counts.skippedIneligible += 1;
+          continue;
+        }
         const allocation = await findActiveAllocation(
           tx,
           consultant.id,
@@ -1312,7 +1338,7 @@ export async function copyPreviousWeek(
 
 export async function submitWeek(
   input: WeekActionInput,
-): Promise<ActionResult<{ submitted: number }>> {
+): Promise<ActionResult<{ submitted: number; skipped: number }>> {
   try {
     ensureDatabase();
     const user = await requireUser();
@@ -1344,19 +1370,46 @@ export async function submitWeek(
     }
 
     const dbUser = await resolveDbUser(user);
-    const submitted = await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const drafts = await tx.timeEntry.findMany({
         where: { periodId: period.id, status: "DRAFT" },
-        select: { id: true, hours: true },
+        select: { id: true, hours: true, date: true, projectId: true },
       });
+      // Trava A no ENVIO: rascunhos criados ANTES do fechamento não podem ser
+      // promovidos a SUBMITTED numa competência já liberada ao Financeiro — a
+      // auto-aprovação os aprovaria e o reconcile os puxaria para o faturado,
+      // divergindo do valor fechado. A semana pode cruzar dois meses, então o
+      // corte é POR LANÇAMENTO/DIA (competência = projeto + mês da data). Uma
+      // única consulta pelos projetos dos drafts (batch, sem N+1); os travados
+      // permanecem DRAFT.
+      const lockedKeys = new Set(
+        await listBillingLockedCompetenceKeys(
+          tx,
+          drafts.map((d) => d.projectId),
+        ),
+      );
+      const submittable = drafts.filter(
+        (d) =>
+          !lockedKeys.has(entryCompetenceKey(d.projectId, toIsoDate(d.date))),
+      );
+      const skipped = drafts.length - submittable.length;
+
       const now = new Date();
       // submittedAt is REQUIRED by the auto-approval engine: without it the
       // cron's delay rule never elapses and nothing is ever approved.
       const updated = await tx.timeEntry.updateMany({
-        where: { periodId: period.id, status: "DRAFT" },
+        where: { id: { in: submittable.map((d) => d.id) } },
         data: { status: "SUBMITTED", submittedAt: now },
       });
       if (updated.count === 0) {
+        // Nada enviável: ou não havia rascunho, ou TODOS estavam em competência
+        // liberada. No segundo caso, a mensagem aponta a Trava A (auditável).
+        if (skipped > 0) {
+          throw new ActionError(
+            "BILLING_RELEASED",
+            "Faturamento liberado para esta competência — contate o Gestor de Área para reabrir.",
+          );
+        }
         throw new ActionError(
           "NOTHING_TO_SUBMIT",
           "Nenhum lançamento em rascunho para enviar.",
@@ -1366,25 +1419,26 @@ export async function submitWeek(
         where: { id: period.id },
         data: { status: "SUBMITTED", submittedAt: now },
       });
-      // Leftover REJECTED entries keep the period flagged for rework.
+      // Reconcilia o status: rascunhos travados que ficaram (Trava A) ou
+      // REJECTED remanescentes mantêm o período sinalizado para retrabalho.
       await recomputePeriodStatus(tx, period.id);
 
-      const total = drafts.reduce((sum, d) => sum + Number(d.hours), 0);
+      const total = submittable.reduce((sum, d) => sum + Number(d.hours), 0);
       await tx.auditEvent.create({
         data: buildAuditEventData({
           actorUserId: dbUser?.id ?? null,
           entityType: "TimesheetPeriod",
           entityId: period.id,
           action: "TIMESHEET_PERIOD_SUBMITTED",
-          after: { entryIds: drafts.map((d) => d.id), total },
+          after: { entryIds: submittable.map((d) => d.id), total, skipped },
         }),
       });
-      return updated.count;
+      return { submitted: updated.count, skipped };
     });
 
     revalidatePath(HORAS_PATH);
     revalidatePath(APROVACOES_PATH);
-    return { ok: true, data: { submitted } };
+    return { ok: true, data: result };
   } catch (error) {
     return toFailure(error);
   }

@@ -169,13 +169,20 @@ export async function runMissingTimesheetReport(params: {
   // Allocations active within the period: ACTIVE/PLANNED allocation that starts
   // before the window ends and is still open or ends within/after it, for an
   // ACTIVE consultant on an ACTIVE/PAUSED project.
+  //
+  // Projects with `dailyEntryRequired = false` are excluded from the weekly
+  // chase: consultants are not billed for days without entries on those
+  // projects. Projects keep the default `true` and behave exactly as before.
   const allocations = await prisma.allocation.findMany({
     where: {
       status: { in: ["ACTIVE", "PLANNED"] },
       startDate: { lt: periodEnd },
       OR: [{ endDate: null }, { endDate: { gte: periodStart } }],
       consultant: { status: "ACTIVE" },
-      project: { status: { in: ["ACTIVE", "PAUSED"] } },
+      project: {
+        status: { in: ["ACTIVE", "PAUSED"] },
+        dailyEntryRequired: true,
+      },
     },
     select: {
       projectId: true,

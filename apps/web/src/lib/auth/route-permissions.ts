@@ -98,6 +98,19 @@ export const OPERATION_CLOSING_READ_ROLES: RoleName[] = [
 ];
 
 /**
+ * Roles que ACESSAM o Cockpit do Gestor de Área (`/app/operacao/cockpit`) —
+ * proposta §7.5 / Fase 4a. Ponto único onde o gestor vê, por projeto e
+ * consultor, o que falta e libera os dois eixos (Financeiro + DP). Difere de
+ * {@link OPERATION_CLOSING_READ_ROLES}: o FINANCE puro e o PEOPLE NÃO entram no
+ * cockpit (é a superfície do gestor de operação, não do consumidor do sinal).
+ */
+export const COCKPIT_ROLES: RoleName[] = [
+  "ADMIN",
+  "AREA_MANAGER",
+  "PROJECT_MANAGER",
+];
+
+/**
  * Roles that own commercial sale values (ProjectSaleRate, tipo de cobrança,
  * budget) and may access the Comercial surface. Single source of truth shared
  * by the `/app/comercial` route guard and the sale-rate server actions.
@@ -284,6 +297,11 @@ export const routePermissions: RouteRule[] = [
   // Operational automation (auto-approval admin/observability). Management
   // only — PROJECT_MANAGER read-only access is deferred to a later round.
   { prefix: "/app/automacoes", access: ["ADMIN", "AREA_MANAGER"] },
+  // Cockpit do Gestor de Área (proposta Fase 4a): ponto único de acompanhamento
+  // por projeto/consultor + as duas liberações. FINANCE puro e PEOPLE NÃO entram
+  // (COCKPIT_ROLES ⊂ OPERATION_CLOSING_READ_ROLES). Regra MAIS ESPECÍFICA que
+  // `/app/operacao` — DEVE vir antes (o lookup casa o primeiro prefixo).
+  { prefix: "/app/operacao/cockpit", access: COCKPIT_ROLES },
   // Fechamento Operacional para o DP: marca que toda a equipe do projeto lançou
   // e teve as horas aprovadas no mês, notificando o DP. Leitura para gestão +
   // FINANCE/PEOPLE; a marcação/reabertura é action-gated por

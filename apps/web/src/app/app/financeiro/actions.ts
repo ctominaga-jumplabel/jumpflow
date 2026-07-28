@@ -10,6 +10,7 @@ import type { RoleName } from "@/lib/auth/roles";
 import {
   notifyClientBillingSummary,
   notifyHoursReleased,
+  notifyRevenueClosingReopened,
 } from "@/lib/automation/notifications/events";
 import { resolveEventDelivery } from "@/lib/automation/notifications/event-delivery";
 import { buildAuditEventData } from "@/lib/db/audit";
@@ -425,6 +426,13 @@ export async function advanceRevenueClosing(input: {
     // Liberação: notify on CLOSE (READY_TO_CLOSE → CLOSED). Best-effort.
     if (parsed.action === "CLOSE") {
       await notifyHoursReleased(parsed.id);
+    }
+    // Retorno da liberação: notifica o Gestor de Área SOMENTE no REOPEN
+    // (CLOSED → READY_TO_CLOSE), a única reversa que sai de CLOSED e destrava
+    // o lançamento de horas da competência (Trava A). REVERT_TO_OPEN /
+    // REVERT_TO_REVIEW não saem de CLOSED e não passam por aqui. Best-effort.
+    if (parsed.action === "REOPEN") {
+      await notifyRevenueClosingReopened(parsed.id);
     }
 
     revalidatePath(FINANCEIRO_PATH);

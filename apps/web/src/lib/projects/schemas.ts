@@ -287,6 +287,11 @@ export const setConsultantAutoApprovalActiveSchema = z.object({
   active: z.boolean(),
 });
 
+export const setProjectDailyEntryRequiredSchema = z.object({
+  projectId: entityId,
+  required: z.boolean(),
+});
+
 export const allocationInputSchema = z
   .object({
     projectId: entityId,
@@ -410,6 +415,9 @@ export type SetProjectAutoApprovalActiveInput = z.infer<
 >;
 export type SetConsultantAutoApprovalActiveInput = z.infer<
   typeof setConsultantAutoApprovalActiveSchema
+>;
+export type SetProjectDailyEntryRequiredInput = z.infer<
+  typeof setProjectDailyEntryRequiredSchema
 >;
 export type AllocationInput = z.infer<typeof allocationInputSchema>;
 export type AllocationUpdateInput = z.infer<typeof allocationUpdateSchema>;

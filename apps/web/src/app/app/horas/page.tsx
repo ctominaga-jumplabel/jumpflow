@@ -133,6 +133,10 @@ export default async function HorasPage({ searchParams }: HorasPageProps) {
     // Lookup de ausências da semana visível (Onda D): sinaliza os dias cobertos
     // por ausência CONFIRMED na grade e bloqueia o lançamento de Dia Útil neles.
     const { getTimeOffLookup } = await import("@/lib/db/time-off");
+    const { listBillingLockedCompetenceKeys } = await import(
+      "@/lib/timesheet/billing-lock"
+    );
+    const { prisma } = await import("@jumpflow/database");
     const [week, period, projects, defaultOptions, holidays, timeOff] =
       await Promise.all([
         getWeekForConsultant(consultant.id, weekStart, filter),
@@ -144,6 +148,13 @@ export default async function HorasPage({ searchParams }: HorasPageProps) {
         getHolidayLookup(weekStart, weekEnd),
         getTimeOffLookup(consultant.id, weekStart, weekEnd),
       ]);
+    // Trava A (cadeado na grade): quais (projeto, competência) da semana já
+    // tiveram o faturamento liberado. Resolvido em UMA consulta pelos projetos
+    // visíveis (sem N+1 por dia/entrada); o client casa cada linha por chave.
+    const billingLockedKeys = await listBillingLockedCompetenceKeys(
+      prisma,
+      week.rows.map((row) => row.projectId),
+    );
     editor = (
       <TimesheetWeekView
         mode="db"
@@ -157,6 +168,7 @@ export default async function HorasPage({ searchParams }: HorasPageProps) {
         canExportCsv={canExportCsv}
         canEditBillable={canEditBillable}
         attachmentsAvailable={attachmentsAvailable}
+        billingLockedKeys={billingLockedKeys}
       />
     );
   }
