@@ -531,6 +531,14 @@ function ProjectAccordion({
         </button>
 
         <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {row.isClosed ? (
+            <span
+              className="rounded-full border border-soft/40 bg-surface-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-medium"
+              title="Projeto encerrado — vai para o Histórico por definição"
+            >
+              Encerrado
+            </span>
+          ) : null}
           <StatusChip label="Fin" full="Financeiro" done={financeiroLiberado} />
           <StatusChip label="DP" full="Departamento pessoal" done={dpLiberado} />
           <DailyEntryToggle
