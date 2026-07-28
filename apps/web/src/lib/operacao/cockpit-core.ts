@@ -112,19 +112,14 @@ export function computeConsultantMetrics(
 export type CockpitProjectPhase = "ATIVO" | "HISTORICO";
 
 /**
- * Classifica o projeto (proposta item 1.1.4). "HISTORICO" quando:
- * - o projeto já está ENCERRADO (`Project.status = CLOSED`) — um projeto que
- *   acabou é histórico por definição, independentemente das liberações; OU
- * - os DOIS eixos independentes já liberaram a competência: Financeiro
- *   (RevenueClosing CLOSED/INVOICED) E DP (OperationClosing CLOSED).
- * Caso contrário "ATIVO" (projeto em andamento com ao menos uma ponta pendente).
- * Puro.
+ * Classifica o projeto cruzando os DOIS eixos independentes de liberação
+ * (proposta item 1.1.4): "HISTORICO" só quando o Financeiro (RevenueClosing
+ * CLOSED/INVOICED) E o DP (OperationClosing CLOSED) já liberaram a competência;
+ * caso contrário "ATIVO" (ainda falta pelo menos uma ponta). Puro.
  */
 export function classifyProjectPhase(
   financeiroLiberado: boolean,
   dpLiberado: boolean,
-  projectClosed = false,
 ): CockpitProjectPhase {
-  if (projectClosed) return "HISTORICO";
   return financeiroLiberado && dpLiberado ? "HISTORICO" : "ATIVO";
 }

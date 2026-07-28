@@ -51,10 +51,8 @@ export interface CockpitProjectRow {
   financeiroLiberado: boolean;
   /** Existe `OperationClosing` CLOSED para (projeto, competência). */
   dpLiberado: boolean;
-  /** ATIVO (falta ≥1 eixo) vs. HISTORICO (ambos liberados ou projeto encerrado). */
+  /** ATIVO (falta ≥1 eixo) vs. HISTORICO (ambos liberados). */
   phase: CockpitProjectPhase;
-  /** Projeto encerrado (`Project.status = CLOSED`) — vai para Histórico por definição. */
-  isClosed: boolean;
   /**
    * Flag operacional `Project.dailyEntryRequired` (proposta item 1.2): `true`
    * mantém a cobrança semanal e a contagem de "dias sem lançamento" como
@@ -121,15 +119,12 @@ export async function getCockpitOverview(input: {
   const competence: CockpitCompetence = { month, year };
   const { start, endExclusive, lastDay } = monthBounds(month, year);
 
-  // 1. Projetos ATIVOS + ENCERRADOS (uma linha por projeto). Os ACTIVE povoam
-  //    "Ativos"/"Histórico" conforme as liberações; os CLOSED vão sempre para
-  //    "Histórico" (projeto encerrado é histórico por definição).
+  // 1. Projetos ATIVOS (uma linha por projeto).
   const projects = await prisma.project.findMany({
-    where: { status: { in: ["ACTIVE", "CLOSED"] } },
+    where: { status: "ACTIVE" },
     select: {
       id: true,
       name: true,
-      status: true,
       dailyEntryRequired: true,
       client: { select: { name: true } },
     },
@@ -249,7 +244,6 @@ export async function getCockpitOverview(input: {
       const readiness = await getOperationReadiness(p.id, month, year);
       const financeiroLiberado = financeSet.has(p.id);
       const dpLiberado = dpSet.has(p.id);
-      const isClosed = p.status === "CLOSED";
 
       return {
         projectId: p.id,
@@ -257,8 +251,7 @@ export async function getCockpitOverview(input: {
         clientName: p.client?.name ?? "—",
         financeiroLiberado,
         dpLiberado,
-        phase: classifyProjectPhase(financeiroLiberado, dpLiberado, isClosed),
-        isClosed,
+        phase: classifyProjectPhase(financeiroLiberado, dpLiberado),
         dailyEntryRequired: p.dailyEntryRequired,
         readiness,
         consultants,
