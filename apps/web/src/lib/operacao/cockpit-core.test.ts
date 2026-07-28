@@ -156,10 +156,22 @@ describe("computeConsultantMetrics", () => {
 });
 
 describe("classifyProjectPhase", () => {
-  it("HISTORICO só quando os dois eixos liberam", () => {
+  it("HISTORICO só quando os dois eixos liberam (projeto em andamento)", () => {
     expect(classifyProjectPhase(true, true)).toBe("HISTORICO");
     expect(classifyProjectPhase(true, false)).toBe("ATIVO");
     expect(classifyProjectPhase(false, true)).toBe("ATIVO");
     expect(classifyProjectPhase(false, false)).toBe("ATIVO");
+  });
+
+  it("projeto ENCERRADO é sempre HISTORICO, independentemente das liberações", () => {
+    expect(classifyProjectPhase(false, false, true)).toBe("HISTORICO");
+    expect(classifyProjectPhase(true, false, true)).toBe("HISTORICO");
+    expect(classifyProjectPhase(false, true, true)).toBe("HISTORICO");
+    expect(classifyProjectPhase(true, true, true)).toBe("HISTORICO");
+  });
+
+  it("projectClosed=false mantém a regra dos dois eixos", () => {
+    expect(classifyProjectPhase(false, false, false)).toBe("ATIVO");
+    expect(classifyProjectPhase(true, true, false)).toBe("HISTORICO");
   });
 });
