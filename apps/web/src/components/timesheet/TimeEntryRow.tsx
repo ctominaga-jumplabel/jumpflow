@@ -1,6 +1,6 @@
 "use client";
 
-import { Paperclip, Pencil } from "lucide-react";
+import { Lock, Paperclip, Pencil } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { focusRing } from "@/lib/styles";
 import {
@@ -52,7 +52,37 @@ export interface TimeEntryRowProps {
    * TimeEntry; o parent resolve a URL assinada e faz `window.open`.
    */
   onOpenAttachment?: (entryId: string) => void;
+  /**
+   * Trava A (Fase 4d): a (projeto, competência) desta linha já teve o
+   * faturamento liberado. Congela a edição — cadeado + tooltip, sem lápis —
+   * mesmo em status editável. Tem PRECEDÊNCIA sobre a Trava B. Derivado no
+   * parent como "ALGUM dia da linha travado" (a edição abre a linha inteira).
+   */
+  billingLocked?: boolean;
+  /**
+   * Trava A por DIA/coluna: `billingLockedDays[i]` indica se o dia `days[i]`
+   * está em competência congelada. Numa semana que cruza a virada do mês, cada
+   * coluna reflete a competência do seu próprio mês (coerente com o servidor,
+   * que trava por lançamento/dia). Ausente/curto ⇒ dia tratado como aberto.
+   */
+  billingLockedDays?: boolean[];
+  /**
+   * Trava B (Fase 4d): solicitar ao Gestor de Área a reabertura de um
+   * lançamento `APPROVED` (o consultor não reverte a própria aprovação). Recebe
+   * o `entryId` da linha. Só é oferecido quando a linha NÃO está congelada pela
+   * Trava A. Ausente em demo (sem servidor).
+   */
+  onRequestReopen?: (entryId: string) => void;
+  /** Desabilita o botão de reabertura enquanto um pedido está em curso. */
+  reopenBusy?: boolean;
 }
+
+/** Trava A: competência congelada pelo Financeiro. */
+const BILLING_LOCK_MESSAGE =
+  "Faturamento liberado — contate o Gestor de Área para reabrir.";
+/** Trava B: lançamento aprovado, edição só após reabertura pelo gestor. */
+const APPROVED_LOCK_MESSAGE =
+  "Lançamento aprovado — solicite reabertura para editar.";
 
 /**
  * One project+activity line in the weekly timesheet grid. Editable rows (DRAFT,
@@ -67,8 +97,30 @@ export function TimeEntryRow({
   onEdit,
   canEditBillable = true,
   onOpenAttachment,
+  billingLocked = false,
+  billingLockedDays = [],
+  onRequestReopen,
+  reopenBusy = false,
 }: TimeEntryRowProps) {
-  const editable = isRowEditable(row) && Boolean(onEdit);
+  // Trava A tem precedência: uma competência congelada nunca é editável, mesmo
+  // em status editável, e não oferece "Solicitar reabertura" (só o Financeiro
+  // reabre). Trava B: linhas APPROVED ficam bloqueadas mas pedem reabertura.
+  const billingBlocked = billingLocked;
+  const approvalBlocked = row.status === "APPROVED";
+  const editable = isRowEditable(row) && Boolean(onEdit) && !billingBlocked;
+  // Mensagem do cadeado (A antes de B). Ausente = linha sem trava a sinalizar.
+  const lockMessage = billingBlocked
+    ? BILLING_LOCK_MESSAGE
+    : approvalBlocked
+      ? APPROVED_LOCK_MESSAGE
+      : null;
+  // Primeiro entryId real da linha — alvo do pedido de reabertura (Trava B).
+  const reopenEntryId = row.entryIds?.find((id): id is string => Boolean(id));
+  const canRequestReopen =
+    approvalBlocked &&
+    !billingBlocked &&
+    Boolean(onRequestReopen) &&
+    Boolean(reopenEntryId);
   const total = rowTotal(row);
   // Anexos do lançamento (melhoria #2): cada dia da linha pode ter 1 anexo. O
   // link abre o arquivo em nova aba via URL assinada (resolvida no parent).
@@ -109,10 +161,46 @@ export function TimeEntryRow({
               className="size-3.5 text-soft group-hover:text-brand"
             />
           </button>
+        ) : lockMessage ? (
+          <span className="flex items-center gap-1.5">
+            <span className="text-sm font-medium text-strong">
+              {row.projectName}
+            </span>
+            {/* Cadeado semântico: Trava A (faturamento congelado) em âmbar,
+                Trava B (aprovado, precisa reabertura) em neutro. Tooltip
+                acessível via title + rótulo em sr-only. */}
+            <span
+              title={lockMessage}
+              aria-label={lockMessage}
+              className={cn(
+                "grid size-5 shrink-0 place-items-center rounded-md border",
+                billingBlocked
+                  ? "border-warning/40 bg-warning-soft text-warning"
+                  : "border-border bg-surface-muted text-soft",
+              )}
+            >
+              <Lock aria-hidden="true" className="size-3" />
+            </span>
+          </span>
         ) : (
           <p className="text-sm font-medium text-strong">{row.projectName}</p>
         )}
         <p className="text-xs text-soft">{row.clientName}</p>
+        {canRequestReopen ? (
+          <button
+            type="button"
+            onClick={() => onRequestReopen?.(reopenEntryId as string)}
+            disabled={reopenBusy}
+            aria-busy={reopenBusy}
+            className={cn(
+              "mt-1 inline-flex items-center rounded-md text-xs font-medium text-brand transition-colors hover:underline disabled:cursor-not-allowed disabled:opacity-60",
+              focusRing,
+            )}
+            title={APPROVED_LOCK_MESSAGE}
+          >
+            Solicitar reabertura
+          </button>
+        ) : null}
       </td>
       <td className="px-4 py-3 align-middle">
         <span className="text-sm text-medium">
@@ -154,26 +242,43 @@ export function TimeEntryRow({
         // célula com o selo do tipo e tem precedência visual sobre o feriado.
         const offInfo = resolveConfirmedTimeOff(timeOff, day.date);
         const offLabel = offInfo ? timeOffKindShortLabel(offInfo.kind) : null;
+        // Trava A POR DIA: a competência DESTE dia (mês da coluna) está
+        // congelada. Numa semana que cruza a virada do mês, só as colunas do
+        // mês liberado ganham o cadeado — coerente com o servidor.
+        const dayBillingLocked = billingLockedDays[index] ?? false;
         return (
           <td
             key={day.date}
             title={
-              offLabel
-                ? `${offLabel} (ausência confirmada)`
-                : holidayName
-                  ? `Feriado: ${holidayName}`
-                  : undefined
+              dayBillingLocked
+                ? BILLING_LOCK_MESSAGE
+                : offLabel
+                  ? `${offLabel} (ausência confirmada)`
+                  : holidayName
+                    ? `Feriado: ${holidayName}`
+                    : undefined
             }
             className={cn(
               "px-2 py-3 text-center align-middle tabular-nums",
               day.weekend && "bg-surface-muted/40",
               holidayName && !offLabel && "bg-warning-soft/40",
               offLabel && "bg-info-soft/40",
+              // Cadeado de faturamento tem o mesmo tom âmbar da Trava A no
+              // cabeçalho; precede a marca de fim de semana/feriado na célula.
+              dayBillingLocked && "bg-warning-soft/60",
               value > 0 ? "text-strong" : "text-soft",
             )}
           >
             {value > 0 ? (
-              value.toLocaleString("pt-BR")
+              dayBillingLocked ? (
+                <span className="inline-flex items-center justify-center gap-1 text-warning">
+                  {value.toLocaleString("pt-BR")}
+                  <Lock aria-hidden="true" className="size-3 shrink-0" />
+                  <span className="sr-only">{BILLING_LOCK_MESSAGE}</span>
+                </span>
+              ) : (
+                value.toLocaleString("pt-BR")
+              )
             ) : offLabel ? (
               <span className="text-[10px] font-medium text-brand-dark">
                 {offLabel}

@@ -17,6 +17,7 @@ import {
 } from "@/lib/automation/email/templates";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { formatMonth } from "@/lib/format";
+import { createInAppNotifications } from "@/lib/db/notifications";
 import { emitNotification } from "./emit";
 
 const decimal = (v: unknown): number => Number(v ?? 0);
@@ -131,6 +132,82 @@ export async function notifyHoursReleased(closingId: string): Promise<void> {
       };
     },
   });
+}
+
+// ---------------------------------------------------------------------------
+// REVENUE_CLOSING_REOPENED — faturamento RETORNADO ao Gestor de Área.
+//
+// Disparado SOMENTE na transição REOPEN do RevenueClosing (CLOSED →
+// READY_TO_CLOSE): a única que SAI de CLOSED e, por consequência, destrava o
+// lançamento de horas daquela competência (a Trava A da Fase 2a só bloqueia
+// enquanto o status é CLOSED/INVOICED). As demais reversas (REVERT_TO_OPEN /
+// REVERT_TO_REVIEW) não saem de CLOSED e não passam por aqui.
+//
+// Como a Fase 1 é a ÚNICA mudança de schema deste épico, NÃO criamos evento
+// de notificação novo nem regra (NotificationRule) própria: a notificação é
+// gravada DIRETO como AppNotification in-app (central de notificações). O
+// valor de enum reutilizado é `HOURS_RELEASED` — mesmo domínio (ciclo de vida
+// do RevenueClosing / liberação de faturamento), sem enum novo. O texto deixa
+// claro que é uma REABERTURA. Um canal de e-mail exigiria um AutomationEmailType
+// novo + seed de NotificationRule — fora do escopo aqui.
+//
+// Best-effort: nunca lança para dentro da action (try/catch interno).
+// ---------------------------------------------------------------------------
+export async function notifyRevenueClosingReopened(
+  closingId: string,
+): Promise<void> {
+  if (!isDatabaseConfigured()) return;
+  try {
+    const closing = await prisma.revenueClosing.findUnique({
+      where: { id: closingId },
+      select: {
+        projectId: true,
+        month: true,
+        year: true,
+        project: { select: { name: true, managerUserId: true } },
+        client: { select: { name: true } },
+      },
+    });
+    // Escopo PROJECT: sem projeto (fechamento por cliente) não há Gestor de
+    // Área definido para retornar a liberação — nada a notificar.
+    if (!closing?.projectId) return;
+
+    // Destinatário: o Gestor de Área. Prioriza o `managerUserId` do projeto;
+    // na ausência dele, cai no papel AREA_MANAGER (todos os usuários ativos).
+    const recipientUserIds = new Set<string>();
+    if (closing.project?.managerUserId) {
+      recipientUserIds.add(closing.project.managerUserId);
+    } else {
+      const managers = await prisma.user.findMany({
+        where: {
+          status: "ACTIVE",
+          roles: { some: { role: { name: "AREA_MANAGER" } } },
+        },
+        select: { id: true },
+      });
+      for (const m of managers) recipientUserIds.add(m.id);
+    }
+    if (recipientUserIds.size === 0) return;
+
+    const periodLabel = formatMonth(closing.month, closing.year);
+    const projectName = closing.project?.name ?? "Projeto";
+    const clientName = closing.client?.name ?? "—";
+
+    await createInAppNotifications(
+      Array.from(recipientUserIds).map((userId) => ({
+        userId,
+        event: "HOURS_RELEASED",
+        title: `Faturamento reaberto — ${projectName} (${periodLabel})`,
+        body: `O Financeiro retornou a liberação de faturamento de ${projectName} · ${clientName} (${periodLabel}). O lançamento de horas dessa competência foi destravado para os consultores.`,
+        href: "/app/financeiro",
+      })),
+    );
+  } catch (error) {
+    console.error("[notification] revenue closing reopened failed", {
+      closingId,
+      error,
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------

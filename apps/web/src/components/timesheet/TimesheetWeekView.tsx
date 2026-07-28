@@ -36,6 +36,7 @@ import {
   saveTimesheetDefault as saveTimesheetDefaultAction,
   updateTimeEntry,
 } from "@/app/app/horas/actions";
+import { requestEntryReopen } from "@/app/app/horas/reopen-request-actions";
 import type { TimesheetPeriodOverview } from "@/lib/db/timesheet";
 import { projects as allProjects } from "@/lib/mock-data/projects";
 import {
@@ -250,6 +251,13 @@ export interface TimesheetWeekViewProps {
    * lançamento (melhoria #2). Default `false` (demo/sem storage).
    */
   attachmentsAvailable?: boolean;
+  /**
+   * db mode (Fase 4d / Trava A): chaves `${projectId}:${YYYY-MM}` cujo
+   * faturamento já foi liberado para o Financeiro. Uma linha cuja (projeto,
+   * competência) está nesse conjunto fica congelada — cadeado + tooltip, sem
+   * edição — mesmo em status editável. Resolvido no servidor (sem N+1).
+   */
+  billingLockedKeys?: string[];
 }
 
 export interface TimesheetDefaultOption extends TimeEntryFormProject {
@@ -648,6 +656,25 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
   const filterProjects = isDemo ? demoFilterProjects : dbProjects;
   const counts = useMemo(() => statusCounts(week), [week]);
   const total = useMemo(() => weekTotal(week), [week]);
+  // Trava A (Fase 4d): conjunto de competências congeladas pelo Financeiro. Em
+  // demo mode não há liberação (conjunto vazio → nenhum cadeado de faturamento).
+  const billingLockedSet = useMemo(
+    () => new Set(props.billingLockedKeys ?? []),
+    [props.billingLockedKeys],
+  );
+  /**
+   * Cadeado da Trava A resolvido POR DIA/coluna: cada dia da linha casa a
+   * competência do SEU próprio mês (`${projectId}:${YYYY-MM}` do dia) contra o
+   * `Set` do servidor. Numa semana que cruza a virada do mês (ex.: 31/jul
+   * travado + 01/ago aberto) as colunas ficam coerentes com o servidor, que
+   * trava por lançamento/dia — e não com um estado único de linha.
+   */
+  const rowBillingLockedDays = (row: TimeEntryRowData): boolean[] => {
+    if (billingLockedSet.size === 0) return week.days.map(() => false);
+    return week.days.map((day) =>
+      billingLockedSet.has(`${row.projectId}:${day.date.slice(0, 7)}`),
+    );
+  };
   const periodOverview = useMemo(
     () => props.period ?? deriveDemoPeriod(week),
     [props.period, week],
@@ -850,6 +877,26 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
       router.refresh();
       setDefaultOpen(false);
       notify(created > 0 ? "success" : "info", `Padrão aplicado: ${parts.join(" · ")}.`);
+    });
+  }
+
+  /**
+   * Trava B (Fase 4d): o consultor NÃO reverte a própria aprovação; solicita a
+   * reabertura ao Gestor de Área. Dispara a action leve (só notifica), passando
+   * o primeiro `entryId` real da linha. Nunca disponível em demo (sem servidor).
+   */
+  function handleRequestReopen(entryId: string) {
+    if (isDemo) return;
+    startTransition(async () => {
+      const result = await requestEntryReopen({ entryId });
+      if (result.ok) {
+        notify(
+          "success",
+          "Pedido de reabertura enviado ao Gestor de Área.",
+        );
+      } else {
+        notify("warning", result.message);
+      }
     });
   }
 
@@ -1463,20 +1510,27 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {week.rows.map((row) => (
-                  <TimeEntryRow
-                    key={row.id}
-                    row={row}
-                    days={week.days}
-                    holidays={holidays}
-                    timeOff={timeOff}
-                    onEdit={openEdit}
-                    canEditBillable={canEditBillable}
-                    onOpenAttachment={
-                      attachmentsAvailable ? openAttachment : undefined
-                    }
-                  />
-                ))}
+                {week.rows.map((row) => {
+                  const lockedDays = rowBillingLockedDays(row);
+                  return (
+                    <TimeEntryRow
+                      key={row.id}
+                      row={row}
+                      days={week.days}
+                      holidays={holidays}
+                      timeOff={timeOff}
+                      onEdit={openEdit}
+                      canEditBillable={canEditBillable}
+                      onOpenAttachment={
+                        attachmentsAvailable ? openAttachment : undefined
+                      }
+                      billingLocked={lockedDays.some(Boolean)}
+                      billingLockedDays={lockedDays}
+                      onRequestReopen={isDemo ? undefined : handleRequestReopen}
+                      reopenBusy={isPending}
+                    />
+                  );
+                })}
               </tbody>
               <tfoot>
                 <tr className="border-t-2 border-ink bg-surface-muted/40 font-semibold text-strong">
