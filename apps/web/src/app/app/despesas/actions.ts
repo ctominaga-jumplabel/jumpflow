@@ -18,11 +18,13 @@ import {
 import { resolveDbUser } from "@/lib/db/users";
 import {
   COMMENT_REQUIRED_MESSAGE,
+  MILEAGE_CATEGORY,
   REASON_REQUIRED_MESSAGE,
   createExpenseBatchSchema,
   decideExpenseSchema,
   expenseIdInputSchema,
   expenseInputSchema,
+  mileageCalcInputSchema,
   receiptInputSchema,
   setPaymentSchema,
   updateExpenseInputSchema,
@@ -30,6 +32,7 @@ import {
   type DecideExpenseInput,
   type ExpenseIdInput,
   type ExpenseInput,
+  type MileageCalcInput,
   type SetPaymentInput,
   type UpdateExpenseInput,
 } from "@/lib/expenses/schemas";
@@ -38,9 +41,13 @@ import type {
   ExpenseCategory,
   ExpenseStatus,
 } from "@/lib/expenses/types";
-import { getActivePolicyRules } from "@/lib/db/reimbursement-policy";
+import {
+  getActivePolicyRules,
+  getMileageRatePerKm,
+} from "@/lib/db/reimbursement-policy";
 import { getActiveExpenseTypeCodes } from "@/lib/db/expense-types";
 import { evaluateExpensePolicy } from "@/lib/expenses/reimbursement-policy";
+import { computeMileage } from "@/lib/mileage/provider";
 import {
   buildStorageKey,
   validateReceiptFile,
@@ -208,6 +215,77 @@ async function assertCategoriesActive(
   }
 }
 
+/** Arredonda para 2 casas (mesma escala de Decimal). */
+function round2(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+/** Campos de milhagem gravados na despesa (null para os demais tipos). */
+interface MileagePersist {
+  amount: number;
+  originAddress: string | null;
+  destinationAddress: string | null;
+  roundTrip: boolean;
+  distanceOutboundKm: number | null;
+  distanceReturnKm: number | null;
+  distanceKm: number | null;
+  valuePerKm: number | null;
+}
+
+/** Entrada crua de um item/edição com os campos possíveis de milhagem. */
+interface MileageItemInput {
+  category?: string | null;
+  amount: number;
+  originAddress?: string;
+  destinationAddress?: string;
+  roundTrip?: boolean;
+  distanceKm?: number;
+  distanceOutboundKm?: number;
+  distanceReturnKm?: number;
+}
+
+/**
+ * Resolve o que gravar para um item. Reembolso Quilometragem: o valor por km é
+ * SEMPRE a taxa global vigente (Política de Reembolso) — o cliente nunca dita o
+ * valor — e `amount` é recomputado como distanceKm × taxa (snapshot). Demais
+ * tipos: `amount` vem do cliente e os campos de milhagem ficam nulos. A presença
+ * de origem/destino/distanceKm já é garantida pelo Zod (`refineMileage`).
+ */
+function resolveMileagePersist(
+  item: MileageItemInput,
+  ratePerKm: number | null,
+): MileagePersist {
+  if (item.category !== MILEAGE_CATEGORY) {
+    return {
+      amount: item.amount,
+      originAddress: null,
+      destinationAddress: null,
+      roundTrip: false,
+      distanceOutboundKm: null,
+      distanceReturnKm: null,
+      distanceKm: null,
+      valuePerKm: null,
+    };
+  }
+  if (ratePerKm === null) {
+    throw new ActionError(
+      "INVALID_INPUT",
+      "Defina o valor por km na Política de Reembolso antes de lançar um Reembolso Quilometragem.",
+    );
+  }
+  const distanceKm = item.distanceKm ?? 0;
+  return {
+    amount: round2(distanceKm * ratePerKm),
+    originAddress: item.originAddress?.trim() || null,
+    destinationAddress: item.destinationAddress?.trim() || null,
+    roundTrip: item.roundTrip ?? false,
+    distanceOutboundKm: item.distanceOutboundKm ?? null,
+    distanceReturnKm: item.distanceReturnKm ?? null,
+    distanceKm,
+    valuePerKm: ratePerKm,
+  };
+}
+
 async function ensureOpenProject(projectId: string) {
   const project = await prisma.project.findUnique({ where: { id: projectId } });
   if (!project) {
@@ -358,13 +436,26 @@ export async function createExpenseBatch(
     // Item 12: os tipos de despesa são dinâmicos — valida os códigos contra o
     // registro ATIVO antes da política e de qualquer escrita.
     await assertCategoriesActive(parsed.items.map((it) => it.category));
-    // P13: reforca a Politica de Reembolso item a item (cada item tem
-    // categoria/data/valor). Falha o lote inteiro antes de qualquer escrita.
+
+    // Reembolso Quilometragem: resolve a taxa global (uma vez) e recomputa o
+    // valor de cada item de milhagem (distanceKm × taxa). Falha cedo se algum
+    // item é milhagem e a taxa não está configurada.
+    const hasMileage = parsed.items.some(
+      (it) => it.category === MILEAGE_CATEGORY,
+    );
+    const mileageRate = hasMileage ? await getMileageRatePerKm() : null;
+    const withMileage = parsed.items.map((item) => ({
+      item,
+      mileage: resolveMileagePersist(item, mileageRate),
+    }));
+
+    // P13: reforca a Politica de Reembolso item a item (usa o valor JÁ computado
+    // para milhagem). Falha o lote inteiro antes de qualquer escrita.
     await assertPolicyOk(
-      parsed.items.map((it) => ({
-        category: it.category,
-        date: it.date,
-        amount: it.amount,
+      withMileage.map(({ item, mileage }) => ({
+        category: item.category,
+        date: item.date,
+        amount: mileage.amount,
       })),
     );
     const invoiceNumber = parsed.invoiceNumber?.trim() || null;
@@ -373,7 +464,7 @@ export async function createExpenseBatch(
     // Resolve a alocação de cada item (por data) antes de abrir a transação,
     // para que uma data inválida falhe sem deixar linhas parciais.
     const prepared = await Promise.all(
-      parsed.items.map(async (item) => {
+      withMileage.map(async ({ item, mileage }) => {
         const date = parseIsoDateUtc(item.date)!;
         const allocation = await ensureActiveAllocation(
           prisma,
@@ -381,24 +472,31 @@ export async function createExpenseBatch(
           project.id,
           date,
         );
-        return { date, allocationId: allocation.id, item };
+        return { date, allocationId: allocation.id, item, mileage };
       }),
     );
 
     const ids = await prisma.$transaction(async (tx) => {
       const created: string[] = [];
-      for (const { date, allocationId, item } of prepared) {
+      for (const { date, allocationId, item, mileage } of prepared) {
         const expense = await tx.expense.create({
           data: {
             consultantId: consultant.id,
             projectId: project.id,
             allocationId,
             date,
-            amount: item.amount,
+            amount: mileage.amount,
             description: parsed.description,
             invoiceNumber,
             category: item.category,
             groupId,
+            originAddress: mileage.originAddress,
+            destinationAddress: mileage.destinationAddress,
+            roundTrip: mileage.roundTrip,
+            distanceOutboundKm: mileage.distanceOutboundKm,
+            distanceReturnKm: mileage.distanceReturnKm,
+            distanceKm: mileage.distanceKm,
+            valuePerKm: mileage.valuePerKm,
             status: "DRAFT",
             submittedAt: null,
           },
@@ -429,6 +527,12 @@ export async function updateExpense(
     // Item 12: valida o código do tipo (quando enviado) contra o registro ativo.
     if (parsed.category) await assertCategoriesActive([parsed.category]);
 
+    // Reembolso Quilometragem: recomputa valor (distanceKm × taxa global) e
+    // grava os campos de milhagem; para os demais tipos os campos ficam nulos.
+    const mileageRate =
+      parsed.category === MILEAGE_CATEGORY ? await getMileageRatePerKm() : null;
+    const mileage = resolveMileagePersist(parsed, mileageRate);
+
     const projectId = parsed.projectId ?? expense.projectId;
     const date = parsed.date ? parseIsoDateUtc(parsed.date)! : expense.date;
     let allocationId = expense.allocationId;
@@ -457,12 +561,21 @@ export async function updateExpense(
         projectId,
         date,
         allocationId,
-        amount: parsed.amount,
+        amount: mileage.amount,
         description: parsed.description,
         invoiceNumber: parsed.invoiceNumber?.trim() || null,
         // Categoria opcional: só sobrescreve quando enviada (preserva o tipo de
         // linhas legadas que ainda não têm categoria).
         ...(parsed.category ? { category: parsed.category } : {}),
+        // Campos de milhagem: preenchidos para MILEAGE_REIMBURSEMENT, nulos
+        // (limpos) ao trocar para outro tipo.
+        originAddress: mileage.originAddress,
+        destinationAddress: mileage.destinationAddress,
+        roundTrip: mileage.roundTrip,
+        distanceOutboundKm: mileage.distanceOutboundKm,
+        distanceReturnKm: mileage.distanceReturnKm,
+        distanceKm: mileage.distanceKm,
+        valuePerKm: mileage.valuePerKm,
         // Editing a rejected expense returns it to DRAFT; resubmission
         // restarts the chain from the manager stage.
         status: "DRAFT",
@@ -478,6 +591,86 @@ export async function updateExpense(
 
     revalidatePath(DESPESAS_PATH);
     return { ok: true, data: { id: expense.id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/** Resultado do cálculo de quilometragem para o formulário de despesa. */
+export interface MileageCalcResult {
+  /** Provedor de distância configurado (chave presente). Se false → manual. */
+  configured: boolean;
+  outboundKm: number | null;
+  returnKm: number | null;
+  totalKm: number | null;
+  /** Taxa global R$/km vigente (Política de Reembolso), ou null se não definida. */
+  ratePerKm: number | null;
+}
+
+const MILEAGE_FAILURE_MESSAGES: Record<string, string> = {
+  ORIGIN_NOT_FOUND: "Endereço de origem não encontrado. Revise-o.",
+  DESTINATION_NOT_FOUND: "Endereço de destino não encontrado. Revise-o.",
+  NO_ROUTE: "Não foi possível traçar uma rota de carro entre os endereços.",
+  PROVIDER_ERROR:
+    "Falha no serviço de distância. Tente novamente ou informe a quilometragem manualmente.",
+};
+
+/**
+ * Calcula a quilometragem de carro entre origem e destino (ida, e a volta à
+ * parte quando ida e volta). Roda no servidor para manter a chave da API fora do
+ * cliente. Sem chave configurada → `configured: false` e o formulário cai para
+ * entrada manual — nunca inventamos a distância. Também devolve a taxa global
+ * vigente para o formulário exibir o valor por km e o total.
+ */
+export async function calculateMileage(
+  input: MileageCalcInput,
+): Promise<ActionResult<MileageCalcResult>> {
+  try {
+    const user = await requireUser();
+    await requireConsultant(user);
+    const parsed = parseInput(mileageCalcInputSchema, input);
+
+    const ratePerKm = isDatabaseConfigured()
+      ? await getMileageRatePerKm()
+      : null;
+
+    const outcome = await computeMileage({
+      origin: parsed.origin,
+      destination: parsed.destination,
+      roundTrip: parsed.roundTrip,
+    });
+
+    if (!outcome.ok) {
+      if (outcome.reason === "NOT_CONFIGURED") {
+        // Degradação honesta: sem provedor, o formulário usa entrada manual.
+        return {
+          ok: true,
+          data: {
+            configured: false,
+            outboundKm: null,
+            returnKm: null,
+            totalKm: null,
+            ratePerKm,
+          },
+        };
+      }
+      throw new ActionError(
+        "INVALID_INPUT",
+        MILEAGE_FAILURE_MESSAGES[outcome.reason] ??
+          "Não foi possível calcular a quilometragem.",
+      );
+    }
+
+    return {
+      ok: true,
+      data: {
+        configured: true,
+        outboundKm: outcome.outboundKm,
+        returnKm: outcome.returnKm,
+        totalKm: outcome.totalKm,
+        ratePerKm,
+      },
+    };
   } catch (error) {
     return toFailure(error);
   }

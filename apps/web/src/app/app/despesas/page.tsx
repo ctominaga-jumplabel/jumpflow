@@ -64,15 +64,16 @@ export default async function DespesasPage() {
   const { listExpensesForConsultant, listExpenseProjects, listExpenseApprovalItems } =
     await import("@/lib/db/expenses");
   const { resolveDbUser } = await import("@/lib/db/users");
-  const { getActivePolicyRules } = await import(
+  const { getActivePolicyRules, getMileageRatePerKm } = await import(
     "@/lib/db/reimbursement-policy"
   );
   const { listExpenseTypeOptions } = await import("@/lib/db/expense-types");
 
   const consultant = await getConsultantForUser(user);
-  const [policyRules, expenseTypes] = await Promise.all([
+  const [policyRules, expenseTypes, mileageRatePerKm] = await Promise.all([
     getActivePolicyRules(),
     listExpenseTypeOptions(),
+    getMileageRatePerKm(),
   ]);
 
   // P14: aprovação operacional/financeira das despesas na própria tela.
@@ -134,6 +135,7 @@ export default async function DespesasPage() {
         storageAvailable={isStorageConfigured()}
         policyRules={policyRules}
         expenseTypes={expenseTypes}
+        mileageRatePerKm={mileageRatePerKm}
       />
     </div>
   );

@@ -20,6 +20,7 @@ import {
   updateReimbursementPolicyRule,
 } from "@/app/app/despesas/policy-actions";
 import { expenseCategoryLabel, type ExpenseCategory } from "@/lib/expenses/types";
+import { MILEAGE_CATEGORY } from "@/lib/expenses/schemas";
 import type { ExpenseTypeAdminView } from "@/lib/db/expense-types";
 import type { ReimbursementPolicyRuleView } from "@/lib/db/reimbursement-policy";
 
@@ -36,6 +37,7 @@ interface FormState {
   category: ExpenseCategory | "";
   maxAgeDays: string;
   maxAmount: string;
+  valuePerKm: string;
   active: boolean;
   notes: string;
 }
@@ -45,6 +47,7 @@ const emptyForm: FormState = {
   category: "",
   maxAgeDays: "",
   maxAmount: "",
+  valuePerKm: "",
   active: true,
   notes: "",
 };
@@ -112,6 +115,7 @@ export function ReimbursementPolicyView({
       category: rule.category ?? "",
       maxAgeDays: rule.maxAgeDays === null ? "" : String(rule.maxAgeDays),
       maxAmount: rule.maxAmount === null ? "" : String(rule.maxAmount),
+      valuePerKm: rule.valuePerKm === null ? "" : String(rule.valuePerKm),
       active: rule.active,
       notes: rule.notes ?? "",
     });
@@ -119,9 +123,18 @@ export function ReimbursementPolicyView({
   }
 
   function handleSave() {
-    const noLimits = !form.maxAgeDays.trim() && !form.maxAmount.trim();
+    const isMileage = form.category === MILEAGE_CATEGORY;
+    const noLimits =
+      !form.maxAgeDays.trim() &&
+      !form.maxAmount.trim() &&
+      !(isMileage && form.valuePerKm.trim());
     if (noLimits) {
-      notify("warning", "Informe ao menos um limite (prazo ou valor).");
+      notify(
+        "warning",
+        isMileage
+          ? "Informe ao menos um limite ou o valor por km."
+          : "Informe ao menos um limite (prazo ou valor).",
+      );
       return;
     }
     const payload = {
@@ -132,6 +145,11 @@ export function ReimbursementPolicyView({
       maxAmount: form.maxAmount.trim()
         ? Number(form.maxAmount.replace(",", "."))
         : null,
+      // R$/km só se aplica ao Reembolso Quilometragem.
+      valuePerKm:
+        isMileage && form.valuePerKm.trim()
+          ? Number(form.valuePerKm.replace(",", "."))
+          : null,
       active: form.active,
       notes: form.notes.trim() || undefined,
     };
@@ -372,6 +390,11 @@ export function ReimbursementPolicyView({
                       {rule.category === null
                         ? "Geral (todas)"
                         : expenseCategoryLabel(rule.category, labelsByCode)}
+                      {rule.valuePerKm !== null ? (
+                        <span className="ml-2 align-middle text-xs font-normal text-soft">
+                          {formatCurrency(rule.valuePerKm)}/km
+                        </span>
+                      ) : null}
                     </td>
                     <td className="px-4 py-3 align-middle tabular-nums text-medium">
                       {rule.maxAgeDays ?? "—"}
@@ -506,6 +529,28 @@ export function ReimbursementPolicyView({
               />
             </div>
           </div>
+          {form.category === MILEAGE_CATEGORY ? (
+            <div>
+              <label htmlFor="policy-value-per-km" className={labelClass}>
+                Valor por km (R$)
+              </label>
+              <input
+                id="policy-value-per-km"
+                type="text"
+                inputMode="decimal"
+                value={form.valuePerKm}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, valuePerKm: e.target.value }))
+                }
+                placeholder="ex.: 1,50"
+                className={inputClass}
+              />
+              <p className="mt-1 text-xs text-soft">
+                Taxa usada no cálculo do Reembolso Quilometragem (valor total = km
+                × R$/km). É o valor que o consultor vê no lançamento.
+              </p>
+            </div>
+          ) : null}
           <div>
             <label htmlFor="policy-notes" className={labelClass}>
               Observacao{" "}

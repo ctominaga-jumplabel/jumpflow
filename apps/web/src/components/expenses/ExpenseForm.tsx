@@ -1,12 +1,13 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Plus, Save, Send, Trash2 } from "lucide-react";
+import { Calculator, Plus, Save, Send, Trash2 } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import { ActionButton } from "@/components/ui/ActionButton";
 import { ExpenseAttachmentField } from "./ExpenseAttachmentField";
 import { cn } from "@/lib/utils";
 import { focusRingInput } from "@/lib/styles";
+import { formatCurrencyPrecise } from "@/lib/format";
 import {
   EXPENSE_CATEGORIES,
   expenseCategoryLabels,
@@ -15,10 +16,61 @@ import {
   type ExpenseCategory,
   type ExpenseTypeOption,
 } from "@/lib/expenses/types";
+import type { MileageCalcResult } from "@/app/app/despesas/actions";
 import {
   evaluateExpensePolicy,
   type PolicyRuleData,
 } from "@/lib/expenses/reimbursement-policy";
+
+/** Código do tipo nativo de Reembolso Quilometragem (espelha o schema). */
+const MILEAGE_CATEGORY = "MILEAGE_REIMBURSEMENT";
+
+/** Arredonda para 2 casas (mesma escala do servidor). */
+const round2 = (value: number) => Math.round(value * 100) / 100;
+
+/**
+ * Callback que pede o cálculo de quilometragem ao servidor. Retorna o resultado
+ * ou `null` quando falhou (a falha já é reportada pelo orquestrador). Injetado
+ * pela ExpensesView para que o modo demo possa usar um stub (entrada manual).
+ */
+export type CalculateMileageFn = (input: {
+  origin: string;
+  destination: string;
+  roundTrip: boolean;
+}) => Promise<MileageCalcResult | null>;
+
+/** Dados de milhagem controlados pelo formulário (origem/destino/km). */
+export interface MileageValue {
+  originAddress: string;
+  destinationAddress: string;
+  roundTrip: boolean;
+  /** Total (ida + volta quando ida e volta). null = ainda não calculado. */
+  distanceKm: number | null;
+  distanceOutboundKm: number | null;
+  distanceReturnKm: number | null;
+  /** Distância informada MANUALMENTE (provedor indisponível ou falha). */
+  manual: boolean;
+}
+
+export const emptyMileage: MileageValue = {
+  originAddress: "",
+  destinationAddress: "",
+  roundTrip: false,
+  distanceKm: null,
+  distanceOutboundKm: null,
+  distanceReturnKm: null,
+  manual: false,
+};
+
+/** Milhagem incompleta = falta origem, destino ou distância válida. */
+export function mileageIncomplete(v: MileageValue): boolean {
+  return (
+    v.originAddress.trim().length < 3 ||
+    v.destinationAddress.trim().length < 3 ||
+    v.distanceKm === null ||
+    v.distanceKm <= 0
+  );
+}
 
 /** Tipos nativos como opções — fallback quando o registro não é fornecido. */
 const BUILTIN_EXPENSE_TYPES: ExpenseTypeOption[] = EXPENSE_CATEGORIES.map(
@@ -33,8 +85,18 @@ export interface ExpenseFormProject {
 
 export type ExpenseSubmitMode = "DRAFT" | "SUBMITTED";
 
+/** Campos de milhagem enviados ao servidor (só quando categoria = milhagem). */
+export interface MileageSubmitFields {
+  originAddress?: string;
+  destinationAddress?: string;
+  roundTrip?: boolean;
+  distanceKm?: number;
+  distanceOutboundKm?: number;
+  distanceReturnKm?: number;
+}
+
 /** Values an EDIT produces (attachment travels separately as a File). */
-export interface ExpenseFormValue {
+export interface ExpenseFormValue extends MileageSubmitFields {
   projectId: string;
   date: string;
   amount: number;
@@ -44,11 +106,23 @@ export interface ExpenseFormValue {
 }
 
 /** One item of a CREATE batch (its receipt travels as a File). */
-export interface ExpenseBatchItem {
+export interface ExpenseBatchItem extends MileageSubmitFields {
   date: string;
   amount: number;
   category: ExpenseCategory;
   file: File | null;
+}
+
+/** Constrói os campos de milhagem para submit a partir do MileageValue. */
+function toMileageSubmit(m: MileageValue): MileageSubmitFields {
+  return {
+    originAddress: m.originAddress.trim(),
+    destinationAddress: m.destinationAddress.trim(),
+    roundTrip: m.roundTrip,
+    distanceKm: m.distanceKm ?? undefined,
+    distanceOutboundKm: m.distanceOutboundKm ?? undefined,
+    distanceReturnKm: m.distanceReturnKm ?? undefined,
+  };
 }
 
 /** A CREATE batch: one NF/header with several items. */
@@ -76,6 +150,10 @@ export interface ExpenseFormProps {
   expenseTypes?: ExpenseTypeOption[];
   /** Mapa código→rótulo (registro) para mensagens de política. Default nativo. */
   categoryLabels?: Record<string, string>;
+  /** Taxa global R$/km (Política de Reembolso) exibida no bloco de milhagem. */
+  mileageRatePerKm?: number | null;
+  /** Calcula a quilometragem no servidor (stub no modo demo). */
+  onCalculateMileage?: CalculateMileageFn;
   /** Disable buttons while a server action is in flight. */
   busy?: boolean;
   /** Edit submit (single expense). */
@@ -97,6 +175,240 @@ const inputClass = (invalid: boolean) =>
 
 const labelClass = "mb-1 block text-xs font-semibold text-medium";
 
+/**
+ * Bloco de Reembolso Quilometragem: origem, destino, toggle ida/volta e o
+ * cálculo da distância. O valor por km é a TAXA GLOBAL (Política de Reembolso),
+ * só leitura para o consultor; o total = km × taxa é exibido e vira o valor da
+ * despesa. Sem provedor configurado (ou em falha), a quilometragem vira entrada
+ * manual — nunca inventamos a distância. Ida e volta recalcula a volta à parte
+ * (destino → origem), que pode divergir do trajeto de ida.
+ */
+function MileageFields({
+  value,
+  onChange,
+  ratePerKm,
+  onCalculate,
+  showErrors,
+  idPrefix,
+  busy = false,
+}: {
+  value: MileageValue;
+  onChange: (v: MileageValue) => void;
+  ratePerKm: number | null;
+  onCalculate: CalculateMileageFn;
+  showErrors: boolean;
+  idPrefix: string;
+  busy?: boolean;
+}) {
+  const [calculating, setCalculating] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const canCalc =
+    value.originAddress.trim().length >= 3 &&
+    value.destinationAddress.trim().length >= 3;
+
+  async function runCalculate(roundTrip: boolean) {
+    setMessage(null);
+    if (!canCalc) {
+      setMessage("Informe origem e destino para calcular a distância.");
+      return;
+    }
+    setCalculating(true);
+    const result = await onCalculate({
+      origin: value.originAddress.trim(),
+      destination: value.destinationAddress.trim(),
+      roundTrip,
+    });
+    setCalculating(false);
+    // Base carrega o roundTrip corrente (evita perder o toggle em corrida).
+    const base = { ...value, roundTrip };
+    if (!result) return; // falha já reportada pelo orquestrador
+    if (!result.configured) {
+      onChange({ ...base, manual: true });
+      setMessage(
+        "Cálculo automático indisponível. Informe a quilometragem manualmente.",
+      );
+      return;
+    }
+    onChange({
+      ...base,
+      manual: false,
+      distanceKm: result.totalKm,
+      distanceOutboundKm: result.outboundKm,
+      distanceReturnKm: result.returnKm,
+    });
+  }
+
+  function handleToggleRoundTrip(next: boolean) {
+    // Recalcula ao alternar ida/volta (a volta é chamada à parte no servidor);
+    // no modo manual apenas alterna o flag.
+    if (!value.manual && canCalc && value.distanceKm !== null) {
+      runCalculate(next);
+    } else {
+      onChange({ ...value, roundTrip: next });
+    }
+  }
+
+  function handleManualKm(raw: string) {
+    const num = Number(raw.replace(",", "."));
+    onChange({
+      ...value,
+      manual: true,
+      distanceKm: raw.trim() === "" || Number.isNaN(num) ? null : round2(num),
+      distanceOutboundKm: null,
+      distanceReturnKm: null,
+    });
+  }
+
+  const total =
+    ratePerKm !== null && value.distanceKm !== null
+      ? round2(value.distanceKm * ratePerKm)
+      : null;
+  const missing = showErrors && mileageIncomplete(value);
+
+  return (
+    <div className="space-y-3 rounded-md border border-border bg-surface-muted/20 p-3">
+      <p className="text-xs font-semibold text-medium">Reembolso Quilometragem</p>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div>
+          <label htmlFor={`${idPrefix}-origin`} className={labelClass}>
+            Origem
+          </label>
+          <input
+            id={`${idPrefix}-origin`}
+            type="text"
+            value={value.originAddress}
+            onChange={(e) =>
+              onChange({ ...value, originAddress: e.target.value })
+            }
+            placeholder="Rua, número, cidade"
+            aria-invalid={showErrors && value.originAddress.trim().length < 3}
+            className={inputClass(
+              showErrors && value.originAddress.trim().length < 3,
+            )}
+          />
+        </div>
+        <div>
+          <label htmlFor={`${idPrefix}-destination`} className={labelClass}>
+            Destino
+          </label>
+          <input
+            id={`${idPrefix}-destination`}
+            type="text"
+            value={value.destinationAddress}
+            onChange={(e) =>
+              onChange({ ...value, destinationAddress: e.target.value })
+            }
+            placeholder="Rua, número, cidade"
+            aria-invalid={
+              showErrors && value.destinationAddress.trim().length < 3
+            }
+            className={inputClass(
+              showErrors && value.destinationAddress.trim().length < 3,
+            )}
+          />
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="flex items-center gap-2 text-sm text-medium">
+          <input
+            type="checkbox"
+            checked={value.roundTrip}
+            onChange={(e) => handleToggleRoundTrip(e.target.checked)}
+            className="size-4 rounded border-border text-brand focus:ring-brand"
+          />
+          Ida e volta
+        </label>
+        <ActionButton
+          type="button"
+          variant="secondary"
+          size="sm"
+          icon={Calculator}
+          disabled={busy || calculating || !canCalc}
+          onClick={() => runCalculate(value.roundTrip)}
+        >
+          {calculating ? "Calculando…" : "Calcular distância"}
+        </ActionButton>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-3">
+        <div>
+          <label htmlFor={`${idPrefix}-km`} className={labelClass}>
+            Quilometragem (km)
+          </label>
+          {value.manual ? (
+            <input
+              id={`${idPrefix}-km`}
+              type="text"
+              inputMode="decimal"
+              value={value.distanceKm === null ? "" : String(value.distanceKm)}
+              onChange={(e) => handleManualKm(e.target.value)}
+              placeholder="0,00"
+              aria-invalid={missing}
+              className={inputClass(missing)}
+            />
+          ) : (
+            <p
+              className={cn(
+                "rounded-md border px-3 py-2 text-sm tabular-nums",
+                missing
+                  ? "border-danger text-danger"
+                  : "border-border bg-surface-muted/50 text-medium",
+              )}
+            >
+              {value.distanceKm === null
+                ? "—"
+                : `${value.distanceKm.toLocaleString("pt-BR")} km`}
+            </p>
+          )}
+        </div>
+        <div>
+          <span className={labelClass}>Valor por km</span>
+          <p className="rounded-md border border-border bg-surface-muted/50 px-3 py-2 text-sm tabular-nums text-medium">
+            {ratePerKm === null ? "—" : formatCurrencyPrecise(ratePerKm)}
+          </p>
+        </div>
+        <div>
+          <span className={labelClass}>Valor total</span>
+          <p className="rounded-md border border-border bg-surface-muted/50 px-3 py-2 text-sm font-semibold tabular-nums text-strong">
+            {total === null ? "—" : formatCurrencyPrecise(total)}
+          </p>
+        </div>
+      </div>
+
+      {value.distanceOutboundKm !== null && !value.manual ? (
+        <p className="text-xs text-soft">
+          Ida: {value.distanceOutboundKm.toLocaleString("pt-BR")} km
+          {value.roundTrip && value.distanceReturnKm !== null
+            ? ` · Volta: ${value.distanceReturnKm.toLocaleString("pt-BR")} km`
+            : ""}
+        </p>
+      ) : null}
+
+      {ratePerKm === null ? (
+        <p className="text-xs font-medium text-warning">
+          Defina o valor por km na Política de Reembolso para calcular o total.
+        </p>
+      ) : (
+        <p className="text-xs text-soft">
+          O valor por km é definido pelo Financeiro na Política de Reembolso.
+        </p>
+      )}
+
+      {message ? (
+        <p className="text-xs font-medium text-medium">{message}</p>
+      ) : null}
+      {missing ? (
+        <p className="text-xs font-medium text-danger">
+          Informe origem, destino e a quilometragem (calcule ou digite).
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 interface ItemState {
   key: string;
   date: string;
@@ -104,6 +416,7 @@ interface ItemState {
   category: ExpenseCategory | "";
   attachment: ExpenseAttachmentMeta | null;
   file: File | null;
+  mileage: MileageValue;
 }
 
 function emptyItem(date: string, seq: number): ItemState {
@@ -114,6 +427,7 @@ function emptyItem(date: string, seq: number): ItemState {
     category: "",
     attachment: null,
     file: null,
+    mileage: { ...emptyMileage },
   };
 }
 
@@ -139,6 +453,8 @@ export function ExpenseForm({
   policyRules = [],
   expenseTypes = BUILTIN_EXPENSE_TYPES,
   categoryLabels = expenseCategoryLabels,
+  mileageRatePerKm = null,
+  onCalculateMileage,
   busy = false,
   onSubmit,
   onSubmitBatch,
@@ -158,6 +474,13 @@ export function ExpenseForm({
     null,
   );
   const [file, setFile] = useState<File | null>(null);
+  const [editMileage, setEditMileage] = useState<MileageValue>({
+    ...emptyMileage,
+  });
+
+  // Cálculo indisponível sem callback (nunca deveria acontecer em db mode).
+  const calcMileage: CalculateMileageFn =
+    onCalculateMileage ?? (async () => null);
 
   // Create-only item list.
   const [items, setItems] = useState<ItemState[]>([emptyItem(defaultDate, 0)]);
@@ -182,6 +505,21 @@ export function ExpenseForm({
       setCategory(initial?.category ?? "");
       setAttachment(initial?.attachment ?? null);
       setFile(null);
+      setEditMileage(
+        initial && initial.category === MILEAGE_CATEGORY
+          ? {
+              originAddress: initial.originAddress ?? "",
+              destinationAddress: initial.destinationAddress ?? "",
+              roundTrip: initial.roundTrip ?? false,
+              distanceKm: initial.distanceKm ?? null,
+              distanceOutboundKm: initial.distanceOutboundKm ?? null,
+              distanceReturnKm: initial.distanceReturnKm ?? null,
+              // Distância já persistida: trate como definida (não manual) para
+              // exibir só leitura; recálculo/entrada manual continuam possíveis.
+              manual: false,
+            }
+          : { ...emptyMileage },
+      );
       setItems([emptyItem(defaultDate, 0)]);
       setItemSeq(1);
       setShowErrors(false);
@@ -191,18 +529,34 @@ export function ExpenseForm({
 
   const selectedProject = projects.find((p) => p.id === projectId);
 
+  /** Valor calculado de uma milhagem (km × taxa global), 0 se incompleto. */
+  const mileageAmount = (m: MileageValue): number =>
+    mileageRatePerKm !== null && m.distanceKm !== null
+      ? round2(m.distanceKm * mileageRatePerKm)
+      : 0;
+
+  /** Milhagem inválida = campos incompletos OU taxa global não configurada. */
+  const mileageInvalid = (m: MileageValue): boolean =>
+    mileageIncomplete(m) || mileageRatePerKm === null;
+
   const headerErrors = {
     projectId: !projectId,
     description: description.trim().length === 0,
   };
 
+  const editIsMileage = category === MILEAGE_CATEGORY;
+
   const editErrors = useMemo(
     () => ({
       date: !date,
-      amount: amountInvalid(amount),
+      // Milhagem: o valor é calculado — validade = campos de milhagem + taxa.
+      amount: editIsMileage
+        ? mileageInvalid(editMileage)
+        : amountInvalid(amount),
       category: category === "",
     }),
-    [date, amount, category],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [date, amount, category, editIsMileage, editMileage, mileageRatePerKm],
   );
 
   // P13: violacoes da Politica de Reembolso (alerta bloqueante). `defaultDate`
@@ -227,13 +581,22 @@ export function ExpenseForm({
       }
     };
     if (isEdit) {
-      collect(category || undefined, date, amount);
+      collect(
+        category || undefined,
+        date,
+        editIsMileage ? String(mileageAmount(editMileage)) : amount,
+      );
     } else {
       for (const it of items) {
-        collect(it.category || undefined, it.date, it.amount);
+        const amt =
+          it.category === MILEAGE_CATEGORY
+            ? String(mileageAmount(it.mileage))
+            : it.amount;
+        collect(it.category || undefined, it.date, amt);
       }
     }
     return messages;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     policyRules,
     isEdit,
@@ -243,6 +606,9 @@ export function ExpenseForm({
     items,
     defaultDate,
     categoryLabels,
+    editIsMileage,
+    editMileage,
+    mileageRatePerKm,
   ]);
 
   const hasPolicyViolation = policyViolations.length > 0;
@@ -265,7 +631,11 @@ export function ExpenseForm({
   }
 
   function itemHasErrors(it: ItemState): boolean {
-    return !it.date || amountInvalid(it.amount) || it.category === "";
+    if (!it.date || it.category === "") return true;
+    // Milhagem: valida os campos de milhagem no lugar do valor (calculado).
+    return it.category === MILEAGE_CATEGORY
+      ? mileageInvalid(it.mileage)
+      : amountInvalid(it.amount);
   }
 
   function handleSubmitEdit(mode: ExpenseSubmitMode) {
@@ -288,10 +658,11 @@ export function ExpenseForm({
       {
         projectId,
         date,
-        amount: parseAmount(amount),
+        amount: editIsMileage ? mileageAmount(editMileage) : parseAmount(amount),
         description: description.trim(),
         invoiceNumber: invoiceNumber.trim() || undefined,
         category: (category || undefined) as ExpenseCategory | undefined,
+        ...(editIsMileage ? toMileageSubmit(editMileage) : {}),
       },
       mode,
       file,
@@ -322,9 +693,15 @@ export function ExpenseForm({
         invoiceNumber: invoiceNumber.trim() || undefined,
         items: items.map((it) => ({
           date: it.date,
-          amount: parseAmount(it.amount),
+          amount:
+            it.category === MILEAGE_CATEGORY
+              ? mileageAmount(it.mileage)
+              : parseAmount(it.amount),
           category: it.category as ExpenseCategory,
           file: it.file,
+          ...(it.category === MILEAGE_CATEGORY
+            ? toMileageSubmit(it.mileage)
+            : {}),
         })),
       },
       mode,
@@ -496,16 +873,25 @@ export function ExpenseForm({
               <label htmlFor="expense-amount" className={labelClass}>
                 Valor (R$)
               </label>
-              <input
-                id="expense-amount"
-                type="text"
-                inputMode="decimal"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                placeholder="0,00"
-                aria-invalid={showErrors && editErrors.amount}
-                className={inputClass(showErrors && editErrors.amount)}
-              />
+              {editIsMileage ? (
+                <p
+                  className="rounded-md border border-border bg-surface-muted/50 px-3 py-2 text-sm font-semibold tabular-nums text-strong"
+                  aria-label="Valor total calculado"
+                >
+                  {formatCurrencyPrecise(mileageAmount(editMileage))}
+                </p>
+              ) : (
+                <input
+                  id="expense-amount"
+                  type="text"
+                  inputMode="decimal"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  placeholder="0,00"
+                  aria-invalid={showErrors && editErrors.amount}
+                  className={inputClass(showErrors && editErrors.amount)}
+                />
+              )}
             </div>
             <div>
               <label htmlFor="expense-category" className={labelClass}>
@@ -534,6 +920,19 @@ export function ExpenseForm({
                 ))}
               </select>
             </div>
+            {editIsMileage ? (
+              <div className="sm:col-span-3">
+                <MileageFields
+                  value={editMileage}
+                  onChange={setEditMileage}
+                  ratePerKm={mileageRatePerKm}
+                  onCalculate={calcMileage}
+                  showErrors={showErrors}
+                  idPrefix="edit-mileage"
+                  busy={busy}
+                />
+              </div>
+            ) : null}
             <div className="sm:col-span-3">
               <ExpenseAttachmentField
                 value={attachment}
@@ -607,18 +1006,29 @@ export function ExpenseForm({
                     <label htmlFor={`${it.key}-amount`} className={labelClass}>
                       Valor (R$)
                     </label>
-                    <input
-                      id={`${it.key}-amount`}
-                      type="text"
-                      inputMode="decimal"
-                      value={it.amount}
-                      onChange={(e) =>
-                        updateItem(it.key, { amount: e.target.value })
-                      }
-                      placeholder="0,00"
-                      aria-invalid={showErrors && amountInvalid(it.amount)}
-                      className={inputClass(showErrors && amountInvalid(it.amount))}
-                    />
+                    {it.category === MILEAGE_CATEGORY ? (
+                      <p
+                        className="rounded-md border border-border bg-surface-muted/50 px-3 py-2 text-sm font-semibold tabular-nums text-strong"
+                        aria-label="Valor total calculado"
+                      >
+                        {formatCurrencyPrecise(mileageAmount(it.mileage))}
+                      </p>
+                    ) : (
+                      <input
+                        id={`${it.key}-amount`}
+                        type="text"
+                        inputMode="decimal"
+                        value={it.amount}
+                        onChange={(e) =>
+                          updateItem(it.key, { amount: e.target.value })
+                        }
+                        placeholder="0,00"
+                        aria-invalid={showErrors && amountInvalid(it.amount)}
+                        className={inputClass(
+                          showErrors && amountInvalid(it.amount),
+                        )}
+                      />
+                    )}
                   </div>
                   <div>
                     <label htmlFor={`${it.key}-category`} className={labelClass}>
@@ -643,6 +1053,19 @@ export function ExpenseForm({
                       ))}
                     </select>
                   </div>
+                  {it.category === MILEAGE_CATEGORY ? (
+                    <div className="sm:col-span-3">
+                      <MileageFields
+                        value={it.mileage}
+                        onChange={(m) => updateItem(it.key, { mileage: m })}
+                        ratePerKm={mileageRatePerKm}
+                        onCalculate={calcMileage}
+                        showErrors={showErrors}
+                        idPrefix={`${it.key}-mileage`}
+                        busy={busy}
+                      />
+                    </div>
+                  ) : null}
                 </div>
                 <ExpenseAttachmentField
                   value={it.attachment}
@@ -671,6 +1094,15 @@ export function ExpenseForm({
           O comprovante é <strong>obrigatório para enviar para aprovação</strong>
           . Você pode salvar como rascunho sem anexo e adicioná-lo depois.
         </p>
+        {(isEdit
+          ? editIsMileage
+          : items.some((it) => it.category === MILEAGE_CATEGORY)) ? (
+          <p className="rounded-md border border-border bg-surface-muted/40 px-3 py-2 text-xs text-soft">
+            Reembolso Quilometragem: anexe o{" "}
+            <strong>aval do gestor</strong> autorizando o reembolso como
+            comprovante.
+          </p>
+        ) : null}
       </form>
     </Modal>
   );

@@ -164,6 +164,14 @@ export interface Expense {
   category?: ExpenseCategory;
   /** Grouping key shared by items launched together under one NF/lote. */
   groupId?: string;
+  /** Reembolso Quilometragem: endereços, quilometragem e R$/km aplicado. */
+  originAddress?: string;
+  destinationAddress?: string;
+  roundTrip?: boolean;
+  distanceOutboundKm?: number;
+  distanceReturnKm?: number;
+  distanceKm?: number;
+  valuePerKm?: number;
   attachment?: ExpenseAttachmentMeta;
   status: ExpenseStatus;
   /** ISO datetime when submitted for approval, when applicable. */

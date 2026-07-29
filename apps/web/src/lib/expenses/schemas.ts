@@ -49,6 +49,77 @@ const categorySchema = z
   .min(1, "Selecione o tipo de lançamento.")
   .max(80, "Tipo de lançamento inválido.");
 
+/** Código do tipo nativo de Reembolso Quilometragem. */
+export const MILEAGE_CATEGORY = "MILEAGE_REIMBURSEMENT";
+
+const addressSchema = z
+  .string()
+  .trim()
+  .min(3, "Informe o endereço.")
+  .max(300, "Endereço deve ter no máximo 300 caracteres.");
+
+const distanceKmSchema = z
+  .number()
+  .gt(0, "A quilometragem deve ser maior que zero.")
+  .lte(100000, "Quilometragem máxima é 100.000 km.")
+  .refine((value) => Math.abs(value * 100 - Math.round(value * 100)) < 1e-9, {
+    message: "Use no máximo 2 casas decimais.",
+  });
+
+/**
+ * Campos do Reembolso Quilometragem enviados pelo formulário (opcionais no tipo
+ * base; obrigatórios só quando a categoria é milhagem — reforçado por
+ * `refineMileage`). O valor por km NÃO vem do cliente: é resolvido no servidor a
+ * partir da taxa global (Política de Reembolso) e gravado como snapshot.
+ */
+export const mileageFieldsSchema = {
+  originAddress: addressSchema.optional(),
+  destinationAddress: addressSchema.optional(),
+  roundTrip: z.boolean().optional(),
+  distanceKm: distanceKmSchema.optional(),
+  distanceOutboundKm: distanceKmSchema.optional(),
+  distanceReturnKm: distanceKmSchema.optional(),
+};
+
+/**
+ * Exige os campos de milhagem quando (e só quando) a categoria é milhagem.
+ * Usado no item do lote e na edição. O `amount` continua sendo enviado pelo
+ * cliente (total previsto), mas o servidor recomputa a partir de distanceKm ×
+ * taxa — nunca confia no valor do cliente para milhagem.
+ */
+export function refineMileage(
+  value: {
+    category?: string | null;
+    originAddress?: string;
+    destinationAddress?: string;
+    distanceKm?: number;
+  },
+  ctx: z.RefinementCtx,
+): void {
+  if (value.category !== MILEAGE_CATEGORY) return;
+  if (!value.originAddress) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["originAddress"],
+      message: "Informe o endereço de origem.",
+    });
+  }
+  if (!value.destinationAddress) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["destinationAddress"],
+      message: "Informe o endereço de destino.",
+    });
+  }
+  if (value.distanceKm === undefined) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["distanceKm"],
+      message: "Calcule (ou informe) a quilometragem antes de continuar.",
+    });
+  }
+}
+
 export const expenseInputSchema = z.object({
   projectId: idSchema,
   date: isoDateSchema,
@@ -65,11 +136,14 @@ export type ExpenseInput = z.infer<typeof expenseInputSchema>;
  * O servidor cria N linhas Expense numa transação compartilhando o cabeçalho e
  * um groupId — "uma descrição para várias despesas" sem entidade pai.
  */
-export const expenseItemSchema = z.object({
-  date: isoDateSchema,
-  amount: amountSchema,
-  category: categorySchema,
-});
+export const expenseItemSchema = z
+  .object({
+    date: isoDateSchema,
+    amount: amountSchema,
+    category: categorySchema,
+    ...mileageFieldsSchema,
+  })
+  .superRefine(refineMileage);
 
 export type ExpenseItemInput = z.infer<typeof expenseItemSchema>;
 
@@ -85,20 +159,32 @@ export const createExpenseBatchSchema = z.object({
 
 export type CreateExpenseBatchInput = z.infer<typeof createExpenseBatchSchema>;
 
-export const updateExpenseInputSchema = z.object({
-  id: idSchema,
-  /** Optional move to another project (re-checks allocation). */
-  projectId: idSchema.optional(),
-  /** Optional date change (re-checks allocation coverage). */
-  date: isoDateSchema.optional(),
-  amount: amountSchema,
-  description: descriptionSchema,
-  invoiceNumber: invoiceNumberSchema,
-  /** Optional so legacy rows (sem categoria) can still be edited. */
-  category: categorySchema.optional(),
-});
+export const updateExpenseInputSchema = z
+  .object({
+    id: idSchema,
+    /** Optional move to another project (re-checks allocation). */
+    projectId: idSchema.optional(),
+    /** Optional date change (re-checks allocation coverage). */
+    date: isoDateSchema.optional(),
+    amount: amountSchema,
+    description: descriptionSchema,
+    invoiceNumber: invoiceNumberSchema,
+    /** Optional so legacy rows (sem categoria) can still be edited. */
+    category: categorySchema.optional(),
+    ...mileageFieldsSchema,
+  })
+  .superRefine(refineMileage);
 
 export type UpdateExpenseInput = z.infer<typeof updateExpenseInputSchema>;
+
+/** Entrada da action que calcula a quilometragem (origem/destino/ida-volta). */
+export const mileageCalcInputSchema = z.object({
+  origin: addressSchema,
+  destination: addressSchema,
+  roundTrip: z.boolean().default(false),
+});
+
+export type MileageCalcInput = z.infer<typeof mileageCalcInputSchema>;
 
 export const expenseIdInputSchema = z.object({ id: idSchema });
 

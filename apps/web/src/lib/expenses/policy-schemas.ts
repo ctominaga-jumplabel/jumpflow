@@ -52,21 +52,47 @@ const notesSchema = z
   .max(500, "Observacao deve ter no maximo 500 caracteres.")
   .optional();
 
+/**
+ * Valor por km (R$) da regra de Reembolso Quilometragem. Taxa global exibida no
+ * formulario de despesa. Aceita string vazia/null (regras que nao sao de
+ * milhagem nao usam este campo).
+ */
+const valuePerKmSchema = z.preprocess(
+  (value) =>
+    value === "" || value === null || value === undefined
+      ? null
+      : Number(value),
+  z
+    .number()
+    .gt(0, "Valor por km deve ser maior que zero.")
+    .lte(9999.99, "Valor por km maximo e R$ 9.999,99.")
+    .refine((v) => Math.abs(v * 100 - Math.round(v * 100)) < 1e-9, {
+      message: "Use no maximo 2 casas decimais.",
+    })
+    .nullable(),
+);
+
 export const reimbursementPolicyInputSchema = z
   .object({
     category: categorySchema,
     maxAgeDays: maxAgeDaysSchema,
     maxAmount: maxAmountSchema,
+    valuePerKm: valuePerKmSchema.default(null),
     active: z.boolean().default(true),
     notes: notesSchema,
   })
   .superRefine((value, ctx) => {
-    // Uma regra sem nenhum limite nao restringe nada — recuse para evitar lixo.
-    if (value.maxAgeDays === null && value.maxAmount === null) {
+    // Uma regra sem nenhum limite/config nao restringe nada — recuse para evitar
+    // lixo. O valor por km (milhagem) tambem conta como configuracao valida.
+    if (
+      value.maxAgeDays === null &&
+      value.maxAmount === null &&
+      value.valuePerKm === null
+    ) {
       ctx.addIssue({
         code: "custom",
         path: ["maxAmount"],
-        message: "Informe ao menos um limite (prazo ou valor).",
+        message: "Informe ao menos um limite (prazo, valor ou R$/km).",
       });
     }
   });

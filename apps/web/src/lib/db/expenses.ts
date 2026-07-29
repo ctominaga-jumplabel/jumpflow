@@ -52,6 +52,13 @@ interface ExpenseRow {
   invoiceNumber: string | null;
   category: string | null;
   groupId: string | null;
+  originAddress: string | null;
+  destinationAddress: string | null;
+  roundTrip: boolean;
+  distanceOutboundKm: unknown;
+  distanceReturnKm: unknown;
+  distanceKm: unknown;
+  valuePerKm: unknown;
   status: string;
   submittedAt: Date | null;
   consultant: { name: string };
@@ -68,12 +75,24 @@ const expenseSelect = {
   invoiceNumber: true,
   category: true,
   groupId: true,
+  originAddress: true,
+  destinationAddress: true,
+  roundTrip: true,
+  distanceOutboundKm: true,
+  distanceReturnKm: true,
+  distanceKm: true,
+  valuePerKm: true,
   status: true,
   submittedAt: true,
   consultant: { select: { name: true } },
   project: { select: { name: true, client: { select: { name: true } } } },
   attachment: { select: { fileName: true, contentType: true, size: true } },
 } as const;
+
+/** Decimal (Prisma) → number, preservando null/undefined como undefined. */
+function toNum(value: unknown): number | undefined {
+  return value == null ? undefined : Number(value);
+}
 
 function toUiExpense(row: ExpenseRow, rejectionReason?: string): Expense {
   return {
@@ -88,6 +107,13 @@ function toUiExpense(row: ExpenseRow, rejectionReason?: string): Expense {
     invoiceNumber: row.invoiceNumber ?? undefined,
     category: (row.category as Expense["category"]) ?? undefined,
     groupId: row.groupId ?? undefined,
+    originAddress: row.originAddress ?? undefined,
+    destinationAddress: row.destinationAddress ?? undefined,
+    roundTrip: row.roundTrip || undefined,
+    distanceOutboundKm: toNum(row.distanceOutboundKm),
+    distanceReturnKm: toNum(row.distanceReturnKm),
+    distanceKm: toNum(row.distanceKm),
+    valuePerKm: toNum(row.valuePerKm),
     attachment: row.attachment ?? undefined,
     status: row.status as ExpenseStatus,
     submittedAt: row.submittedAt?.toISOString(),

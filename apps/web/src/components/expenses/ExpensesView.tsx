@@ -13,6 +13,7 @@ import { focusRingInput } from "@/lib/styles";
 import { formatCurrency, formatDate } from "@/lib/format";
 import {
   attachReceipt,
+  calculateMileage as calculateMileageAction,
   createExpenseBatch as createExpenseBatchAction,
   deleteExpense as deleteExpenseAction,
   getReceiptUrl,
@@ -38,6 +39,7 @@ import { ExpenseSummaryCards } from "./ExpenseSummaryCards";
 import { ExpenseList } from "./ExpenseList";
 import {
   ExpenseForm,
+  type CalculateMileageFn,
   type ExpenseBatchValue,
   type ExpenseFormProject,
   type ExpenseFormValue,
@@ -96,6 +98,8 @@ export interface ExpensesViewProps {
    * Ausente em demo mode → cai para os tipos nativos.
    */
   expenseTypes?: ExpenseTypeOption[];
+  /** Taxa global R$/km (Política de Reembolso) para o Reembolso Quilometragem. */
+  mileageRatePerKm?: number | null;
 }
 
 /** Tipos nativos como opções — fallback para demo mode (sem banco/registro). */
@@ -262,6 +266,13 @@ export function ExpensesView(props: ExpensesViewProps) {
           date: it.date,
           amount: it.amount,
           category: it.category,
+          // Campos de milhagem (presentes só quando category = milhagem).
+          originAddress: it.originAddress,
+          destinationAddress: it.destinationAddress,
+          roundTrip: it.roundTrip,
+          distanceKm: it.distanceKm,
+          distanceOutboundKm: it.distanceOutboundKm,
+          distanceReturnKm: it.distanceReturnKm,
         })),
       });
       if (!created.ok) {
@@ -316,6 +327,13 @@ export function ExpensesView(props: ExpensesViewProps) {
       invoiceNumber: value.invoiceNumber,
       category: it.category,
       groupId,
+      originAddress: it.originAddress,
+      destinationAddress: it.destinationAddress,
+      roundTrip: it.roundTrip,
+      distanceKm: it.distanceKm,
+      distanceOutboundKm: it.distanceOutboundKm,
+      distanceReturnKm: it.distanceReturnKm,
+      valuePerKm: props.mileageRatePerKm ?? undefined,
       attachment: it.file
         ? {
             fileName: it.file.name,
@@ -453,6 +471,29 @@ export function ExpensesView(props: ExpensesViewProps) {
       }
     });
   }
+
+  /**
+   * Calcula a quilometragem no servidor (chave da API fica fora do cliente). No
+   * modo demo não há servidor: degrada para entrada manual, mas ainda devolve a
+   * taxa conhecida para exibir o valor por km. Falhas viram aviso e `null`.
+   */
+  const handleCalculateMileage: CalculateMileageFn = async (input) => {
+    if (isDemo) {
+      return {
+        configured: false,
+        outboundKm: null,
+        returnKm: null,
+        totalKm: null,
+        ratePerKm: props.mileageRatePerKm ?? null,
+      };
+    }
+    const result = await calculateMileageAction(input);
+    if (!result.ok) {
+      notify("warning", result.message);
+      return null;
+    }
+    return result.data;
+  };
 
   function handleDownloadReceipt(expense: Expense) {
     startTransition(async () => {
@@ -604,6 +645,8 @@ export function ExpensesView(props: ExpensesViewProps) {
         policyRules={props.policyRules ?? []}
         expenseTypes={activeTypeOptions}
         categoryLabels={categoryLabels}
+        mileageRatePerKm={props.mileageRatePerKm ?? null}
+        onCalculateMileage={handleCalculateMileage}
         busy={isPending}
         onSubmit={handleFormSubmit}
         onSubmitBatch={handleBatchSubmit}
