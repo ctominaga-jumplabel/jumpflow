@@ -111,6 +111,41 @@ describe("summarizeReadiness", () => {
       "Zélia",
     ]);
   });
+
+  it("blocks on NO_ENTRIES by default (daily entry required)", () => {
+    const r = summarizeReadiness([
+      consultant({ consultantId: "a", state: "APPROVED" }),
+      consultant({ consultantId: "b", state: "NO_ENTRIES", hours: 0 }),
+    ]);
+    expect(r.canClose).toBe(false);
+    expect(r.pendingByState.NO_ENTRIES).toBe(1);
+  });
+
+  it("does NOT block on NO_ENTRIES when daily entry is not required", () => {
+    const r = summarizeReadiness(
+      [
+        consultant({ consultantId: "a", state: "APPROVED" }),
+        consultant({ consultantId: "b", state: "NO_ENTRIES", hours: 0 }),
+      ],
+      { dailyEntryRequired: false },
+    );
+    expect(r.canClose).toBe(true);
+    // Still reported for visibility, just no longer a blocker.
+    expect(r.pendingByState.NO_ENTRIES).toBe(1);
+    expect(r.readyConsultants).toBe(1);
+  });
+
+  it("still blocks on logged-but-unapproved hours even when daily entry is off", () => {
+    const r = summarizeReadiness(
+      [
+        consultant({ consultantId: "a", state: "NO_ENTRIES", hours: 0 }),
+        consultant({ consultantId: "b", state: "PENDING_REVIEW", hours: 8 }),
+      ],
+      { dailyEntryRequired: false },
+    );
+    expect(r.canClose).toBe(false);
+    expect(r.pendingByState.PENDING_REVIEW).toBe(1);
+  });
 });
 
 describe("pendingAlert", () => {

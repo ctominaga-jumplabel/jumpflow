@@ -85,24 +85,47 @@ export interface OperationReadiness {
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
 /**
+ * Options that relax the closing gate for a specific project's operating model.
+ */
+export interface ReadinessOptions {
+  /**
+   * `Project.dailyEntryRequired`. When `false` there is NO obligation to log
+   * every day, so a consultant with NO launches at all (`NO_ENTRIES`) must NOT
+   * block the DP closing. Hours that WERE logged but are still pending/draft/
+   * rejected keep blocking regardless (they must be approved before payroll).
+   * Defaults to `true` (strict) for backward compatibility.
+   */
+  dailyEntryRequired?: boolean;
+}
+
+/**
  * Aggregate per-consultant readiness into the project's operational readiness.
- * `canClose` requires at least one consultant and all of them APPROVED.
+ * `canClose` requires at least one consultant and none in a BLOCKING state.
+ * With `dailyEntryRequired: false`, `NO_ENTRIES` stops being a blocker (there is
+ * no daily-entry obligation) — every other non-approved state still blocks.
  */
 export function summarizeReadiness(
   consultants: readonly ConsultantReadiness[],
+  options?: ReadinessOptions,
 ): OperationReadiness {
+  const dailyEntryRequired = options?.dailyEntryRequired ?? true;
   const sorted = [...consultants].sort((a, b) =>
     a.consultantName.localeCompare(b.consultantName, "pt-BR"),
   );
   let ready = 0;
+  let blocking = 0;
   let totalHours = 0;
   const pendingByState: Partial<Record<ConsultantReadinessState, number>> = {};
   for (const c of sorted) {
     totalHours += c.hours;
     if (isReadyState(c.state)) {
       ready += 1;
-    } else {
-      pendingByState[c.state] = (pendingByState[c.state] ?? 0) + 1;
+      continue;
+    }
+    pendingByState[c.state] = (pendingByState[c.state] ?? 0) + 1;
+    // "Sem lançamento" only blocks when daily entry is required.
+    if (!(c.state === "NO_ENTRIES" && !dailyEntryRequired)) {
+      blocking += 1;
     }
   }
   const total = sorted.length;
@@ -113,7 +136,7 @@ export function summarizeReadiness(
     readyConsultants: ready,
     pendingConsultants: pending,
     totalHours: round2(totalHours),
-    canClose: total > 0 && pending === 0,
+    canClose: total > 0 && blocking === 0,
     pendingByState,
   };
 }

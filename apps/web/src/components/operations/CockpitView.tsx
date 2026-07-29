@@ -51,6 +51,11 @@ const MONTH_LABELS = [
   "Dezembro",
 ];
 
+/** Horas em pt-BR, sem casas decimais supérfluas (ex.: 8 → "8", 7.5 → "7,5"). */
+function formatHours(hours: number): string {
+  return hours.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+}
+
 /** Primeiro e último dia ISO da competência (janela passada ao fecharApuracao). */
 function competenceRange(month: number, year: number): { from: string; to: string } {
   const mm = String(month).padStart(2, "0");
@@ -258,6 +263,7 @@ export function CockpitView({
               openCalendar(row.projectId, row.projectName, consultant)
             }
             onFlagResult={(tone, text) => notify(tone, text)}
+            onFlagToggled={() => router.refresh()}
           />
         ))}
       </div>
@@ -479,6 +485,8 @@ interface ProjectAccordionProps {
   onReleaseDp: () => void;
   onOpenCalendar: (consultant: CockpitConsultantRow) => void;
   onFlagResult: (tone: "success" | "warning", text: string) => void;
+  /** Chamado após uma alternância bem-sucedida da flag (para revalidar o gate DP). */
+  onFlagToggled: () => void;
 }
 
 function ProjectAccordion({
@@ -493,6 +501,7 @@ function ProjectAccordion({
   onReleaseDp,
   onOpenCalendar,
   onFlagResult,
+  onFlagToggled,
 }: ProjectAccordionProps) {
   const reduce = useReducedMotion();
   const [open, setOpen] = useState(false);
@@ -525,7 +534,8 @@ function ProjectAccordion({
               {row.projectName}
             </span>
             <span className="block truncate text-xs text-soft">
-              {row.clientName} · {row.consultants.length} consultor(es)
+              {row.clientName} · {row.consultants.length} consultor(es) ·{" "}
+              {formatHours(row.totalHoras)}h lançadas
             </span>
           </span>
         </button>
@@ -538,6 +548,7 @@ function ProjectAccordion({
             initial={row.dailyEntryRequired}
             canToggle={canToggleFlag}
             onResult={onFlagResult}
+            onToggled={onFlagToggled}
           />
         </div>
       </div>
@@ -566,6 +577,9 @@ function ProjectAccordion({
                   <tr>
                     <th className="px-3 py-2 font-semibold">Consultor</th>
                     <th className="px-3 py-2 text-right font-semibold">
+                      Horas
+                    </th>
+                    <th className="px-3 py-2 text-right font-semibold">
                       Sem lançamento
                     </th>
                     <th className="px-3 py-2 text-right font-semibold">
@@ -584,6 +598,9 @@ function ProjectAccordion({
                     >
                       <td className="px-3 py-2 font-medium text-strong">
                         {c.consultantName}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums text-medium">
+                        {formatHours(c.horasLancadas)}h
                       </td>
                       <td className="px-3 py-2 text-right">
                         <MetricPill value={c.diasSemLancamento} />
@@ -609,6 +626,15 @@ function ProjectAccordion({
                     </tr>
                   ))}
                 </tbody>
+                <tfoot>
+                  <tr className="border-t-2 border-ink bg-surface-muted/40 text-sm font-semibold text-strong">
+                    <td className="px-3 py-2">Total</td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {formatHours(row.totalHoras)}h
+                    </td>
+                    <td className="px-3 py-2" colSpan={3} aria-hidden="true" />
+                  </tr>
+                </tfoot>
               </table>
             </div>
           )}
@@ -726,11 +752,13 @@ function DailyEntryToggle({
   initial,
   canToggle,
   onResult,
+  onToggled,
 }: {
   projectId: string;
   initial: boolean;
   canToggle: boolean;
   onResult: (tone: "success" | "warning", text: string) => void;
+  onToggled: () => void;
 }) {
   const [required, setRequired] = useState(initial);
   const [isPending, startTransition] = useTransition();
@@ -756,6 +784,9 @@ function DailyEntryToggle({
           ? "Obrigatoriedade diária ligada."
           : "Obrigatoriedade diária desligada.",
       );
+      // Revalida no servidor: o gate do "Liberar DP" depende da flag (sem
+      // obrigatoriedade diária, "sem lançamento" deixa de bloquear).
+      onToggled();
     });
   }
 

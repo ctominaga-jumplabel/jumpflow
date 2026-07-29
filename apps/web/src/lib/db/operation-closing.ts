@@ -139,9 +139,12 @@ function ensureConsultant(
 /**
  * Build the readiness of a single project's month from the consultant
  * accumulator (allocated team unioned with whoever logged hours).
+ * `dailyEntryRequired` (the project's flag) relaxes the gate: when `false`, a
+ * consultant with no launches at all no longer blocks the closing.
  */
 function readinessFromAccumulator(
   consultants: Map<string, ConsultantAccumulator>,
+  dailyEntryRequired = true,
 ): OperationReadiness {
   const rows: ConsultantReadiness[] = [];
   for (const [consultantId, acc] of consultants) {
@@ -152,7 +155,7 @@ function readinessFromAccumulator(
       hours: Math.round(acc.hours * 100) / 100,
     });
   }
-  return summarizeReadiness(rows);
+  return summarizeReadiness(rows, { dailyEntryRequired });
 }
 
 /**
@@ -166,6 +169,13 @@ export async function getOperationReadiness(
 ): Promise<OperationReadiness> {
   const { start, end } = monthBounds(month, year);
   const consultants = new Map<string, ConsultantAccumulator>();
+
+  // The project's operating model: when daily entry is NOT required, a
+  // consultant who logged nothing does not block the closing.
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { dailyEntryRequired: true },
+  });
 
   // Active allocations overlapping the month define the team that MUST finish.
   const allocations = await prisma.allocation.findMany({
@@ -201,7 +211,7 @@ export async function getOperationReadiness(
     acc.hours += Number(e.hours ?? 0);
   }
 
-  return readinessFromAccumulator(consultants);
+  return readinessFromAccumulator(consultants, project?.dailyEntryRequired ?? true);
 }
 
 /**
@@ -318,7 +328,12 @@ export async function listOperationClosings(
 
   const projects = await prisma.project.findMany({
     where: { AND: constraints },
-    select: { id: true, name: true, client: { select: { name: true } } },
+    select: {
+      id: true,
+      name: true,
+      dailyEntryRequired: true,
+      client: { select: { name: true } },
+    },
     orderBy: [{ client: { name: "asc" } }, { name: "asc" }],
   });
 
@@ -337,7 +352,7 @@ export async function listOperationClosings(
   const rows: OperationClosingRow[] = projects.map((p) => {
     const closing = closingByProject.get(p.id) ?? null;
     const consultants = byProject.get(p.id) ?? new Map();
-    const readiness = readinessFromAccumulator(consultants);
+    const readiness = readinessFromAccumulator(consultants, p.dailyEntryRequired);
     let exceptionCount = 0;
     for (const acc of consultants.values()) exceptionCount += acc.exceptions;
     return {

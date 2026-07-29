@@ -114,6 +114,19 @@ export function CockpitCalendarGrid({ calendar }: { calendar: CockpitCalendar })
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2, ease: "easeOut" }}
     >
+      <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-surface-muted/40 px-3 py-2">
+        <span className="inline-flex items-center gap-1.5 text-xs font-medium text-medium">
+          <Clock aria-hidden="true" className="size-3.5 text-soft" />
+          Total lançado no mês
+        </span>
+        <span className="text-sm font-semibold tabular-nums text-strong">
+          {calendar.totalHoras.toLocaleString("pt-BR", {
+            maximumFractionDigits: 2,
+          })}
+          h
+        </span>
+      </div>
+
       <div className="grid grid-cols-7 gap-1">
         {WEEKDAY_LABELS.map((label) => (
           <div

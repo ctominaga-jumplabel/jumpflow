@@ -40,6 +40,8 @@ export interface CockpitConsultantRow {
   consultantName: string;
   diasSemLancamento: number;
   diasPendentes: number;
+  /** Total de horas lançadas no mês (qualquer status), somadas. */
+  horasLancadas: number;
 }
 
 /** Uma linha de projeto no cockpit (uma competência). */
@@ -63,6 +65,12 @@ export interface CockpitProjectRow {
   readiness: OperationReadiness;
   /** Consultores alocados (Allocation vigente) com suas métricas na competência. */
   consultants: CockpitConsultantRow[];
+  /**
+   * Total de horas lançadas no projeto na competência = soma das horas dos
+   * consultores exibidos (o time alocado vigente). Consistente com as linhas
+   * mostradas na tabela do accordion.
+   */
+  totalHoras: number;
 }
 
 /** Resultado do cockpit para UMA competência. */
@@ -71,6 +79,9 @@ export interface CockpitOverview {
   year: number;
   projects: CockpitProjectRow[];
 }
+
+/** Arredonda para 2 casas (horas), evitando ruído de ponto flutuante. */
+const round2 = (n: number): number => Math.round(n * 100) / 100;
 
 /** Limites da competência: início inclusivo, fim exclusivo e último dia (feriados). */
 function monthBounds(
@@ -164,6 +175,7 @@ export async function getCockpitOverview(input: {
           consultantId: true,
           date: true,
           status: true,
+          hours: true,
         },
       }),
       prisma.revenueClosing.findMany({
@@ -199,6 +211,8 @@ export async function getCockpitOverview(input: {
 
   // projectId → (consultantId → dias lançados). Uma entrada por TimeEntry.
   const entriesByProject = new Map<string, Map<string, CockpitEntryDay[]>>();
+  // projectId → (consultantId → soma de horas lançadas no mês).
+  const hoursByProject = new Map<string, Map<string, number>>();
   for (const e of entries) {
     let byConsultant = entriesByProject.get(e.projectId);
     if (!byConsultant) {
@@ -208,6 +222,16 @@ export async function getCockpitOverview(input: {
     const list = byConsultant.get(e.consultantId) ?? [];
     list.push({ date: toIsoDate(e.date), status: e.status });
     byConsultant.set(e.consultantId, list);
+
+    let hoursOfConsultant = hoursByProject.get(e.projectId);
+    if (!hoursOfConsultant) {
+      hoursOfConsultant = new Map();
+      hoursByProject.set(e.projectId, hoursOfConsultant);
+    }
+    hoursOfConsultant.set(
+      e.consultantId,
+      (hoursOfConsultant.get(e.consultantId) ?? 0) + Number(e.hours ?? 0),
+    );
   }
 
   const financeSet = new Set(
@@ -224,6 +248,8 @@ export async function getCockpitOverview(input: {
       const team = teamByProject.get(p.id) ?? new Map<string, AllocatedConsultant>();
       const entriesByConsultant =
         entriesByProject.get(p.id) ?? new Map<string, CockpitEntryDay[]>();
+      const hoursByConsultant =
+        hoursByProject.get(p.id) ?? new Map<string, number>();
 
       const consultants: CockpitConsultantRow[] = [...team.values()]
         .map((c) => {
@@ -237,9 +263,14 @@ export async function getCockpitOverview(input: {
             consultantName: c.consultantName,
             diasSemLancamento: metrics.diasSemLancamento,
             diasPendentes: metrics.diasPendentes,
+            horasLancadas: round2(hoursByConsultant.get(c.consultantId) ?? 0),
           };
         })
         .sort((a, b) => a.consultantName.localeCompare(b.consultantName, "pt-BR"));
+
+      const totalHoras = round2(
+        consultants.reduce((sum, c) => sum + c.horasLancadas, 0),
+      );
 
       const readiness = await getOperationReadiness(p.id, month, year);
       const financeiroLiberado = financeSet.has(p.id);
@@ -255,6 +286,7 @@ export async function getCockpitOverview(input: {
         dailyEntryRequired: p.dailyEntryRequired,
         readiness,
         consultants,
+        totalHoras,
       };
     }),
   );
@@ -303,6 +335,8 @@ export interface CockpitCalendar {
   consultantId: string;
   consultantName: string;
   days: CockpitCalendarDay[];
+  /** Total de horas lançadas no mês (soma de todos os dias). */
+  totalHoras: number;
 }
 
 /**
@@ -403,5 +437,6 @@ export async function getConsultantCalendar(input: {
     consultantId,
     consultantName: consultant.name,
     days,
+    totalHoras: round2(days.reduce((sum, d) => sum + d.hours, 0)),
   };
 }
