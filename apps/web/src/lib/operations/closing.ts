@@ -39,24 +39,54 @@ export const consultantReadinessLabels: Record<
   NO_ENTRIES: "Sem lançamento",
 };
 
-/** Only APPROVED is "done"; every other state blocks the closing. */
+/** Only APPROVED counts as "aprovado" for the readyConsultants tally. */
 export function isReadyState(state: ConsultantReadinessState): boolean {
   return state === "APPROVED";
 }
 
 /**
+ * Whether a consultant's state BLOCKS the DP closing. Distinct from
+ * {@link isReadyState}: a state can be non-blocking without being "aprovado".
+ * - DRAFT / PENDING_REVIEW always block (unfinished / awaiting approval).
+ * - REJECTED never blocks: it is terminal (must be re-launched to matter); a
+ *   re-launch shows up as a fresh DRAFT/SUBMITTED that blocks on its own.
+ * - NO_ENTRIES blocks only when the project requires daily entry.
+ * - APPROVED never blocks.
+ */
+export function isBlockingState(
+  state: ConsultantReadinessState,
+  dailyEntryRequired: boolean,
+): boolean {
+  switch (state) {
+    case "APPROVED":
+    case "REJECTED":
+      return false;
+    case "NO_ENTRIES":
+      return dailyEntryRequired;
+    case "DRAFT":
+    case "PENDING_REVIEW":
+      return true;
+  }
+}
+
+/**
  * Classify one consultant's month from the statuses of their time entries in
- * the project. Pure (no I/O). Priority matches the timesheet period derivation:
- * REJECTED > DRAFT/empty > SUBMITTED > APPROVED, so a single pending entry keeps
- * the consultant out of the "ready" set.
+ * the project. Pure (no I/O).
+ *
+ * PENDING work dominates a rejection: a REJECTED launch is terminal (it was
+ * deemed wrong and the consultant must re-launch/correct it), so it does NOT
+ * count as "pending approval" and must NOT hide an actual DRAFT/SUBMITTED that
+ * still blocks the closing. Priority: DRAFT > SUBMITTED > REJECTED > APPROVED.
+ * REJECTED therefore surfaces only when nothing is still pending — and, for the
+ * DP closing, it is treated as non-blocking (see {@link summarizeReadiness}).
  */
 export function classifyConsultantReadiness(
   entryStatuses: readonly string[],
 ): ConsultantReadinessState {
   if (entryStatuses.length === 0) return "NO_ENTRIES";
-  if (entryStatuses.includes("REJECTED")) return "REJECTED";
   if (entryStatuses.includes("DRAFT")) return "DRAFT";
   if (entryStatuses.includes("SUBMITTED")) return "PENDING_REVIEW";
+  if (entryStatuses.includes("REJECTED")) return "REJECTED";
   // Only APPROVED (and/or already CLOSED) entries remain.
   return "APPROVED";
 }
@@ -123,8 +153,7 @@ export function summarizeReadiness(
       continue;
     }
     pendingByState[c.state] = (pendingByState[c.state] ?? 0) + 1;
-    // "Sem lançamento" only blocks when daily entry is required.
-    if (!(c.state === "NO_ENTRIES" && !dailyEntryRequired)) {
+    if (isBlockingState(c.state, dailyEntryRequired)) {
       blocking += 1;
     }
   }
@@ -148,10 +177,11 @@ export function summarizeReadiness(
 export function pendingAlert(readiness: OperationReadiness): string {
   if (readiness.totalConsultants === 0) return "Sem equipe alocada no mês";
   if (readiness.canClose) return "";
+  // REJECTED never blocks (terminal — see isBlockingState), so it is not part
+  // of the "why is this blocked" summary.
   const order: ConsultantReadinessState[] = [
     "PENDING_REVIEW",
     "DRAFT",
-    "REJECTED",
     "NO_ENTRIES",
   ];
   return order

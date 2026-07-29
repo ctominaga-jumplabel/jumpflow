@@ -6,6 +6,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   AlertTriangle,
   CalendarDays,
+  CalendarRange,
   CheckCircle2,
   ChevronDown,
   Clock,
@@ -28,13 +29,20 @@ import { pendingAlert } from "@/lib/operations/closing";
 import type {
   CockpitCalendar,
   CockpitConsultantRow,
+  CockpitException,
+  CockpitProjectCalendar,
   CockpitProjectRow,
 } from "@/lib/operacao/cockpit";
 import { fecharApuracao } from "@/app/app/financeiro/actions";
 import { closeOperation } from "@/app/app/operacao/fechamento/actions";
 import { setProjectDailyEntryRequired } from "@/app/app/projetos/actions";
-import { loadConsultantCalendar } from "@/app/app/operacao/cockpit/actions";
+import {
+  loadConsultantCalendar,
+  loadProjectCalendar,
+} from "@/app/app/operacao/cockpit/actions";
+import { getTimeEntryAttachmentUrl } from "@/app/app/horas/actions";
 import { CockpitCalendarGrid } from "./CockpitCalendarGrid";
+import { CockpitProjectCalendarGrid } from "./CockpitProjectCalendarGrid";
 
 const MONTH_LABELS = [
   "Janeiro",
@@ -54,6 +62,35 @@ const MONTH_LABELS = [
 /** Horas em pt-BR, sem casas decimais supérfluas (ex.: 8 → "8", 7.5 → "7,5"). */
 function formatHours(hours: number): string {
   return hours.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+}
+
+/**
+ * Texto do hover do alerta de exceções (itens 2/3): "dd/mm: Atividade (com
+ * anexo) · …". Um "Dia Útil" só aparece aqui quando carrega anexo.
+ */
+function exceptionSummary(
+  exceptions: readonly CockpitException[],
+): string {
+  return exceptions
+    .map((e) => {
+      const [, mm, dd] = e.date.split("-");
+      const label = e.activityType !== "WORKDAY" ? e.activityLabel : "Dia Útil";
+      return `${dd}/${mm}: ${label}${e.hasAttachment ? " (com anexo)" : ""}`;
+    })
+    .join(" · ");
+}
+
+/** Abre o anexo de um lançamento numa nova aba via URL assinada (300s). */
+function openTimeEntryAttachment(entryId: string) {
+  const popup = window.open("about:blank", "_blank");
+  void getTimeEntryAttachmentUrl({ id: entryId }).then((result) => {
+    if (result.ok && result.data?.url) {
+      if (popup) popup.location.href = result.data.url;
+      else window.open(result.data.url, "_blank");
+    } else if (popup) {
+      popup.close();
+    }
+  });
 }
 
 /** Primeiro e último dia ISO da competência (janela passada ao fecharApuracao). */
@@ -117,11 +154,21 @@ export function CockpitView({
   const [obs, setObs] = useState("");
   const [obsError, setObsError] = useState<string | null>(null);
 
-  // Drawer de calendário (carregado sob demanda).
+  // Drawer de calendário do CONSULTOR (carregado sob demanda).
   const [calTarget, setCalTarget] = useState<CalendarTarget | null>(null);
   const [calData, setCalData] = useState<CockpitCalendar | null>(null);
   const [calLoading, setCalLoading] = useState(false);
   const [calError, setCalError] = useState<string | null>(null);
+
+  // Drawer de calendário do PROJETO (item 2, carregado sob demanda).
+  const [projCalTarget, setProjCalTarget] = useState<CockpitProjectRow | null>(
+    null,
+  );
+  const [projCalData, setProjCalData] = useState<CockpitProjectCalendar | null>(
+    null,
+  );
+  const [projCalLoading, setProjCalLoading] = useState(false);
+  const [projCalError, setProjCalError] = useState<string | null>(null);
 
   const finOf = (row: CockpitProjectRow) =>
     row.financeiroLiberado || releasedFinance.has(row.projectId);
@@ -235,6 +282,29 @@ export function CockpitView({
     setCalError(null);
   }
 
+  function openProjectCalendar(row: CockpitProjectRow) {
+    setProjCalTarget(row);
+    setProjCalData(null);
+    setProjCalError(null);
+    setProjCalLoading(true);
+    startTransition(async () => {
+      const result = await loadProjectCalendar({
+        projectId: row.projectId,
+        month,
+        year,
+      });
+      setProjCalLoading(false);
+      if (result.ok) setProjCalData(result.data);
+      else setProjCalError(result.message);
+    });
+  }
+
+  function dismissProjectCalendar() {
+    setProjCalTarget(null);
+    setProjCalData(null);
+    setProjCalError(null);
+  }
+
   function renderList(rows: CockpitProjectRow[], emptyLabel: string) {
     if (rows.length === 0) {
       return (
@@ -262,6 +332,7 @@ export function CockpitView({
             onOpenCalendar={(consultant) =>
               openCalendar(row.projectId, row.projectName, consultant)
             }
+            onOpenProjectCalendar={() => openProjectCalendar(row)}
             onFlagResult={(tone, text) => notify(tone, text)}
             onFlagToggled={() => router.refresh()}
           />
@@ -387,10 +458,72 @@ export function CockpitView({
             {calError}
           </p>
         ) : calData ? (
-          <CockpitCalendarGrid calendar={calData} />
+          <CockpitCalendarGrid
+            calendar={calData}
+            onOpenAttachment={openTimeEntryAttachment}
+          />
+        ) : null}
+      </Modal>
+
+      {/* Drawer de calendário do PROJETO (item 2, carregado sob demanda). */}
+      <Modal
+        open={projCalTarget != null}
+        onClose={dismissProjectCalendar}
+        title={
+          projCalTarget
+            ? `Calendário do projeto — ${projCalTarget.projectName}`
+            : "Calendário do projeto"
+        }
+        description={
+          projCalTarget
+            ? `${projCalTarget.clientName} · ${monthLabel}`
+            : undefined
+        }
+        className="max-w-2xl"
+      >
+        {projCalLoading ? (
+          <div
+            className="flex items-center justify-center gap-2 py-10 text-sm text-soft"
+            role="status"
+            aria-live="polite"
+          >
+            <Loader2 aria-hidden="true" className="size-4 animate-spin" />
+            Carregando calendário…
+          </div>
+        ) : projCalError ? (
+          <p className="py-8 text-center text-sm text-danger" role="alert">
+            {projCalError}
+          </p>
+        ) : projCalData ? (
+          <CockpitProjectCalendarGrid calendar={projCalData} />
         ) : null}
       </Modal>
     </div>
+  );
+}
+
+/**
+ * Sino de alerta de exceções (itens 2/3). Vazio = nada renderiza. Com exceções,
+ * mostra um triângulo âmbar cujo hover (title) lista as situações.
+ */
+function ExceptionAlert({
+  exceptions,
+}: {
+  exceptions: readonly CockpitException[];
+}) {
+  if (exceptions.length === 0) {
+    return <span className="text-sm text-soft">—</span>;
+  }
+  const summary = exceptionSummary(exceptions);
+  return (
+    <span
+      title={summary}
+      aria-label={`${exceptions.length} exceção(ões): ${summary}`}
+      className="inline-flex items-center gap-1 rounded-md bg-warning-soft px-2 py-0.5 text-xs font-semibold tabular-nums text-warning"
+    >
+      <AlertTriangle aria-hidden="true" className="size-3.5" />
+      {exceptions.length}
+    </span>
   );
 }
 
@@ -484,6 +617,8 @@ interface ProjectAccordionProps {
   onOpenFinance: () => void;
   onReleaseDp: () => void;
   onOpenCalendar: (consultant: CockpitConsultantRow) => void;
+  /** Abre o calendário a nível de projeto (item 2). */
+  onOpenProjectCalendar: () => void;
   onFlagResult: (tone: "success" | "warning", text: string) => void;
   /** Chamado após uma alternância bem-sucedida da flag (para revalidar o gate DP). */
   onFlagToggled: () => void;
@@ -500,6 +635,7 @@ function ProjectAccordion({
   onOpenFinance,
   onReleaseDp,
   onOpenCalendar,
+  onOpenProjectCalendar,
   onFlagResult,
   onFlagToggled,
 }: ProjectAccordionProps) {
@@ -585,6 +721,9 @@ function ProjectAccordion({
                     <th className="px-3 py-2 text-right font-semibold">
                       Pendentes
                     </th>
+                    <th className="px-3 py-2 text-center font-semibold">
+                      Alertas
+                    </th>
                     <th className="px-3 py-2 text-right font-semibold">
                       Calendário
                     </th>
@@ -607,6 +746,9 @@ function ProjectAccordion({
                       </td>
                       <td className="px-3 py-2 text-right">
                         <MetricPill value={c.diasPendentes} />
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        <ExceptionAlert exceptions={c.exceptions} />
                       </td>
                       <td className="px-3 py-2 text-right">
                         <button
@@ -632,7 +774,7 @@ function ProjectAccordion({
                     <td className="px-3 py-2 text-right tabular-nums">
                       {formatHours(row.totalHoras)}h
                     </td>
-                    <td className="px-3 py-2" colSpan={3} aria-hidden="true" />
+                    <td className="px-3 py-2" colSpan={4} aria-hidden="true" />
                   </tr>
                 </tfoot>
               </table>
@@ -646,6 +788,18 @@ function ProjectAccordion({
               {row.readiness.readyConsultants}/{row.readiness.totalConsultants}{" "}
               aprovados
             </div>
+            <button
+              type="button"
+              onClick={onOpenProjectCalendar}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1 text-xs font-semibold text-medium transition-colors hover:border-brand/40 hover:bg-surface-muted/60 hover:text-strong",
+                focusRing,
+              )}
+              title="Abrir o calendário do projeto no mês"
+            >
+              <CalendarRange aria-hidden="true" className="size-4" />
+              Calendário do projeto
+            </button>
             <div className="ml-auto flex flex-wrap items-center gap-2">
               {/* Liberar Financeiro */}
               {financeiroLiberado ? (

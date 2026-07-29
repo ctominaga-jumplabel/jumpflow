@@ -8,16 +8,18 @@ import {
   FileText,
   Minus,
   Moon,
+  Paperclip,
   XCircle,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { focusRing } from "@/lib/styles";
 import type {
   CockpitCalendar,
   CockpitCalendarDayKind,
 } from "@/lib/operacao/cockpit";
 
-const WEEKDAY_LABELS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+export const WEEKDAY_LABELS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 
 interface KindMeta {
   label: string;
@@ -31,7 +33,7 @@ interface KindMeta {
   iconClass: string;
 }
 
-const KIND_META: Record<CockpitCalendarDayKind, KindMeta> = {
+export const KIND_META: Record<CockpitCalendarDayKind, KindMeta> = {
   APPROVED: {
     label: "Aprovado",
     cell: "border-success/40 bg-success-soft text-success",
@@ -89,7 +91,14 @@ const KIND_META: Record<CockpitCalendarDayKind, KindMeta> = {
  * vazio) e os não úteis por feriado / fim de semana. Sem scroll effects — grade
  * estática, coerente com fluxos operacionais.
  */
-export function CockpitCalendarGrid({ calendar }: { calendar: CockpitCalendar }) {
+export function CockpitCalendarGrid({
+  calendar,
+  onOpenAttachment,
+}: {
+  calendar: CockpitCalendar;
+  /** Abre o anexo de um lançamento (clip) — item 4. */
+  onOpenAttachment?: (entryId: string) => void;
+}) {
   const reduce = useReducedMotion();
   const days = calendar.days;
   // Espaços em branco antes do dia 1 para alinhar na coluna do dia da semana.
@@ -151,27 +160,68 @@ export function CockpitCalendarGrid({ calendar }: { calendar: CockpitCalendar })
           return (
             <div
               key={day.date}
-              title={title}
               aria-label={title}
               className={cn(
-                "flex min-h-12 flex-col justify-between rounded-md border px-1.5 py-1 text-right",
+                "flex min-h-16 flex-col gap-0.5 rounded-md border px-1.5 py-1",
                 meta.cell,
               )}
             >
-              <span className="text-xs font-semibold tabular-nums">
-                {day.day}
-              </span>
-              <span className="flex items-center justify-between gap-0.5">
+              <div className="flex items-center justify-between gap-0.5">
+                <span
+                  className="text-xs font-semibold tabular-nums"
+                  title={title}
+                >
+                  {day.day}
+                </span>
                 <Icon
                   aria-hidden="true"
                   className={cn("size-3 shrink-0", meta.iconClass)}
                 />
-                {day.hours > 0 ? (
-                  <span className="text-[10px] font-medium tabular-nums opacity-80">
-                    {day.hours}h
-                  </span>
-                ) : null}
-              </span>
+              </div>
+              {/* Atividades do dia (item 4): rótulo + clip do anexo. */}
+              {day.activities.length > 0 ? (
+                <ul className="space-y-0.5 text-left">
+                  {day.activities.map((a) => (
+                    <li
+                      key={a.entryId}
+                      className="flex items-center gap-0.5 leading-tight"
+                    >
+                      <span
+                        className="min-w-0 flex-1 truncate text-[10px] font-medium"
+                        title={`${a.activityLabel} — ${a.hours}h`}
+                      >
+                        {a.activityLabel}
+                      </span>
+                      {a.hasAttachment ? (
+                        onOpenAttachment ? (
+                          <button
+                            type="button"
+                            onClick={() => onOpenAttachment(a.entryId)}
+                            title="Ver anexo"
+                            aria-label={`Ver anexo de ${a.activityLabel}`}
+                            className={cn(
+                              "shrink-0 rounded p-0.5 hover:bg-ink/10",
+                              focusRing,
+                            )}
+                          >
+                            <Paperclip className="size-3" />
+                          </button>
+                        ) : (
+                          <Paperclip
+                            aria-label="Com anexo"
+                            className="size-3 shrink-0"
+                          />
+                        )
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {day.hours > 0 ? (
+                <span className="mt-auto text-right text-[10px] font-medium tabular-nums opacity-80">
+                  {day.hours}h
+                </span>
+              ) : null}
             </div>
           );
         })}

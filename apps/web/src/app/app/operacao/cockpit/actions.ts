@@ -8,12 +8,20 @@ import { COCKPIT_ROLES } from "@/lib/auth/route-permissions";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import {
   getConsultantCalendar,
+  getProjectCalendar,
   type CockpitCalendar,
+  type CockpitProjectCalendar,
 } from "@/lib/operacao/cockpit";
 
 const calendarInputSchema = z.object({
   projectId: z.string().min(1),
   consultantId: z.string().min(1),
+  month: z.number().int().min(1).max(12),
+  year: z.number().int().min(2000).max(2100),
+});
+
+const projectCalendarInputSchema = z.object({
+  projectId: z.string().min(1),
   month: z.number().int().min(1).max(12),
   year: z.number().int().min(2000).max(2100),
 });
@@ -73,6 +81,61 @@ export async function loadConsultantCalendar(input: {
       ok: false,
       error: "UNEXPECTED",
       message: "Não foi possível carregar o calendário.",
+    };
+  }
+}
+
+/**
+ * Read-only calendar of a WHOLE project's month (proposta item 2): aggregate
+ * status per day + exception situations for the hover alert. Loaded on demand by
+ * the cockpit project drawer. Same server gate as the page (`COCKPIT_ROLES`).
+ */
+export async function loadProjectCalendar(input: {
+  projectId: string;
+  month: number;
+  year: number;
+}): Promise<ActionResult<CockpitProjectCalendar>> {
+  try {
+    await requireRole(COCKPIT_ROLES);
+    if (!isDatabaseConfigured()) {
+      return {
+        ok: false,
+        error: "NO_DATABASE",
+        message: "Banco de dados não configurado.",
+      };
+    }
+    const parsed = projectCalendarInputSchema.safeParse(input);
+    if (!parsed.success) {
+      return {
+        ok: false,
+        error: "INVALID_INPUT",
+        message: "Dados inválidos para o calendário.",
+      };
+    }
+    const data = await getProjectCalendar(parsed.data);
+    if (!data) {
+      return {
+        ok: false,
+        error: "NOT_FOUND",
+        message: "Projeto não encontrado.",
+      };
+    }
+    return { ok: true, data };
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "digest" in error &&
+      typeof (error as { digest?: unknown }).digest === "string" &&
+      (error as { digest: string }).digest.startsWith("NEXT_")
+    ) {
+      throw error;
+    }
+    console.error("[cockpit] project calendar action error", error);
+    return {
+      ok: false,
+      error: "UNEXPECTED",
+      message: "Não foi possível carregar o calendário do projeto.",
     };
   }
 }

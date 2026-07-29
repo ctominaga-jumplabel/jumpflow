@@ -23,7 +23,11 @@ import { getOperationReadiness } from "@/lib/db/operation-closing";
 import type { OperationReadiness } from "@/lib/operations/closing";
 import type { HolidayLookup } from "@/lib/timesheet/holidays";
 
-import { classifyConsultantReadiness } from "@/lib/operations/closing";
+import {
+  classifyConsultantReadiness,
+  isExceptionEntry,
+} from "@/lib/operations/closing";
+import { activityLabelOf } from "@/lib/timesheet/types";
 
 import {
   classifyProjectPhase,
@@ -34,6 +38,20 @@ import {
   type CockpitProjectPhase,
 } from "./cockpit-core";
 
+/**
+ * Um lançamento "de exceção" (proposta itens 2/3): atividade diferente de
+ * "Dia Útil" (WORKDAY) OU um "Dia Útil" que carrega anexo. Mesma regra do
+ * fechamento (`isExceptionEntry`), aqui moldada para o alerta do cockpit.
+ */
+export interface CockpitException {
+  /** ISO `yyyy-mm-dd` do lançamento. */
+  date: string;
+  activityType: string;
+  /** Rótulo legível da atividade (ex.: "Sobreaviso"). */
+  activityLabel: string;
+  hasAttachment: boolean;
+}
+
 /** Uma linha de consultor no accordion de um projeto. */
 export interface CockpitConsultantRow {
   consultantId: string;
@@ -42,6 +60,11 @@ export interface CockpitConsultantRow {
   diasPendentes: number;
   /** Total de horas lançadas no mês (qualquer status), somadas. */
   horasLancadas: number;
+  /**
+   * Lançamentos de exceção do consultor no mês (item 3): não-WORKDAY ou WORKDAY
+   * com anexo. Vazio = sem alerta. Ordenados por data.
+   */
+  exceptions: CockpitException[];
 }
 
 /** Uma linha de projeto no cockpit (uma competência). */
@@ -176,6 +199,8 @@ export async function getCockpitOverview(input: {
           date: true,
           status: true,
           hours: true,
+          activityType: true,
+          attachment: { select: { id: true } },
         },
       }),
       prisma.revenueClosing.findMany({
@@ -213,14 +238,17 @@ export async function getCockpitOverview(input: {
   const entriesByProject = new Map<string, Map<string, CockpitEntryDay[]>>();
   // projectId → (consultantId → soma de horas lançadas no mês).
   const hoursByProject = new Map<string, Map<string, number>>();
+  // projectId → (consultantId → lançamentos de exceção). Item 3.
+  const exceptionsByProject = new Map<string, Map<string, CockpitException[]>>();
   for (const e of entries) {
+    const iso = toIsoDate(e.date);
     let byConsultant = entriesByProject.get(e.projectId);
     if (!byConsultant) {
       byConsultant = new Map();
       entriesByProject.set(e.projectId, byConsultant);
     }
     const list = byConsultant.get(e.consultantId) ?? [];
-    list.push({ date: toIsoDate(e.date), status: e.status });
+    list.push({ date: iso, status: e.status });
     byConsultant.set(e.consultantId, list);
 
     let hoursOfConsultant = hoursByProject.get(e.projectId);
@@ -232,6 +260,23 @@ export async function getCockpitOverview(input: {
       e.consultantId,
       (hoursOfConsultant.get(e.consultantId) ?? 0) + Number(e.hours ?? 0),
     );
+
+    const hasAttachment = e.attachment != null;
+    if (isExceptionEntry({ activityType: e.activityType, hasAttachment })) {
+      let exByConsultant = exceptionsByProject.get(e.projectId);
+      if (!exByConsultant) {
+        exByConsultant = new Map();
+        exceptionsByProject.set(e.projectId, exByConsultant);
+      }
+      const exList = exByConsultant.get(e.consultantId) ?? [];
+      exList.push({
+        date: iso,
+        activityType: e.activityType,
+        activityLabel: activityLabelOf(e.activityType),
+        hasAttachment,
+      });
+      exByConsultant.set(e.consultantId, exList);
+    }
   }
 
   const financeSet = new Set(
@@ -250,6 +295,8 @@ export async function getCockpitOverview(input: {
         entriesByProject.get(p.id) ?? new Map<string, CockpitEntryDay[]>();
       const hoursByConsultant =
         hoursByProject.get(p.id) ?? new Map<string, number>();
+      const exceptionsByConsultant =
+        exceptionsByProject.get(p.id) ?? new Map<string, CockpitException[]>();
 
       const consultants: CockpitConsultantRow[] = [...team.values()]
         .map((c) => {
@@ -258,12 +305,16 @@ export async function getCockpitOverview(input: {
             holidaySet,
             entriesByConsultant.get(c.consultantId) ?? [],
           );
+          const exceptions = (exceptionsByConsultant.get(c.consultantId) ?? [])
+            .slice()
+            .sort((a, b) => a.date.localeCompare(b.date));
           return {
             consultantId: c.consultantId,
             consultantName: c.consultantName,
             diasSemLancamento: metrics.diasSemLancamento,
             diasPendentes: metrics.diasPendentes,
             horasLancadas: round2(hoursByConsultant.get(c.consultantId) ?? 0),
+            exceptions,
           };
         })
         .sort((a, b) => a.consultantName.localeCompare(b.consultantName, "pt-BR"));
@@ -313,6 +364,21 @@ export type CockpitCalendarDayKind =
   | "HOLIDAY"
   | "WEEKEND";
 
+/**
+ * Um lançamento do dia no calendário do consultor (item 4): a atividade, as
+ * horas e — quando há anexo — o id do `TimeEntry` para gerar a URL assinada de
+ * visualização (o clip). Pode haver mais de um por dia (atividades distintas).
+ */
+export interface CockpitCalendarActivity {
+  /** Id do TimeEntry (usado para abrir o anexo via signed URL). */
+  entryId: string;
+  activityType: string;
+  activityLabel: string;
+  hours: number;
+  /** Quando true, há anexo e o clip deve linkar para `entryId`. */
+  hasAttachment: boolean;
+}
+
 export interface CockpitCalendarDay {
   /** ISO `yyyy-mm-dd`. */
   date: string;
@@ -325,6 +391,8 @@ export interface CockpitCalendarDay {
   holidayName: string | null;
   /** Horas lançadas no dia (qualquer status), somadas. */
   hours: number;
+  /** Lançamentos do dia (atividade, horas, anexo). Item 4. */
+  activities: CockpitCalendarActivity[];
 }
 
 export interface CockpitCalendar {
@@ -337,6 +405,32 @@ export interface CockpitCalendar {
   days: CockpitCalendarDay[];
   /** Total de horas lançadas no mês (soma de todos os dias). */
   totalHoras: number;
+}
+
+/**
+ * Pinta o "kind" de um dia a partir dos status dos lançamentos (reusa a mesma
+ * prioridade de `classifyConsultantReadiness`); sem lançamentos cai em
+ * feriado > fim de semana > vazio. Compartilhado pelos calendários de consultor
+ * e de projeto.
+ */
+function calendarDayKind(
+  statuses: readonly string[],
+  holidayName: string | null,
+  iso: string,
+): CockpitCalendarDayKind {
+  if (statuses.length > 0) {
+    const state = classifyConsultantReadiness(statuses);
+    return state === "APPROVED"
+      ? "APPROVED"
+      : state === "PENDING_REVIEW"
+        ? "PENDING"
+        : state === "REJECTED"
+          ? "REJECTED"
+          : "DRAFT";
+  }
+  if (holidayName) return "HOLIDAY";
+  if (isWeekend(iso)) return "WEEKEND";
+  return "EMPTY";
 }
 
 /**
@@ -372,20 +466,38 @@ export async function getConsultantCalendar(input: {
         consultantId,
         date: { gte: start, lt: endExclusive },
       },
-      select: { date: true, status: true, hours: true },
+      select: {
+        id: true,
+        date: true,
+        status: true,
+        hours: true,
+        activityType: true,
+        attachment: { select: { id: true } },
+      },
     }),
   ]);
   if (!project || !consultant) return null;
 
   const holidaySet = applicableHolidaySet(lookup, projectId);
 
-  // ISO date → { statuses[], hours } (pode haver mais de um TimeEntry no dia).
-  const byDay = new Map<string, { statuses: string[]; hours: number }>();
+  // ISO date → { statuses[], hours, activities[] } (pode haver mais de um
+  // TimeEntry no dia, com atividades distintas).
+  const byDay = new Map<
+    string,
+    { statuses: string[]; hours: number; activities: CockpitCalendarActivity[] }
+  >();
   for (const e of entries) {
     const iso = toIsoDate(e.date);
-    const bucket = byDay.get(iso) ?? { statuses: [], hours: 0 };
+    const bucket = byDay.get(iso) ?? { statuses: [], hours: 0, activities: [] };
     bucket.statuses.push(e.status);
     bucket.hours += Number(e.hours);
+    bucket.activities.push({
+      entryId: e.id,
+      activityType: e.activityType,
+      activityLabel: activityLabelOf(e.activityType),
+      hours: round2(Number(e.hours ?? 0)),
+      hasAttachment: e.attachment != null,
+    });
     byDay.set(iso, bucket);
   }
 
@@ -400,32 +512,14 @@ export async function getConsultantCalendar(input: {
       : null;
     const bucket = byDay.get(iso);
 
-    let kind: CockpitCalendarDayKind;
-    if (bucket && bucket.statuses.length > 0) {
-      const state = classifyConsultantReadiness(bucket.statuses);
-      kind =
-        state === "APPROVED"
-          ? "APPROVED"
-          : state === "PENDING_REVIEW"
-            ? "PENDING"
-            : state === "REJECTED"
-              ? "REJECTED"
-              : "DRAFT";
-    } else if (holidayName) {
-      kind = "HOLIDAY";
-    } else if (isWeekend(iso)) {
-      kind = "WEEKEND";
-    } else {
-      kind = "EMPTY";
-    }
-
     days.push({
       date: iso,
       day: d,
       weekday,
-      kind,
+      kind: calendarDayKind(bucket?.statuses ?? [], holidayName, iso),
       holidayName,
-      hours: bucket ? Math.round(bucket.hours * 100) / 100 : 0,
+      hours: bucket ? round2(bucket.hours) : 0,
+      activities: bucket?.activities ?? [],
     });
   }
 
@@ -438,5 +532,138 @@ export async function getConsultantCalendar(input: {
     consultantName: consultant.name,
     days,
     totalHoras: round2(days.reduce((sum, d) => sum + d.hours, 0)),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Calendário por PROJETO + competência (proposta item 2).
+// ---------------------------------------------------------------------------
+
+/** Uma situação de exceção num dia do calendário de projeto (para o hover). */
+export interface CockpitProjectCalendarException {
+  consultantName: string;
+  activityType: string;
+  activityLabel: string;
+  hasAttachment: boolean;
+}
+
+export interface CockpitProjectCalendarDay {
+  /** ISO `yyyy-mm-dd`. */
+  date: string;
+  day: number;
+  weekday: number;
+  /** Status agregado do dia (pior status entre todos os consultores). */
+  kind: CockpitCalendarDayKind;
+  holidayName: string | null;
+  /** Total de horas lançadas no dia (todos os consultores). */
+  hours: number;
+  /**
+   * Lançamentos de exceção no dia (item 2): qualquer consultor com atividade
+   * não-WORKDAY ou WORKDAY com anexo. Vazio = sem alerta. Alimenta o hover.
+   */
+  exceptions: CockpitProjectCalendarException[];
+}
+
+export interface CockpitProjectCalendar {
+  month: number;
+  year: number;
+  projectId: string;
+  projectName: string;
+  clientName: string;
+  days: CockpitProjectCalendarDay[];
+  totalHoras: number;
+}
+
+/**
+ * Grade do mês de UM projeto agregando TODOS os consultores (drawer do item 2).
+ * Cada dia mostra o status agregado (pior status), o total de horas e a lista de
+ * lançamentos de exceção (não-WORKDAY ou WORKDAY com anexo) para o alerta/hover.
+ * Reusa `calendarDayKind` (status), o lookup de feriados e `isExceptionEntry`.
+ * Retorna `null` se o projeto não existir.
+ */
+export async function getProjectCalendar(input: {
+  projectId: string;
+  month: number;
+  year: number;
+}): Promise<CockpitProjectCalendar | null> {
+  const { projectId, month, year } = input;
+  const { start, endExclusive, lastDay } = monthBounds(month, year);
+
+  const [project, lookup, entries] = await Promise.all([
+    prisma.project.findUnique({
+      where: { id: projectId },
+      select: { name: true, client: { select: { name: true } } },
+    }),
+    getHolidayLookup(start, lastDay),
+    prisma.timeEntry.findMany({
+      where: { projectId, date: { gte: start, lt: endExclusive } },
+      select: {
+        date: true,
+        status: true,
+        hours: true,
+        activityType: true,
+        attachment: { select: { id: true } },
+        consultant: { select: { name: true } },
+      },
+    }),
+  ]);
+  if (!project) return null;
+
+  const holidaySet = applicableHolidaySet(lookup, projectId);
+
+  const byDay = new Map<
+    string,
+    {
+      statuses: string[];
+      hours: number;
+      exceptions: CockpitProjectCalendarException[];
+    }
+  >();
+  for (const e of entries) {
+    const iso = toIsoDate(e.date);
+    const bucket = byDay.get(iso) ?? { statuses: [], hours: 0, exceptions: [] };
+    bucket.statuses.push(e.status);
+    bucket.hours += Number(e.hours ?? 0);
+    const hasAttachment = e.attachment != null;
+    if (isExceptionEntry({ activityType: e.activityType, hasAttachment })) {
+      bucket.exceptions.push({
+        consultantName: e.consultant?.name ?? "Consultor",
+        activityType: e.activityType,
+        activityLabel: activityLabelOf(e.activityType),
+        hasAttachment,
+      });
+    }
+    byDay.set(iso, bucket);
+  }
+
+  const mm = String(month).padStart(2, "0");
+  const lastDayNum = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const days: CockpitProjectCalendarDay[] = [];
+  for (let d = 1; d <= lastDayNum; d += 1) {
+    const iso = `${year}-${mm}-${String(d).padStart(2, "0")}`;
+    const weekday = new Date(`${iso}T00:00:00.000Z`).getUTCDay();
+    const holidayName = holidaySet.has(iso)
+      ? (lookup.byProject[projectId]?.[iso] ?? lookup.global[iso] ?? null)
+      : null;
+    const bucket = byDay.get(iso);
+    days.push({
+      date: iso,
+      day: d,
+      weekday,
+      kind: calendarDayKind(bucket?.statuses ?? [], holidayName, iso),
+      holidayName,
+      hours: bucket ? round2(bucket.hours) : 0,
+      exceptions: bucket?.exceptions ?? [],
+    });
+  }
+
+  return {
+    month,
+    year,
+    projectId,
+    projectName: project.name,
+    clientName: project.client?.name ?? "—",
+    days,
+    totalHoras: round2(days.reduce((sum, day) => sum + day.hours, 0)),
   };
 }

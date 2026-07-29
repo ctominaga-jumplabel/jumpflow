@@ -37,10 +37,18 @@ describe("classifyConsultantReadiness", () => {
     expect(classifyConsultantReadiness([])).toBe("NO_ENTRIES");
   });
 
-  it("prioritizes REJECTED over everything else", () => {
+  it("lets pending work dominate a rejection (DRAFT/SUBMITTED win over REJECTED)", () => {
+    // A still-pending launch must not be hidden by a terminal rejection.
     expect(
       classifyConsultantReadiness(["APPROVED", "SUBMITTED", "REJECTED"]),
-    ).toBe("REJECTED");
+    ).toBe("PENDING_REVIEW");
+    expect(classifyConsultantReadiness(["DRAFT", "REJECTED"])).toBe("DRAFT");
+  });
+
+  it("surfaces REJECTED only when nothing is still pending", () => {
+    expect(classifyConsultantReadiness(["APPROVED", "REJECTED"])).toBe(
+      "REJECTED",
+    );
   });
 
   it("flags DRAFT before SUBMITTED", () => {
@@ -133,6 +141,26 @@ describe("summarizeReadiness", () => {
     // Still reported for visibility, just no longer a blocker.
     expect(r.pendingByState.NO_ENTRIES).toBe(1);
     expect(r.readyConsultants).toBe(1);
+  });
+
+  it("does NOT block on REJECTED (terminal — must be re-launched to matter)", () => {
+    const r = summarizeReadiness([
+      consultant({ consultantId: "a", state: "APPROVED", hours: 8 }),
+      consultant({ consultantId: "b", state: "REJECTED", hours: 4 }),
+    ]);
+    expect(r.canClose).toBe(true);
+    // Reported for visibility, but not counted as "aprovado" nor a blocker.
+    expect(r.pendingByState.REJECTED).toBe(1);
+    expect(r.readyConsultants).toBe(1);
+  });
+
+  it("omits REJECTED from the blocked-reason summary", () => {
+    const r = summarizeReadiness([
+      consultant({ consultantId: "a", state: "PENDING_REVIEW" }),
+      consultant({ consultantId: "b", state: "REJECTED" }),
+    ]);
+    expect(r.canClose).toBe(false);
+    expect(pendingAlert(r)).toBe("1 aguardando aprovação");
   });
 
   it("still blocks on logged-but-unapproved hours even when daily entry is off", () => {
