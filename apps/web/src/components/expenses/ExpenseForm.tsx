@@ -64,12 +64,18 @@ export const emptyMileage: MileageValue = {
 
 /** Milhagem incompleta = falta origem, destino ou distância válida. */
 export function mileageIncomplete(v: MileageValue): boolean {
-  return (
+  if (
     v.originAddress.trim().length < 3 ||
-    v.destinationAddress.trim().length < 3 ||
-    v.distanceKm === null ||
-    v.distanceKm <= 0
-  );
+    v.destinationAddress.trim().length < 3
+  ) {
+    return true;
+  }
+  // Ida e volta em modo manual: exige as DUAS pernas (ida e volta) preenchidas,
+  // pois os trechos podem divergir e o total é a soma.
+  if (v.roundTrip && v.manual) {
+    return !((v.distanceOutboundKm ?? 0) > 0 && (v.distanceReturnKm ?? 0) > 0);
+  }
+  return v.distanceKm === null || v.distanceKm <= 0;
 }
 
 /** Tipos nativos como opções — fallback quando o registro não é fornecido. */
@@ -115,13 +121,15 @@ export interface ExpenseBatchItem extends MileageSubmitFields {
 
 /** Constrói os campos de milhagem para submit a partir do MileageValue. */
 function toMileageSubmit(m: MileageValue): MileageSubmitFields {
+  // Só envia trechos > 0 (o Zod exige >0; um trecho vazio vira undefined).
+  const pos = (n: number | null) => (n && n > 0 ? n : undefined);
   return {
     originAddress: m.originAddress.trim(),
     destinationAddress: m.destinationAddress.trim(),
     roundTrip: m.roundTrip,
-    distanceKm: m.distanceKm ?? undefined,
-    distanceOutboundKm: m.distanceOutboundKm ?? undefined,
-    distanceReturnKm: m.distanceReturnKm ?? undefined,
+    distanceKm: pos(m.distanceKm),
+    distanceOutboundKm: pos(m.distanceOutboundKm),
+    distanceReturnKm: pos(m.distanceReturnKm),
   };
 }
 
@@ -235,29 +243,46 @@ function MileageFields({
       manual: false,
       distanceKm: result.totalKm,
       distanceOutboundKm: result.outboundKm,
-      distanceReturnKm: result.returnKm,
+      // Só-ida devolve returnKm=0; guarda null para não enviar 0 ao Zod (>0).
+      distanceReturnKm:
+        result.returnKm && result.returnKm > 0 ? result.returnKm : null,
     });
   }
 
   function handleToggleRoundTrip(next: boolean) {
-    // Recalcula ao alternar ida/volta (a volta é chamada à parte no servidor);
-    // no modo manual apenas alterna o flag.
+    // Auto: recalcula ao alternar (a volta é chamada à parte no servidor).
     if (!value.manual && canCalc && value.distanceKm !== null) {
       runCalculate(next);
-    } else {
-      onChange({ ...value, roundTrip: next });
+      return;
     }
-  }
-
-  function handleManualKm(raw: string) {
-    const num = Number(raw.replace(",", "."));
+    // Manual (ou ainda sem cálculo): recompõe o total pelos trechos digitados.
+    const out = value.distanceOutboundKm ?? 0;
+    const ret = next ? (value.distanceReturnKm ?? 0) : 0;
+    const total = round2(out + ret);
     onChange({
       ...value,
-      manual: true,
-      distanceKm: raw.trim() === "" || Number.isNaN(num) ? null : round2(num),
-      distanceOutboundKm: null,
-      distanceReturnKm: null,
+      roundTrip: next,
+      distanceReturnKm: next ? value.distanceReturnKm : null,
+      distanceKm: total > 0 ? total : null,
     });
+  }
+
+  function parseKm(raw: string): number | null {
+    const num = Number(raw.replace(",", "."));
+    return raw.trim() === "" || Number.isNaN(num) ? null : round2(num);
+  }
+
+  /** Edita um trecho (ida/volta) no modo manual e recomputa o total. */
+  function handleLeg(
+    field: "distanceOutboundKm" | "distanceReturnKm",
+    raw: string,
+  ) {
+    const next: MileageValue = { ...value, manual: true, [field]: parseKm(raw) };
+    const out = next.distanceOutboundKm ?? 0;
+    const ret = next.roundTrip ? (next.distanceReturnKm ?? 0) : 0;
+    const total = round2(out + ret);
+    next.distanceKm = total > 0 ? total : null;
+    onChange(next);
   }
 
   const total =
@@ -333,37 +358,99 @@ function MileageFields({
         </ActionButton>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-3">
-        <div>
-          <label htmlFor={`${idPrefix}-km`} className={labelClass}>
-            Quilometragem (km)
-          </label>
-          {value.manual ? (
+      {/* Distância: manual (1 campo só-ida, ou Ida/Volta) ou leitura (auto). */}
+      {value.manual ? (
+        value.roundTrip ? (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label htmlFor={`${idPrefix}-km-out`} className={labelClass}>
+                Ida (km)
+              </label>
+              <input
+                id={`${idPrefix}-km-out`}
+                type="text"
+                inputMode="decimal"
+                value={
+                  value.distanceOutboundKm === null
+                    ? ""
+                    : String(value.distanceOutboundKm)
+                }
+                onChange={(e) =>
+                  handleLeg("distanceOutboundKm", e.target.value)
+                }
+                placeholder="0,00"
+                aria-invalid={missing}
+                className={inputClass(missing)}
+              />
+            </div>
+            <div>
+              <label htmlFor={`${idPrefix}-km-ret`} className={labelClass}>
+                Volta (km)
+              </label>
+              <input
+                id={`${idPrefix}-km-ret`}
+                type="text"
+                inputMode="decimal"
+                value={
+                  value.distanceReturnKm === null
+                    ? ""
+                    : String(value.distanceReturnKm)
+                }
+                onChange={(e) => handleLeg("distanceReturnKm", e.target.value)}
+                placeholder="0,00"
+                aria-invalid={missing}
+                className={inputClass(missing)}
+              />
+            </div>
+          </div>
+        ) : (
+          <div>
+            <label htmlFor={`${idPrefix}-km`} className={labelClass}>
+              Quilometragem (km)
+            </label>
             <input
               id={`${idPrefix}-km`}
               type="text"
               inputMode="decimal"
-              value={value.distanceKm === null ? "" : String(value.distanceKm)}
-              onChange={(e) => handleManualKm(e.target.value)}
+              value={
+                value.distanceOutboundKm === null
+                  ? ""
+                  : String(value.distanceOutboundKm)
+              }
+              onChange={(e) => handleLeg("distanceOutboundKm", e.target.value)}
               placeholder="0,00"
               aria-invalid={missing}
               className={inputClass(missing)}
             />
-          ) : (
-            <p
-              className={cn(
-                "rounded-md border px-3 py-2 text-sm tabular-nums",
-                missing
-                  ? "border-danger text-danger"
-                  : "border-border bg-surface-muted/50 text-medium",
-              )}
-            >
-              {value.distanceKm === null
-                ? "—"
-                : `${value.distanceKm.toLocaleString("pt-BR")} km`}
+          </div>
+        )
+      ) : (
+        <div>
+          <span className={labelClass}>Quilometragem (km)</span>
+          <p
+            className={cn(
+              "rounded-md border px-3 py-2 text-sm tabular-nums",
+              missing
+                ? "border-danger text-danger"
+                : "border-border bg-surface-muted/50 text-medium",
+            )}
+          >
+            {value.distanceKm === null
+              ? "—"
+              : `${value.distanceKm.toLocaleString("pt-BR")} km`}
+          </p>
+          {value.distanceOutboundKm !== null ? (
+            <p className="mt-1 text-xs text-soft">
+              Ida: {value.distanceOutboundKm.toLocaleString("pt-BR")} km
+              {value.roundTrip && value.distanceReturnKm !== null
+                ? ` · Volta: ${value.distanceReturnKm.toLocaleString("pt-BR")} km`
+                : ""}
             </p>
-          )}
+          ) : null}
         </div>
+      )}
+
+      <div className="grid gap-3 sm:grid-cols-2">
         <div>
           <span className={labelClass}>Valor por km</span>
           <p className="rounded-md border border-border bg-surface-muted/50 px-3 py-2 text-sm tabular-nums text-medium">
@@ -371,21 +458,17 @@ function MileageFields({
           </p>
         </div>
         <div>
-          <span className={labelClass}>Valor total</span>
+          <span className={labelClass}>
+            Valor total
+            {value.roundTrip && value.distanceKm !== null
+              ? ` · ${value.distanceKm.toLocaleString("pt-BR")} km`
+              : ""}
+          </span>
           <p className="rounded-md border border-border bg-surface-muted/50 px-3 py-2 text-sm font-semibold tabular-nums text-strong">
             {total === null ? "—" : formatCurrencyPrecise(total)}
           </p>
         </div>
       </div>
-
-      {value.distanceOutboundKm !== null && !value.manual ? (
-        <p className="text-xs text-soft">
-          Ida: {value.distanceOutboundKm.toLocaleString("pt-BR")} km
-          {value.roundTrip && value.distanceReturnKm !== null
-            ? ` · Volta: ${value.distanceReturnKm.toLocaleString("pt-BR")} km`
-            : ""}
-        </p>
-      ) : null}
 
       {ratePerKm === null ? (
         <p className="text-xs font-medium text-warning">
