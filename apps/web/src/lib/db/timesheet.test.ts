@@ -958,12 +958,14 @@ describe("listAllowedProjects", () => {
         name: "Atlas",
         clientId: "cli-vix",
         clientName: "Vix Energia",
+        standardHoursPerDay: null,
       },
       {
         id: "proj-orion",
         name: "Órion",
         clientId: "cli-banco",
         clientName: "Banco Sul",
+        standardHoursPerDay: null,
       },
     ]);
   });

@@ -7,6 +7,7 @@ import {
   Paperclip,
   Save,
   Trash2,
+  TriangleAlert,
   X,
 } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
@@ -85,6 +86,12 @@ export interface TimeEntryFormProject {
   name: string;
   clientId: string;
   clientName: string;
+  /**
+   * Horas padrão/dia do projeto (hora extra). `null`/ausente = sem padrão →
+   * nada é considerado extra. Acima disso, o excedente é hora extra e exige
+   * anexo de aprovação do gestor.
+   */
+  standardHoursPerDay?: number | null;
 }
 
 /**
@@ -282,6 +289,30 @@ export function TimeEntryForm({
     value.multiplier > 0 ? value.multiplier : 0,
   );
 
+  // Hora extra: excedente do total do dia sobre o padrão de horas/dia do projeto
+  // (Project.standardHoursPerDay). Só WORKDAY em modo diário/edição — o anexo é
+  // 1:1 com um lançamento. Acima do padrão, o excedente é hora extra e EXIGE
+  // anexo de aprovação do gestor antes de salvar (o servidor persiste overtimeHours).
+  const selectedProject = projects.find((p) => p.id === value.projectId);
+  const standardHoursPerDay = selectedProject?.standardHoursPerDay ?? null;
+  const dayHours = clockHours(value.clock) ?? 0;
+  const overtimeHours =
+    value.activity === "WORKDAY" &&
+    value.mode === "daily" &&
+    standardHoursPerDay != null &&
+    standardHoursPerDay > 0 &&
+    dayHours > standardHoursPerDay
+      ? Math.round((dayHours - standardHoursPerDay) * 100) / 100
+      : 0;
+  const hasOvertime = overtimeHours > 0;
+  const hasAttachment =
+    Boolean(attachFile) || (Boolean(initialAttachment) && !removeAttachment);
+  // Bloqueio: hora extra exige anexo. Só é exigível com storage configurado
+  // (attachmentsAvailable); sem storage o campo nem aparece → degrade (indica,
+  // não bloqueia). O servidor persiste overtimeHours de qualquer forma.
+  const overtimeAttachmentMissing =
+    hasOvertime && attachmentsAvailable && !hasAttachment;
+
   // Feriado do dia selecionado, PROJECT-AWARE (global OU vinculado ao projeto
   // escolhido). Derivado de props/estado — sem efeito, sem setState. Usado no
   // aviso passivo e como base do gatilho no modo diário.
@@ -378,6 +409,15 @@ export function TimeEntryForm({
     // Mostra o erro inline e impede o submit.
     if (hasTimeOffBlock) {
       setShowErrors(true);
+      return;
+    }
+    // Hora extra sem anexo: o excedente sobre o padrão do projeto exige anexo de
+    // aprovação do gestor. Bloqueia e aponta o campo de anexo.
+    if (overtimeAttachmentMissing) {
+      setShowErrors(true);
+      setAttachError(
+        `Há ${overtimeHours} h de hora extra (acima de ${standardHoursPerDay} h/dia do projeto). Anexe o comprovante de aprovação do gestor para salvar.`,
+      );
       return;
     }
     // "Dia Útil" em feriado: pede confirmação antes de salvar (não bloqueia —
@@ -785,14 +825,35 @@ export function TimeEntryForm({
             entram como faturáveis por padrão (ON_CALL como não faturável por
             regra de negócio); a gestão decide depois na aprovação. */}
 
+        {/* Hora extra: indica o excedente sobre o padrão do projeto e que o
+            anexo de aprovação do gestor é obrigatório para salvar. */}
+        {hasOvertime ? (
+          <div className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm font-medium text-warning">
+            <TriangleAlert
+              aria-hidden="true"
+              className="mt-0.5 size-4 shrink-0"
+            />
+            <span>
+              {overtimeHours} h de hora extra (acima de {standardHoursPerDay} h/dia
+              do projeto).{" "}
+              {attachmentsAvailable
+                ? "Anexe o comprovante de aprovação do gestor para salvar."
+                : "Anexo de aprovação indisponível neste ambiente."}
+            </span>
+          </div>
+        ) : null}
+
         {/* Anexo opcional (melhoria #2): exceção disponível em qualquer
-            lançamento diário. Enviado após salvar, com o id retornado. */}
+            lançamento diário. Enviado após salvar, com o id retornado. Hora
+            extra torna o anexo OBRIGATÓRIO (bloqueio no submit). */}
         {attachmentFieldVisible ? (
           <div>
             <span className="mb-1 block text-xs font-semibold text-medium">
               Anexo{" "}
               <span className="font-normal text-soft">
-                (opcional · PDF, JPG, PNG ou WEBP, até 10 MB)
+                {hasOvertime
+                  ? "(obrigatório p/ hora extra · PDF, JPG, PNG ou WEBP, até 10 MB)"
+                  : "(opcional · PDF, JPG, PNG ou WEBP, até 10 MB)"}
               </span>
             </span>
             {attachFile ? (
