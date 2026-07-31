@@ -10,13 +10,17 @@ import {
   canSeeNavItem,
   canSeeNavItemByMatrix,
   findActiveNav,
+  hasFinanceGroupedNav,
+  isFinanceGroupedHref,
   primaryNavigation,
+  visibleFinanceGroups,
 } from "@/lib/navigation";
 import type { RoleName } from "@/lib/auth/roles";
 import { cn } from "@/lib/utils";
 import { focusRing } from "@/lib/styles";
 import { BrandMark } from "@/components/brand/BrandMark";
 import { NavItem } from "./NavItem";
+import { NavGroup } from "./NavGroup";
 
 export interface SidebarProps {
   /** Called after navigating (closes the mobile drawer). */
@@ -67,9 +71,16 @@ export function Sidebar({
     item.permissionCode
       ? canSeeNavItemByMatrix(item, viewable)
       : canSeeNavItem(item, roles);
+  // Menu do Financeiro agrupado (dropdowns) só para FINANCE/ADMIN. Quando ativo,
+  // os itens financeiros saem da lista plana (viram filhos dos grupos) e os dois
+  // grupos são renderizados logo após o menu primário.
+  const grouped = hasFinanceGroupedNav(roles);
+  const financeGroups = grouped ? visibleFinanceGroups(roles, viewable) : [];
   // Apply the persisted order first, then role/matrix visibility (order is a
   // full-catalog concept; filtering after keeps the relative order intact).
-  const primaryItems = applyNavOrder(primaryNavigation, navOrder).filter(canSee);
+  const primaryItems = applyNavOrder(primaryNavigation, navOrder)
+    .filter(canSee)
+    .filter((item) => !grouped || !isFinanceGroupedHref(item.href));
   const adminItems = adminNavigation.filter(canSee);
 
   return (
@@ -140,6 +151,16 @@ export function Sidebar({
             key={item.href}
             item={item}
             active={item.href === activeHref}
+            onNavigate={onNavigate}
+            collapsed={collapsed}
+          />
+        ))}
+
+        {financeGroups.map((group) => (
+          <NavGroup
+            key={group.label}
+            group={group}
+            activeHref={activeHref}
             onNavigate={onNavigate}
             collapsed={collapsed}
           />

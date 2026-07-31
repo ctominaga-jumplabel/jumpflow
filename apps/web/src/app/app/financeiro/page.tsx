@@ -58,7 +58,12 @@ function resolvePendingCompetence(
   return { month, year };
 }
 
-/** Serializa os filtros correntes preservando `projectIds` como params repetidos. */
+/**
+ * Serializa os filtros correntes preservando `projectIds` como params repetidos.
+ * NÃO propaga `consultantId`/`billable`: eles segmentam a LISTA por dia (Contas a
+ * Receber); a Apuração é o recorte completo faturável do projeto (colaborador /
+ * "Faturar Não" distorceriam os totais). Ver `getReceivablesApuracao`.
+ */
 function buildQuery(
   filter: ReceivablesFilter,
   extra: Record<string, string> = {},
@@ -99,6 +104,8 @@ export default async function FinanceiroPage({
     to: params.to,
     clientId: params.clientId,
     projectIds: params.projectIds,
+    consultantId: params.consultantId,
+    billable: params.billable,
   });
   const filter: ReceivablesFilter = withDefaultPeriod(
     parsedFilter.success ? parsedFilter.data : { projectIds: [] },
@@ -183,6 +190,9 @@ export default async function FinanceiroPage({
           to: filter.to,
           clientId: filter.clientId,
           projectIds: filter.projectIds,
+          consultantId: filter.consultantId,
+          billable:
+            filter.billable === undefined ? undefined : String(filter.billable),
         }}
         canEditBillable={canEditBillable}
         timesheetExportHref={timesheetExportHref}
@@ -194,6 +204,7 @@ export default async function FinanceiroPage({
         pagarExportHref={databaseConfigured ? "/api/financeiro/pagar/export" : undefined}
         pendingClosings={pendingClosings}
         canClosePending={canClosePending}
+        canRevertPending={hasRole(user, ["ADMIN", "FINANCE"])}
       />
     </div>
   );

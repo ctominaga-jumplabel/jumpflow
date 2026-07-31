@@ -32,6 +32,7 @@ function entry(overrides: Partial<ReceivablesEntry> = {}): ReceivablesEntry {
     date: "2026-07-01",
     consultantId: "c1",
     consultantName: "Ana",
+    contractType: null,
     projectId: "p1",
     projectName: "Atlas",
     clientName: "Vix",
@@ -276,6 +277,16 @@ describe("classifyPendingStatus", () => {
   it("no entries and not closed → SEM_LANCAMENTO", () => {
     expect(classifyPendingStatus(false, false)).toBe("SEM_LANCAMENTO");
   });
+  it("INVOICED (invoiced=true) → FATURADO, with the highest precedence", () => {
+    // Faturado vence Liberado e a existência de lançamentos.
+    expect(classifyPendingStatus(true, true, true)).toBe("FATURADO");
+    expect(classifyPendingStatus(false, true, true)).toBe("FATURADO");
+    expect(classifyPendingStatus(true, false, true)).toBe("FATURADO");
+  });
+  it("defaults invoiced to false (backward compatible)", () => {
+    expect(classifyPendingStatus(true, true)).toBe("LIBERADO");
+    expect(classifyPendingStatus(true, false)).toBe("PENDENTE");
+  });
 });
 
 describe("countPendingRows", () => {
@@ -342,5 +353,32 @@ describe("receivablesFilterSchema", () => {
       clientId: "cli1",
       projectIds: ["p1", "p2"],
     });
+  });
+
+  it("parses the 'Faturar (Sim/Não)' filter into boolean | undefined", () => {
+    expect(receivablesFilterSchema.parse({ billable: "true" }).billable).toBe(
+      true,
+    );
+    expect(receivablesFilterSchema.parse({ billable: "false" }).billable).toBe(
+      false,
+    );
+    // Vazio / omitido / ALL → undefined (todos).
+    expect(receivablesFilterSchema.parse({ billable: "" }).billable).toBeUndefined();
+    expect(receivablesFilterSchema.parse({}).billable).toBeUndefined();
+    expect(
+      receivablesFilterSchema.parse({ billable: "ALL" }).billable,
+    ).toBeUndefined();
+  });
+
+  it("parses the collaborator filter (consultantId), dropping blanks and ALL", () => {
+    expect(
+      receivablesFilterSchema.parse({ consultantId: "c1" }).consultantId,
+    ).toBe("c1");
+    expect(
+      receivablesFilterSchema.parse({ consultantId: "" }).consultantId,
+    ).toBeUndefined();
+    expect(
+      receivablesFilterSchema.parse({ consultantId: "ALL" }).consultantId,
+    ).toBeUndefined();
   });
 });

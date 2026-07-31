@@ -12,6 +12,7 @@ import { FeedbackBanner, useFeedback } from "@/components/ui/Feedback";
 import { focusRing, focusRingInput } from "@/lib/styles";
 import { formatDate } from "@/lib/format";
 import type { ReceivablesDayGroup, ReceivablesEntry } from "@/lib/financial/receivables-journey-core";
+import { contractTypeLabels } from "@/lib/consultants/labels";
 import {
   getTimeEntryAttachmentUrl,
   setEntryBillable,
@@ -166,14 +167,15 @@ export function ReceivablesDayGroups({
         <CollapsibleGroup
           key={day.date}
           defaultOpen
+          tone="soft"
           title={`Dia ${formatDate(day.date)}`}
           hint={`Total de horas do dia: ${toHHMM(day.totalHours)}`}
-          className="shadow-[4px_4px_0_0_var(--color-ink)]"
         >
           <div className="-mx-4 -my-4 overflow-x-auto">
-            <table className="w-full min-w-[720px] text-sm">
+            <table className="w-full min-w-[760px] text-sm">
               <thead>
                 <tr className="border-b border-border text-left text-xs font-semibold text-medium">
+                  <th className="px-4 py-2">Contratação</th>
                   <th className="px-4 py-2">Alocado</th>
                   <th className="px-4 py-2">Projeto</th>
                   <th className="px-4 py-2">Tipo de Atividade</th>
@@ -194,8 +196,17 @@ export function ReceivablesDayGroups({
                       className="border-b border-border/60 last:border-0"
                     >
                       <td className="px-4 py-2.5">
+                        {entry.contractType ? (
+                          <span className="inline-flex items-center rounded-full bg-surface-muted px-2.5 py-0.5 text-xs font-medium text-medium">
+                            {contractTypeLabels[entry.contractType]}
+                          </span>
+                        ) : (
+                          <span className="text-soft">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5">
                         <span className="flex items-center gap-2">
-                          <span className="grid size-8 shrink-0 place-items-center rounded-full border-2 border-ink bg-brand-soft text-xs font-semibold text-brand-dark">
+                          <span className="grid size-8 shrink-0 place-items-center rounded-full bg-brand-soft/70 text-xs font-semibold text-brand-dark">
                             {initialsOf(entry.consultantName)}
                           </span>
                           <span className="truncate font-medium text-strong">

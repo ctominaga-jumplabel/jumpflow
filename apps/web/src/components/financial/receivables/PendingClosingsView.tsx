@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, ListChecks, Unlock } from "lucide-react";
+import { CheckCircle2, ListChecks, Receipt, RotateCcw, Unlock } from "lucide-react";
 
 import { ActionButton } from "@/components/ui/ActionButton";
 import { Modal } from "@/components/ui/Modal";
@@ -11,7 +11,10 @@ import { StatusBadge, type StatusTone } from "@/components/ui/StatusBadge";
 import { FeedbackBanner, useFeedback } from "@/components/ui/Feedback";
 import { focusRing, focusRingInput } from "@/lib/styles";
 import { cn } from "@/lib/utils";
-import { fecharApuracao } from "@/app/app/financeiro/actions";
+import {
+  fecharApuracao,
+  retornarFaturamento,
+} from "@/app/app/financeiro/actions";
 import type {
   CompetenceCloseResult,
   PendingClosingRow,
@@ -45,10 +48,22 @@ const STATUS_META: Record<
   PendingClosingStatus,
   { label: string; tone: StatusTone }
 > = {
+  FATURADO: { label: "Faturado", tone: "info" },
   LIBERADO: { label: "Liberado", tone: "success" },
   PENDENTE: { label: "Pendente", tone: "warning" },
   SEM_LANCAMENTO: { label: "Sem lançamento", tone: "neutral" },
 };
+
+/** Opções do filtro de status. `ABERTOS` = Pendente + Liberado (default). */
+type StatusFilter = "ABERTOS" | "PENDENTE" | "LIBERADO" | "FATURADO" | "TODOS";
+
+const STATUS_FILTER_OPTIONS: Array<{ value: StatusFilter; label: string }> = [
+  { value: "ABERTOS", label: "Pendentes + Liberados" },
+  { value: "PENDENTE", label: "Pendente" },
+  { value: "LIBERADO", label: "Liberado" },
+  { value: "FATURADO", label: "Faturado" },
+  { value: "TODOS", label: "Todos" },
+];
 
 /** Uma competência é boa (liberada) quando fica CLOSED ou já estava CLOSED. */
 function isGoodClose(status: CompetenceCloseResult["status"]): boolean {
@@ -62,6 +77,11 @@ export interface PendingClosingsViewProps {
   pendingCount: number;
   /** ADMIN/AREA_MANAGER: pode LIBERAR faturamento. O gate real é server-side. */
   canClose: boolean;
+  /**
+   * ADMIN/FINANCE (RECEIVABLES_ROLES): pode RETORNAR faturamento (Faturado →
+   * Liberado). O gate real é server-side na action `retornarFaturamento`.
+   */
+  canRevert?: boolean;
   /**
    * Destino (GET) do formulário de competência. Default: a rota standalone
    * `/app/financeiro/pendentes` (usada pelo AREA_MANAGER). Dentro da aba
@@ -97,6 +117,7 @@ export function PendingClosingsView({
   year,
   pendingCount,
   canClose,
+  canRevert = false,
   formAction = "/app/financeiro/pendentes",
   monthParam = "month",
   yearParam = "year",
@@ -109,11 +130,23 @@ export function PendingClosingsView({
   // Override otimista: projectIds liberados nesta sessão. Deriva o status
   // efetivo sem sincronizar props em efeito (props do refresh confirmam).
   const [released, setReleased] = useState<Set<string>>(new Set());
+  // Override otimista: projectIds cujo faturamento foi RETORNADO (Faturado →
+  // Liberado) nesta sessão.
+  const [reverted, setReverted] = useState<Set<string>>(new Set());
+  // Filtro de status (client-side): default esconde os Faturados dos pendentes.
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("ABERTOS");
 
   // Modal de liberação: projeto alvo + justificativa OBRIGATÓRIA.
   const [target, setTarget] = useState<PendingClosingRow | null>(null);
   const [obs, setObs] = useState("");
   const [obsError, setObsError] = useState<string | null>(null);
+
+  // Modal de RETORNO de faturamento: projeto alvo + justificativa OBRIGATÓRIA.
+  const [revertTarget, setRevertTarget] = useState<PendingClosingRow | null>(
+    null,
+  );
+  const [revertObs, setRevertObs] = useState("");
+  const [revertObsError, setRevertObsError] = useState<string | null>(null);
 
   const yearOptions = useMemo(() => {
     const now = new Date().getFullYear();
@@ -125,7 +158,22 @@ export function PendingClosingsView({
   }, [year]);
 
   function effectiveStatus(row: PendingClosingRow): PendingClosingStatus {
-    return released.has(row.projectId) ? "LIBERADO" : row.status;
+    // Otimista: retorno de faturamento tem precedência (Faturado → Liberado);
+    // depois a liberação (Pendente → Liberado).
+    if (reverted.has(row.projectId)) return "LIBERADO";
+    if (released.has(row.projectId)) return "LIBERADO";
+    return row.status;
+  }
+
+  function matchesFilter(status: PendingClosingStatus): boolean {
+    switch (statusFilter) {
+      case "ABERTOS":
+        return status === "PENDENTE" || status === "LIBERADO";
+      case "TODOS":
+        return true;
+      default:
+        return status === statusFilter;
+    }
   }
 
   function openLiberar(row: PendingClosingRow) {
@@ -133,6 +181,67 @@ export function PendingClosingsView({
     setObs("");
     setObsError(null);
     clear();
+  }
+
+  function openRetornar(row: PendingClosingRow) {
+    setRevertTarget(row);
+    setRevertObs("");
+    setRevertObsError(null);
+    clear();
+  }
+
+  function confirmRetornar() {
+    if (!revertTarget) return;
+    const justificativa = revertObs.trim();
+    if (justificativa.length === 0) {
+      setRevertObsError("Informe uma justificativa para retornar o faturamento.");
+      return;
+    }
+    setRevertObsError(null);
+    clear();
+    const row = revertTarget;
+    startTransition(async () => {
+      const result = await retornarFaturamento({
+        projectId: row.projectId,
+        from: row.from,
+        to: row.to,
+        justificativa,
+      });
+
+      if (!result.ok) {
+        if (result.error === "INVALID_INPUT") {
+          setRevertObsError(result.message);
+          return;
+        }
+        notify("warning", result.message);
+        return;
+      }
+
+      if (!result.data.allDone) {
+        const problem = result.data.competences.find(
+          (c) => c.status !== "REVERTED" && c.status !== "NOT_INVOICED",
+        );
+        setRevertTarget(null);
+        notify(
+          "warning",
+          problem?.message ?? "Não foi possível retornar o faturamento.",
+        );
+        return;
+      }
+
+      // Otimista: a linha volta para "Liberado"; o refresh confirma.
+      setReverted((prev) => {
+        const next = new Set(prev);
+        next.add(row.projectId);
+        return next;
+      });
+      setRevertTarget(null);
+      notify(
+        "success",
+        `Faturamento de "${row.projectName}" retornado para Liberado.`,
+      );
+      router.refresh();
+    });
   }
 
   function confirmLiberar() {
@@ -192,6 +301,9 @@ export function PendingClosingsView({
   }
 
   const competenceLabel = `${MONTH_NAMES[Math.min(Math.max(month, 1), 12) - 1]}/${year}`;
+  const filteredRows = rows.filter((row) =>
+    matchesFilter(effectiveStatus(row)),
+  );
 
   return (
     <div className="space-y-5">
@@ -258,6 +370,31 @@ export function PendingClosingsView({
           </ActionButton>
         </form>
 
+        {/* Filtro de status (client-side): default esconde os Faturados. */}
+        <div className="sm:self-end">
+          <label
+            htmlFor="pc-status"
+            className="mb-1 block text-xs font-semibold text-medium"
+          >
+            Status
+          </label>
+          <select
+            id="pc-status"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+            className={cn(
+              "h-9 w-52 rounded-md border border-border bg-surface px-3 text-sm text-strong",
+              focusRing,
+            )}
+          >
+            {STATUS_FILTER_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
         <div className="shrink-0 rounded-md border border-border bg-surface-muted px-4 py-2 text-center">
           <p className="text-xs font-semibold uppercase tracking-wide text-soft">
             Pendentes em {competenceLabel}
@@ -277,11 +414,11 @@ export function PendingClosingsView({
         </p>
       ) : null}
 
-      {rows.length === 0 ? (
+      {filteredRows.length === 0 ? (
         <EmptyState
           icon={ListChecks}
-          title="Nenhum projeto ativo na competência"
-          description={`Não há projetos ativos para liberar em ${competenceLabel}. Ajuste a competência acima.`}
+          title="Nenhum projeto no recorte"
+          description={`Não há projetos com este status em ${competenceLabel}. Ajuste a competência ou o filtro de status acima.`}
         />
       ) : (
         <div className="overflow-x-auto rounded-[var(--radius-card)] border-2 border-ink bg-surface shadow-[4px_4px_0_0_var(--color-ink)]">
@@ -296,7 +433,7 @@ export function PendingClosingsView({
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => {
+              {filteredRows.map((row) => {
                 const status = effectiveStatus(row);
                 const meta = STATUS_META[status];
                 return (
@@ -325,6 +462,23 @@ export function PendingClosingsView({
                         >
                           Liberar
                         </ActionButton>
+                      ) : status === "FATURADO" ? (
+                        canRevert ? (
+                          <ActionButton
+                            variant="secondary"
+                            size="sm"
+                            icon={RotateCcw}
+                            disabled={isPending}
+                            onClick={() => openRetornar(row)}
+                          >
+                            Retornar faturamento
+                          </ActionButton>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-brand-dark">
+                            <Receipt aria-hidden="true" className="size-4" />
+                            Faturado
+                          </span>
+                        )
                       ) : status === "LIBERADO" ? (
                         <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-success">
                           <CheckCircle2 aria-hidden="true" className="size-4" />
@@ -396,6 +550,66 @@ export function PendingClosingsView({
           <p className="mt-1 text-xs text-soft">
             A justificativa fica registrada na auditoria do fechamento (leva a
             competência para CLOSED e libera o envio da apuração pelo Financeiro).
+          </p>
+        )}
+      </Modal>
+
+      {/* Modal RETORNAR FATURAMENTO: Faturado → Liberado (justificativa). */}
+      <Modal
+        open={revertTarget != null}
+        onClose={() => setRevertTarget(null)}
+        title="Retornar faturamento"
+        description={
+          revertTarget
+            ? `${revertTarget.projectName} · ${revertTarget.clientName} — ${competenceLabel}`
+            : undefined
+        }
+        footer={
+          <>
+            <ActionButton
+              variant="secondary"
+              size="sm"
+              onClick={() => setRevertTarget(null)}
+            >
+              Cancelar
+            </ActionButton>
+            <ActionButton
+              variant="primary"
+              size="sm"
+              icon={RotateCcw}
+              disabled={isPending}
+              onClick={confirmRetornar}
+            >
+              Retornar faturamento
+            </ActionButton>
+          </>
+        }
+      >
+        <label className="block text-sm font-medium text-medium">
+          Justificativa (obrigatório)
+          <textarea
+            value={revertObs}
+            onChange={(e) => {
+              setRevertObs(e.target.value);
+              if (revertObsError) setRevertObsError(null);
+            }}
+            rows={3}
+            placeholder="Motivo para retornar o faturamento para Liberado..."
+            className={cn(
+              "mt-1 w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-strong",
+              focusRingInput,
+              revertObsError && "border-danger",
+            )}
+          />
+        </label>
+        {revertObsError ? (
+          <p className="mt-1 text-xs font-medium text-danger">
+            {revertObsError}
+          </p>
+        ) : (
+          <p className="mt-1 text-xs text-soft">
+            Volta a competência de Faturado para Liberado (CLOSED). Bloqueado se
+            houver NFS-e ativa — cancele a NFS-e antes. Registrado na auditoria.
           </p>
         )}
       </Modal>

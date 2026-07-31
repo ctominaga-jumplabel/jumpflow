@@ -16,11 +16,15 @@ export interface ReceivablesProjectOption extends ReceivablesFilterOption {
 export interface ReceivablesFilterBarProps {
   clients: ReceivablesFilterOption[];
   projects: ReceivablesProjectOption[];
+  consultants: ReceivablesFilterOption[];
   values: {
     from?: string;
     to?: string;
     clientId?: string;
     projectIds: string[];
+    consultantId?: string;
+    /** "true" | "false" | undefined (Todos). */
+    billable?: string;
   };
 }
 
@@ -40,6 +44,7 @@ const fieldClass = cn(
 export function ReceivablesFilterBar({
   clients,
   projects,
+  consultants,
   values,
 }: ReceivablesFilterBarProps) {
   const [clientId, setClientId] = useState(values.clientId ?? "");
@@ -89,7 +94,7 @@ export function ReceivablesFilterBar({
     <form
       method="get"
       action="/app/financeiro"
-      className="grid items-end gap-3 rounded-[var(--radius-card)] border-2 border-ink bg-surface p-4 shadow-[4px_4px_0_0_var(--color-ink)] md:grid-cols-[1fr_1fr_1fr_auto]"
+      className="grid items-end gap-3 rounded-[var(--radius-card)] border-2 border-ink bg-surface p-4 shadow-[4px_4px_0_0_var(--color-ink)] sm:grid-cols-2 lg:grid-cols-3"
     >
       {/* Mantém a aba ativa ao filtrar via GET. */}
       <input type="hidden" name="tab" value="receber" />
@@ -213,16 +218,47 @@ export function ReceivablesFilterBar({
         ) : null}
       </div>
 
-      <button
-        type="submit"
-        className={cn(
-          "inline-flex h-10 items-center justify-center gap-2 rounded-md border-2 border-ink bg-brand px-5 text-sm font-semibold text-white shadow-[3px_3px_0_0_var(--color-ink)] transition-[transform,box-shadow] duration-150 hover:-translate-x-px hover:-translate-y-px hover:shadow-[4px_4px_0_0_var(--color-ink)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[1px_1px_0_0_var(--color-ink)]",
-          focusRing,
-        )}
-      >
-        <Search aria-hidden="true" className="size-4" />
-        Pesquisar
-      </button>
+      <label className="min-w-0">
+        <span className="text-xs font-semibold text-medium">Colaborador</span>
+        <select
+          name="consultantId"
+          defaultValue={values.consultantId ?? ""}
+          className={cn(fieldClass, "mt-1")}
+        >
+          <option value="">Todos os colaboradores</option>
+          {consultants.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="min-w-0">
+        <span className="text-xs font-semibold text-medium">Faturar</span>
+        <select
+          name="billable"
+          defaultValue={values.billable ?? ""}
+          className={cn(fieldClass, "mt-1")}
+        >
+          <option value="">Todos</option>
+          <option value="true">Sim</option>
+          <option value="false">Não</option>
+        </select>
+      </label>
+
+      <div className="flex items-end sm:col-span-2 lg:col-span-1">
+        <button
+          type="submit"
+          className={cn(
+            "inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border-2 border-ink bg-brand px-5 text-sm font-semibold text-white shadow-[3px_3px_0_0_var(--color-ink)] transition-[transform,box-shadow] duration-150 hover:-translate-x-px hover:-translate-y-px hover:shadow-[4px_4px_0_0_var(--color-ink)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[1px_1px_0_0_var(--color-ink)]",
+            focusRing,
+          )}
+        >
+          <Search aria-hidden="true" className="size-4" />
+          Pesquisar
+        </button>
+      </div>
     </form>
   );
 }

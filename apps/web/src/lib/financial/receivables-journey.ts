@@ -160,6 +160,13 @@ export async function loadReceivablesEntries(
         ? filter.projectIds[0]
         : { in: filter.projectIds };
   }
+  // Filtros adicionais (item 5/6): colaborador e "Faturar (Sim/Não)".
+  if (filter.consultantId) {
+    where.consultantId = filter.consultantId;
+  }
+  if (filter.billable !== undefined) {
+    where.billable = filter.billable;
+  }
 
   const rows = await prisma.timeEntry.findMany({
     where,
@@ -173,7 +180,7 @@ export async function loadReceivablesEntries(
       consultantId: true,
       projectId: true,
       allocationId: true,
-      consultant: { select: { name: true } },
+      consultant: { select: { name: true, contractType: true } },
       project: {
         select: { name: true, client: { select: { name: true } } },
       },
@@ -206,6 +213,7 @@ export async function loadReceivablesEntries(
       date: toIsoDate(r.date),
       consultantId: r.consultantId,
       consultantName: r.consultant.name,
+      contractType: r.consultant.contractType,
       projectId: r.projectId,
       projectName: r.project.name,
       clientName: r.project.client.name,
@@ -514,7 +522,12 @@ export async function listPendingClosings(
   const rows: PendingClosingRow[] = projects.map((project) => {
     const closing = closingByProject.get(project.id) ?? null;
     const closed = closing?.status === "CLOSED";
-    const status = classifyPendingStatus(hasEntries.has(project.id), closed);
+    const invoiced = closing?.status === "INVOICED";
+    const status = classifyPendingStatus(
+      hasEntries.has(project.id),
+      closed,
+      invoiced,
+    );
     return {
       projectId: project.id,
       projectName: project.name,
