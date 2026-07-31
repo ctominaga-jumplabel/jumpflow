@@ -50,7 +50,7 @@ import {
 } from "@/lib/automation/email-transport";
 import { buildWorkbook, defineSheet } from "@/lib/export/xlsx";
 import { getHoursReport } from "@/lib/db/reports";
-import { hoursXlsxColumns } from "@/lib/reports/xlsx-columns";
+import { clientHoursXlsxColumns } from "@/lib/reports/xlsx-columns";
 import type { HoursReport } from "@/lib/reports/types";
 import type { HoursReportFilter } from "@/lib/reports/schemas";
 import { timeEntryStatusLabels } from "@/lib/timesheet/types";
@@ -1055,10 +1055,10 @@ async function buildProjectHoursAttachment(params: {
   if (report.rows.length === 0) return null;
 
   const competence = `${params.year}-${String(params.month).padStart(2, "0")}`;
-  const columns = hoursXlsxColumns({
-    includeFinancials: report.includeFinancials,
-    statusLabel: hoursStatusLabel,
-  });
+  // Anexo do e-mail ao cliente: layout do print (Cliente/Projeto/Faturável/
+  // Status/Atividade/Consultor/Data/Data(dia da semana)/Horas/Valor hora/Valor
+  // faturado), distinto do export interno de Relatórios (`hoursXlsxColumns`).
+  const columns = clientHoursXlsxColumns({ statusLabel: hoursStatusLabel });
 
   const buffer = await buildWorkbook([
     defineSheet({
