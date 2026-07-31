@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import type { ConsultantContractType } from "@/lib/consultants/schemas";
 import { parseIsoDateUtc } from "@/lib/timesheet/week";
 import {
   buildWorkbook,
@@ -78,12 +79,26 @@ const projectIdsSchema = z.preprocess((value) => {
   return [...new Set(cleaned)];
 }, z.array(z.string().min(1)));
 
+/**
+ * Filtro "Faturar (Sim/Não)": aceita "true"/"false" (do `<select>`); vazio/`ALL`
+ * → undefined (todos). Mantém boolean opcional para a camada de banco aplicar
+ * `where.billable`.
+ */
+const billableFilterSchema = z.preprocess((value) => {
+  const cleaned = blankToUndefined(value);
+  if (cleaned === "true" || cleaned === true) return true;
+  if (cleaned === "false" || cleaned === false) return false;
+  return undefined;
+}, z.boolean().optional());
+
 export const receivablesFilterSchema = z
   .object({
     from: isoDateSchema,
     to: isoDateSchema,
     clientId: idFilterSchema,
     projectIds: projectIdsSchema,
+    consultantId: idFilterSchema,
+    billable: billableFilterSchema,
   })
   .superRefine((value, ctx) => {
     if (value.from && value.to && value.to < value.from) {
@@ -222,24 +237,32 @@ export function filterReleasedEntries(
 /* -------------------------------------------------------------------------- */
 
 /**
- * Status de UM projeto na competência da tela "Pendentes de Fechamento":
+ * Status de UM projeto na competência da tela "Status de Faturamento" (ex-
+ * "Pendentes de Fechamento"):
+ * - `FATURADO`: existe `RevenueClosing` `INVOICED` (marcado como faturado) →
+ *   sai dos pendentes; habilita "Retornar faturamento";
  * - `LIBERADO`: existe `RevenueClosing` `CLOSED` (aparece em Contas a Receber);
  * - `PENDENTE`: há lançamento APPROVED na competência e ainda NÃO está `CLOSED`
  *   → habilita "Liberar" (ADMIN/AREA_MANAGER);
  * - `SEM_LANCAMENTO`: nenhum lançamento APPROVED (0h) → sem ação.
  */
-export type PendingClosingStatus = "LIBERADO" | "PENDENTE" | "SEM_LANCAMENTO";
+export type PendingClosingStatus =
+  | "FATURADO"
+  | "LIBERADO"
+  | "PENDENTE"
+  | "SEM_LANCAMENTO";
 
 /**
- * Classifica o status de um projeto na competência. Puro: `closed` tem
- * precedência (um fechamento CLOSED sempre é LIBERADO, mesmo que a leitura de
- * horas do recorte não retorne linhas). Sem fechamento CLOSED, `hasEntries`
- * separa PENDENTE de SEM_LANCAMENTO.
+ * Classifica o status de um projeto na competência. Puro: `invoiced` (FATURADO)
+ * tem a maior precedência, depois `closed` (LIBERADO). Sem fechamento
+ * CLOSED/INVOICED, `hasEntries` separa PENDENTE de SEM_LANCAMENTO.
  */
 export function classifyPendingStatus(
   hasEntries: boolean,
   closed: boolean,
+  invoiced = false,
 ): PendingClosingStatus {
+  if (invoiced) return "FATURADO";
   if (closed) return "LIBERADO";
   if (hasEntries) return "PENDENTE";
   return "SEM_LANCAMENTO";
@@ -293,6 +316,8 @@ export interface ReceivablesEntry {
   date: string;
   consultantId: string;
   consultantName: string;
+  /** Tipo de contratação do consultor (cadastro); null quando não informado. */
+  contractType: ConsultantContractType | null;
   projectId: string;
   projectName: string;
   clientName: string;
@@ -491,6 +516,55 @@ export interface FecharApuracaoResult {
   competences: CompetenceCloseResult[];
   /** true quando toda competência elegível está CLOSED ou ALREADY_CLOSED. */
   allClosed: boolean;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Tipos do faturamento manual (actions `marcarApuracaoFaturada` /            */
+/* `retornarFaturamento` — em actions.ts). Flip CLOSED (Liberado) <-> INVOICED */
+/* (Faturado), desacoplado do pipeline NFS-e.                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Estado do faturamento manual por competência.
+ * - `INVOICED`: marcado como Faturado agora (CLOSED -> INVOICED).
+ * - `ALREADY_INVOICED`: já estava Faturado (idempotente).
+ * - `REVERTED`: retornado para Liberado (INVOICED -> CLOSED).
+ * - `NOT_CLOSED`: ainda não Liberado (não há o que faturar).
+ * - `NOT_INVOICED`: não estava Faturado (nada a retornar).
+ * - `NOT_FOUND`: sem `RevenueClosing` na competência.
+ * - `ERROR`: falha (ex.: NFS-e ativa bloqueia o retorno) ou status incompatível.
+ */
+export type CompetenceInvoiceStatus =
+  | "INVOICED"
+  | "ALREADY_INVOICED"
+  | "REVERTED"
+  | "NOT_CLOSED"
+  | "NOT_INVOICED"
+  | "NOT_FOUND"
+  | "ERROR";
+
+/** Resultado do faturamento manual de UMA competência (mês/ano). */
+export interface CompetenceInvoiceResult {
+  month: number;
+  year: number;
+  closingId: string | null;
+  status: CompetenceInvoiceStatus;
+  message?: string;
+}
+
+/** Resultado das actions de faturamento manual (por projeto, multi-competência). */
+export interface InvoiceApuracaoResult {
+  clientId: string;
+  projectId: string;
+  from: string;
+  to: string;
+  competences: CompetenceInvoiceResult[];
+  /**
+   * `marcarApuracaoFaturada`: true quando toda competência elegível está
+   * INVOICED/ALREADY_INVOICED. `retornarFaturamento`: true quando toda
+   * competência elegível foi REVERTED/NOT_INVOICED.
+   */
+  allDone: boolean;
 }
 
 /* -------------------------------------------------------------------------- */

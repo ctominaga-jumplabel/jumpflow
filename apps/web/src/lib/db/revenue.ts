@@ -105,19 +105,24 @@ export type RevenueClosingAdvanceAction =
   | "MARK_READY"
   | "CLOSE"
   | "MARK_INVOICED"
+  // Faturamento manual (Status de Faturamento): marca CLOSED -> INVOICED SEM
+  // exigir NFS-e emitida (rastreamento de faturamento desacoplado do fiscal).
+  | "MARK_INVOICED_MANUAL"
   | "CANCEL"
   // Reverse transitions ("voltar status"). Reopening a CLOSED closing is a
   // sensitive change (audited) and is blocked upstream when a non-cancelled
-  // fiscal document exists. Un-invoicing (INVOICED -> CLOSED) is NOT offered:
-  // an issued NFS-e must be cancelled through the fiscal flow first.
+  // fiscal document exists. `REVERT_INVOICED` desfaz o faturamento MANUAL
+  // (INVOICED -> CLOSED / "voltar ao Liberado"); é bloqueado upstream quando
+  // existe documento fiscal não-cancelado (nesse caso, cancele a NFS-e antes).
   | "REVERT_TO_OPEN"
   | "REVERT_TO_REVIEW"
+  | "REVERT_INVOICED"
   | "REOPEN";
 
 export const revenueClosingTransitions: Record<
   RevenueClosingAdvanceAction,
   {
-    expected: "OPEN" | "IN_REVIEW" | "READY_TO_CLOSE" | "CLOSED";
+    expected: "OPEN" | "IN_REVIEW" | "READY_TO_CLOSE" | "CLOSED" | "INVOICED";
     next:
       | "OPEN"
       | "IN_REVIEW"
@@ -162,6 +167,13 @@ export const revenueClosingTransitions: Record<
     auditAction: "REVENUE_CLOSING_INVOICED",
     requiresJustification: false,
   },
+  MARK_INVOICED_MANUAL: {
+    expected: "CLOSED",
+    next: "INVOICED",
+    auditAction: "REVENUE_CLOSING_INVOICED",
+    requiresJustification: false,
+    noteLabel: "Marcado como faturado",
+  },
   CANCEL: {
     expected: "OPEN",
     next: "CANCELLED",
@@ -181,6 +193,13 @@ export const revenueClosingTransitions: Record<
     auditAction: "REVENUE_CLOSING_REVERTED_REVIEW",
     requiresJustification: true,
     noteLabel: "Voltar status",
+  },
+  REVERT_INVOICED: {
+    expected: "INVOICED",
+    next: "CLOSED",
+    auditAction: "REVENUE_CLOSING_REVERTED_CLOSED",
+    requiresJustification: true,
+    noteLabel: "Retornar faturamento",
   },
   REOPEN: {
     expected: "CLOSED",

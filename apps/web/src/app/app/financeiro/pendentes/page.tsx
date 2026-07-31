@@ -9,7 +9,7 @@ import { PENDING_CLOSING_ROLES, hasRole } from "@/lib/auth/route-permissions";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import type { PendingClosingRow } from "@/lib/financial/receivables-journey-core";
 
-export const metadata: Metadata = { title: "Pendentes de Fechamento — Financeiro" };
+export const metadata: Metadata = { title: "Status de Faturamento — Financeiro" };
 
 type RawParams = Record<string, string | string[] | undefined>;
 
@@ -64,12 +64,15 @@ export default async function PendentesFechamentoPage({
   // gate real é server-side na action `fecharApuracao` (APURACAO_CLOSE_ROLES =
   // [ADMIN, AREA_MANAGER]); aqui a UI só decide a affordance do botão "Liberar".
   const canClose = hasRole(user, ["ADMIN", "AREA_MANAGER"]);
+  // "Retornar faturamento" (Faturado → Liberado) é do Financeiro (RECEIVABLES_ROLES
+  // = [ADMIN, FINANCE]); o gate real é server-side na action `retornarFaturamento`.
+  const canRevert = hasRole(user, ["ADMIN", "FINANCE"]);
 
   const header = (
     <PageHeader
       eyebrow="Financeiro"
-      title="Pendentes de Fechamento"
-      description="Libere projetos para faturamento por competência. Cada projeto liberado passa a aparecer em Contas a Receber."
+      title="Status de Faturamento"
+      description="Acompanhe cada projeto até o faturamento por competência: Pendente → Liberado → Faturado. Libere projetos e, quando faturados, retorne se necessário."
     />
   );
 
@@ -104,6 +107,7 @@ export default async function PendentesFechamentoPage({
         year={result.year}
         pendingCount={result.pendingCount}
         canClose={canClose}
+        canRevert={canRevert}
       />
     </div>
   );

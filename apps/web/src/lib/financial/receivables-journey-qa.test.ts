@@ -30,6 +30,7 @@ function entry(overrides: Partial<ReceivablesEntry> = {}): ReceivablesEntry {
     date: "2026-07-01",
     consultantId: "c1",
     consultantName: "Ana",
+    contractType: null,
     projectId: "p1",
     projectName: "Atlas",
     clientName: "Vix",

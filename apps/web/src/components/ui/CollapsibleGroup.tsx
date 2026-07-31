@@ -11,6 +11,12 @@ export interface CollapsibleGroupProps {
   hint?: string;
   /** Start expanded. Defaults to false (collapsed). */
   defaultOpen?: boolean;
+  /**
+   * Peso visual da moldura. "default" mantém a borda neo-brutalista (border-2
+   * border-ink) usada no cadastro. "soft" usa borda/divisor leves (para telas
+   * densas como Contas a Receber, onde a borda dura pesava demais).
+   */
+  tone?: "default" | "soft";
   children: React.ReactNode;
   className?: string;
 }
@@ -26,14 +32,17 @@ export function CollapsibleGroup({
   icon: Icon,
   hint,
   defaultOpen = false,
+  tone = "default",
   children,
   className,
 }: CollapsibleGroupProps) {
+  const soft = tone === "soft";
   return (
     <details
       open={defaultOpen}
       className={cn(
-        "group overflow-hidden rounded-md border-2 border-ink bg-surface [&_summary::-webkit-details-marker]:hidden",
+        "group overflow-hidden rounded-md bg-surface [&_summary::-webkit-details-marker]:hidden",
+        soft ? "border border-border shadow-sm" : "border-2 border-ink",
         className,
       )}
     >
@@ -50,7 +59,14 @@ export function CollapsibleGroup({
           />
         </span>
       </summary>
-      <div className="space-y-4 border-t-2 border-ink px-4 py-4">{children}</div>
+      <div
+        className={cn(
+          "space-y-4 px-4 py-4",
+          soft ? "border-t border-border" : "border-t-2 border-ink",
+        )}
+      >
+        {children}
+      </div>
     </details>
   );
 }

@@ -58,9 +58,11 @@ import type { AppUser } from "@/lib/auth/types";
 import {
   monthsInRange,
   type CompetenceCloseResult,
+  type CompetenceInvoiceResult,
   type CompetenceSendResult,
   type EnviarApuracaoResult,
   type FecharApuracaoResult,
+  type InvoiceApuracaoResult,
 } from "@/lib/financial/receivables-journey-core";
 
 const FINANCEIRO_PATH = "/app/financeiro";
@@ -94,9 +96,11 @@ const advanceInputSchema = z.object({
     "MARK_READY",
     "CLOSE",
     "MARK_INVOICED",
+    "MARK_INVOICED_MANUAL",
     "CANCEL",
     "REVERT_TO_OPEN",
     "REVERT_TO_REVIEW",
+    "REVERT_INVOICED",
     "REOPEN",
   ]),
   // D4 (Onda B): justificativa da liberação do faturamento para o financeiro.
@@ -179,6 +183,49 @@ const enviarApuracaoSchema = z
     to: isoDateInputSchema,
     observacoes: z.string().trim().max(2000).optional(),
     resendCompetences: z.array(competenceInputSchema).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.to < value.from) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["to"],
+        message: "A data final deve ser maior ou igual à inicial.",
+      });
+    }
+  });
+
+/**
+ * Entrada do faturamento manual (`marcarApuracaoFaturada`): por projeto +
+ * período. `clientId` é DERIVADO do projeto no servidor. Marca CLOSED (Liberado)
+ * -> INVOICED (Faturado) sem exigir NFS-e.
+ */
+const marcarFaturadoSchema = z
+  .object({
+    projectId: z.string().min(1),
+    from: isoDateInputSchema,
+    to: isoDateInputSchema,
+  })
+  .superRefine((value, ctx) => {
+    if (value.to < value.from) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["to"],
+        message: "A data final deve ser maior ou igual à inicial.",
+      });
+    }
+  });
+
+/**
+ * Entrada de "Retornar faturamento" (`retornarFaturamento`): por projeto +
+ * período + justificativa OBRIGATÓRIA (reversa sensível, auditada). Reverte
+ * INVOICED (Faturado) -> CLOSED (Liberado); bloqueada quando há NFS-e ativa.
+ */
+const retornarFaturamentoSchema = z
+  .object({
+    projectId: z.string().min(1),
+    from: isoDateInputSchema,
+    to: isoDateInputSchema,
+    justificativa: z.string().trim().max(2000).optional(),
   })
   .superRefine((value, ctx) => {
     if (value.to < value.from) {
@@ -374,6 +421,21 @@ export async function advanceRevenueClosing(input: {
         throw new ActionError(
           "INVALID_INPUT",
           "Cancele a NFS-e antes de reabrir o fechamento.",
+        );
+      }
+    }
+    if (parsed.action === "REVERT_INVOICED") {
+      // "Retornar faturamento" (INVOICED -> CLOSED) só é permitido no
+      // faturamento MANUAL. Se existe NFS-e emitida/pendente, a reversão passa
+      // pelo fluxo fiscal (cancelar a NFS-e antes).
+      const fiscalDocument = await prisma.fiscalDocument.findFirst({
+        where: { revenueClosingId: parsed.id, status: { not: "CANCELLED" } },
+        select: { id: true },
+      });
+      if (fiscalDocument) {
+        throw new ActionError(
+          "INVALID_INPUT",
+          "Cancele a NFS-e antes de retornar o faturamento.",
         );
       }
     }
@@ -1657,6 +1719,246 @@ export async function enviarApuracao(input: {
         competences,
         allSent,
         needsConfirmResend,
+      },
+    };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/**
+ * "Marcar como Faturado" da jornada Contas a Receber (Status de Faturamento):
+ * por PROJETO, resolve o(s) `RevenueClosing` da(s) competência(s) do período e,
+ * para cada uma que estiver `CLOSED` (Liberado), avança para `INVOICED`
+ * (Faturado) via `MARK_INVOICED_MANUAL` — flip MANUAL, SEM exigir NFS-e (decisão
+ * do usuário). Idempotente (`ALREADY_INVOICED`); competência ainda não liberada
+ * retorna `NOT_CLOSED`. Gated a RECEIVABLES_ROLES (ADMIN, FINANCE). Auditoria
+ * dedicada `RECEIVABLES_APURACAO_INVOICED` além da auditoria da transição.
+ */
+export async function marcarApuracaoFaturada(input: {
+  projectId: string;
+  from: string;
+  to: string;
+}): Promise<ActionResult<InvoiceApuracaoResult>> {
+  try {
+    ensureDatabase();
+    const user = await requireRole(RECEIVABLES_ROLES);
+    const parsed = parseInput(marcarFaturadoSchema, input);
+    const dbUser = await resolveDbUser(user);
+
+    const clientId = await resolveProjectClientId(parsed.projectId);
+    const months = monthsInRange(parsed.from, parsed.to);
+    const closings = await Promise.all(
+      months.map((m) =>
+        prisma.revenueClosing.findFirst({
+          where: {
+            clientId,
+            projectId: parsed.projectId,
+            month: m.month,
+            year: m.year,
+          },
+          select: { id: true, status: true, month: true, year: true },
+        }),
+      ),
+    );
+
+    const competences: CompetenceInvoiceResult[] = [];
+    for (let i = 0; i < months.length; i += 1) {
+      const m = months[i];
+      const closing = closings[i];
+      if (!closing) {
+        competences.push({
+          month: m.month,
+          year: m.year,
+          closingId: null,
+          status: "NOT_FOUND",
+          message: "Sem fechamento na competência — nada a faturar.",
+        });
+        continue;
+      }
+      const base = { month: m.month, year: m.year, closingId: closing.id };
+      if (closing.status === "INVOICED") {
+        competences.push({ ...base, status: "ALREADY_INVOICED" });
+        continue;
+      }
+      if (closing.status !== "CLOSED") {
+        competences.push({
+          ...base,
+          status: "NOT_CLOSED",
+          message: "Libere o faturamento (Liberado) antes de marcar Faturado.",
+        });
+        continue;
+      }
+
+      const result = await advanceRevenueClosing({
+        id: closing.id,
+        action: "MARK_INVOICED_MANUAL",
+      });
+      competences.push({
+        ...base,
+        status: result.ok ? "INVOICED" : "ERROR",
+        ...(result.ok ? {} : { message: result.message }),
+      });
+
+      await prisma.auditEvent.create({
+        data: buildAuditEventData({
+          actorUserId: dbUser?.id ?? null,
+          entityType: "RevenueClosing",
+          entityId: closing.id,
+          action: "RECEIVABLES_APURACAO_INVOICED",
+          after: {
+            clientId,
+            projectId: parsed.projectId,
+            from: parsed.from,
+            to: parsed.to,
+            month: m.month,
+            year: m.year,
+            result: result.ok ? "INVOICED" : "ERROR",
+          },
+        }),
+      });
+    }
+
+    const relevant = competences.filter((c) => c.status !== "NOT_FOUND");
+    const allDone =
+      relevant.length > 0 &&
+      relevant.every(
+        (c) => c.status === "INVOICED" || c.status === "ALREADY_INVOICED",
+      );
+
+    revalidatePath(FINANCEIRO_PATH);
+    return {
+      ok: true,
+      data: {
+        clientId,
+        projectId: parsed.projectId,
+        from: parsed.from,
+        to: parsed.to,
+        competences,
+        allDone,
+      },
+    };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/**
+ * "Retornar faturamento" da tela Status de Faturamento: reverte o faturamento
+ * MANUAL, levando o(s) `RevenueClosing` de `INVOICED` (Faturado) de volta a
+ * `CLOSED` (Liberado) via `REVERT_INVOICED`. Justificativa OBRIGATÓRIA (reversa
+ * sensível, auditada). Bloqueada quando existe NFS-e ativa (a action reforça:
+ * cancele a NFS-e antes). Gated a RECEIVABLES_ROLES. Auditoria dedicada
+ * `RECEIVABLES_APURACAO_REVERTED` além da auditoria da transição.
+ */
+export async function retornarFaturamento(input: {
+  projectId: string;
+  from: string;
+  to: string;
+  justificativa?: string;
+}): Promise<ActionResult<InvoiceApuracaoResult>> {
+  try {
+    ensureDatabase();
+    const user = await requireRole(RECEIVABLES_ROLES);
+    const parsed = parseInput(retornarFaturamentoSchema, input);
+    const dbUser = await resolveDbUser(user);
+    const justificativa = parsed.justificativa?.trim() ?? "";
+
+    if (!justificativa) {
+      throw new ActionError(
+        "INVALID_INPUT",
+        "Informe uma justificativa para retornar o faturamento.",
+      );
+    }
+
+    const clientId = await resolveProjectClientId(parsed.projectId);
+    const months = monthsInRange(parsed.from, parsed.to);
+    const closings = await Promise.all(
+      months.map((m) =>
+        prisma.revenueClosing.findFirst({
+          where: {
+            clientId,
+            projectId: parsed.projectId,
+            month: m.month,
+            year: m.year,
+          },
+          select: { id: true, status: true, month: true, year: true },
+        }),
+      ),
+    );
+
+    const competences: CompetenceInvoiceResult[] = [];
+    for (let i = 0; i < months.length; i += 1) {
+      const m = months[i];
+      const closing = closings[i];
+      if (!closing) {
+        competences.push({
+          month: m.month,
+          year: m.year,
+          closingId: null,
+          status: "NOT_FOUND",
+          message: "Sem fechamento na competência.",
+        });
+        continue;
+      }
+      const base = { month: m.month, year: m.year, closingId: closing.id };
+      if (closing.status !== "INVOICED") {
+        competences.push({
+          ...base,
+          status: "NOT_INVOICED",
+          message: "Competência não está Faturada — nada a retornar.",
+        });
+        continue;
+      }
+
+      const result = await advanceRevenueClosing({
+        id: closing.id,
+        action: "REVERT_INVOICED",
+        justification: justificativa,
+      });
+      competences.push({
+        ...base,
+        status: result.ok ? "REVERTED" : "ERROR",
+        ...(result.ok ? {} : { message: result.message }),
+      });
+
+      await prisma.auditEvent.create({
+        data: buildAuditEventData({
+          actorUserId: dbUser?.id ?? null,
+          entityType: "RevenueClosing",
+          entityId: closing.id,
+          action: "RECEIVABLES_APURACAO_REVERTED",
+          after: {
+            clientId,
+            projectId: parsed.projectId,
+            from: parsed.from,
+            to: parsed.to,
+            month: m.month,
+            year: m.year,
+            justificativa,
+            result: result.ok ? "REVERTED" : "ERROR",
+          },
+        }),
+      });
+    }
+
+    const relevant = competences.filter((c) => c.status !== "NOT_FOUND");
+    const allDone =
+      relevant.length > 0 &&
+      relevant.every(
+        (c) => c.status === "REVERTED" || c.status === "NOT_INVOICED",
+      );
+
+    revalidatePath(FINANCEIRO_PATH);
+    return {
+      ok: true,
+      data: {
+        clientId,
+        projectId: parsed.projectId,
+        from: parsed.from,
+        to: parsed.to,
+        competences,
+        allDone,
       },
     };
   } catch (error) {

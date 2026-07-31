@@ -6,6 +6,7 @@ import {
   BellRing,
   BookOpen,
   Building2,
+  Calculator,
   CalendarCheck,
   CalendarDays,
   CalendarRange,
@@ -82,6 +83,17 @@ export interface NavItemDef {
    * the route (403 on direct URL access). Undefined means no matrix gate.
    */
   permissionCode?: string;
+}
+
+/**
+ * Um AGRUPADOR do menu lateral (dropdown colapsável). Diferente de `NavItemDef`
+ * (um link folha), agrupa vários `NavItemDef` sob um rótulo/ícone. Usado só no
+ * menu do Financeiro (ver `financeGroupedNavigation`).
+ */
+export interface NavGroupDef {
+  label: string;
+  icon: LucideIcon;
+  children: NavItemDef[];
 }
 
 /**
@@ -461,11 +473,11 @@ const primaryNavigationRaw: NavItemDef[] = [
     // sem depender de célula na matriz — como o AREA_MANAGER cai no Feed em
     // `/app`, é por aqui que ele alcança a fila. A rota (PENDING_CLOSING_ROLES) e
     // a action de liberar (ADMIN/AREA_MANAGER) reforçam o acesso no servidor.
-    label: "Pendentes de Fechamento",
+    label: "Status de Faturamento",
     href: "/app/financeiro/pendentes",
     icon: ListChecks,
     description:
-      "Liberação de faturamento por projeto e competência para o Financeiro.",
+      "Acompanhamento por competência: Pendente → Liberado → Faturado.",
     requiredRoles: ["ADMIN", "AREA_MANAGER", "FINANCE"],
   },
   {
@@ -583,6 +595,124 @@ function withoutDisabledModules(items: NavItemDef[]): NavItemDef[] {
  */
 export const primaryNavigation: NavItemDef[] =
   withoutDisabledModules(primaryNavigationRaw);
+
+/**
+ * Menu do FINANCEIRO agrupado em dois dropdowns (só para FINANCE/ADMIN — ver
+ * `hasFinanceGroupedNav`): "Contas a Receber" e "Contas a Pagar". Cada filho
+ * mantém seu gate (`permissionCode`/`requiredRoles`), então a visibilidade
+ * por item é idêntica à do menu plano — muda só a apresentação. Os hrefs
+ * espelham telas existentes; "Apuração" é a tela atual de Contas a Receber e
+ * "Contas a Pagar" é a aba `?tab=pagar` da mesma rota.
+ */
+export const financeGroupedNavigation: NavGroupDef[] = [
+  {
+    label: "Contas a Receber",
+    icon: Wallet,
+    children: [
+      {
+        label: "Apuração",
+        href: "/app/financeiro",
+        permissionCode: "FINANCEIRO",
+        icon: Calculator,
+        description: "Horas aprovadas por dia, valor a faturar e apuração.",
+      },
+      {
+        label: "Cobrança de Projetos",
+        href: "/app/financeiro/projetos",
+        permissionCode: "FINANCEIRO_COBRANCA",
+        icon: ReceiptText,
+        description: "Regra de cobrança por projeto (motor parametrizável).",
+      },
+      {
+        label: "Status de Faturamento",
+        href: "/app/financeiro/pendentes",
+        icon: ListChecks,
+        description:
+          "Acompanhamento por competência: Pendente → Liberado → Faturado.",
+        requiredRoles: ["ADMIN", "AREA_MANAGER", "FINANCE"],
+      },
+    ],
+  },
+  {
+    label: "Contas a Pagar",
+    icon: Banknote,
+    children: [
+      {
+        label: "Contas a Pagar",
+        href: "/app/financeiro?tab=pagar",
+        permissionCode: "FINANCEIRO",
+        icon: Wallet,
+        description: "Despesas aprovadas pelo financeiro (pagamento).",
+      },
+      {
+        label: "Despesas",
+        href: "/app/despesas",
+        permissionCode: "DESPESAS",
+        icon: Receipt,
+        description: "Lançamento de despesas, comprovantes e reembolsos.",
+      },
+      {
+        label: "Política de Reembolso",
+        href: "/app/despesas/politica",
+        icon: Wallet,
+        description:
+          "Tipos de despesa e limites (prazo/valor) de reembolso por tipo.",
+        requiredRoles: ["ADMIN", "AREA_MANAGER", "FINANCE", "PEOPLE"],
+      },
+      {
+        label: "Pagamentos",
+        href: "/app/pagamentos",
+        permissionCode: "PAGAMENTOS",
+        icon: Banknote,
+        description: "Pagamentos de consultores, NF e envio ao banco.",
+      },
+    ],
+  },
+];
+
+/**
+ * Hrefs (folha) que passam a viver DENTRO dos dropdowns do Financeiro. Quando o
+ * menu agrupado está ativo (FINANCE/ADMIN), o Sidebar remove esses hrefs da
+ * lista plana para não duplicar. "/app/financeiro?tab=pagar" não é item plano
+ * (é aba), então não afeta a supressão — inofensivo estar aqui.
+ */
+const financeGroupedHrefsSet = new Set(
+  financeGroupedNavigation.flatMap((g) => g.children.map((c) => c.href)),
+);
+
+/** Whether a flat nav href is subsumed by a finance dropdown group. */
+export function isFinanceGroupedHref(href: string): boolean {
+  return financeGroupedHrefsSet.has(href);
+}
+
+/**
+ * Whether the user should see the GROUPED finance menu (dropdowns) instead of
+ * the flat finance items. Decisão do usuário: só FINANCE e ADMIN.
+ */
+export function hasFinanceGroupedNav(roles: readonly RoleName[]): boolean {
+  return roles.includes("ADMIN") || roles.includes("FINANCE");
+}
+
+/**
+ * Grupos do Financeiro com os filhos já filtrados pela visibilidade do usuário
+ * (mesma regra do menu plano: matrix p/ itens com `permissionCode`, senão o
+ * gate de papéis). Grupos que ficam sem filhos são descartados.
+ */
+export function visibleFinanceGroups(
+  roles: readonly RoleName[],
+  viewableCodes: ReadonlySet<string>,
+): NavGroupDef[] {
+  const canSee = (item: NavItemDef) =>
+    item.permissionCode
+      ? canSeeNavItemByMatrix(item, viewableCodes)
+      : canSeeNavItem(item, roles);
+  return financeGroupedNavigation
+    .map((group) => ({
+      ...group,
+      children: group.children.filter(canSee),
+    }))
+    .filter((group) => group.children.length > 0);
+}
 
 /**
  * Reorder primary navigation items according to a persisted `href → position`

@@ -35,10 +35,11 @@ export interface FinancialOverviewProps {
   receivablesMode?: "demo" | "db";
   /** Lançamentos por dia + cards-resumo do recorte (db mode). */
   receivables?: ReceivablesOverview;
-  /** Opções dos filtros (cliente/projeto), escopadas ao usuário (db mode). */
+  /** Opções dos filtros (cliente/projeto/colaborador), escopadas ao usuário (db mode). */
   receivablesFilterOptions?: {
     clients: ReceivablesFilterOption[];
     projects: ReceivablesProjectOption[];
+    consultants: ReceivablesFilterOption[];
   };
   /** Valores correntes dos filtros, refletidos na barra e nas hrefs (db mode). */
   receivablesValues?: {
@@ -46,6 +47,8 @@ export interface FinancialOverviewProps {
     to?: string;
     clientId?: string;
     projectIds: string[];
+    consultantId?: string;
+    billable?: string;
   };
   /** Se o usuário pode alternar a coluna Faturar? (gate real é server-side). */
   canEditBillable?: boolean;
@@ -76,6 +79,8 @@ export interface FinancialOverviewProps {
   };
   /** ADMIN/AREA_MANAGER pode LIBERAR (na aba, na prática só ADMIN chega aqui). */
   canClosePending?: boolean;
+  /** ADMIN/FINANCE pode RETORNAR faturamento (Faturado → Liberado). */
+  canRevertPending?: boolean;
 }
 
 /**
@@ -101,6 +106,7 @@ export function FinancialOverview({
   pagarExportHref,
   pendingClosings,
   canClosePending = false,
+  canRevertPending = false,
 }: FinancialOverviewProps) {
   const overview: ReceivablesOverview = receivables ?? {
     days: [],
@@ -114,7 +120,11 @@ export function FinancialOverview({
     includeFinancials: false,
   };
   const values = receivablesValues ?? { projectIds: [] };
-  const options = receivablesFilterOptions ?? { clients: [], projects: [] };
+  const options = receivablesFilterOptions ?? {
+    clients: [],
+    projects: [],
+    consultants: [],
+  };
   const { summary } = overview;
 
   const receber = (
@@ -131,6 +141,7 @@ export function FinancialOverview({
         <ReceivablesFilterBar
           clients={options.clients}
           projects={options.projects}
+          consultants={options.consultants}
           values={values}
         />
       )}
@@ -221,6 +232,7 @@ export function FinancialOverview({
       year={pendingClosings.year}
       pendingCount={pendingClosings.pendingCount}
       canClose={canClosePending}
+      canRevert={canRevertPending}
       formAction="/app/financeiro"
       monthParam="pmonth"
       yearParam="pyear"
@@ -242,7 +254,7 @@ export function FinancialOverview({
         { id: "pagar", label: "Contas a Pagar", content: pagar },
         {
           id: "pendentes",
-          label: "Pendentes de Fechamento",
+          label: "Status de Faturamento",
           content: pendentes,
         },
       ]}

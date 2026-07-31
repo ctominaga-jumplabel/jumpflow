@@ -9,6 +9,7 @@ import {
   Clock,
   DollarSign,
   Info,
+  Receipt,
   Send,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -25,7 +26,10 @@ import type {
   CompetenceSendResult,
   EnviarApuracaoResult,
 } from "@/lib/financial/receivables-journey-core";
-import { enviarApuracao } from "@/app/app/financeiro/actions";
+import {
+  enviarApuracao,
+  marcarApuracaoFaturada,
+} from "@/app/app/financeiro/actions";
 
 /** Horas decimais efetivas → "HH:MM" (ex.: 2.5 → "02:30"). */
 function toHHMM(hours: number): string {
@@ -289,6 +293,9 @@ function ApuracaoProjectCard({
   const [closed] = useState(project.initialState.anyClosed);
   const [alreadySent, setAlreadySent] = useState(project.initialState.allSent);
   const [success, setSuccess] = useState(false);
+  // Faturamento manual (Status de Faturamento): marcado nesta sessão para dar
+  // feedback imediato (a fonte é o servidor no próximo carregamento).
+  const [invoiced, setInvoiced] = useState(false);
 
   // ENVIAR: confirmação de reenvio + resultado por competência.
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -363,6 +370,44 @@ function ApuracaoProjectCard({
       return;
     }
     doSend();
+  }
+
+  function doMarcarFaturado() {
+    if (!from || !to || !project.clientId) {
+      notify(
+        "warning",
+        "Defina data inicial e final no filtro para marcar como faturado.",
+      );
+      return;
+    }
+    clear();
+    startTransition(async () => {
+      const result = await marcarApuracaoFaturada({
+        projectId: project.projectId,
+        from,
+        to,
+      });
+      if (!result.ok) {
+        notify("warning", result.message);
+        return;
+      }
+      if (result.data.allDone) {
+        setInvoiced(true);
+        notify("success", "Faturamento marcado. O projeto sai dos pendentes.");
+        return;
+      }
+      const problem = result.data.competences.find(
+        (c) =>
+          c.status !== "INVOICED" &&
+          c.status !== "ALREADY_INVOICED" &&
+          c.status !== "NOT_FOUND",
+      );
+      notify(
+        "warning",
+        problem?.message ??
+          "Não foi possível marcar o faturamento de todas as competências.",
+      );
+    });
   }
 
   if (success) {
@@ -568,6 +613,16 @@ function ApuracaoProjectCard({
             disabled={sendDisabled}
           >
             {alreadySent ? "Apuração Enviada" : "Enviar Apuração"}
+          </ActionButton>
+        ) : null}
+        {canSend ? (
+          <ActionButton
+            variant={invoiced ? "success" : "secondary"}
+            icon={invoiced ? CheckCircle2 : Receipt}
+            onClick={doMarcarFaturado}
+            disabled={isPending || !hasPeriod || !closed || invoiced}
+          >
+            {invoiced ? "Faturado" : "Marcar como Faturado"}
           </ActionButton>
         ) : null}
       </div>
