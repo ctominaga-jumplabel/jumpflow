@@ -102,6 +102,25 @@ function clockToData(input: ClockTimes) {
 }
 
 /**
+ * Horas extra do lançamento (melhoria hora extra): o excedente sobre o padrão
+ * de horas/dia do projeto (`Project.standardHoursPerDay`). Só se aplica a
+ * WORKDAY (Sobreaviso/ausência têm regra própria). Sem padrão configurado (NULL)
+ * o consultor lança livremente e nada é considerado extra (overtime = 0).
+ */
+function overtimeHoursFor(
+  standardHoursPerDay: unknown,
+  activityType: string,
+  hours: number,
+): number {
+  if (activityType !== "WORKDAY") return 0;
+  const std =
+    standardHoursPerDay == null ? null : Number(standardHoursPerDay);
+  if (std == null || Number.isNaN(std) || std <= 0) return 0;
+  const extra = hours - std;
+  return extra > 0 ? Math.round(extra * 100) / 100 : 0;
+}
+
+/**
  * Enforcement server-side do campo financeiro `billable` (CLAUDE.md: proteger
  * campo financeiro por papel). Gestão define livremente; um consultor puro NÃO
  * dita `billable` — o servidor IGNORA o payload e deriva pela regra de negócio
@@ -372,6 +391,12 @@ export async function createTimeEntry(
 
     const description = parsed.description.trim();
     const clock = clockToData(parsed);
+    // Hora extra: excedente sobre o padrão de horas/dia do projeto (WORKDAY).
+    const overtimeHours = overtimeHoursFor(
+      project.standardHoursPerDay,
+      parsed.activityType,
+      clock.hours,
+    );
     // Enforcement de campo financeiro por papel + P9: consultor puro não dita
     // billable; gestor que marca NÃO faturável precisa de justificativa.
     const billableDecision = resolveBillableDecision(
@@ -413,6 +438,7 @@ export async function createTimeEntry(
           where: { id: existing.id },
           data: {
             ...clock,
+            overtimeHours,
             description,
             billable,
             nonBillableReason: billableDecision.nonBillableReason,
@@ -432,6 +458,7 @@ export async function createTimeEntry(
             allocationId: allocation.id,
             date,
             ...clock,
+            overtimeHours,
             activityType: parsed.activityType,
             description,
             billable,
@@ -659,6 +686,7 @@ export async function updateTimeEntry(
       where: { id: parsed.id },
       include: {
         period: true,
+        project: { select: { standardHoursPerDay: true } },
         billableJustificationAttachment: {
           select: { storageKey: true, storageBucket: true },
         },
@@ -768,10 +796,19 @@ export async function updateTimeEntry(
       // (Rodada 4.3): status = SUBMITTED + new submittedAt. The new submittedAt
       // also resets the auto-approval delay for an already-submitted entry.
       const now = new Date();
+      const clock = clockToData(parsed);
+      // Hora extra: recalcula o excedente sobre o padrão do projeto (a atividade
+      // não muda no edit, então usa a do lançamento).
+      const overtimeHours = overtimeHoursFor(
+        entry.project?.standardHoursPerDay,
+        entry.activityType,
+        clock.hours,
+      );
       await tx.timeEntry.update({
         where: { id: entry.id },
         data: {
-          ...clockToData(parsed),
+          ...clock,
+          overtimeHours,
           description: parsed.description.trim(),
           billable: billableDecision.billable,
           nonBillableReason: billableDecision.nonBillableReason,
@@ -871,10 +908,16 @@ export async function deleteTimeEntry(
         "Esta semana já foi fechada e não aceita alterações.",
       );
     }
-    if (entry.status !== "DRAFT" && entry.status !== "REJECTED") {
+    if (
+      entry.status !== "DRAFT" &&
+      entry.status !== "REJECTED" &&
+      entry.status !== "SUBMITTED"
+    ) {
+      // APPROVED/CLOSED são terminais: não podem ser excluídos pelo consultor
+      // (espelha `updateTimeEntry` — se dá para editar/reenviar, dá para excluir).
       throw new ActionError(
         "NOT_EDITABLE",
-        "Apenas rascunhos ou lançamentos reprovados podem ser excluídos.",
+        "Lançamento aprovado ou fechado não pode ser excluído.",
       );
     }
     // Trava A: excluir horas de uma competência já liberada para o Financeiro

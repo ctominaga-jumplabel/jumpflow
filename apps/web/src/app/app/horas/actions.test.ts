@@ -1181,7 +1181,7 @@ describe("updateTimeEntry / deleteTimeEntry — editability", () => {
     expect(result).toMatchObject({ ok: false, error: "FORBIDDEN" });
   });
 
-  it("deletes only DRAFT/REJECTED entries", async () => {
+  it("deletes DRAFT/REJECTED/SUBMITTED but not APPROVED entries", async () => {
     seedCurrentPeriod();
     const draft = seedEntry();
     const submitted = seedEntry({
@@ -1189,13 +1189,23 @@ describe("updateTimeEntry / deleteTimeEntry — editability", () => {
       activityType: "MEETING",
       submittedAt: new Date(),
     });
+    const approved = seedEntry({
+      status: "APPROVED",
+      activityType: "ON_CALL",
+    });
 
-    expect(await deleteTimeEntry({ id: submitted.id })).toMatchObject({
+    // APPROVED é terminal: bloqueado (mesma regra do update).
+    expect(await deleteTimeEntry({ id: approved.id })).toMatchObject({
       ok: false,
       error: "NOT_EDITABLE",
     });
+    // SUBMITTED (pendente de aprovação) agora pode ser excluído — se dá para
+    // editar/reenviar, dá para excluir.
+    expect(await deleteTimeEntry({ id: submitted.id })).toMatchObject({
+      ok: true,
+    });
     expect(await deleteTimeEntry({ id: draft.id })).toMatchObject({ ok: true });
-    expect(h.store.entries.map((e) => e.id)).toEqual([submitted.id]);
+    expect(h.store.entries.map((e) => e.id)).toEqual([approved.id]);
   });
 });
 

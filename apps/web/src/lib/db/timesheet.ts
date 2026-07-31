@@ -485,6 +485,11 @@ export interface AllowedProject {
   name: string;
   clientId: string;
   clientName: string;
+  /**
+   * Horas padrão por dia do projeto (hora extra). `null` = sem padrão → nada é
+   * considerado extra. Campo operacional (não financeiro), seguro para o form.
+   */
+  standardHoursPerDay: number | null;
 }
 
 export interface TimesheetDefaultOption extends AllowedProject {
@@ -531,7 +536,11 @@ export async function listAllowedProjects(
     select: {
       projectId: true,
       project: {
-        select: { name: true, client: { select: { id: true, name: true } } },
+        select: {
+          name: true,
+          standardHoursPerDay: true,
+          client: { select: { id: true, name: true } },
+        },
       },
     },
   });
@@ -543,6 +552,10 @@ export async function listAllowedProjects(
       name: allocation.project.name,
       clientId: allocation.project.client.id,
       clientName: allocation.project.client.name,
+      standardHoursPerDay:
+        allocation.project.standardHoursPerDay == null
+          ? null
+          : Number(allocation.project.standardHoursPerDay),
     });
   }
   return [...byProject.values()].sort((a, b) =>
@@ -574,7 +587,11 @@ export async function listTimesheetDefaultOptions(
       id: true,
       projectId: true,
       project: {
-        select: { name: true, client: { select: { id: true, name: true } } },
+        select: {
+          name: true,
+          standardHoursPerDay: true,
+          client: { select: { id: true, name: true } },
+        },
       },
       timesheetDefault: {
         select: {
@@ -599,6 +616,10 @@ export async function listTimesheetDefaultOptions(
     name: allocation.project.name,
     clientId: allocation.project.client.id,
     clientName: allocation.project.client.name,
+    standardHoursPerDay:
+      allocation.project.standardHoursPerDay == null
+        ? null
+        : Number(allocation.project.standardHoursPerDay),
     defaultConfig: allocation.timesheetDefault
       ? {
           activityType: allocation.timesheetDefault.activityType,
