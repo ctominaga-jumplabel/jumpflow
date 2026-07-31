@@ -167,6 +167,8 @@ export default async function FinanceiroPage({
     if (filter.projectIds.length === 1) {
       timesheetQuery.set("projectId", filter.projectIds[0]);
     }
+    // `layout=client`: mesmo layout do print/anexo do e-mail (Contas a Receber).
+    timesheetQuery.set("layout", "client");
     timesheetExportHref = `/api/relatorios/horas/xlsx?${timesheetQuery.toString()}`;
 
     // Ver Apuração (tela da Wave C): preserva os filtros na query (projectIds

@@ -52,23 +52,30 @@ function weekdayPtBr(iso: string): string {
 }
 
 export interface ClientHoursXlsxOptions {
+  /**
+   * Quando false, as colunas monetárias ("Valor hora", "Valor faturado") são
+   * OMITIDAS (mesmo mascaramento por papel do `hoursXlsxColumns`). Preserva o
+   * RBAC quando este layout é usado por uma rota compartilhada (Exportar
+   * Timesheet). No anexo do e-mail o contexto é sempre financeiro → true.
+   */
+  includeFinancials: boolean;
   /** Resolve a status label (pt-BR). */
   statusLabel: (status: string) => string;
 }
 
 /**
- * Colunas do Excel de horas faturáveis ENVIADO AO CLIENTE (anexo do e-mail de
- * pré-fatura). Layout do print aprovado pelo cliente: Cliente, Projeto,
- * Faturável, Status, Atividade, Consultor, Data, Data (dia da semana), Horas,
- * Valor hora, Valor faturado. Difere do export interno de Relatórios
- * (`hoursXlsxColumns`), que carrega campos operacionais (Semana/Enviado em/
- * Decidido em) e mascara os monetários por papel. Aqui o contexto já é
- * financeiro (montado no envio da pré-fatura), então os valores sempre entram.
+ * Colunas do Excel de horas faturáveis no layout do CLIENTE (print aprovado):
+ * Cliente, Projeto, Faturável, Status, Atividade, Consultor, Data, Data (dia da
+ * semana), Horas, [Valor hora, Valor faturado]. Usado no anexo do e-mail de
+ * pré-fatura e no botão "Exportar Timesheet" (Contas a Receber). Difere do
+ * export interno de Relatórios (`hoursXlsxColumns`), que carrega campos
+ * operacionais (Semana/Enviado em/Decidido em). As colunas monetárias respeitam
+ * `includeFinancials` (mascaramento por papel), igual ao export interno.
  */
 export function clientHoursXlsxColumns(
   opts: ClientHoursXlsxOptions,
 ): XlsxColumn<HoursReportRow>[] {
-  return [
+  const base: XlsxColumn<HoursReportRow>[] = [
     { header: "Cliente", value: (r) => r.clientName, width: 22 },
     { header: "Projeto", value: (r) => r.projectName, width: 24 },
     {
@@ -82,6 +89,10 @@ export function clientHoursXlsxColumns(
     { header: "Data", value: (r) => formatDateBr(r.date), width: 12 },
     { header: "Data", value: (r) => weekdayPtBr(r.date), width: 12 },
     { header: "Horas", value: (r) => r.hours, numFmt: MONEY_FMT, width: 10 },
+  ];
+  if (!opts.includeFinancials) return base;
+  return [
+    ...base,
     {
       header: "Valor hora",
       value: (r) => r.billingRate ?? null,
