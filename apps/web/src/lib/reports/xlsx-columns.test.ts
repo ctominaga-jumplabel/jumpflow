@@ -69,9 +69,12 @@ describe("hoursXlsxColumns", () => {
   });
 });
 
-describe("clientHoursXlsxColumns (anexo do e-mail ao cliente)", () => {
+describe("clientHoursXlsxColumns (layout do print — e-mail + Exportar Timesheet)", () => {
   it("shapes the print layout: Cliente…Valor faturado, com data e dia da semana", () => {
-    const columns = clientHoursXlsxColumns({ statusLabel });
+    const columns = clientHoursXlsxColumns({
+      includeFinancials: true,
+      statusLabel,
+    });
     expect(columns.map((c) => c.header)).toEqual([
       "Cliente",
       "Projeto",
@@ -87,8 +90,31 @@ describe("clientHoursXlsxColumns (anexo do e-mail ao cliente)", () => {
     ]);
   });
 
+  it("omite as colunas monetárias quando não há financials (mascaramento por papel)", () => {
+    const headers = clientHoursXlsxColumns({
+      includeFinancials: false,
+      statusLabel,
+    }).map((c) => c.header);
+    expect(headers).not.toContain("Valor hora");
+    expect(headers).not.toContain("Valor faturado");
+    expect(headers).toEqual([
+      "Cliente",
+      "Projeto",
+      "Faturável",
+      "Status",
+      "Atividade",
+      "Consultor",
+      "Data",
+      "Data",
+      "Horas",
+    ]);
+  });
+
   it("formata a data (dd/mm/aaaa) e o dia da semana pt-BR, mantendo os valores", () => {
-    const columns = clientHoursXlsxColumns({ statusLabel });
+    const columns = clientHoursXlsxColumns({
+      includeFinancials: true,
+      statusLabel,
+    });
     // 2026-06-10 é uma quarta-feira (UTC, date-only).
     const [dataCol, weekdayCol] = columns.filter((c) => c.header === "Data");
     expect(dataCol.value(hourRow)).toBe("10/06/2026");

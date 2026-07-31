@@ -5,7 +5,10 @@ import {
   resolveDetailRange,
 } from "@/lib/reports/schemas";
 import { buildWorkbook, defineSheet, xlsxResponse } from "@/lib/export/xlsx";
-import { hoursXlsxColumns } from "@/lib/reports/xlsx-columns";
+import {
+  clientHoursXlsxColumns,
+  hoursXlsxColumns,
+} from "@/lib/reports/xlsx-columns";
 import { timeEntryStatusLabels } from "@/lib/timesheet/types";
 import {
   noDatabaseResponse,
@@ -25,7 +28,8 @@ export async function GET(request: Request) {
   const user = await requireUser();
   if (!isDatabaseConfigured()) return noDatabaseResponse();
 
-  const params = Object.fromEntries(new URL(request.url).searchParams);
+  const url = new URL(request.url);
+  const params = Object.fromEntries(url.searchParams);
   const parsed = hoursReportFilterSchema.safeParse(params);
   if (!parsed.success) return invalidInputResponse();
 
@@ -37,12 +41,24 @@ export async function GET(request: Request) {
   void _pageSize;
   const report = await getHoursReport(user, exportFilter);
 
-  const columns = hoursXlsxColumns({
-    includeFinancials: report.includeFinancials,
-    statusLabel: (status) =>
-      timeEntryStatusLabels[status as keyof typeof timeEntryStatusLabels] ??
-      status,
-  });
+  // `layout=client` (botão "Exportar Timesheet" de Contas a Receber): layout do
+  // print enviado ao cliente. Sem o param, o export interno de Relatórios/Horas
+  // mantém o layout operacional. Em ambos, o mascaramento monetário respeita o
+  // `includeFinancials` recomputado do usuário REAL (o hint do cliente nunca
+  // amplia o export).
+  const clientLayout = url.searchParams.get("layout") === "client";
+  const statusLabel = (status: string) =>
+    timeEntryStatusLabels[status as keyof typeof timeEntryStatusLabels] ??
+    status;
+  const columns = clientLayout
+    ? clientHoursXlsxColumns({
+        includeFinancials: report.includeFinancials,
+        statusLabel,
+      })
+    : hoursXlsxColumns({
+        includeFinancials: report.includeFinancials,
+        statusLabel,
+      });
 
   const range = resolveDetailRange(parsed.data, new Date());
   const slug = rangeSlug(range.from, range.to);

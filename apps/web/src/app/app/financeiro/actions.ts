@@ -1058,7 +1058,10 @@ async function buildProjectHoursAttachment(params: {
   // Anexo do e-mail ao cliente: layout do print (Cliente/Projeto/Faturável/
   // Status/Atividade/Consultor/Data/Data(dia da semana)/Horas/Valor hora/Valor
   // faturado), distinto do export interno de Relatórios (`hoursXlsxColumns`).
-  const columns = clientHoursXlsxColumns({ statusLabel: hoursStatusLabel });
+  const columns = clientHoursXlsxColumns({
+    includeFinancials: report.includeFinancials,
+    statusLabel: hoursStatusLabel,
+  });
 
   const buffer = await buildWorkbook([
     defineSheet({
