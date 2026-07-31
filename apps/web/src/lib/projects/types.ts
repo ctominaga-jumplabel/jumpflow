@@ -178,6 +178,11 @@ export interface ProjectItem {
    */
   billingAttachHours?: boolean;
   budgetHours?: number;
+  /**
+   * Horas padrão de lançamento por dia (referência de hora extra). Ausente/null
+   * = sem hora extra. Operacional (editado junto do projeto).
+   */
+  standardHoursPerDay?: number;
   costCenter?: string;
   commercialContractRef?: string;
   /** Condição de pagamento do cliente (comercial). Opcional. */
