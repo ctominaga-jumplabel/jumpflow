@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { hoursXlsxColumns, expensesXlsxColumns } from "./xlsx-columns";
+import {
+  clientHoursXlsxColumns,
+  hoursXlsxColumns,
+  expensesXlsxColumns,
+} from "./xlsx-columns";
 import type { HoursReportRow, ExpensesReportRow } from "./types";
 
 const hourRow: HoursReportRow = {
@@ -62,6 +66,40 @@ describe("hoursXlsxColumns", () => {
     const row = { ...hourRow, billingRate: null, billedAmount: null };
     expect(byHeader["Valor hora"].value(row)).toBeNull();
     expect(byHeader["Valor faturado"].value(row)).toBeNull();
+  });
+});
+
+describe("clientHoursXlsxColumns (anexo do e-mail ao cliente)", () => {
+  it("shapes the print layout: Cliente…Valor faturado, com data e dia da semana", () => {
+    const columns = clientHoursXlsxColumns({ statusLabel });
+    expect(columns.map((c) => c.header)).toEqual([
+      "Cliente",
+      "Projeto",
+      "Faturável",
+      "Status",
+      "Atividade",
+      "Consultor",
+      "Data",
+      "Data",
+      "Horas",
+      "Valor hora",
+      "Valor faturado",
+    ]);
+  });
+
+  it("formata a data (dd/mm/aaaa) e o dia da semana pt-BR, mantendo os valores", () => {
+    const columns = clientHoursXlsxColumns({ statusLabel });
+    // 2026-06-10 é uma quarta-feira (UTC, date-only).
+    const [dataCol, weekdayCol] = columns.filter((c) => c.header === "Data");
+    expect(dataCol.value(hourRow)).toBe("10/06/2026");
+    expect(weekdayCol.value(hourRow)).toBe("Quarta");
+    const byHeader = Object.fromEntries(columns.map((c) => [c.header, c]));
+    expect(byHeader["Faturável"].value(hourRow)).toBe("Sim");
+    expect(byHeader["Status"].value(hourRow)).toBe("Aprovado");
+    expect(byHeader["Valor faturado"].value(hourRow)).toBe(1600);
+    expect(
+      byHeader["Valor hora"].value({ ...hourRow, billingRate: null }),
+    ).toBeNull();
   });
 });
 
