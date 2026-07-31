@@ -164,6 +164,7 @@ const emptyProject: ProjectInput = {
   billingTypeId: undefined,
   billingHourlyRate: undefined,
   budgetHours: undefined,
+  standardHoursPerDay: undefined,
   costCenter: "",
   requiresAcceptanceTerm: false,
 };
@@ -182,6 +183,7 @@ function projectToInput(project: ProjectItem): ProjectInput {
     billingTypeId: project.billingTypeId,
     billingHourlyRate: project.billingHourlyRate,
     budgetHours: project.budgetHours,
+    standardHoursPerDay: project.standardHoursPerDay,
     costCenter: project.costCenter ?? "",
     requiresAcceptanceTerm: project.requiresAcceptanceTerm ?? false,
   };
@@ -1181,6 +1183,31 @@ function ProjectModal({
             }
             className={fieldClass()}
           />
+        </label>
+        <label className="space-y-1 text-sm font-medium text-medium">
+          Horas padrão por dia
+          <input
+            type="number"
+            min={0}
+            step="0.5"
+            inputMode="decimal"
+            placeholder="Sem hora extra"
+            value={value.standardHoursPerDay ?? ""}
+            onChange={(event) =>
+              onChange({
+                ...value,
+                standardHoursPerDay:
+                  event.target.value === ""
+                    ? undefined
+                    : Number(event.target.value),
+              })
+            }
+            className={fieldClass()}
+          />
+          <span className="block text-xs font-normal text-soft">
+            Referência de hora extra: horas lançadas no dia acima disso viram
+            hora extra. Vazio = sem hora extra.
+          </span>
         </label>
         <label className="space-y-1 text-sm font-medium text-medium md:col-span-2">
           Descrição

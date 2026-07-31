@@ -357,6 +357,9 @@ export async function listProjects(options?: {
       // Centro de custo é um dado operacional (não um valor financeiro
       // sensível), então é retornado a qualquer perfil que veja o projeto.
       costCenter: row.costCenter ?? undefined,
+      // Horas padrão por dia é operacional (referência de hora extra no
+      // lançamento), retornado a qualquer perfil que veja o projeto.
+      standardHoursPerDay: decimalToNumber(row.standardHoursPerDay) ?? undefined,
       commercialContractRef: row.commercialContractRef ?? undefined,
       // Tipo de pagamento é comercial (como billingType): mascarado por gate.
       paymentType: includeFinancials

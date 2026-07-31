@@ -77,6 +77,9 @@ export const projectInputSchema = z
     billingTypeId: optionalCuid,
     billingHourlyRate: optionalNumber,
     budgetHours: optionalNumber,
+    // Horas padrão de lançamento por dia (referência de hora extra). Ausente/""
+    // = sem hora extra. optionalNumber já converte ""→undefined e exige >= 0.
+    standardHoursPerDay: optionalNumber,
     costCenter: optionalText(80),
     // Flag INFORMATIVA de termo de aceite (operacional). Default false mantém a
     // chave opcional no tipo inferido; nunca bloqueia lançamento/faturamento.

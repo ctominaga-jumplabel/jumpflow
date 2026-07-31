@@ -185,6 +185,9 @@ function projectData(
     // Centro de custo é operacional (não é valor financeiro), gravado pela
     // Operação junto dos demais dados do projeto.
     costCenter: input.costCenter,
+    // Horas padrão de lançamento por dia (referência de hora extra). undefined
+    // (campo vazio) → null = sem hora extra. Operacional.
+    standardHoursPerDay: input.standardHoursPerDay ?? null,
     // Flag INFORMATIVA de termo de aceite (operacional). Não toca em
     // acceptanceTermAcceptedAt/By: a marcação de aceite é uma ação à parte.
     requiresAcceptanceTerm: input.requiresAcceptanceTerm ?? false,
