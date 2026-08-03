@@ -183,6 +183,11 @@ export interface ProjectItem {
    * = sem hora extra. Operacional (editado junto do projeto).
    */
   standardHoursPerDay?: number;
+  /**
+   * Fator de remuneração/cobrança da hora extra deste projeto (ex.: 1.5).
+   * Ausente/null = usa o padrão global. Operacional (editado junto do projeto).
+   */
+  overtimeMultiplier?: number;
   costCenter?: string;
   commercialContractRef?: string;
   /** Condição de pagamento do cliente (comercial). Opcional. */

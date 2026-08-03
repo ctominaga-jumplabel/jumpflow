@@ -360,6 +360,9 @@ export async function listProjects(options?: {
       // Horas padrão por dia é operacional (referência de hora extra no
       // lançamento), retornado a qualquer perfil que veja o projeto.
       standardHoursPerDay: decimalToNumber(row.standardHoursPerDay) ?? undefined,
+      // Fator de hora extra é operacional (como standardHoursPerDay), visível a
+      // qualquer perfil que veja o projeto.
+      overtimeMultiplier: decimalToNumber(row.overtimeMultiplier) ?? undefined,
       commercialContractRef: row.commercialContractRef ?? undefined,
       // Tipo de pagamento é comercial (como billingType): mascarado por gate.
       paymentType: includeFinancials

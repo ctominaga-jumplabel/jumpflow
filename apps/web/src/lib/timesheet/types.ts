@@ -21,6 +21,7 @@ export const ACTIVITY_TYPES = [
   "DAY_OFF",
   "PAID_ABSENCE",
   "ON_CALL",
+  "OVERTIME",
 ] as const;
 
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];
@@ -34,7 +35,22 @@ export const activityLabels: Record<ActivityType, string> = {
   DAY_OFF: "Folga",
   PAID_ABSENCE: "Ausência Remunerada",
   ON_CALL: "Sobreaviso",
+  OVERTIME: "Hora Extra",
 };
+
+/**
+ * Atividades que o consultor NÃO seleciona manualmente no formulário: são
+ * geradas pelo sistema. `OVERTIME` (Hora Extra) nasce automaticamente quando um
+ * `WORKDAY` excede o padrão de horas/dia do projeto — vira uma linha própria de
+ * lançamento (com fator de remuneração de hora extra) em vez de ser digitada.
+ * Continua sendo uma atividade válida para rótulos, filtros e a grade.
+ */
+export const SYSTEM_ACTIVITY_TYPES: readonly ActivityType[] = ["OVERTIME"];
+
+/** Whether a Hora Extra line is auto-generated (never edited/created by hand). */
+export function isSystemActivity(value: string): boolean {
+  return (SYSTEM_ACTIVITY_TYPES as readonly string[]).includes(value);
+}
 
 /**
  * Labels for legacy activity values that predate the 4.2 catalog. They are NOT
@@ -49,8 +65,16 @@ export const DEPRECATED_ACTIVITY_LABELS: Record<string, string> = {
   DOCS: "Documentação",
 };
 
-/** Activity options, in the order shown in the entry form. */
+/** Activity options for labels/filters, in catalog order. */
 export const activityOrder: ActivityType[] = [...ACTIVITY_TYPES];
+
+/**
+ * Activity options the consultant can pick in the entry form. Excludes system
+ * activities (Hora Extra), which are materialized automatically by the server.
+ */
+export const creatableActivityOrder: ActivityType[] = activityOrder.filter(
+  (activity) => !isSystemActivity(activity),
+);
 
 export function isActivityType(value: string): value is ActivityType {
   return (ACTIVITY_TYPES as readonly string[]).includes(value);
@@ -197,6 +221,9 @@ export function cloneWeek(week: TimesheetWeek): TimesheetWeek {
  * delay). APPROVED and CLOSED are terminal/locked and never editable here.
  */
 export function isRowEditable(row: TimeEntryRow): boolean {
+  // Linhas de sistema (Hora Extra) são derivadas do Dia Útil e nunca editadas
+  // diretamente: editar o Dia Útil recalcula a Hora Extra automaticamente.
+  if (isSystemActivity(row.activity)) return false;
   return (
     row.status === "DRAFT" ||
     row.status === "REJECTED" ||

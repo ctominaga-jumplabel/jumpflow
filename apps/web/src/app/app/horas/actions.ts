@@ -120,6 +120,130 @@ function overtimeHoursFor(
   return extra > 0 ? Math.round(extra * 100) / 100 : 0;
 }
 
+/** Atividade da linha automática de Hora Extra (catálogo em lib/timesheet/types). */
+const OVERTIME_ACTIVITY = "OVERTIME";
+/** Fator de remuneração/cobrança da hora extra quando o projeto não configura um. */
+const DEFAULT_OVERTIME_MULTIPLIER = 1.5;
+const OVERTIME_DESCRIPTION = "Hora extra (gerada automaticamente do Dia Útil)";
+
+/**
+ * Fator de remuneração da hora extra do projeto, com fallback global. NULL ou
+ * <= 0 → DEFAULT_OVERTIME_MULTIPLIER (1.5x). Um valor explícito (inclusive 1.0)
+ * é respeitado.
+ */
+function resolveOvertimeMultiplier(value: unknown): number {
+  const n = value == null ? null : Number(value);
+  if (n == null || Number.isNaN(n) || n <= 0) return DEFAULT_OVERTIME_MULTIPLIER;
+  return n;
+}
+
+/**
+ * Sincroniza a linha-irmã de Hora Extra (activityType OVERTIME) de um dia
+ * WORKDAY. A Hora Extra vira uma LINHA PRÓPRIA de lançamento (melhoria hora
+ * extra): o Dia Útil fica com o padrão de horas e o excedente vive nesta linha,
+ * com o fator de remuneração/cobrança de hora extra — que flui para receita e
+ * pagamento por `timeEntryEffectiveHours` (hours × multiplier), sem wiring novo.
+ *
+ * `overtimeHours <= 0` remove a linha órfã. Uma linha JÁ decidida (APPROVED/
+ * CLOSED) nunca é alterada aqui — o gestor já a tratou. Só é chamada para dias
+ * WORKDAY; a chave (consultant, project, OVERTIME, date) nunca colide com o Dia
+ * Útil nem com outras atividades.
+ */
+async function syncOvertimeSibling(
+  tx: Db,
+  params: {
+    consultantId: string;
+    projectId: string;
+    allocationId: string | null;
+    periodId: string;
+    date: Date;
+    overtimeHours: number;
+    overtimeMultiplier: number;
+    billable: boolean;
+    nonBillableReason: string | null;
+    submittedAt: Date;
+    dbUserId: string | null;
+  },
+): Promise<void> {
+  const existing = await tx.timeEntry.findFirst({
+    where: {
+      consultantId: params.consultantId,
+      projectId: params.projectId,
+      activityType: OVERTIME_ACTIVITY,
+      date: params.date,
+    },
+  });
+  const editable =
+    !existing ||
+    existing.status === "DRAFT" ||
+    existing.status === "REJECTED" ||
+    existing.status === "SUBMITTED";
+
+  // Sem excedente: remove a linha de Hora Extra órfã (se ainda editável).
+  if (params.overtimeHours <= 0) {
+    if (existing && editable) {
+      await tx.timeEntry.delete({ where: { id: existing.id } });
+      await tx.auditEvent.create({
+        data: buildAuditEventData({
+          actorUserId: params.dbUserId,
+          entityType: "TimeEntry",
+          entityId: existing.id,
+          action: "OVERTIME_ENTRY_REMOVED",
+          after: { date: params.date.toISOString().slice(0, 10) },
+        }),
+      });
+    }
+    return;
+  }
+
+  // Uma Hora Extra já aprovada/fechada não é mexida automaticamente.
+  if (existing && !editable) return;
+
+  const data = {
+    hours: params.overtimeHours,
+    multiplier: params.overtimeMultiplier,
+    billable: params.billable,
+    nonBillableReason: params.nonBillableReason,
+    allocationId: params.allocationId,
+    periodId: params.periodId,
+    status: "SUBMITTED" as const,
+    submittedAt: params.submittedAt,
+    // A Hora Extra não tem relógio próprio: o ponto vive no Dia Útil.
+    startTime: null,
+    breakStart: null,
+    breakEnd: null,
+    endTime: null,
+    overtimeHours: 0,
+    description: OVERTIME_DESCRIPTION,
+  };
+
+  const saved = existing
+    ? await tx.timeEntry.update({ where: { id: existing.id }, data })
+    : await tx.timeEntry.create({
+        data: {
+          ...data,
+          consultantId: params.consultantId,
+          projectId: params.projectId,
+          date: params.date,
+          activityType: OVERTIME_ACTIVITY,
+        },
+      });
+
+  await tx.auditEvent.create({
+    data: buildAuditEventData({
+      actorUserId: params.dbUserId,
+      entityType: "TimeEntry",
+      entityId: saved.id,
+      action: existing ? "OVERTIME_ENTRY_UPDATED" : "OVERTIME_ENTRY_CREATED",
+      after: {
+        entryId: saved.id,
+        hours: params.overtimeHours,
+        multiplier: params.overtimeMultiplier,
+      },
+    }),
+  });
+}
+
 /**
  * Enforcement server-side do campo financeiro `billable` (CLAUDE.md: proteger
  * campo financeiro por papel). Gestão define livremente; um consultor puro NÃO
@@ -392,11 +516,17 @@ export async function createTimeEntry(
     const description = parsed.description.trim();
     const clock = clockToData(parsed);
     // Hora extra: excedente sobre o padrão de horas/dia do projeto (WORKDAY).
+    // O Dia Útil fica com o padrão (regularHours) e o excedente vira uma LINHA
+    // PRÓPRIA (activityType OVERTIME) via syncOvertimeSibling.
     const overtimeHours = overtimeHoursFor(
       project.standardHoursPerDay,
       parsed.activityType,
       clock.hours,
     );
+    const overtimeMultiplier = resolveOvertimeMultiplier(
+      project.overtimeMultiplier,
+    );
+    const regularHours = Math.round((clock.hours - overtimeHours) * 100) / 100;
     // Enforcement de campo financeiro por papel + P9: consultor puro não dita
     // billable; gestor que marca NÃO faturável precisa de justificativa.
     const billableDecision = resolveBillableDecision(
@@ -438,7 +568,8 @@ export async function createTimeEntry(
           where: { id: existing.id },
           data: {
             ...clock,
-            overtimeHours,
+            hours: regularHours,
+            overtimeHours: 0,
             description,
             billable,
             nonBillableReason: billableDecision.nonBillableReason,
@@ -458,7 +589,8 @@ export async function createTimeEntry(
             allocationId: allocation.id,
             date,
             ...clock,
-            overtimeHours,
+            hours: regularHours,
+            overtimeHours: 0,
             activityType: parsed.activityType,
             description,
             billable,
@@ -467,6 +599,23 @@ export async function createTimeEntry(
             status: "SUBMITTED",
             submittedAt: now,
           },
+        });
+      }
+      // Hora Extra vira linha própria (só WORKDAY): materializa/atualiza/remove
+      // a linha-irmã OVERTIME com o excedente e o fator de hora extra.
+      if (parsed.activityType === "WORKDAY") {
+        await syncOvertimeSibling(tx, {
+          consultantId: consultant.id,
+          projectId: project.id,
+          allocationId: allocation.id,
+          periodId: period.id,
+          date,
+          overtimeHours,
+          overtimeMultiplier,
+          billable,
+          nonBillableReason: billableDecision.nonBillableReason,
+          submittedAt: now,
+          dbUserId: dbUser.id,
         });
       }
       await recomputePeriodStatus(tx, period.id);
@@ -550,6 +699,18 @@ export async function createWeeklyTimeEntries(
       parsed.nonBillableReason,
     );
     const billable = billableDecision.billable;
+    // Hora extra: o padrão semanal aplica horas uniformes; se excederem o padrão
+    // do projeto (WORKDAY), o Dia Útil fica no padrão e o excedente vira linha
+    // OVERTIME por dia criado.
+    const overtimeHours = overtimeHoursFor(
+      project.standardHoursPerDay,
+      parsed.activityType,
+      clock.hours,
+    );
+    const overtimeMultiplier = resolveOvertimeMultiplier(
+      project.overtimeMultiplier,
+    );
+    const regularHours = Math.round((clock.hours - overtimeHours) * 100) / 100;
 
     const result = await prisma.$transaction(async (tx) => {
       let period = await tx.timesheetPeriod.findUnique({
@@ -620,6 +781,8 @@ export async function createWeeklyTimeEntries(
             allocationId: allocation.id,
             date,
             ...clock,
+            hours: regularHours,
+            overtimeHours: 0,
             activityType: parsed.activityType,
             description,
             billable,
@@ -631,6 +794,21 @@ export async function createWeeklyTimeEntries(
         });
         existingDays.add(date.getTime());
         counts.created += 1;
+        if (parsed.activityType === "WORKDAY") {
+          await syncOvertimeSibling(tx, {
+            consultantId: consultant.id,
+            projectId: project.id,
+            allocationId: allocation.id,
+            periodId: period.id,
+            date,
+            overtimeHours,
+            overtimeMultiplier,
+            billable,
+            nonBillableReason: billableDecision.nonBillableReason,
+            submittedAt,
+            dbUserId: dbUser.id,
+          });
+        }
         await tx.auditEvent.create({
           data: buildAuditEventData({
             actorUserId: dbUser.id,
@@ -686,7 +864,9 @@ export async function updateTimeEntry(
       where: { id: parsed.id },
       include: {
         period: true,
-        project: { select: { standardHoursPerDay: true } },
+        project: {
+          select: { standardHoursPerDay: true, overtimeMultiplier: true },
+        },
         billableJustificationAttachment: {
           select: { storageKey: true, storageBucket: true },
         },
@@ -699,6 +879,14 @@ export async function updateTimeEntry(
       throw new ActionError(
         "FORBIDDEN",
         "Você só pode alterar os seus próprios lançamentos.",
+      );
+    }
+    // A linha de Hora Extra é derivada do Dia Útil e nunca editada diretamente:
+    // ajuste o Dia Útil e o excedente é recalculado. (Defesa; a UI já a bloqueia.)
+    if (entry.activityType === OVERTIME_ACTIVITY) {
+      throw new ActionError(
+        "NOT_EDITABLE",
+        "A Hora Extra é gerada automaticamente. Edite o Dia Útil para alterá-la.",
       );
     }
     if (entry.period.status === "CLOSED") {
@@ -798,17 +986,23 @@ export async function updateTimeEntry(
       const now = new Date();
       const clock = clockToData(parsed);
       // Hora extra: recalcula o excedente sobre o padrão do projeto (a atividade
-      // não muda no edit, então usa a do lançamento).
+      // não muda no edit, então usa a do lançamento). O Dia Útil fica com o
+      // padrão e o excedente vive na linha-irmã OVERTIME.
       const overtimeHours = overtimeHoursFor(
         entry.project?.standardHoursPerDay,
         entry.activityType,
         clock.hours,
       );
+      const overtimeMultiplier = resolveOvertimeMultiplier(
+        entry.project?.overtimeMultiplier,
+      );
+      const regularHours = Math.round((clock.hours - overtimeHours) * 100) / 100;
       await tx.timeEntry.update({
         where: { id: entry.id },
         data: {
           ...clock,
-          overtimeHours,
+          hours: regularHours,
+          overtimeHours: 0,
           description: parsed.description.trim(),
           billable: billableDecision.billable,
           nonBillableReason: billableDecision.nonBillableReason,
@@ -819,6 +1013,41 @@ export async function updateTimeEntry(
           submittedAt: now,
         },
       });
+      // Se a data mudou, a Hora Extra da data ANTIGA fica órfã: remove-a antes de
+      // sincronizar na data nova (só WORKDAY tem Hora Extra).
+      if (
+        entry.activityType === "WORKDAY" &&
+        date.getTime() !== entry.date.getTime()
+      ) {
+        await syncOvertimeSibling(tx, {
+          consultantId: consultant.id,
+          projectId: entry.projectId,
+          allocationId,
+          periodId: entry.periodId,
+          date: entry.date,
+          overtimeHours: 0,
+          overtimeMultiplier,
+          billable: billableDecision.billable,
+          nonBillableReason: billableDecision.nonBillableReason,
+          submittedAt: now,
+          dbUserId: dbUser.id,
+        });
+      }
+      if (entry.activityType === "WORKDAY") {
+        await syncOvertimeSibling(tx, {
+          consultantId: consultant.id,
+          projectId: entry.projectId,
+          allocationId,
+          periodId: entry.periodId,
+          date,
+          overtimeHours,
+          overtimeMultiplier,
+          billable: billableDecision.billable,
+          nonBillableReason: billableDecision.nonBillableReason,
+          submittedAt: now,
+          dbUserId: dbUser.id,
+        });
+      }
       await recomputePeriodStatus(tx, entry.periodId);
       await tx.auditEvent.create({
         data: buildAuditEventData({
@@ -926,6 +1155,19 @@ export async function deleteTimeEntry(
 
     await prisma.$transaction(async (tx) => {
       await tx.timeEntry.delete({ where: { id: entry.id } });
+      // Excluir o Dia Útil remove também a Hora Extra derivada dele (só linhas
+      // ainda editáveis; uma Hora Extra já aprovada/fechada é preservada).
+      if (entry.activityType === "WORKDAY") {
+        await tx.timeEntry.deleteMany({
+          where: {
+            consultantId: entry.consultantId,
+            projectId: entry.projectId,
+            activityType: OVERTIME_ACTIVITY,
+            date: entry.date,
+            status: { in: ["DRAFT", "REJECTED", "SUBMITTED"] },
+          },
+        });
+      }
       await recomputePeriodStatus(tx, entry.periodId);
     });
 
@@ -1075,7 +1317,14 @@ export async function applyTimesheetDefault(
     const allocation = await prisma.allocation.findFirst({
       where: { id: parsed.allocationId, consultantId: consultant.id, status: "ACTIVE" },
       include: {
-        project: { select: { id: true, status: true } },
+        project: {
+          select: {
+            id: true,
+            status: true,
+            standardHoursPerDay: true,
+            overtimeMultiplier: true,
+          },
+        },
         timesheetDefault: true,
       },
     });
@@ -1156,6 +1405,19 @@ export async function applyTimesheetDefault(
         // Trava A: um padrão semanal não materializa em competência liberada.
         await assertCompetenceBillingOpen(tx, allocation.projectId, date);
         const def = allocation.timesheetDefault!;
+        // Hora extra: o padrão pode aplicar mais horas/dia que o padrão do
+        // projeto; o Dia Útil fica no padrão e o excedente vira linha OVERTIME.
+        const defHours = Number(def.hoursPerDay);
+        const defBillable = resolveBillable(user, def.activityType, def.billable);
+        const overtimeHours = overtimeHoursFor(
+          allocation.project.standardHoursPerDay,
+          def.activityType,
+          defHours,
+        );
+        const overtimeMultiplier = resolveOvertimeMultiplier(
+          allocation.project.overtimeMultiplier,
+        );
+        const regularHours = Math.round((defHours - overtimeHours) * 100) / 100;
         const created = await tx.timeEntry.create({
           data: {
             periodId: period.id,
@@ -1163,7 +1425,8 @@ export async function applyTimesheetDefault(
             projectId: allocation.projectId,
             allocationId: allocation.id,
             date,
-            hours: def.hoursPerDay,
+            hours: regularHours,
+            overtimeHours: 0,
             startTime: def.startTime,
             breakStart: def.breakStart,
             breakEnd: def.breakEnd,
@@ -1173,13 +1436,28 @@ export async function applyTimesheetDefault(
             // Defesa-em-profundidade: mesmo que um default legado guarde
             // billable=false, um consultor puro aplicando-o gera lançamentos
             // faturáveis (ON_CALL nunca é padrão). Gestão aplica o que está no def.
-            billable: resolveBillable(user, def.activityType, def.billable),
+            billable: defBillable,
             status: "SUBMITTED",
             submittedAt,
           },
         });
         existingDays.add(date.getTime());
         counts.created += 1;
+        if (def.activityType === "WORKDAY") {
+          await syncOvertimeSibling(tx, {
+            consultantId: consultant.id,
+            projectId: allocation.projectId,
+            allocationId: allocation.id,
+            periodId: period.id,
+            date,
+            overtimeHours,
+            overtimeMultiplier,
+            billable: defBillable,
+            nonBillableReason: null,
+            submittedAt,
+            dbUserId: dbUser.id,
+          });
+        }
         await tx.auditEvent.create({
           data: buildAuditEventData({
             actorUserId: dbUser.id,

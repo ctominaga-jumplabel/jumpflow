@@ -80,6 +80,9 @@ export const projectInputSchema = z
     // Horas padrão de lançamento por dia (referência de hora extra). Ausente/""
     // = sem hora extra. optionalNumber já converte ""→undefined e exige >= 0.
     standardHoursPerDay: optionalNumber,
+    // Fator de remuneração/cobrança da hora extra (ex.: 1.5). Ausente/"" = usa o
+    // padrão global. optionalNumber converte ""→undefined e exige >= 0.
+    overtimeMultiplier: optionalNumber,
     costCenter: optionalText(80),
     // Flag INFORMATIVA de termo de aceite (operacional). Default false mantém a
     // chave opcional no tipo inferido; nunca bloqueia lançamento/faturamento.

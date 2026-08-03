@@ -1496,6 +1496,11 @@ model Project {
   /// Quando definido, o excedente diario (soma dos lancamentos do dia no projeto
   /// acima deste valor) e tratado como hora extra no lancamento de horas.
   standardHoursPerDay         Decimal?                     @db.Decimal(5, 2)
+  /// Fator de remuneracao/cobranca da hora extra deste projeto. Aplicado ao
+  /// lancamento OVERTIME (Hora Extra) gerado automaticamente quando o dia excede
+  /// standardHoursPerDay. NULL = usa o padrao global (DEFAULT_OVERTIME_MULTIPLIER,
+  /// 1.5x). Flui para receita/pagamento via timeEntryEffectiveHours (hours x fator).
+  overtimeMultiplier          Decimal?                     @db.Decimal(5, 2)
   /// Quando true, o consultor deve lancar em todo dia util e e cobrado semanalmente
   /// (motor MISSING_TIMESHEET_REPORT); quando false, sem cobranca, apenas indicador informativo.
   dailyEntryRequired          Boolean                      @default(true)

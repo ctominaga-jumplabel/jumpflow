@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
 import { focusRing, focusRingInput } from "@/lib/styles";
 import {
   activityLabels,
-  activityOrder,
+  creatableActivityOrder,
   type ActivityType,
   type TimeEntryAttachmentMeta,
   type WeekDay,
@@ -628,7 +628,7 @@ export function TimeEntryForm({
                 isEditing && "cursor-not-allowed opacity-70",
               )}
             >
-              {activityOrder.map((activity) => (
+              {creatableActivityOrder.map((activity) => (
                 <option key={activity} value={activity}>
                   {activityLabels[activity]}
                 </option>
