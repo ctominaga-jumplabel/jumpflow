@@ -1,6 +1,7 @@
 import { prisma } from "@jumpflow/database";
 import { isRoleName, type RoleName } from "@/lib/auth/roles";
 import type { AppUser } from "@/lib/auth/types";
+import { recordAuditEvent } from "@/lib/db/audit";
 
 /**
  * User persistence + persisted RBAC.
@@ -112,14 +113,65 @@ export async function ensureConsultantForUser(
 }
 
 /**
+ * Default access group granted to every authenticated Jump identity (SSO).
+ *
+ * Product rule: anyone who can sign in through the company SSO enters as a
+ * CONSULTANT — it is the baseline access everyone gets. Kept as a const so
+ * callers and tests share the same expectation.
+ */
+export const DEFAULT_ROLE = "CONSULTANT" as const satisfies RoleName;
+
+/**
+ * Idempotently grant the {@link DEFAULT_ROLE} to a user, returning whether the
+ * role is now in place. Used to provision baseline access for a first-time SSO
+ * login. Idempotent via the `UserRole` composite PK.
+ *
+ * Returns `false` (and logs) when the system role row is missing — i.e. the
+ * RBAC catalog was not seeded — so the caller neither claims the grant nor
+ * throws. Callers decide (via `status`/role checks) WHEN to call this; the
+ * helper only performs the grant.
+ *
+ * @param db Prisma client (or transaction) — keeps it testable.
+ */
+export async function ensureDefaultRoleForUser(
+  db: typeof prisma,
+  input: { userId: string },
+): Promise<boolean> {
+  const role = await db.role.findUnique({
+    where: { name: DEFAULT_ROLE },
+    select: { id: true },
+  });
+  if (!role) {
+    // RBAC catalog not seeded — cannot grant default access. Fail soft.
+    console.warn(
+      `[ensureDefaultRoleForUser] system role ${DEFAULT_ROLE} not found; cannot grant default access`,
+    );
+    return false;
+  }
+  await db.userRole.upsert({
+    where: { userId_roleId: { userId: input.userId, roleId: role.id } },
+    update: {},
+    create: { userId: input.userId, roleId: role.id },
+  });
+  return true;
+}
+
+/**
  * Idempotently sync the authenticated identity into the `User` table and
  * return the persisted user together with its roles. Email is the natural key
- * (unique). Existing rows have their display name refreshed; roles are NOT
- * granted here — role provisioning is a separate, audited admin action.
+ * (unique). Existing rows have their display name refreshed.
+ *
+ * Default access: an ACTIVE identity that has NO roles yet is granted the
+ * {@link DEFAULT_ROLE} (CONSULTANT) — the SSO baseline everyone gets. This runs
+ * ONLY when the role set is empty, so an admin who assigned any role (the access
+ * screen requires at least one) is never overridden, and an INACTIVE (revoked)
+ * user is never re-enabled. The grant is reflected in the returned roles so the
+ * current session gets access immediately, not only on the next login.
  *
  * As a side effect, every authenticated identity is guaranteed a `Consultant`
- * profile (see {@link ensureConsultantForUser}). That step is non-fatal: if it
- * fails, login still succeeds and the persisted user is returned.
+ * profile (see {@link ensureConsultantForUser}). Both side effects are
+ * non-fatal: if they fail, login still succeeds and the persisted user is
+ * returned (with whatever roles were resolved).
  */
 export async function syncUserFromAuth(
   input: SyncUserInput,
@@ -136,6 +188,35 @@ export async function syncUserFromAuth(
       consultant: { select: { id: true } },
     },
   });
+
+  let roles = mapPersistedRoles(user.roles);
+
+  // Default SSO access: a brand-new (roleless) ACTIVE identity enters as
+  // CONSULTANT. Non-fatal — a failure here must never break login, and
+  // getCurrentUser already fails closed on its own.
+  if (roles.length === 0 && user.status === "ACTIVE") {
+    try {
+      const granted = await ensureDefaultRoleForUser(prisma, {
+        userId: user.id,
+      });
+      if (granted) {
+        roles = [DEFAULT_ROLE];
+        await recordAuditEvent({
+          // The identity itself is the actor of its own first-login provisioning.
+          actorUserId: user.id,
+          entityType: "UserRole",
+          entityId: user.id,
+          action: "ROLE_GRANTED",
+          after: { role: DEFAULT_ROLE, reason: "DEFAULT_SSO_ACCESS" },
+        });
+      }
+    } catch (error) {
+      console.error(
+        `[syncUserFromAuth] failed to grant default role for ${user.email}`,
+        error,
+      );
+    }
+  }
 
   try {
     await ensureConsultantForUser(
@@ -155,7 +236,7 @@ export async function syncUserFromAuth(
     id: user.id,
     name: user.name,
     email: user.email,
-    roles: mapPersistedRoles(user.roles),
+    roles,
   };
 }
 
