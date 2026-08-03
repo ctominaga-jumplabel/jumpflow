@@ -5,6 +5,8 @@ const findUnique = vi.fn();
 const consultantFindUnique = vi.fn();
 const consultantUpdate = vi.fn();
 const consultantCreate = vi.fn();
+const roleFindUnique = vi.fn();
+const userRoleUpsert = vi.fn();
 
 // Mock the database package so no real Prisma client / connection is needed.
 vi.mock("@jumpflow/database", () => ({
@@ -18,12 +20,26 @@ vi.mock("@jumpflow/database", () => ({
       update: (...args: unknown[]) => consultantUpdate(...args),
       create: (...args: unknown[]) => consultantCreate(...args),
     },
+    role: {
+      findUnique: (...args: unknown[]) => roleFindUnique(...args),
+    },
+    userRole: {
+      upsert: (...args: unknown[]) => userRoleUpsert(...args),
+    },
   },
+}));
+
+// Auditing is a no-op without a configured database (recordAuditEvent guards on
+// isDatabaseConfigured); stub it so the grant path never touches Prisma.auditEvent.
+vi.mock("@/lib/db/audit", () => ({
+  recordAuditEvent: vi.fn(async () => {}),
 }));
 
 import {
   DEFAULT_CONSULTANT_SENIORITY,
+  DEFAULT_ROLE,
   ensureConsultantForUser,
+  ensureDefaultRoleForUser,
   loadUserRoles,
   mapPersistedRoles,
   syncUserFromAuth,
@@ -135,6 +151,94 @@ describe("syncUserFromAuth", () => {
     expect(consultantUpdate).not.toHaveBeenCalled();
   });
 
+  it("grants CONSULTANT to a brand-new ACTIVE user with no roles", async () => {
+    upsert.mockResolvedValue({
+      id: "u5",
+      name: "New Consultant",
+      email: "sso@x.com",
+      status: "ACTIVE",
+      roles: [],
+      consultant: null,
+    });
+    roleFindUnique.mockResolvedValue({ id: "role-consultant" });
+    userRoleUpsert.mockResolvedValue({});
+    consultantFindUnique.mockResolvedValue(null);
+    consultantCreate.mockResolvedValue({ id: "c5" });
+
+    const result = await syncUserFromAuth({
+      email: "sso@x.com",
+      name: "New Consultant",
+    });
+
+    expect(result.roles).toEqual([DEFAULT_ROLE]);
+    expect(roleFindUnique).toHaveBeenCalledWith({
+      where: { name: DEFAULT_ROLE },
+      select: { id: true },
+    });
+    expect(userRoleUpsert).toHaveBeenCalledWith({
+      where: { userId_roleId: { userId: "u5", roleId: "role-consultant" } },
+      update: {},
+      create: { userId: "u5", roleId: "role-consultant" },
+    });
+  });
+
+  it("does NOT override an existing role set (admin-assigned)", async () => {
+    upsert.mockResolvedValue({
+      id: "u6",
+      name: "Finance User",
+      email: "fin@x.com",
+      status: "ACTIVE",
+      roles: [{ role: { name: "FINANCE" } }],
+      consultant: { id: "c6" },
+    });
+
+    const result = await syncUserFromAuth({ email: "fin@x.com", name: "Finance User" });
+
+    expect(result.roles).toEqual(["FINANCE"]);
+    expect(roleFindUnique).not.toHaveBeenCalled();
+    expect(userRoleUpsert).not.toHaveBeenCalled();
+  });
+
+  it("does NOT grant a default role to an INACTIVE (revoked) user", async () => {
+    upsert.mockResolvedValue({
+      id: "u7",
+      name: "Revoked User",
+      email: "revoked@x.com",
+      status: "INACTIVE",
+      roles: [],
+      consultant: { id: "c7" },
+    });
+
+    const result = await syncUserFromAuth({ email: "revoked@x.com", name: "Revoked User" });
+
+    expect(result.roles).toEqual([]);
+    expect(roleFindUnique).not.toHaveBeenCalled();
+    expect(userRoleUpsert).not.toHaveBeenCalled();
+  });
+
+  it("does not break login when the default-role grant fails", async () => {
+    upsert.mockResolvedValue({
+      id: "u8",
+      name: "Flaky Grant",
+      email: "flakygrant@x.com",
+      status: "ACTIVE",
+      roles: [],
+      consultant: { id: "c8" },
+    });
+    roleFindUnique.mockRejectedValue(new Error("db down"));
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await syncUserFromAuth({
+      email: "flakygrant@x.com",
+      name: "Flaky Grant",
+    });
+
+    // Login still succeeds; the user just has no roles this round.
+    expect(result.roles).toEqual([]);
+    expect(errorSpy).toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
   it("does not break login when consultant provisioning fails", async () => {
     upsert.mockResolvedValue({
       id: "u4",
@@ -223,6 +327,40 @@ describe("ensureConsultantForUser", () => {
 
     expect(consultantUpdate).not.toHaveBeenCalled();
     expect(consultantCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("ensureDefaultRoleForUser", () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const roleDb: any = {
+    role: { findUnique: (...args: unknown[]) => roleFindUnique(...args) },
+    userRole: { upsert: (...args: unknown[]) => userRoleUpsert(...args) },
+  };
+
+  it("grants the default role via composite-PK upsert and returns true", async () => {
+    roleFindUnique.mockResolvedValue({ id: "role-consultant" });
+    userRoleUpsert.mockResolvedValue({});
+
+    const granted = await ensureDefaultRoleForUser(roleDb, { userId: "u1" });
+
+    expect(granted).toBe(true);
+    expect(userRoleUpsert).toHaveBeenCalledWith({
+      where: { userId_roleId: { userId: "u1", roleId: "role-consultant" } },
+      update: {},
+      create: { userId: "u1", roleId: "role-consultant" },
+    });
+  });
+
+  it("returns false and does not write when the system role is not seeded", async () => {
+    roleFindUnique.mockResolvedValue(null);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const granted = await ensureDefaultRoleForUser(roleDb, { userId: "u1" });
+
+    expect(granted).toBe(false);
+    expect(userRoleUpsert).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
   });
 });
 
