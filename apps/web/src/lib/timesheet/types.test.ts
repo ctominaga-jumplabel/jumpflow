@@ -4,8 +4,10 @@ import {
   activityLabelOf,
   activityLabels,
   activityOrder,
+  creatableActivityOrder,
   isActivityType,
   isRowEditable,
+  isSystemActivity,
   type TimeEntryRow,
   type TimeEntryStatus,
 } from "./types";
@@ -34,6 +36,7 @@ describe("activity catalog (Rodada 4.2)", () => {
       "DAY_OFF",
       "PAID_ABSENCE",
       "ON_CALL",
+      "OVERTIME",
     ]);
     expect(ACTIVITY_TYPES[0]).toBe("WORKDAY");
     expect(activityOrder).toEqual([...ACTIVITY_TYPES]);
@@ -48,6 +51,22 @@ describe("activity catalog (Rodada 4.2)", () => {
       "Aguardando início no projeto",
     );
     expect(activityLabels.ON_CALL).toBe("Sobreaviso");
+    expect(activityLabels.OVERTIME).toBe("Hora Extra");
+  });
+
+  it("Hora Extra is a system activity: labeled/filterable but not hand-created", () => {
+    // OVERTIME é gerada automaticamente do Dia Útil, então some do formulário
+    // (creatableActivityOrder) mas continua no catálogo para rótulos e filtros.
+    expect(isSystemActivity("OVERTIME")).toBe(true);
+    expect(isSystemActivity("WORKDAY")).toBe(false);
+    expect(activityOrder).toContain("OVERTIME");
+    expect(creatableActivityOrder).not.toContain("OVERTIME");
+    expect(creatableActivityOrder).toContain("WORKDAY");
+  });
+
+  it("a Hora Extra row is never editable in the grid (derived line)", () => {
+    const overtimeRow: TimeEntryRow = { ...row("DRAFT"), activity: "OVERTIME" };
+    expect(isRowEditable(overtimeRow)).toBe(false);
   });
 
   it("isActivityType validates only the canonical catalog", () => {

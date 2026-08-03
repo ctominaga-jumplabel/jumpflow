@@ -165,6 +165,7 @@ const emptyProject: ProjectInput = {
   billingHourlyRate: undefined,
   budgetHours: undefined,
   standardHoursPerDay: undefined,
+  overtimeMultiplier: undefined,
   costCenter: "",
   requiresAcceptanceTerm: false,
 };
@@ -184,6 +185,7 @@ function projectToInput(project: ProjectItem): ProjectInput {
     billingHourlyRate: project.billingHourlyRate,
     budgetHours: project.budgetHours,
     standardHoursPerDay: project.standardHoursPerDay,
+    overtimeMultiplier: project.overtimeMultiplier,
     costCenter: project.costCenter ?? "",
     requiresAcceptanceTerm: project.requiresAcceptanceTerm ?? false,
   };
@@ -1207,6 +1209,31 @@ function ProjectModal({
           <span className="block text-xs font-normal text-soft">
             Referência de hora extra: horas lançadas no dia acima disso viram
             hora extra. Vazio = sem hora extra.
+          </span>
+        </label>
+        <label className="space-y-1 text-sm font-medium text-medium">
+          Fator da hora extra
+          <input
+            type="number"
+            min={0}
+            step="0.1"
+            inputMode="decimal"
+            placeholder="Padrão 1,5×"
+            value={value.overtimeMultiplier ?? ""}
+            onChange={(event) =>
+              onChange({
+                ...value,
+                overtimeMultiplier:
+                  event.target.value === ""
+                    ? undefined
+                    : Number(event.target.value),
+              })
+            }
+            className={fieldClass()}
+          />
+          <span className="block text-xs font-normal text-soft">
+            Multiplicador de remuneração/cobrança da hora extra (ex.: 1,5).
+            Vazio = usa o padrão global (1,5×).
           </span>
         </label>
         <label className="space-y-1 text-sm font-medium text-medium md:col-span-2">

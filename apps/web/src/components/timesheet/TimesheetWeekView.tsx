@@ -83,7 +83,7 @@ import {
 import {
   activityLabelOf,
   activityLabels,
-  activityOrder,
+  creatableActivityOrder,
   type ActivityType,
 } from "@/lib/timesheet/types";
 import { focusRingInput } from "@/lib/styles";
@@ -1646,7 +1646,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
               }
               className={inputClass}
             >
-              {activityOrder.map((activity) => (
+              {creatableActivityOrder.map((activity) => (
                 <option key={activity} value={activity}>
                   {activityLabels[activity]}
                 </option>

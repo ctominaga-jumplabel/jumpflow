@@ -89,12 +89,15 @@ export async function collectAutoApprovalDecisions(
     return { skipped: true, reason: "disabled", evaluations: [] };
   }
 
-  // Sobreaviso (melhoria #2): ON_CALL SEMPRE exige aprovação humana — nunca é
-  // auto-aprovado. Excluímos esses lançamentos do motor na origem, então eles
-  // permanecem SUBMITTED na fila de aprovação manual (e não aparecem como
-  // candidatos no painel read-only de observabilidade).
+  // Sobreaviso (ON_CALL) e Hora Extra (OVERTIME) SEMPRE exigem aprovação humana
+  // — nunca são auto-aprovados. A Hora Extra carrega o comprovante de liberação
+  // do gestor, então o motor a exclui na origem: permanece SUBMITTED na fila
+  // manual (e não aparece como candidato no painel read-only de observabilidade).
   const submitted = await prisma.timeEntry.findMany({
-    where: { status: "SUBMITTED", activityType: { not: "ON_CALL" } },
+    where: {
+      status: "SUBMITTED",
+      activityType: { notIn: ["ON_CALL", "OVERTIME"] },
+    },
     select: {
       id: true,
       consultantId: true,

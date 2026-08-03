@@ -188,6 +188,10 @@ function projectData(
     // Horas padrão de lançamento por dia (referência de hora extra). undefined
     // (campo vazio) → null = sem hora extra. Operacional.
     standardHoursPerDay: input.standardHoursPerDay ?? null,
+    // Fator de remuneração/cobrança da hora extra deste projeto. undefined
+    // (campo vazio) → null = usa o padrão global (1.5x). Operacional, editado
+    // junto do padrão de horas/dia.
+    overtimeMultiplier: input.overtimeMultiplier ?? null,
     // Flag INFORMATIVA de termo de aceite (operacional). Não toca em
     // acceptanceTermAcceptedAt/By: a marcação de aceite é uma ação à parte.
     requiresAcceptanceTerm: input.requiresAcceptanceTerm ?? false,
