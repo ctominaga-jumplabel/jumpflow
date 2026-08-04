@@ -4,6 +4,14 @@
   "installCommand": "npm install",
   "buildCommand": "npm run db:generate && npm run build",
   "outputDirectory": "apps/web/.next",
+  "redirects": [
+    {
+      "source": "/:path*",
+      "has": [{ "type": "host", "value": ".*\\.vercel\\.app" }],
+      "destination": "https://flow.jump.tec.br/:path*",
+      "permanent": false
+    }
+  ],
   "crons": [
     { "path": "/api/jobs/auto-approval", "schedule": "0 10 * * *" },
     { "path": "/api/jobs/missing-timesheets", "schedule": "0 12 * * 1" },
