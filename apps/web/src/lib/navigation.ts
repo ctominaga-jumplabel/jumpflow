@@ -789,3 +789,21 @@ export function findActiveNav(pathname: string): NavItemDef | undefined {
   );
   return matches.sort((a, b) => b.href.length - a.href.length)[0];
 }
+
+/**
+ * Resolve the active menu href when the current location is a TAB of
+ * `/app/financeiro`. The finance dropdown has two entries on the exact same
+ * pathname that differ only by `?tab` — "Apuração" (`/app/financeiro`, default
+ * = Contas a Receber) and "Contas a Pagar" (`/app/financeiro?tab=pagar`).
+ * `findActiveNav` is pathname-only, so on `?tab=pagar` it would wrongly light up
+ * Apuração and never the Contas a Pagar entry. Returns the exact grouped-child
+ * href for a recognized tab, or `undefined` to fall back to the normal
+ * pathname match (receber / no tab → Apuração).
+ */
+export function resolveFinanceTabHref(
+  pathname: string,
+  tab: string | null | undefined,
+): string | undefined {
+  if (pathname !== "/app/financeiro") return undefined;
+  return tab === "pagar" ? "/app/financeiro?tab=pagar" : undefined;
+}
