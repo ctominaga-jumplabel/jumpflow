@@ -10,6 +10,7 @@ import {
   resolveFinanceTabHref,
 } from "@/lib/navigation";
 import { DISABLED_MODULE_CODES } from "@/lib/modules/disabled-modules";
+import { appConfig } from "@/config/app";
 
 describe("findActiveNav", () => {
   it("matches an exact route", () => {
@@ -39,8 +40,14 @@ describe("findActiveNav", () => {
   it("exposes one entry per operational module", () => {
     expect(primaryNavigation.length).toBeGreaterThanOrEqual(8);
     for (const item of primaryNavigation) {
-      // Every item lives under /app (the launcher is exactly "/app").
-      expect(item.href === "/app" || item.href.startsWith("/app/")).toBe(true);
+      if (item.external) {
+        // External portals (e.g. JumpAcademy) carry an absolute URL, not a
+        // route under /app.
+        expect(item.href).toMatch(/^https?:\/\//);
+      } else {
+        // Every internal item lives under /app (the launcher is exactly "/app").
+        expect(item.href === "/app" || item.href.startsWith("/app/")).toBe(true);
+      }
     }
   });
 
@@ -95,14 +102,17 @@ describe("disabled modules (EP-M07)", () => {
   });
 });
 
-describe("JumpAcademy rename (EP-M09)", () => {
-  it("labels the learning module JumpAcademy while keeping route + code", () => {
+describe("JumpAcademy external portal (EP-M09 / PR #36)", () => {
+  it("exposes JumpAcademy as an external portal entry gated by UNIVERSIDADE", () => {
     const academy = primaryNavigation.find(
-      (i) => i.href === "/app/universidade",
+      (i) => i.permissionCode === "UNIVERSIDADE",
     );
     expect(academy?.label).toBe("JumpAcademy");
-    expect(academy?.permissionCode).toBe("UNIVERSIDADE");
-    expect(academy?.description).not.toMatch(/Universidade/);
+    // Portal externo (app separado): abre em nova aba com URL absoluta de config,
+    // não mais a rota interna legada /app/universidade.
+    expect(academy?.external).toBe(true);
+    expect(academy?.href).toBe(appConfig.academyUrl);
+    expect(academy?.href).not.toBe("/app/universidade");
   });
 });
 
