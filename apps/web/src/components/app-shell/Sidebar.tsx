@@ -1,6 +1,6 @@
 "use client";
 
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { appConfig } from "@/config/app";
@@ -13,6 +13,7 @@ import {
   hasFinanceGroupedNav,
   isFinanceGroupedHref,
   primaryNavigation,
+  resolveFinanceTabHref,
   visibleFinanceGroups,
 } from "@/lib/navigation";
 import type { RoleName } from "@/lib/auth/roles";
@@ -62,7 +63,14 @@ export function Sidebar({
   className,
 }: SidebarProps) {
   const pathname = usePathname();
-  const activeHref = findActiveNav(pathname)?.href;
+  const searchParams = useSearchParams();
+  // The finance dropdown has two entries on the exact same pathname
+  // (/app/financeiro) that differ only by `?tab` — Apuração (receber) and
+  // Contas a Pagar (?tab=pagar). `findActiveNav` is pathname-only, so it would
+  // always light up Apuração; prefer the exact tab href when present.
+  const activeHref =
+    resolveFinanceTabHref(pathname, searchParams.get("tab")) ??
+    findActiveNav(pathname)?.href;
   const viewable = new Set(viewableNavCodes);
   // Items WITH a permissionCode are gated solely by the matrix (so admins can
   // grant/revoke menu visibility from the Matriz de Permissões). Items WITHOUT

@@ -7,6 +7,7 @@ import {
   findActiveNav,
   navPermissionCodes,
   primaryNavigation,
+  resolveFinanceTabHref,
 } from "@/lib/navigation";
 import { DISABLED_MODULE_CODES } from "@/lib/modules/disabled-modules";
 
@@ -47,6 +48,26 @@ describe("findActiveNav", () => {
     expect(findActiveNav("/app/admin/acessos")?.href).toBe(
       "/app/admin/acessos",
     );
+  });
+});
+
+describe("resolveFinanceTabHref (aba do Financeiro no menu)", () => {
+  it("marks Contas a Pagar when on ?tab=pagar", () => {
+    expect(resolveFinanceTabHref("/app/financeiro", "pagar")).toBe(
+      "/app/financeiro?tab=pagar",
+    );
+  });
+
+  it("falls back (Apuração) for receber / no tab", () => {
+    expect(resolveFinanceTabHref("/app/financeiro", "receber")).toBeUndefined();
+    expect(resolveFinanceTabHref("/app/financeiro", null)).toBeUndefined();
+    expect(resolveFinanceTabHref("/app/financeiro", undefined)).toBeUndefined();
+  });
+
+  it("only applies to the /app/financeiro pathname", () => {
+    // Sibling routes (Cobrança, Status de Faturamento) resolve by pathname.
+    expect(resolveFinanceTabHref("/app/financeiro/projetos", "pagar")).toBeUndefined();
+    expect(resolveFinanceTabHref("/app/despesas", "pagar")).toBeUndefined();
   });
 });
 
