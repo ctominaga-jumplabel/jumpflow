@@ -23,6 +23,7 @@ import { getReceiptUrl, setPayment } from "@/app/app/despesas/actions";
 import { expenses as mockExpenses } from "@/lib/mock-data/expenses";
 import { summarizeExpenses, type Expense } from "@/lib/expenses/types";
 import { ExpenseStatusBadge } from "@/components/expenses/ExpenseStatusBadge";
+import { ExpenseBankInfoInline } from "@/components/expenses/ExpenseBankInfoInline";
 
 const thClass =
   "px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-soft";
@@ -299,8 +300,11 @@ export function ExpensesFinancePanel(props: ExpensesFinancePanelProps) {
                       </p>
                       <p className="text-xs text-soft">{expense.clientName}</p>
                     </td>
-                    <td className="px-4 py-3 align-middle text-medium">
-                      {expense.consultantName}
+                    <td className="px-4 py-3 align-top text-medium">
+                      <p>{expense.consultantName}</p>
+                      {!isDemo ? (
+                        <ExpenseBankInfoInline info={expense.bankInfo} />
+                      ) : null}
                     </td>
                     <td className="px-4 py-3 text-right align-middle font-semibold tabular-nums text-strong">
                       {formatCurrency(expense.amount)}

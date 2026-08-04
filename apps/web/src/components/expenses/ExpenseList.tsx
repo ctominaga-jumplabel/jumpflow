@@ -1,8 +1,9 @@
 "use client";
 
-import { Paperclip, Pencil, Receipt, Send, Trash2 } from "lucide-react";
+import { Download, Paperclip, Pencil, Receipt, Send, Trash2 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { SectionPanel } from "@/components/ui/SectionPanel";
+import { ActionButton } from "@/components/ui/ActionButton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { cn } from "@/lib/utils";
 import { focusRing } from "@/lib/styles";
@@ -30,6 +31,20 @@ export interface ExpenseListProps {
   onSubmitExpense?: (expense: Expense) => void;
   /** Disable row actions while a server action is in flight. */
   busy?: boolean;
+  /**
+   * Habilita a seleção múltipla de comprovantes (checkbox por linha) para
+   * download em massa (ZIP). Só faz sentido com banco + storage. Quando ligado,
+   * o estado de seleção é controlado pelo pai (ExpensesView).
+   */
+  selectionEnabled?: boolean;
+  /** Ids selecionados (controlado). */
+  selectedIds?: string[];
+  /** Alterna a seleção de uma linha. */
+  onToggleSelected?: (id: string) => void;
+  /** Alterna todas as linhas com comprovante. */
+  onToggleAllSelected?: () => void;
+  /** Dispara o download em massa dos comprovantes selecionados. */
+  onDownloadSelected?: () => void;
 }
 
 function RowAction({
@@ -73,13 +88,40 @@ export function ExpenseList({
   onDelete,
   onSubmitExpense,
   busy = false,
+  selectionEnabled = false,
+  selectedIds,
+  onToggleSelected,
+  onToggleAllSelected,
+  onDownloadSelected,
 }: ExpenseListProps) {
   const hasActions = Boolean(onEdit || onDelete || onSubmitExpense);
+
+  // Seleção para download em massa dos comprovantes (só linhas com anexo).
+  const selectedSet = new Set(selectedIds ?? []);
+  const selectableIds = expenses
+    .filter((e) => e.attachment)
+    .map((e) => e.id);
+  const selectedWithReceipt = selectableIds.filter((id) => selectedSet.has(id));
+  const allSelected =
+    selectableIds.length > 0 && selectableIds.every((id) => selectedSet.has(id));
 
   return (
     <SectionPanel
       title="Despesas"
       description="Lançamentos por projeto, da aprovação ao pagamento."
+      action={
+        selectionEnabled ? (
+          <ActionButton
+            variant="secondary"
+            size="sm"
+            icon={Download}
+            disabled={busy || selectedWithReceipt.length === 0}
+            onClick={() => onDownloadSelected?.()}
+          >
+            Baixar comprovantes ({selectedWithReceipt.length})
+          </ActionButton>
+        ) : undefined
+      }
     >
       {expenses.length === 0 ? (
         <div className="px-5 py-10">
@@ -95,6 +137,18 @@ export function ExpenseList({
             <caption className="sr-only">Lista de despesas</caption>
             <thead>
               <tr className="border-b border-border">
+                {selectionEnabled ? (
+                  <th scope="col" className={cn(thClass, "w-10")}>
+                    <input
+                      type="checkbox"
+                      aria-label="Selecionar todos com comprovante"
+                      checked={allSelected}
+                      onChange={() => onToggleAllSelected?.()}
+                      disabled={selectableIds.length === 0}
+                      className="size-4 rounded border-border text-brand focus:ring-brand disabled:opacity-40"
+                    />
+                  </th>
+                ) : null}
                 <th scope="col" className={thClass}>
                   Data
                 </th>
@@ -134,6 +188,18 @@ export function ExpenseList({
                     key={expense.id}
                     className="transition-colors hover:bg-surface-muted/60"
                   >
+                    {selectionEnabled ? (
+                      <td className="px-4 py-3 align-middle">
+                        <input
+                          type="checkbox"
+                          aria-label={`Selecionar comprovante de ${expense.description}`}
+                          checked={selectedSet.has(expense.id)}
+                          onChange={() => onToggleSelected?.(expense.id)}
+                          disabled={!expense.attachment}
+                          className="size-4 rounded border-border text-brand focus:ring-brand disabled:opacity-40"
+                        />
+                      </td>
+                    ) : null}
                     <td className="px-4 py-3 align-middle tabular-nums text-medium">
                       {formatDate(expense.date)}
                     </td>

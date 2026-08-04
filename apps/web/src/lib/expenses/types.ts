@@ -146,6 +146,27 @@ export interface ExpenseAttachmentMeta {
   size: number;
 }
 
+/**
+ * Dados bancários do consultor para o Financeiro pagar o reembolso. SENSÍVEL:
+ * só é populado nas leituras financeiras (painel de pagamento e etapa de
+ * aprovação do financeiro) — nunca nas visões do próprio consultor. Resolve a
+ * conta de pagamento (PJ preferida, senão PRIMARY) via `buildExpenseBankInfo`.
+ */
+export interface ExpenseBankInfo {
+  /** Nome do banco da conta de pagamento. */
+  bankName?: string;
+  /** Agência. */
+  agency?: string;
+  /** Conta (número + dígito). */
+  account?: string;
+  /** Chave PIX de pagamento. */
+  pixKey?: string;
+  /** CNPJ (preferido) ou CPF do recebedor. */
+  document?: string;
+  /** Tipo da conta escolhida (PJ/PRIMARY/CLT). */
+  accountKind?: "CLT" | "PJ" | "PRIMARY";
+}
+
 /** UI shape of an expense (db rows and demo items share it). */
 export interface Expense {
   id: string;
@@ -173,6 +194,11 @@ export interface Expense {
   distanceKm?: number;
   valuePerKm?: number;
   attachment?: ExpenseAttachmentMeta;
+  /**
+   * Dados bancários do consultor (para o Financeiro pagar o reembolso). Só
+   * presente nas leituras financeiras — ausente nas visões do consultor.
+   */
+  bankInfo?: ExpenseBankInfo;
   status: ExpenseStatus;
   /** ISO datetime when submitted for approval, when applicable. */
   submittedAt?: string;

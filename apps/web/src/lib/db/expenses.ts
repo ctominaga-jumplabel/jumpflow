@@ -11,6 +11,7 @@ import type {
   ExpenseTotals,
 } from "@/lib/expenses/types";
 import { isExpenseRejected, summarizeExpenses } from "@/lib/expenses/types";
+import { buildExpenseBankInfo } from "@/lib/expenses/bank";
 import type { ApprovalItem, ApprovalStage } from "@/lib/mock-data/approvals";
 import { getStorageProvider, isStorageConfigured } from "@/lib/storage/provider";
 import { parseIsoDateUtc, toIsoDate } from "@/lib/timesheet/week";
@@ -88,6 +89,76 @@ const expenseSelect = {
   project: { select: { name: true, client: { select: { name: true } } } },
   attachment: { select: { fileName: true, contentType: true, size: true } },
 } as const;
+
+/**
+ * Select do consultor com dados bancários + documentos (CNPJ/CPF) para as
+ * leituras FINANCEIRAS (painel de pagamento e etapa de aprovação do
+ * financeiro). Só contas ATIVAS. Sensível — nunca usar em leituras do próprio
+ * consultor.
+ */
+const consultantFinanceSelect = {
+  name: true,
+  bankAccounts: {
+    where: { active: true },
+    select: {
+      kind: true,
+      bankName: true,
+      bankCode: true,
+      agency: true,
+      accountNumber: true,
+      accountDigit: true,
+      pixKey: true,
+    },
+  },
+  companyInfo: { select: { cnpj: true } },
+  personalInfo: { select: { cpf: true } },
+} as const;
+
+/** `expenseSelect` + consultor com dados bancários (visões financeiras). */
+const financeExpenseSelect = {
+  ...expenseSelect,
+  consultant: { select: consultantFinanceSelect },
+} as const;
+
+/**
+ * Consultor com os campos do `financeExpenseSelect`. Os relacionamentos são
+ * opcionais para o tipo aceitar também linhas lidas com o `expenseSelect` enxuto
+ * (etapa do gestor) — nesse caso não há dados bancários e o resultado é
+ * `undefined`, sem nunca acessar PII ausente.
+ */
+interface FinanceConsultant {
+  name: string;
+  bankAccounts?: Array<{
+    kind: string;
+    bankName: string | null;
+    bankCode: string | null;
+    agency: string | null;
+    accountNumber: string | null;
+    accountDigit: string | null;
+    pixKey: string | null;
+  }>;
+  companyInfo?: { cnpj: string | null } | null;
+  personalInfo?: { cpf: string | null } | null;
+}
+
+/** Resolve o `bankInfo` (conta de pagamento + documento) do consultor. */
+function bankInfoFromConsultant(consultant: FinanceConsultant) {
+  return buildExpenseBankInfo(
+    (consultant.bankAccounts ?? []).map((a) => ({
+      kind: a.kind as "CLT" | "PJ" | "PRIMARY",
+      bankName: a.bankName,
+      bankCode: a.bankCode,
+      agency: a.agency,
+      accountNumber: a.accountNumber,
+      accountDigit: a.accountDigit,
+      pixKey: a.pixKey,
+    })),
+    {
+      cnpj: consultant.companyInfo?.cnpj ?? null,
+      cpf: consultant.personalInfo?.cpf ?? null,
+    },
+  );
+}
 
 /** Decimal (Prisma) → number, preservando null/undefined como undefined. */
 function toNum(value: unknown): number | undefined {
@@ -278,13 +349,21 @@ export async function listExpenseApprovalItems(
     pendingFilters.push({ status: "MANAGER_APPROVED" });
   }
 
-  const pendingRows = pendingFilters.length
-    ? await prisma.expense.findMany({
-        where: { OR: pendingFilters },
-        select: expenseSelect,
-        orderBy: { submittedAt: "asc" },
-      })
-    : [];
+  // Só busca os dados bancários (PII) quando a etapa FINANCE está no escopo —
+  // um gestor de projeto (só etapa do gestor) nunca traz banco/CNPJ/CPF do banco.
+  const pendingRows = !pendingFilters.length
+    ? []
+    : scope.includeFinanceStage
+      ? await prisma.expense.findMany({
+          where: { OR: pendingFilters },
+          select: financeExpenseSelect,
+          orderBy: { submittedAt: "asc" },
+        })
+      : await prisma.expense.findMany({
+          where: { OR: pendingFilters },
+          select: expenseSelect,
+          orderBy: { submittedAt: "asc" },
+        });
 
   const pending: ApprovalItem[] = pendingRows.map((row) => ({
     id: `db-exp-pending-${row.id}`,
@@ -292,6 +371,11 @@ export async function listExpenseApprovalItems(
     source: "db",
     expenseId: row.id,
     stage: row.status === "SUBMITTED" ? "MANAGER" : "FINANCE",
+    // Dados bancários só na etapa FINANCE (MANAGER_APPROVED) — o gestor não os vê.
+    bankInfo:
+      row.status === "MANAGER_APPROVED"
+        ? bankInfoFromConsultant(row.consultant)
+        : undefined,
     consultantName: row.consultant.name,
     projectName: row.project.name,
     clientName: row.project.client.name,
@@ -400,10 +484,14 @@ export async function listFinanceExpenses(): Promise<FinanceExpenses> {
     where: {
       status: { in: ["FINANCE_APPROVED", "PAYMENT_SCHEDULED", "PAID"] },
     },
-    select: expenseSelect,
+    select: financeExpenseSelect,
     orderBy: [{ date: "desc" }, { createdAt: "desc" }],
   });
-  const expenses = rows.map((row) => toUiExpense(row));
+  const expenses = rows.map((row) => ({
+    ...toUiExpense(row),
+    // Dados bancários para o Financeiro pagar o reembolso (visão protegida).
+    bankInfo: bankInfoFromConsultant(row.consultant),
+  }));
   return { expenses, totals: summarizeExpenses(expenses) };
 }
 
@@ -419,18 +507,41 @@ export interface BulkReceiptRow {
 }
 
 /**
- * Receipt metadata for a set of expense ids, for the finance bulk ZIP download
- * (P17). Only rows that actually have an attachment are returned. RBAC is
- * enforced at the route (FINANCIAL_ROLES) — finance may open any receipt, so no
- * per-row owner check is needed here (mirrors getReceiptSignedUrl's privileged
- * branch). Never exposes project financial fields.
+ * Owner scope for the bulk receipt download when the caller is NOT privileged
+ * (finance). Restricts to the caller's own expenses — by DB user id, or by the
+ * consultant email in dev-auth (mirrors `getReceiptSignedUrl`'s owner branch).
+ */
+export interface ReceiptOwnerScope {
+  ownerUserId?: string;
+  ownerEmail?: string;
+}
+
+/**
+ * Receipt metadata for a set of expense ids, for the bulk ZIP download (P17).
+ * Only rows that actually have an attachment are returned. Never exposes project
+ * financial fields.
+ *
+ * RBAC: finance (FINANCIAL_ROLES) may pull ANY receipt, so the route calls this
+ * with no scope. A non-finance owner may pull ONLY their own receipts — the
+ * route passes a `ReceiptOwnerScope` and this query filters by it, so a
+ * consultant can never enumerate someone else's receipts by id.
  */
 export async function listReceiptsByIds(
   expenseIds: string[],
+  scope: ReceiptOwnerScope = {},
 ): Promise<BulkReceiptRow[]> {
   if (expenseIds.length === 0) return [];
+  const ownerWhere = scope.ownerUserId
+    ? { consultant: { userId: scope.ownerUserId } }
+    : scope.ownerEmail
+      ? {
+          consultant: {
+            email: { equals: scope.ownerEmail, mode: "insensitive" as const },
+          },
+        }
+      : {};
   const rows = await prisma.expense.findMany({
-    where: { id: { in: expenseIds }, attachment: { isNot: null } },
+    where: { id: { in: expenseIds }, attachment: { isNot: null }, ...ownerWhere },
     select: {
       id: true,
       date: true,
