@@ -81,6 +81,11 @@ export interface ApprovalItem {
   expenseId?: string;
   /** Approval stage of an EXPENSE item ("Gestor" or "Financeiro"). */
   stage?: ApprovalStage;
+  /**
+   * Dados bancários do consultor — presente APENAS em itens EXPENSE na etapa
+   * FINANCE (para o Financeiro decidir/pagar). Ausente na etapa do gestor.
+   */
+  bankInfo?: import("@/lib/expenses/types").ExpenseBankInfo;
   consultantName: string;
   projectName: string;
   clientName: string;

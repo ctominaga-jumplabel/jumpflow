@@ -1,9 +1,11 @@
 import JSZip from "jszip";
-import { requireRole } from "@/lib/auth/guards";
-import { FINANCIAL_ROLES } from "@/lib/auth/route-permissions";
+import { requireUser } from "@/lib/auth/guards";
+import { isDevAuthEnabled } from "@/lib/auth/dev";
+import { FINANCIAL_ROLES, hasRole } from "@/lib/auth/route-permissions";
 import { recordAuditEvent } from "@/lib/db/audit";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { resolveDbUser } from "@/lib/db/users";
+import type { ReceiptOwnerScope } from "@/lib/db/expenses";
 import {
   EXPENSE_RECEIPTS_BUCKET,
   getStorageProvider,
@@ -13,11 +15,14 @@ import {
 export const dynamic = "force-dynamic";
 
 /**
- * P17 (Onda 3): download em massa de comprovantes para o Financeiro. Recebe os
- * ids das despesas selecionadas (?ids=a,b,c), busca cada anexo do storage e
- * monta um ZIP. RBAC por FINANCIAL_ROLES; degrada honesto com NO_STORAGE quando
- * o storage não está configurado. Cada arquivo é nomeado por data-consultor-
- * descrição para leitura clara. O download em massa é auditado.
+ * P17 (Onda 3): download em massa de comprovantes. Recebe os ids das despesas
+ * selecionadas (?ids=a,b,c), busca cada anexo do storage e monta um ZIP.
+ * RBAC: o Financeiro (FINANCIAL_ROLES) baixa QUALQUER comprovante; qualquer
+ * usuário autenticado pode baixar os PRÓPRIOS comprovantes em massa (na tela
+ * Despesas) — nesse caso a busca é escopada ao dono, então ninguém enumera
+ * comprovante alheio por id. Degrada honesto com NO_STORAGE quando o storage não
+ * está configurado. Cada arquivo é nomeado por data-consultor-descrição para
+ * leitura clara. O download em massa é auditado.
  */
 function jsonError(code: string, message: string, status: number): Response {
   return new Response(JSON.stringify({ ok: false, error: code, message }), {
@@ -43,9 +48,9 @@ function extensionOf(fileName: string): string {
 }
 
 export async function GET(request: Request) {
-  // RBAC: apenas papéis financeiros. requireRole redireciona (não-JSON) em
-  // ausência de sessão/role — coerente com o restante das rotas protegidas.
-  const user = await requireRole(FINANCIAL_ROLES);
+  // Autenticação obrigatória. O ESCOPO (todos vs. só os próprios) é resolvido
+  // abaixo pelo papel — o Financeiro baixa qualquer um; os demais, só os seus.
+  const user = await requireUser();
   if (!isDatabaseConfigured()) {
     return jsonError("NO_DATABASE", "Banco de dados não configurado.", 503);
   }
@@ -55,6 +60,25 @@ export async function GET(request: Request) {
       "Anexos indisponíveis: storage não configurado.",
       409,
     );
+  }
+
+  // Financeiro (FINANCIAL_ROLES) pode baixar qualquer comprovante; qualquer
+  // outro usuário só os próprios — escopo aplicado na query (anti-enumeração).
+  const privileged = hasRole(user, FINANCIAL_ROLES);
+  const dbUser = await resolveDbUser(user);
+  let scope: ReceiptOwnerScope = {};
+  if (!privileged) {
+    if (dbUser) {
+      scope = { ownerUserId: dbUser.id };
+    } else if (isDevAuthEnabled()) {
+      scope = { ownerEmail: user.email.trim().toLowerCase() };
+    } else {
+      return jsonError(
+        "FORBIDDEN",
+        "Você não tem acesso a estes comprovantes.",
+        403,
+      );
+    }
   }
 
   const idsParam = new URL(request.url).searchParams.get("ids") ?? "";
@@ -71,7 +95,7 @@ export async function GET(request: Request) {
   }
 
   const { listReceiptsByIds } = await import("@/lib/db/expenses");
-  const rows = await listReceiptsByIds(ids);
+  const rows = await listReceiptsByIds(ids, scope);
   if (rows.length === 0) {
     return jsonError(
       "NOT_FOUND",
@@ -121,13 +145,13 @@ export async function GET(request: Request) {
 
   // Audita a tentativa SEMPRE — inclusive quando nenhum comprovante baixou
   // (antes o caso de falha total retornava 502 sem deixar rastro).
-  const actorUserId = (await resolveDbUser(user))?.id ?? null;
   await recordAuditEvent({
-    actorUserId,
+    actorUserId: dbUser?.id ?? null,
     entityType: "Expense",
     entityId: "bulk",
     action: "EXPENSE_RECEIPTS_BULK_DOWNLOAD",
     after: {
+      scope: privileged ? "finance" : "owner",
       requested: ids.length,
       downloaded: added,
       failed: failed.length,

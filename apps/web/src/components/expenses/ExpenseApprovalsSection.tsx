@@ -17,6 +17,7 @@ import {
   getReceiptUrl,
 } from "@/app/app/despesas/actions";
 import { approvalStageLabels, type ApprovalItem } from "@/lib/mock-data/approvals";
+import { ExpenseBankInfoInline } from "./ExpenseBankInfoInline";
 
 export interface ExpenseApprovalsSectionProps {
   /** Pending EXPENSE approval items (both stages), server-scoped by role. */
@@ -134,6 +135,9 @@ export function ExpenseApprovalsSection({
                   <p className="truncate text-xs text-medium">
                     {item.activitySummary}
                   </p>
+                  {stage === "FINANCE" ? (
+                    <ExpenseBankInfoInline info={item.bankInfo} />
+                  ) : null}
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-1.5">
                   <ActionButton

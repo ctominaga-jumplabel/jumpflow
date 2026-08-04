@@ -138,6 +138,8 @@ export function ExpensesView(props: ExpensesViewProps) {
   const [receiptPreviewUrl, setReceiptPreviewUrl] = useState<string | null>(null);
   /** Which expense the open preview belongs to (guards stale previews). */
   const [previewExpenseId, setPreviewExpenseId] = useState<string | null>(null);
+  /** Seleção para download em massa de comprovantes (db + storage). */
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const { feedback, notify } = useFeedback();
   const [isPending, startTransition] = useTransition();
   const idCounter = useRef(0);
@@ -495,6 +497,52 @@ export function ExpensesView(props: ExpensesViewProps) {
     return result.data;
   };
 
+  // Seleção múltipla de comprovantes (checkbox) → download em massa via ZIP.
+  // Só habilitada com banco + storage; o endpoint escopa ao dono no servidor.
+  const selectionEnabled = !isDemo && storageAvailable;
+  const selectableIds = useMemo(
+    () => filtered.filter((e) => e.attachment).map((e) => e.id),
+    [filtered],
+  );
+  const selectedWithReceipt = useMemo(
+    () => selectableIds.filter((id) => selectedIds.includes(id)),
+    [selectableIds, selectedIds],
+  );
+
+  function toggleSelected(id: string) {
+    setSelectedIds((current) =>
+      current.includes(id)
+        ? current.filter((v) => v !== id)
+        : [...current, id],
+    );
+  }
+
+  function toggleAllSelected() {
+    setSelectedIds((current) =>
+      selectableIds.every((id) => current.includes(id)) ? [] : selectableIds,
+    );
+  }
+
+  function handleDownloadSelected() {
+    if (selectedWithReceipt.length === 0) {
+      notify("info", "Selecione ao menos uma despesa com comprovante.");
+      return;
+    }
+    const href = `/api/despesas/comprovantes?ids=${encodeURIComponent(
+      selectedWithReceipt.join(","),
+    )}`;
+    const anchor = document.createElement("a");
+    anchor.href = href;
+    anchor.rel = "noopener noreferrer";
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    notify(
+      "info",
+      `Gerando ZIP com ${selectedWithReceipt.length} comprovante(s).`,
+    );
+  }
+
   function handleDownloadReceipt(expense: Expense) {
     startTransition(async () => {
       const result = await getReceiptUrl({ expenseId: expense.id });
@@ -629,6 +677,11 @@ export function ExpensesView(props: ExpensesViewProps) {
         onDelete={handleDelete}
         onSubmitExpense={handleSubmitExpense}
         busy={isPending}
+        selectionEnabled={selectionEnabled}
+        selectedIds={selectedIds}
+        onToggleSelected={toggleSelected}
+        onToggleAllSelected={toggleAllSelected}
+        onDownloadSelected={handleDownloadSelected}
       />
 
       <ExpenseForm
