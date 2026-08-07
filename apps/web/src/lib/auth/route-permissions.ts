@@ -193,6 +193,13 @@ interface RouteRule {
  */
 export const routePermissions: RouteRule[] = [
   { prefix: "/app/pagamentos", access: FINANCIAL_ROLES },
+  // Self-service da NF do consultor (melhoria #3): o consultor vê e anexa a NF
+  // dos PRÓPRIOS pagamentos. O read é escopado ao usuário logado (nunca ao
+  // cliente), então a superfície é segura. Regra MAIS ESPECÍFICA que `/app`.
+  {
+    prefix: "/app/minhas-notas",
+    access: ["CONSULTANT", "ADMIN", "AREA_MANAGER", "FINANCE"],
+  },
   // Pendentes de Fechamento (Melhorias v2): o Gerente de Área libera o
   // faturamento por projeto/competência; FINANCE/ADMIN acompanham. Regra MAIS
   // ESPECÍFICA que `/app/financeiro` — DEVE vir antes (o lookup casa o primeiro

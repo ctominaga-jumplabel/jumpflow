@@ -135,6 +135,18 @@ const primaryNavigationRaw: NavItemDef[] = [
     description: "Lançamento de despesas, comprovantes e reembolsos.",
   },
   {
+    // Minhas Notas Fiscais (melhoria #3): self-service do consultor para
+    // acompanhar os próprios pagamentos e anexar a NF dos meses em aberto. O
+    // read é escopado ao usuário logado. Role-gated (sem permissionCode) para
+    // aparecer no menu do CONSULTANT sem depender de célula na matriz; a rota
+    // reforça o mesmo conjunto no servidor.
+    label: "Minhas Notas",
+    href: "/app/minhas-notas",
+    icon: ReceiptText,
+    description: "Meus pagamentos por competência e envio da nota fiscal.",
+    requiredRoles: ["CONSULTANT", "ADMIN", "AREA_MANAGER", "FINANCE"],
+  },
+  {
     // Política de Reembolso (P12 + item 12): tipos de despesa + limites de
     // prazo/valor. Governança financeira/People — role-gated (sem permissionCode)
     // para aparecer no menu direto, sem depender de célula na matriz. A tela já

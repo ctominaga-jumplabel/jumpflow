@@ -11,8 +11,11 @@ import { isDatabaseConfigured } from "@/lib/db/config";
 import {
   createPaymentForecast,
   generateConsultantPayments,
+  requestMonthlyConsultantInvoices,
+  sendConsultantInvoiceRequest,
   sendConsultantPaymentForecast,
   type GenerateConsultantPaymentsResult,
+  type RequestMonthlyInvoicesResult,
 } from "@/lib/db/payments";
 import { resolveDbUser } from "@/lib/db/users";
 import {
@@ -20,6 +23,7 @@ import {
   consultantPaymentTransitions,
   type ConsultantPaymentAction,
 } from "@/lib/payments/state-machine";
+import { buildInvoiceComparison } from "@/lib/payments/invoice-validation";
 
 const PAGAMENTOS_PATH = "/app/pagamentos";
 
@@ -169,7 +173,9 @@ export async function advanceConsultantPayment(input: {
         id: true,
         status: true,
         contractType: true,
+        pjAmount: true,
         totalAmount: true,
+        invoiceAmount: true,
       },
     });
     if (!payment) {
@@ -196,6 +202,20 @@ export async function advanceConsultantPayment(input: {
     }
     if (parsed.action === "MARK_PAID") data.confirmedPaidAt = now;
 
+    // Melhoria #4: ao VALIDAR a NF, registramos a divergência de valor no
+    // AuditEvent (quando houver). NÃO bloqueia — é decisão de produto alertar
+    // mas permitir aprovar.
+    const invoiceDivergence =
+      parsed.action === "VALIDATE_INVOICE"
+        ? buildInvoiceComparison({
+            contractType: payment.contractType,
+            pjAmount: Number(payment.pjAmount),
+            totalAmount: Number(payment.totalAmount),
+            invoiceAmount:
+              payment.invoiceAmount == null ? null : Number(payment.invoiceAmount),
+          })
+        : null;
+
     await prisma.$transaction(async (tx) => {
       const updated = await tx.consultantPayment.updateMany({
         where: { id: payment.id, status: transition.expected },
@@ -217,10 +237,30 @@ export async function advanceConsultantPayment(input: {
           after: {
             status: transition.next,
             totalAmount: Number(payment.totalAmount),
+            ...(invoiceDivergence
+              ? { invoiceDivergence }
+              : {}),
           },
         }),
       });
     });
+
+    // Melhoria #1: ao PEDIR a NF (REQUEST_INVOICE), dispara o e-mail ao
+    // consultor PJ. Best-effort e idempotente (AutomationEmailLog) — uma falha
+    // aqui não desfaz a transição já commitada.
+    if (parsed.action === "REQUEST_INVOICE") {
+      try {
+        await sendConsultantInvoiceRequest({
+          paymentId: payment.id,
+          actorUserId: dbUser?.id ?? null,
+        });
+      } catch (emailError) {
+        console.error(
+          "[pagamentos] failed to send invoice request email",
+          emailError,
+        );
+      }
+    }
 
     revalidatePath(PAGAMENTOS_PATH);
     return { ok: true, data: { id: payment.id, status: transition.next } };
@@ -248,6 +288,62 @@ export async function sendPaymentForecast(input: {
     if (!result) {
       throw new ActionError("NOT_FOUND", "Pagamento nao encontrado.");
     }
+    revalidatePath(PAGAMENTOS_PATH);
+    return { ok: true, data: result };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+const requestInvoiceInputSchema = z.object({
+  paymentId: z.string().min(1),
+});
+
+/**
+ * Melhoria #1: solicita a NF de UM pagamento PJ (e-mail ao consultor). Só
+ * Financeiro. Idempotente (AutomationEmailLog) — reenviar não duplica.
+ */
+export async function requestConsultantInvoice(input: {
+  paymentId: string;
+}): Promise<ActionResult<{ status: string }>> {
+  try {
+    ensureDatabase();
+    const user = await requireRole(FINANCIAL_ROLES);
+    const parsed = parseInput(requestInvoiceInputSchema, input);
+    const dbUser = await resolveDbUser(user);
+    const result = await sendConsultantInvoiceRequest({
+      paymentId: parsed.paymentId,
+      actorUserId: dbUser?.id ?? null,
+    });
+    if (result.status === "NOT_FOUND") {
+      throw new ActionError("NOT_FOUND", "Pagamento nao encontrado.");
+    }
+    revalidatePath(PAGAMENTOS_PATH);
+    return { ok: true, data: { status: result.status } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/**
+ * Melhoria #1 (massa): "Solicitar NF do mês" — dispara o e-mail a todos os
+ * pagamentos PJ elegíveis (OPEN/WAITING_FOR_INVOICE) da competência. Só
+ * Financeiro. Idempotente por pagamento.
+ */
+export async function requestMonthlyInvoices(input: {
+  month: number;
+  year: number;
+}): Promise<ActionResult<RequestMonthlyInvoicesResult>> {
+  try {
+    ensureDatabase();
+    const user = await requireRole(FINANCIAL_ROLES);
+    const parsed = parseInput(monthInputSchema, input);
+    const dbUser = await resolveDbUser(user);
+    const result = await requestMonthlyConsultantInvoices({
+      month: parsed.month,
+      year: parsed.year,
+      actorUserId: dbUser?.id ?? null,
+    });
     revalidatePath(PAGAMENTOS_PATH);
     return { ok: true, data: result };
   } catch (error) {

@@ -29,6 +29,14 @@ export const CLIENT_LOGOS_BUCKET = "client-logos";
 /** Private bucket for consultant documents (created via devops, never public). */
 export const CONSULTANT_DOCUMENTS_BUCKET = "consultant-documents";
 
+/**
+ * Private bucket for consultant invoice (NF) files (melhoria #3). The raw NF is
+ * financial/PII and NEVER public — only reachable through a short-lived signed
+ * URL gated by the payment read scope (finance, or the consultant's own).
+ * Created via devops.
+ */
+export const CONSULTANT_INVOICES_BUCKET = "consultant-invoices";
+
 /** Private bucket for on-call ("sobreaviso") approval attachments. */
 export const ONCALL_APPROVALS_BUCKET = "oncall-approvals";
 
@@ -96,6 +104,11 @@ export function getConsultantDocumentStorageProvider(): StorageProvider | null {
 /** Convenience resolver for the on-call approvals bucket. */
 export function getOnCallAttachmentStorageProvider(): StorageProvider | null {
   return getStorageProvider(ONCALL_APPROVALS_BUCKET);
+}
+
+/** Convenience resolver for the consultant-invoices bucket (melhoria #3). */
+export function getConsultantInvoiceStorageProvider(): StorageProvider | null {
+  return getStorageProvider(CONSULTANT_INVOICES_BUCKET);
 }
 
 /** Convenience resolver for the non-billable justification bucket (P9). */

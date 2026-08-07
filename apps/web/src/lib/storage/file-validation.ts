@@ -79,6 +79,28 @@ export function maxFeedAttachmentSizeFor(type: string): number {
     : MAX_FEED_ATTACHMENT_SIZE_BYTES;
 }
 
+/**
+ * Whitelist for a consultant invoice (NF, melhoria #3): the fiscal document as
+ * PDF or XML, plus common images (a photo/scan of the NF). SVG is excluded on
+ * purpose (it can carry scripts). 10 MB cap — same ceiling as receipts.
+ *
+ * XML is served by two interchangeable MIME types depending on the browser/OS
+ * (`application/xml` and `text/xml`); both map to the `.xml` extension.
+ */
+const INVOICE_MIME_EXTENSIONS: Record<string, readonly string[]> = {
+  "application/pdf": [".pdf"],
+  "application/xml": [".xml"],
+  "text/xml": [".xml"],
+  "image/jpeg": [".jpg", ".jpeg"],
+  "image/png": [".png"],
+  "image/webp": [".webp"],
+};
+
+export const ACCEPTED_INVOICE_MIME_TYPES = Object.keys(INVOICE_MIME_EXTENSIONS);
+
+/** Consultant invoice (NF) size ceiling: 10 MB (same as receipts). */
+export const MAX_INVOICE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
+
 export interface ReceiptFileMeta {
   name: string;
   type: string;
@@ -224,6 +246,37 @@ export function validateFeedAttachmentFile(
 }
 
 /**
+ * Validate a consultant invoice (NF) file's metadata. PDF, XML or common images
+ * (JPG, PNG, WEBP), max 10 MB. Same INVALID_FILE/FILE_TOO_LARGE typed-failure
+ * contract as the other validators.
+ */
+export function validateInvoiceFile(
+  file: ReceiptFileMeta,
+): FileValidationFailure | null {
+  const allowedExtensions = INVOICE_MIME_EXTENSIONS[file.type];
+  if (!allowedExtensions) {
+    return {
+      code: "INVALID_FILE",
+      message: "Formato não aceito. Use PDF, XML, JPG, PNG ou WEBP.",
+    };
+  }
+  const extension = extensionOf(file.name);
+  if (!allowedExtensions.includes(extension)) {
+    return {
+      code: "INVALID_FILE",
+      message: "Extensão do arquivo não corresponde ao tipo enviado.",
+    };
+  }
+  if (file.size <= 0) {
+    return { code: "FILE_TOO_LARGE", message: "Arquivo vazio." };
+  }
+  if (file.size > MAX_INVOICE_SIZE_BYTES) {
+    return { code: "FILE_TOO_LARGE", message: "Arquivo acima de 10 MB." };
+  }
+  return null;
+}
+
+/**
  * Sanitize a file name for storage keys: lowercase, pure ASCII (accents
  * stripped), spaces -> "-", only [a-z0-9._-], no ".."/path separators
  * (anti path traversal), max 100 chars, fallback "comprovante".
@@ -275,6 +328,20 @@ export function buildConsultantDocumentKey(
   now: Date = new Date(),
 ): string {
   return `consultants/${consultantId}/${type.toLowerCase()}/${compactUtcTimestamp(now)}-${safeFileName(fileName)}`;
+}
+
+/**
+ * Storage key for a consultant invoice (NF, melhoria #3):
+ * `consultant-invoices/{paymentId}/{timestamp}-{name}`. The path NEVER contains
+ * CNPJ, CPF, consultant name or any sensitive data — only the payment cuid and
+ * the sanitized file name.
+ */
+export function buildConsultantInvoiceKey(
+  paymentId: string,
+  fileName: string,
+  now: Date = new Date(),
+): string {
+  return `consultant-invoices/${paymentId}/${compactUtcTimestamp(now)}-${safeFileName(fileName)}`;
 }
 
 /**
