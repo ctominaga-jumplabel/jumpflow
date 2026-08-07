@@ -10,13 +10,26 @@ import {
   FileText,
   Mail,
   RotateCw,
+  Send,
+  TriangleAlert,
+  Upload,
+  X,
 } from "lucide-react";
 import { ActionButton } from "@/components/ui/ActionButton";
 import { DataTable, type DataTableColumn } from "@/components/ui/DataTable";
 import { FeedbackBanner, useFeedback } from "@/components/ui/Feedback";
 import { SectionPanel } from "@/components/ui/SectionPanel";
 import { StatusBadge, type StatusTone } from "@/components/ui/StatusBadge";
-import { formatCurrency, formatDate, formatHours, formatMonth } from "@/lib/format";
+import { focusRing } from "@/lib/styles";
+import { cn } from "@/lib/utils";
+import {
+  formatCurrency,
+  formatCurrencyPrecise,
+  formatDate,
+  formatHours,
+  formatMonth,
+  formatPercent,
+} from "@/lib/format";
 import {
   consultantPaymentStatusLabels,
   type ConsultantPaymentView,
@@ -24,8 +37,20 @@ import {
 import {
   advanceConsultantPayment,
   generateMonthlyConsultantPayments,
+  requestConsultantInvoice,
+  requestMonthlyInvoices,
   sendPaymentForecast,
 } from "@/app/app/pagamentos/actions";
+import { InvoiceUploadForm } from "./InvoiceUploadForm";
+
+/** Human labels for the "solicitar NF" outcomes (per-payment). */
+const invoiceRequestLabels: Record<string, string> = {
+  SENT: "NF solicitada ao consultor.",
+  SKIPPED_ALREADY_SENT: "NF já havia sido solicitada.",
+  NOT_PJ: "Contrato não é PJ — sem solicitação de NF.",
+  NOT_ELIGIBLE: "Pagamento não está elegível para solicitar NF.",
+  SKIPPED_NO_RULE: "Sem regra de notificação configurada para o e-mail.",
+};
 
 const contractTypeLabels: Record<
   ConsultantPaymentView["contractType"],
@@ -71,6 +96,8 @@ export function ConsultantPaymentsPanel({
     useState<ConsultantPaymentView | null>(null);
   const [expectedPaymentAt, setExpectedPaymentAt] = useState("");
   const [responseDeadlineAt, setResponseDeadlineAt] = useState("");
+  const [uploadTarget, setUploadTarget] =
+    useState<ConsultantPaymentView | null>(null);
   const total = useMemo(
     () => payments.reduce((sum, payment) => sum + payment.totalAmount, 0),
     [payments],
@@ -110,6 +137,43 @@ export function ConsultantPaymentsPanel({
       const result = await advanceConsultantPayment({ id: payment.id, action });
       if (result.ok) notify("success", "Status atualizado.");
       else notify("warning", result.message);
+    });
+  }
+
+  function requestInvoice(payment: ConsultantPaymentView) {
+    if (isDemo) {
+      notify("info", "Solicitação de NF local simulada.");
+      return;
+    }
+    startTransition(async () => {
+      const result = await requestConsultantInvoice({ paymentId: payment.id });
+      if (result.ok) {
+        const label =
+          invoiceRequestLabels[result.data.status] ??
+          `Solicitação processada (${result.data.status}).`;
+        notify(result.data.status === "SENT" ? "success" : "info", label);
+      } else {
+        notify("warning", result.message);
+      }
+    });
+  }
+
+  function requestMonthInvoices() {
+    if (isDemo) {
+      notify("info", "Solicitação de NF do mês local simulada.");
+      return;
+    }
+    startTransition(async () => {
+      const result = await requestMonthlyInvoices({ month, year });
+      if (result.ok) {
+        const { eligible, sent, skipped } = result.data;
+        notify(
+          sent > 0 ? "success" : "info",
+          `NF do mês: ${sent} enviada(s), ${skipped} ignorada(s) de ${eligible} elegível(is).`,
+        );
+      } else {
+        notify("warning", result.message);
+      }
     });
   }
 
@@ -198,6 +262,50 @@ export function ConsultantPaymentsPanel({
       ),
     },
     {
+      key: "invoice",
+      header: "Nota fiscal",
+      cell: (payment) => (
+        <div className="space-y-1.5">
+          {payment.invoiceAmount != null ? (
+            <p className="text-xs tabular-nums text-medium">
+              {formatCurrencyPrecise(payment.invoiceAmount)}
+              {payment.invoiceAttachmentCount > 0
+                ? ` · ${payment.invoiceAttachmentCount} anexo(s)`
+                : ""}
+            </p>
+          ) : payment.invoiceAttachmentCount > 0 ? (
+            <p className="text-xs text-medium">
+              {payment.invoiceAttachmentCount} anexo(s)
+            </p>
+          ) : (
+            <p className="text-xs text-soft">Sem NF</p>
+          )}
+          {payment.invoiceAttachments.map((attachment) => (
+            <a
+              key={attachment.id}
+              href={`/api/pagamentos/nf?id=${encodeURIComponent(attachment.id)}`}
+              className={cn(
+                "flex items-center gap-1.5 text-xs font-medium text-brand-dark hover:underline",
+                focusRing,
+              )}
+            >
+              <Download aria-hidden="true" className="size-3.5 shrink-0" />
+              <span className="max-w-[12rem] truncate">
+                {attachment.fileName}
+              </span>
+            </a>
+          ))}
+          {payment.invoiceDivergence?.isDivergent ? (
+            <StatusBadge tone="warning">
+              <TriangleAlert aria-hidden="true" className="size-3.5" />
+              NF diverge{" "}
+              {formatPercent(payment.invoiceDivergence.diffPct * 100)}
+            </StatusBadge>
+          ) : null}
+        </div>
+      ),
+    },
+    {
       key: "dates",
       header: "Previsao",
       cell: (payment) => (
@@ -219,6 +327,36 @@ export function ConsultantPaymentsPanel({
       header: "Acoes",
       cell: (payment) => (
         <div className="flex flex-wrap gap-1.5">
+          {payment.contractType === "PJ" &&
+          (payment.status === "OPEN" ||
+            payment.status === "WAITING_FOR_INVOICE") ? (
+            <ActionButton
+              size="sm"
+              variant="secondary"
+              icon={Send}
+              disabled={isPending}
+              onClick={() => requestInvoice(payment)}
+            >
+              Solicitar NF
+            </ActionButton>
+          ) : null}
+          {payment.status === "OPEN" ||
+          payment.status === "WAITING_FOR_INVOICE" ||
+          payment.status === "INVOICE_RECEIVED" ? (
+            <ActionButton
+              size="sm"
+              variant={payment.id === uploadTarget?.id ? "primary" : "secondary"}
+              icon={Upload}
+              disabled={isPending}
+              onClick={() =>
+                setUploadTarget((current) =>
+                  current?.id === payment.id ? null : payment,
+                )
+              }
+            >
+              Anexar NF
+            </ActionButton>
+          ) : null}
           {payment.status === "OPEN" ? (
             <>
               {payment.contractType === "CLT" ? (
@@ -350,6 +488,15 @@ export function ConsultantPaymentsPanel({
             )}
             <ActionButton
               size="sm"
+              variant="secondary"
+              icon={Send}
+              disabled={isPending}
+              onClick={requestMonthInvoices}
+            >
+              Solicitar NF do mês
+            </ActionButton>
+            <ActionButton
+              size="sm"
               variant="primary"
               icon={RotateCw}
               disabled={isPending}
@@ -367,6 +514,38 @@ export function ConsultantPaymentsPanel({
           caption="Pagamentos de consultores"
         />
       </SectionPanel>
+      {uploadTarget ? (
+        <SectionPanel
+          title="Anexar nota fiscal"
+          description={`${uploadTarget.consultantName} — ${formatMonth(uploadTarget.month, uploadTarget.year)}`}
+          action={
+            <button
+              type="button"
+              onClick={() => setUploadTarget(null)}
+              aria-label="Fechar"
+              className={cn(
+                "inline-flex size-8 items-center justify-center rounded-md text-soft hover:bg-surface-muted hover:text-strong",
+                focusRing,
+              )}
+            >
+              <X aria-hidden="true" className="size-4" />
+            </button>
+          }
+        >
+          <div className="p-5">
+            <InvoiceUploadForm
+              key={uploadTarget.id}
+              paymentId={uploadTarget.id}
+              defaultAmount={uploadTarget.invoiceAmount}
+              disabled={isDemo}
+              onResult={(ok, message) => {
+                notify(ok ? "success" : "warning", message);
+                if (ok) setUploadTarget(null);
+              }}
+            />
+          </div>
+        </SectionPanel>
+      ) : null}
       {forecastTarget ? (
         <SectionPanel
           title="Enviar previsao"

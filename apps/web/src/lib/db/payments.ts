@@ -12,6 +12,12 @@ import type {
   ConsultantPaymentLineView,
   ConsultantPaymentView,
 } from "@/lib/payments/types";
+import { appConfig } from "@/config/app";
+import { buildInvoiceComparison } from "@/lib/payments/invoice-validation";
+import { buildAuditEventData } from "@/lib/db/audit";
+import { getEmailTransport } from "@/lib/automation/email-transport";
+import { buildConsultantInvoiceRequestEmail } from "@/lib/automation/email/templates";
+import { resolveEventDelivery } from "@/lib/automation/notifications/event-delivery";
 
 type ConsultantContractType = "CLT" | "PJ" | "CLT_FLEX";
 import { sendPaymentForecastEmail } from "@/lib/payments/notify";
@@ -99,6 +105,73 @@ function paymentLineView(row: {
   };
 }
 
+/**
+ * Prisma `include` shared by the finance list and the consultant's own list so
+ * both build the IDENTICAL {@link ConsultantPaymentView} (incl. NF fields).
+ */
+const paymentViewInclude = {
+  consultant: {
+    select: {
+      name: true,
+      email: true,
+      companyInfo: { select: { cnpj: true } },
+    },
+  },
+  lines: {
+    include: { project: { select: { name: true } } },
+    orderBy: [{ project: { name: "asc" } }, { createdAt: "asc" }],
+  },
+  _count: { select: { invoiceAttachments: true } },
+  // Real NF attachment ids (+ fileName) so the UI can link the signed-URL
+  // download (melhoria #3). Newest first. The endpoint re-checks ownership.
+  invoiceAttachments: {
+    select: { id: true, fileName: true },
+    orderBy: { createdAt: "desc" as const },
+  },
+} satisfies Prisma.ConsultantPaymentInclude;
+
+type PaymentRowForView = Prisma.ConsultantPaymentGetPayload<{
+  include: typeof paymentViewInclude;
+}>;
+
+/** Single mapper Row -> DTO, including the NF amount + divergence (M#3/M#4). */
+function toPaymentView(row: PaymentRowForView): ConsultantPaymentView {
+  const invoiceAmount = row.invoiceAmount == null ? null : toNumber(row.invoiceAmount);
+  const pjAmount = toNumber(row.pjAmount);
+  const totalAmount = toNumber(row.totalAmount);
+  return {
+    id: row.id,
+    consultantName: row.consultant.name,
+    consultantEmail: row.consultant.email,
+    contractType: row.contractType,
+    cnpj: row.consultant.companyInfo?.cnpj ?? null,
+    month: row.month,
+    year: row.year,
+    status: row.status,
+    cltNetAmount: toNumber(row.cltNetAmount),
+    pjAmount,
+    benefitAmount: toNumber(row.benefitAmount),
+    totalAmount,
+    expectedPaymentAt: toIsoDate(row.expectedPaymentAt),
+    confirmedPaidAt: toIsoDate(row.confirmedPaidAt),
+    invoiceReceivedAt: toIsoDate(row.invoiceReceivedAt),
+    invoiceValidatedAt: toIsoDate(row.invoiceValidatedAt),
+    invoiceAmount,
+    invoiceAttachmentCount: row._count.invoiceAttachments,
+    invoiceAttachments: row.invoiceAttachments.map((attachment) => ({
+      id: attachment.id,
+      fileName: attachment.fileName,
+    })),
+    invoiceDivergence: buildInvoiceComparison({
+      contractType: row.contractType,
+      pjAmount,
+      totalAmount,
+      invoiceAmount,
+    }),
+    lines: row.lines.map(paymentLineView),
+  };
+}
+
 export async function listPaymentConsultants(): Promise<
   { id: string; name: string }[]
 > {
@@ -128,41 +201,38 @@ export async function listConsultantPayments(input: {
       ...(input.consultantId ? { consultantId: input.consultantId } : {}),
       ...(input.status ? { status: input.status } : {}),
     },
-    include: {
-      consultant: {
-        select: {
-          name: true,
-          email: true,
-          companyInfo: { select: { cnpj: true } },
-        },
-      },
-      lines: {
-        include: { project: { select: { name: true } } },
-        orderBy: [{ project: { name: "asc" } }, { createdAt: "asc" }],
-      },
-    },
+    include: paymentViewInclude,
     orderBy: [{ consultant: { name: "asc" } }],
   });
 
-  return rows.map((row) => ({
-    id: row.id,
-    consultantName: row.consultant.name,
-    consultantEmail: row.consultant.email,
-    contractType: row.contractType,
-    cnpj: row.consultant.companyInfo?.cnpj ?? null,
-    month: row.month,
-    year: row.year,
-    status: row.status,
-    cltNetAmount: toNumber(row.cltNetAmount),
-    pjAmount: toNumber(row.pjAmount),
-    benefitAmount: toNumber(row.benefitAmount),
-    totalAmount: toNumber(row.totalAmount),
-    expectedPaymentAt: toIsoDate(row.expectedPaymentAt),
-    confirmedPaidAt: toIsoDate(row.confirmedPaidAt),
-    invoiceReceivedAt: toIsoDate(row.invoiceReceivedAt),
-    invoiceValidatedAt: toIsoDate(row.invoiceValidatedAt),
-    lines: row.lines.map(paymentLineView),
-  }));
+  return rows.map(toPaymentView);
+}
+
+/**
+ * Consultant self-service read (melhoria #3): the payments that belong to the
+ * LOGGED-IN user only. The owner scope is applied IN THE QUERY (`consultant:
+ * { userId }`) — never trusted from the client — so a consultant can never see
+ * another consultant's payment/NF. Same PJ/CLT_FLEX restriction and DTO shape as
+ * the finance list; the raw NF file is only reachable through the signed-URL
+ * download endpoint, which re-checks ownership.
+ */
+export async function listOwnConsultantPayments(input: {
+  userId: string;
+  month?: number;
+  year?: number;
+}): Promise<ConsultantPaymentView[]> {
+  const rows = await prisma.consultantPayment.findMany({
+    where: {
+      consultant: { userId: input.userId },
+      contractType: { in: PAYMENT_CONTRACT_TYPES },
+      ...(input.month ? { month: input.month } : {}),
+      ...(input.year ? { year: input.year } : {}),
+    },
+    include: paymentViewInclude,
+    orderBy: [{ year: "desc" }, { month: "desc" }],
+  });
+
+  return rows.map(toPaymentView);
 }
 
 /**
@@ -660,4 +730,276 @@ export async function sendConsultantPaymentForecast(input: {
   });
 
   return sent;
+}
+
+// ---------------------------------------------------------------------------
+// Melhoria #3 — download da NF (URL assinada), com escopo anti-enumeração.
+// ---------------------------------------------------------------------------
+
+/**
+ * Escopo de dono para o download da NF quando o solicitante NÃO é Financeiro.
+ * Restringe ao consultor dono do pagamento — por id de User (produção) ou por
+ * e-mail do consultor (dev-auth). O Financeiro chama sem escopo (baixa qualquer).
+ */
+export interface InvoiceAttachmentOwnerScope {
+  ownerUserId?: string;
+  ownerEmail?: string;
+}
+
+export interface InvoiceAttachmentDownload {
+  id: string;
+  fileName: string;
+  contentType: string;
+  storageBucket: string;
+  storageKey: string;
+  consultantPaymentId: string;
+}
+
+/**
+ * Resolve UM anexo de NF para download. O escopo é aplicado NA QUERY (via
+ * `consultantPayment.consultant`), então um consultor jamais enumera a NF de
+ * outro por id: fora do escopo, a linha simplesmente não retorna (=> 404).
+ */
+export async function getInvoiceAttachmentForDownload(
+  attachmentId: string,
+  scope: InvoiceAttachmentOwnerScope = {},
+): Promise<InvoiceAttachmentDownload | null> {
+  const ownerWhere = scope.ownerUserId
+    ? { consultantPayment: { consultant: { userId: scope.ownerUserId } } }
+    : scope.ownerEmail
+      ? {
+          consultantPayment: {
+            consultant: {
+              email: { equals: scope.ownerEmail, mode: "insensitive" as const },
+            },
+          },
+        }
+      : {};
+  const row = await prisma.consultantInvoiceAttachment.findFirst({
+    where: { id: attachmentId, ...ownerWhere },
+    select: {
+      id: true,
+      fileName: true,
+      contentType: true,
+      storageBucket: true,
+      storageKey: true,
+      consultantPaymentId: true,
+    },
+  });
+  return row;
+}
+
+// ---------------------------------------------------------------------------
+// Melhoria #1 — e-mail pedindo a NF ao consultor PJ.
+// ---------------------------------------------------------------------------
+
+/** AutomationEmailLog type/key for the "solicitar NF" email (idempotência). */
+const INVOICE_REQUEST_EMAIL_TYPE = "CONSULTANT_INVOICE_REQUEST" as const;
+
+/**
+ * Statuses onde pedir a NF ainda faz sentido (a nota ainda não chegou). Só PJ
+ * passa por NF neste fluxo; CLT_FLEX também recebe NF, mas a MELHORIA pede o
+ * lembrete restrito a PJ — a restrição de contrato é aplicada no envio.
+ */
+const INVOICE_REQUEST_ELIGIBLE_STATUSES: ConsultantPaymentStatus[] = [
+  "OPEN",
+  "WAITING_FOR_INVOICE",
+];
+
+export interface ConsultantInvoiceRequestResult {
+  status:
+    | "SENT"
+    | "SKIPPED_ALREADY_SENT"
+    | "SKIPPED_NO_RULE"
+    | "NOT_PJ"
+    | "NOT_ELIGIBLE"
+    | "NOT_FOUND";
+  emailId?: string;
+  provider?: string;
+}
+
+/**
+ * Envia (idempotentemente) o e-mail pedindo a NF ao consultor PJ de UM
+ * pagamento. Idempotência por AutomationEmailLog(type, referenceKey=paymentId):
+ * um SENT já registrado não reenvia (a menos de `force`). O destinatário é o
+ * consultor (EVENT_TARGET), rastreável no log. Best-effort quanto ao provedor:
+ * uma falha de envio é registrada como FAILED e pode ser retentada.
+ */
+export async function sendConsultantInvoiceRequest(input: {
+  paymentId: string;
+  actorUserId: string | null;
+  force?: boolean;
+}): Promise<ConsultantInvoiceRequestResult> {
+  const payment = await prisma.consultantPayment.findUnique({
+    where: { id: input.paymentId },
+    select: {
+      id: true,
+      month: true,
+      year: true,
+      status: true,
+      contractType: true,
+      pjAmount: true,
+      totalAmount: true,
+      consultant: { select: { name: true, email: true } },
+    },
+  });
+  if (!payment) return { status: "NOT_FOUND" };
+  // Melhoria pede lembrete só para PJ.
+  if (payment.contractType !== "PJ") return { status: "NOT_PJ" };
+  if (!INVOICE_REQUEST_ELIGIBLE_STATUSES.includes(payment.status)) {
+    return { status: "NOT_ELIGIBLE" };
+  }
+
+  const referenceKey = payment.id;
+  const existing = await prisma.automationEmailLog.findUnique({
+    where: {
+      type_referenceKey: {
+        type: INVOICE_REQUEST_EMAIL_TYPE,
+        referenceKey,
+      },
+    },
+    select: { status: true },
+  });
+  if (existing?.status === "SENT" && !input.force) {
+    return { status: "SKIPPED_ALREADY_SENT" };
+  }
+
+  // A regra CONSULTANT_INVOICE_REQUEST (/app/admin/notificacoes) pode desligar
+  // ou adicionar destinatários; o consultor é o EVENT_TARGET (fail-open: sem
+  // regra, envia ao consultor mesmo assim).
+  const delivery = await resolveEventDelivery(INVOICE_REQUEST_EMAIL_TYPE, {
+    targets: [
+      { email: payment.consultant.email, name: payment.consultant.name },
+    ],
+  });
+  if (delivery.skip || delivery.emails.length === 0) {
+    return { status: "SKIPPED_NO_RULE" };
+  }
+
+  // Link direto para a tela do consultor "Minhas Notas" (/app/minhas-notas).
+  // /app/pagamentos é restrito ao Financeiro — o consultor tomaria 403 lá.
+  const notasUrl = appConfig.url
+    ? `${appConfig.url}/app/minhas-notas`
+    : undefined;
+  const email = buildConsultantInvoiceRequestEmail({
+    consultantName: payment.consultant.name,
+    month: payment.month,
+    year: payment.year,
+    expectedAmount: toNumber(payment.pjAmount),
+    notasUrl,
+  });
+
+  let sentId = "";
+  let provider = "";
+  let logStatus: "SENT" | "FAILED" = "SENT";
+  let error: string | null = null;
+  try {
+    const sent = await getEmailTransport().send({
+      to: delivery.emails,
+      subject: email.subject,
+      text: email.text,
+      html: email.html,
+    });
+    sentId = sent.id;
+    provider = sent.provider;
+  } catch (e) {
+    logStatus = "FAILED";
+    error = e instanceof Error ? e.message : String(e);
+  }
+
+  await prisma.$transaction(async (tx) => {
+    // Upsert mantém idempotência: um FAILED anterior é promovido a SENT no
+    // retry; nunca sobrescrevemos um SENT (curto-circuitado acima).
+    await tx.automationEmailLog.upsert({
+      where: {
+        type_referenceKey: {
+          type: INVOICE_REQUEST_EMAIL_TYPE,
+          referenceKey,
+        },
+      },
+      create: {
+        type: INVOICE_REQUEST_EMAIL_TYPE,
+        referenceKey,
+        recipient: delivery.emails.join(", "),
+        status: logStatus,
+        error,
+        meta: {
+          messageId: sentId,
+          provider,
+          month: payment.month,
+          year: payment.year,
+        },
+      },
+      update: {
+        recipient: delivery.emails.join(", "),
+        status: logStatus,
+        error,
+        meta: {
+          messageId: sentId,
+          provider,
+          month: payment.month,
+          year: payment.year,
+        },
+      },
+    });
+    await tx.auditEvent.create({
+      data: buildAuditEventData({
+        actorUserId: input.actorUserId,
+        entityType: "ConsultantPayment",
+        entityId: payment.id,
+        action: "CONSULTANT_PAYMENT_INVOICE_REQUEST_EMAIL_SENT",
+        after: {
+          status: logStatus,
+          provider,
+          recipients: delivery.emails,
+          month: payment.month,
+          year: payment.year,
+        },
+      }),
+    });
+  });
+
+  if (logStatus === "FAILED") {
+    return { status: "SKIPPED_NO_RULE", emailId: sentId, provider };
+  }
+  return { status: "SENT", emailId: sentId, provider };
+}
+
+export interface RequestMonthlyInvoicesResult {
+  eligible: number;
+  sent: number;
+  skipped: number;
+}
+
+/**
+ * Ação em massa "Solicitar NF do mês": envia o lembrete a TODOS os pagamentos PJ
+ * elegíveis (status OPEN/WAITING_FOR_INVOICE) da competência. Idempotente por
+ * pagamento — reexecutar não reenvia a quem já recebeu (SENT no log).
+ */
+export async function requestMonthlyConsultantInvoices(input: {
+  month: number;
+  year: number;
+  actorUserId: string | null;
+}): Promise<RequestMonthlyInvoicesResult> {
+  const payments = await prisma.consultantPayment.findMany({
+    where: {
+      month: input.month,
+      year: input.year,
+      contractType: "PJ",
+      status: { in: INVOICE_REQUEST_ELIGIBLE_STATUSES },
+    },
+    select: { id: true },
+  });
+
+  let sent = 0;
+  let skipped = 0;
+  for (const payment of payments) {
+    const result = await sendConsultantInvoiceRequest({
+      paymentId: payment.id,
+      actorUserId: input.actorUserId,
+    });
+    if (result.status === "SENT") sent += 1;
+    else skipped += 1;
+  }
+  return { eligible: payments.length, sent, skipped };
 }

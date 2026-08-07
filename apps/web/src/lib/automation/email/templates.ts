@@ -884,3 +884,50 @@ export function buildPaymentForecastEmail(input: {
     text,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Solicitação de NF ao consultor PJ (interno → marca JumpFlow). Melhoria #1.
+// ---------------------------------------------------------------------------
+export function buildConsultantInvoiceRequestEmail(input: {
+  consultantName: string;
+  month: number;
+  year: number;
+  /** Valor previsto de pagamento (base da NF) — orienta o consultor. */
+  expectedAmount: number;
+  /**
+   * Link direto para a tela do consultor "Minhas Notas" (/app/minhas-notas),
+   * onde ele anexa a NF. Opcional: quando ausente (NEXT_PUBLIC_APP_URL não
+   * setado) o e-mail apenas cita a tela no texto, sem botão.
+   */
+  notasUrl?: string;
+}): BuiltEmail {
+  const competenceLabel = `${String(input.month).padStart(2, "0")}/${input.year}`;
+  const blocks: EmailBlock[] = [
+    paragraph(`Olá, ${input.consultantName}.`),
+    paragraph(
+      `Para seguirmos com o seu pagamento referente à competência ${competenceLabel}, precisamos da sua nota fiscal (NF).`,
+    ),
+    kpi("Valor previsto", formatCurrency(input.expectedAmount), "info"),
+    keyValueList([{ label: "Competência", value: competenceLabel }]),
+    paragraph(
+      `Emita a NF com o valor previsto acima e anexe o arquivo (PDF ou XML) na plataforma, em "Minhas Notas". Caso haja divergência de valor, responda a este e-mail antes de emitir.`,
+    ),
+  ];
+
+  if (input.notasUrl) {
+    blocks.push(button("Abrir Minhas Notas", input.notasUrl));
+  }
+
+  const { html, text } = renderEmail({
+    preheader: `Envie sua NF — competência ${competenceLabel}`,
+    title: "Solicitação de nota fiscal",
+    blocks,
+    signoff: `Equipe ${app()}`,
+  });
+
+  return {
+    subject: `${app()} · Envie sua NF — competência ${competenceLabel}`,
+    html,
+    text,
+  };
+}
