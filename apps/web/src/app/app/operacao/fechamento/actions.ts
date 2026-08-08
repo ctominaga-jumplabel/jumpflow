@@ -13,6 +13,8 @@ import {
   getOperationReadiness,
 } from "@/lib/db/operation-closing";
 import { resolveDbUser } from "@/lib/db/users";
+import { reconcileConsultantPaymentsForConsultants } from "@/lib/db/payments";
+import type { ConsultantPaymentStatus } from "@/lib/payments/state-machine";
 import {
   pendingAlert,
   type OperationClosingDetail,
@@ -20,7 +22,43 @@ import {
 import { justificationSchema } from "@/lib/shared/justification";
 
 const OPERACAO_PATH = "/app/operacao/fechamento";
+const PAGAMENTOS_PATH = "/app/pagamentos";
 const PERMISSION_CODE = "OPERACAO_FECHAMENTO";
+
+/**
+ * Payload de pagamentos devolvido ao CLIENTE pelo fechamento. É SANITIZADO: NÃO
+ * carrega valores em R$ (currentTotal/recomputedTotal), pois o fechamento é
+ * feito por um gestor de área que pode não ter papel financeiro. Os valores
+ * sensíveis ficam apenas no AuditEvent server-side (ver
+ * `reconcileConsultantPaymentsForConsultants`). Só nomes/contagens/status vêm
+ * ao cliente — o suficiente para o banner de feedback.
+ */
+export interface CloseOperationPaymentsFeedback {
+  created: number;
+  refreshed: number;
+  lockedDivergent: {
+    consultantId: string;
+    name: string;
+    status: ConsultantPaymentStatus;
+  }[];
+  skippedNoCompensation: { consultantId: string; name: string }[];
+  skippedNotPayable: {
+    consultantId: string;
+    name: string;
+    contractType: string;
+  }[];
+}
+
+/**
+ * Retorno do fechamento: além do id do closing, expõe o resultado (sanitizado)
+ * da geração/reconciliação de pagamentos (para a UI mostrar toast) e um aviso
+ * quando o efeito de pagamentos falha SEM desfazer o fechamento (resiliência).
+ */
+export interface CloseOperationResult {
+  id: string;
+  payments?: CloseOperationPaymentsFeedback;
+  paymentsError?: string;
+}
 
 class ActionError extends Error {
   constructor(
@@ -128,7 +166,7 @@ export async function closeOperation(input: {
   projectId: string;
   month: number;
   year: number;
-}): Promise<ActionResult<{ id: string }>> {
+}): Promise<ActionResult<CloseOperationResult>> {
   try {
     ensureDatabase();
     const user = await requirePermission(PERMISSION_CODE, "edit");
@@ -206,8 +244,49 @@ export async function closeOperation(input: {
     // Notify the DP (ROLE PEOPLE) — best-effort, never breaks the close.
     await notifyOperationClosed(closing.id);
 
+    // Gera/atualiza os pagamentos dos consultores DESTE projeto/mês. Efeito de
+    // SISTEMA: roda com o ator que fechou (gestor de área), sem exigir papel
+    // financeiro. RESILIENTE: se falhar, o fechamento (já commitado) NÃO é
+    // desfeito — capturamos o erro e devolvemos como aviso para a UI.
+    let payments: CloseOperationPaymentsFeedback | undefined;
+    let paymentsError: string | undefined;
+    try {
+      const reconciled = await reconcileConsultantPaymentsForConsultants({
+        month: parsed.month,
+        year: parsed.year,
+        consultantIds: snapshot.map((c) => c.consultantId),
+        audit: {
+          actorUserId: dbUser?.id ?? null,
+          entityId: `${parsed.year}-${String(parsed.month).padStart(2, "0")}`,
+          action: "CONSULTANT_PAYMENTS_RECONCILED",
+        },
+      });
+      // Sanitiza: remove currentTotal/recomputedTotal antes de sair do servidor.
+      payments = {
+        created: reconciled.created,
+        refreshed: reconciled.refreshed,
+        lockedDivergent: reconciled.lockedDivergent.map((l) => ({
+          consultantId: l.consultantId,
+          name: l.name,
+          status: l.status,
+        })),
+        skippedNoCompensation: reconciled.skippedNoCompensation,
+        skippedNotPayable: reconciled.skippedNotPayable,
+      };
+    } catch (paymentError) {
+      console.error(
+        "[operacao] failed to reconcile consultant payments on close",
+        paymentError,
+      );
+      paymentsError =
+        paymentError instanceof Error
+          ? paymentError.message
+          : "Falha ao gerar pagamentos.";
+    }
+
     revalidatePath(OPERACAO_PATH);
-    return { ok: true, data: { id: closing.id } };
+    revalidatePath(PAGAMENTOS_PATH);
+    return { ok: true, data: { id: closing.id, payments, paymentsError } };
   } catch (error) {
     return toFailure(error);
   }

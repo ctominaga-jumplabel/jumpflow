@@ -35,6 +35,7 @@ import type {
 } from "@/lib/operacao/cockpit";
 import { fecharApuracao } from "@/app/app/financeiro/actions";
 import { closeOperation } from "@/app/app/operacao/fechamento/actions";
+import { buildCloseOperationFeedback } from "@/lib/operations/close-feedback";
 import { setProjectDailyEntryRequired } from "@/app/app/projetos/actions";
 import {
   loadConsultantCalendar,
@@ -253,7 +254,11 @@ export function CockpitView({
         return;
       }
       setReleasedDp((prev) => new Set(prev).add(row.projectId));
-      notify("success", `DP de "${row.projectName}" liberado. DP notificado.`);
+      const { tone, text } = buildCloseOperationFeedback(
+        `DP de "${row.projectName}" liberado. DP notificado.`,
+        result.data,
+      );
+      notify(tone, text);
       router.refresh();
     });
   }

@@ -58,6 +58,7 @@ vi.mock("@jumpflow/database", () => ({
     timeEntry: { findMany: () => timeEntryFindMany() },
     consultantAdHocPayment: { findMany: () => adHocFindMany() },
     consultant: { findMany: () => consultantFindMany() },
+    consultantProjectRate: { findMany: async () => [] },
     consultantPayment: { findUnique: () => paymentFindUnique() },
     $transaction: (cb: (tx: unknown) => unknown) => transaction(cb),
   },

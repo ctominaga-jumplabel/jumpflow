@@ -42,6 +42,7 @@ import {
   reopenOperation,
 } from "@/app/app/operacao/fechamento/actions";
 import { getTimeEntryAttachmentUrl } from "@/app/app/horas/actions";
+import { buildCloseOperationFeedback } from "@/lib/operations/close-feedback";
 
 const readinessTone: Record<ConsultantReadinessState, StatusTone> = {
   APPROVED: "success",
@@ -150,8 +151,13 @@ export function OperationClosingTable({
         month: overview.month,
         year: overview.year,
       });
-      if (result.ok) notify("success", "Operação fechada. DP notificado.");
-      else notify("warning", result.message);
+      if (result.ok) {
+        const { tone, text } = buildCloseOperationFeedback(
+          "Operação fechada. DP notificado.",
+          result.data,
+        );
+        notify(tone, text);
+      } else notify("warning", result.message);
     });
   }
 
