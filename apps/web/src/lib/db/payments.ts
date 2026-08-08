@@ -366,6 +366,203 @@ export async function createPaymentForecast(input: {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Cálculo por-consultor reutilizável (A) — extraído do loop de
+// generateConsultantPayments para ser compartilhado com a reconciliação
+// disparada pelo Fechamento Operacional. Função PURA (sem I/O): recebe os dados
+// já carregados (compensação/benefícios do consultor, lançamentos aprovados do
+// mês, pontuais do mês e as vigências de valor/hora por projeto) e devolve as
+// LINHAS congeladas + os montantes (cltNetAmount/pjAmount/benefitAmount/
+// totalAmount) e o contractType. Retorna null quando o consultor NÃO tem
+// compensação vigente na virada do mês (mesmo critério do skip anterior).
+// ---------------------------------------------------------------------------
+
+export interface ComputedConsultantPaymentLine {
+  projectId: string | null;
+  description: string;
+  hours: number;
+  unitRate: number;
+  amount: number;
+}
+
+export interface ComputedConsultantPayment {
+  contractType: ConsultantContractType;
+  cltNetAmount: number;
+  pjAmount: number;
+  benefitAmount: number;
+  totalAmount: number;
+  lines: ComputedConsultantPaymentLine[];
+}
+
+interface ComputeConsultantCompensation {
+  contractType: ConsultantContractType;
+  hourlyRate: Prisma.Decimal | number | null;
+  cltAmount: Prisma.Decimal | number | null;
+  pjAmount: Prisma.Decimal | number | null;
+  benefitCardAmount: Prisma.Decimal | number | null;
+  discountRules: Prisma.JsonValue;
+  startsAt: Date;
+  endsAt: Date | null;
+}
+
+interface ComputeConsultantBenefit {
+  type: string;
+  amount: Prisma.Decimal | number | null;
+  startsAt: Date;
+  endsAt: Date | null;
+}
+
+export interface ComputeConsultantRecord {
+  compensations: ComputeConsultantCompensation[];
+  benefits: ComputeConsultantBenefit[];
+}
+
+interface ComputeConsultantEntry {
+  projectId: string;
+  date: Date;
+  hours: Prisma.Decimal | number | null;
+  multiplier: Prisma.Decimal | number | null;
+  project: { name: string };
+}
+
+interface ComputeConsultantAdHoc {
+  projectId: string;
+  kind: string;
+  amount: Prisma.Decimal | number | null;
+  project: { name: string } | null;
+}
+
+/**
+ * Computa as linhas + montantes de UM consultor para um mês. Regras (idênticas
+ * às aplicadas hoje na geração mensal):
+ *  - Sem compensação vigente => null (consultor pulado).
+ *  - Pontuais (ad-hoc) viram linhas extras que SEMPRE somam ao total, mesmo sem
+ *    horas (consultor só-pontual recebe apenas as pontuais).
+ *  - A BASE (salário/pjAmount + benefícios + benefitCard) só compõe quando há
+ *    horas aprovadas no mês; sem horas, a base é zerada.
+ *  - Valor/hora por projeto (vigente na data do lançamento) tem precedência
+ *    sobre o hourlyRate acordado.
+ */
+export function computeConsultantMonthlyPayment(input: {
+  consultantId: string;
+  consultantRecord: ComputeConsultantRecord;
+  approvedEntries: ComputeConsultantEntry[];
+  adHocs: ComputeConsultantAdHoc[];
+  start: Date;
+  projectRateWindows: Map<string, ProjectRateWindow[]>;
+}): ComputedConsultantPayment | null {
+  const {
+    consultantId,
+    consultantRecord,
+    approvedEntries,
+    adHocs,
+    start,
+    projectRateWindows,
+  } = input;
+
+  const compensation = activeOn(consultantRecord.compensations, start);
+  if (!compensation) return null;
+
+  // Linhas de remuneração pontual (D2): uma por ConsultantAdHocPayment do mês.
+  // hours=0, unitRate=amount (valor cheio). Somam SEMPRE por cima.
+  const adHocLines: ComputedConsultantPaymentLine[] = adHocs.map((payment) => ({
+    projectId: payment.projectId,
+    description: `${AD_HOC_LINE_PREFIX} (${payment.kind}) - ${payment.project?.name ?? "projeto"}`,
+    hours: 0,
+    unitRate: toNumber(payment.amount),
+    amount: toNumber(payment.amount),
+  }));
+  const adHocTotal = adHocLines.reduce((sum, line) => sum + line.amount, 0);
+
+  // C2 (folha): base só compõe quando há horas aprovadas no mês.
+  const hasApprovedHours = approvedEntries.length > 0;
+  const benefits = hasApprovedHours
+    ? consultantRecord.benefits.filter(
+        (benefit) =>
+          benefit.startsAt <= start && (!benefit.endsAt || start < benefit.endsAt),
+      )
+    : [];
+
+  const byProject = new Map<
+    string,
+    { projectName: string; hours: number; amount: number; unitRate: number }
+  >();
+  for (const entry of approvedEntries) {
+    const hours = timeEntryEffectiveHours(
+      toNumber(entry.hours),
+      toNumber(entry.multiplier),
+    );
+    const overrideRate = resolveProjectRate(
+      projectRateWindows.get(projectRateKey(consultantId, entry.projectId)) ?? [],
+      entry.date,
+    );
+    const rate = overrideRate ?? toNumber(compensation.hourlyRate);
+    const amount = hours * rate;
+    const current = byProject.get(entry.projectId) ?? {
+      projectName: entry.project.name,
+      hours: 0,
+      amount: 0,
+      unitRate: rate,
+    };
+    current.hours += hours;
+    current.amount += amount;
+    byProject.set(entry.projectId, current);
+  }
+
+  const projectLines: ComputedConsultantPaymentLine[] = [
+    ...byProject.entries(),
+  ].map(([projectId, line]) => ({
+    projectId,
+    description: `Horas aprovadas - ${line.projectName}`,
+    hours: line.hours,
+    unitRate: line.unitRate,
+    amount: line.amount,
+  }));
+  const benefitLines: ComputedConsultantPaymentLine[] = benefits.map((benefit) => ({
+    projectId: null,
+    description: `Beneficio ${benefit.type}`,
+    hours: 0,
+    unitRate: toNumber(benefit.amount),
+    amount: toNumber(benefit.amount),
+  }));
+  const benefitCardAmount = hasApprovedHours
+    ? toNumber(compensation.benefitCardAmount)
+    : 0;
+  if (benefitCardAmount > 0) {
+    benefitLines.push({
+      projectId: null,
+      description: "Beneficio BENEFIT_CARD",
+      hours: 0,
+      unitRate: benefitCardAmount,
+      amount: benefitCardAmount,
+    });
+  }
+
+  const baseAmounts = hasApprovedHours
+    ? buildConsultantPaymentAmounts(
+        {
+          contractType: compensation.contractType,
+          hourlyRate: toNumber(compensation.hourlyRate),
+          cltAmount: toNumber(compensation.cltAmount),
+          pjAmount: toNumber(compensation.pjAmount),
+          benefitCardAmount: toNumber(compensation.benefitCardAmount),
+          discountRules: compensation.discountRules as never,
+        },
+        benefits.map((benefit) => ({ amount: toNumber(benefit.amount) })),
+        projectLines,
+      )
+    : { cltNetAmount: 0, pjAmount: 0, benefitAmount: 0, totalAmount: 0 };
+
+  return {
+    contractType: compensation.contractType,
+    cltNetAmount: baseAmounts.cltNetAmount,
+    pjAmount: baseAmounts.pjAmount,
+    benefitAmount: baseAmounts.benefitAmount,
+    totalAmount: baseAmounts.totalAmount + adHocTotal,
+    lines: [...projectLines, ...benefitLines, ...adHocLines],
+  };
+}
+
 export async function generateConsultantPayments(input: {
   month: number;
   year: number;
@@ -469,20 +666,7 @@ export async function generateConsultantPayments(input: {
   await prisma.$transaction(async (tx) => {
     for (const consultantId of allConsultantIds) {
       const consultantEntries = byConsultant.get(consultantId) ?? [];
-      // Linhas de remuneracao pontual (D2): uma por ConsultantAdHocPayment do
-      // mes, vinculada ao projeto (projectId sempre presente). hours=0 e
-      // unitRate=amount (valor cheio, nao horario). SOMAM SEMPRE por cima; nao
-      // passam pelos buckets de compensacao (CLT/PJ), pois nao derivam de horas
-      // nem de beneficio recorrente — sao acertos avulsos.
       const adHocForConsultant = adHocByConsultant.get(consultantId) ?? [];
-      const adHocLines = adHocForConsultant.map((payment) => ({
-        projectId: payment.projectId,
-        description: `${AD_HOC_LINE_PREFIX} (${payment.kind}) - ${payment.project?.name ?? "projeto"}`,
-        hours: 0,
-        unitRate: toNumber(payment.amount),
-        amount: toNumber(payment.amount),
-      }));
-      const adHocTotal = adHocLines.reduce((sum, line) => sum + line.amount, 0);
 
       const existing = await tx.consultantPayment.findUnique({
         where: {
@@ -500,6 +684,10 @@ export async function generateConsultantPayments(input: {
         // (foram cadastradas depois da geracao), sinaliza para o operador. Nao
         // regeramos automaticamente — apenas damos visibilidade.
         if (adHocForConsultant.length > 0) {
+          const adHocTotal = adHocForConsultant.reduce(
+            (sum, payment) => sum + toNumber(payment.amount),
+            0,
+          );
           const reflectedLines = await tx.consultantPaymentLine.findMany({
             where: {
               consultantPaymentId: existing.id,
@@ -525,112 +713,31 @@ export async function generateConsultantPayments(input: {
       const consultantRecord =
         consultantEntries[0]?.consultant ?? consultantById.get(consultantId);
       if (!consultantRecord) continue;
-      const compensation = activeOn(consultantRecord.compensations, start);
-      if (!compensation) continue;
 
-      // C2 (folha): a BASE (salario CLT liquido / pjAmount fixo + beneficios) so
-      // compoe o pagamento quando ha HORAS APROVADAS no mes — comportamento
-      // anterior a pontual. Consultor SEM horas (so-pontual) recebe APENAS as
-      // linhas de pontual; nao entra na folha com salario integral.
-      const hasApprovedHours = consultantEntries.length > 0;
-
-      const benefits = hasApprovedHours
-        ? consultantRecord.benefits.filter(
-            (benefit) =>
-              benefit.startsAt <= start && (!benefit.endsAt || start < benefit.endsAt),
-          )
-        : [];
-      const byProject = new Map<
-        string,
-        { projectName: string; hours: number; amount: number; unitRate: number }
-      >();
-      for (const entry of consultantEntries) {
-        // Consultor é SEMPRE remunerado pelo equivalente (hours x multiplier).
-        // Atividades normais têm multiplier=1.00 (effectiveHours == hours);
-        // ON_CALL carrega fator fracionário (ex.: 0.33). Fonte única de cálculo:
-        // timeEntryEffectiveHours. A flag `billable` não afeta pagamento.
-        const hours = timeEntryEffectiveHours(
-          toNumber(entry.hours),
-          toNumber(entry.multiplier),
-        );
-        // M2: valor/hora do projeto (vigente na data do lançamento) tem
-        // precedência sobre o hourlyRate acordado; senão, cai no acordado.
-        const overrideRate = resolveProjectRate(
-          projectRateWindows.get(
-            projectRateKey(consultantId, entry.projectId),
-          ) ?? [],
-          entry.date,
-        );
-        const rate = overrideRate ?? toNumber(compensation.hourlyRate);
-        const amount = hours * rate;
-        const current = byProject.get(entry.projectId) ?? {
-          projectName: entry.project.name,
-          hours: 0,
-          amount: 0,
-          unitRate: rate,
-        };
-        current.hours += hours;
-        current.amount += amount;
-        byProject.set(entry.projectId, current);
-      }
-
-      const projectLines = [...byProject.entries()].map(([projectId, line]) => ({
-        projectId,
-        description: `Horas aprovadas - ${line.projectName}`,
-        hours: line.hours,
-        unitRate: line.unitRate,
-        amount: line.amount,
-      }));
-      const benefitLines = benefits.map((benefit) => ({
-        projectId: null as string | null,
-        description: `Beneficio ${benefit.type}`,
-        hours: 0,
-        unitRate: toNumber(benefit.amount),
-        amount: toNumber(benefit.amount),
-      }));
-      const benefitCardAmount = hasApprovedHours
-        ? toNumber(compensation.benefitCardAmount)
-        : 0;
-      if (benefitCardAmount > 0) {
-        benefitLines.push({
-          projectId: null,
-          description: "Beneficio BENEFIT_CARD",
-          hours: 0,
-          unitRate: benefitCardAmount,
-          amount: benefitCardAmount,
-        });
-      }
-
-      // Base zerada quando nao ha horas: nada de salario/beneficios sem folha.
-      const baseAmounts = hasApprovedHours
-        ? buildConsultantPaymentAmounts(
-            {
-              contractType: compensation.contractType,
-              hourlyRate: toNumber(compensation.hourlyRate),
-              cltAmount: toNumber(compensation.cltAmount),
-              pjAmount: toNumber(compensation.pjAmount),
-              benefitCardAmount: toNumber(compensation.benefitCardAmount),
-              discountRules: compensation.discountRules as never,
-            },
-            benefits.map((benefit) => ({ amount: toNumber(benefit.amount) })),
-            projectLines,
-          )
-        : { cltNetAmount: 0, pjAmount: 0, benefitAmount: 0, totalAmount: 0 };
+      const computed = computeConsultantMonthlyPayment({
+        consultantId,
+        consultantRecord,
+        approvedEntries: consultantEntries,
+        adHocs: adHocForConsultant,
+        start,
+        projectRateWindows,
+      });
+      if (!computed) continue;
 
       const payment = await tx.consultantPayment.create({
         data: {
           consultantId,
           month: input.month,
           year: input.year,
-          contractType: compensation.contractType,
-          cltNetAmount: baseAmounts.cltNetAmount,
-          pjAmount: baseAmounts.pjAmount,
-          benefitAmount: baseAmounts.benefitAmount,
-          totalAmount: baseAmounts.totalAmount + adHocTotal,
+          contractType: computed.contractType,
+          cltNetAmount: computed.cltNetAmount,
+          pjAmount: computed.pjAmount,
+          benefitAmount: computed.benefitAmount,
+          totalAmount: computed.totalAmount,
         },
       });
       await tx.consultantPaymentLine.createMany({
-        data: [...projectLines, ...benefitLines, ...adHocLines].map((line) => ({
+        data: computed.lines.map((line) => ({
           consultantPaymentId: payment.id,
           ...line,
         })),
@@ -656,6 +763,395 @@ export async function generateConsultantPayments(input: {
   });
 
   return { generated, skippedExisting, skippedWithUnreflectedAdHoc };
+}
+
+// ---------------------------------------------------------------------------
+// Reconciliação escopada (B) — disparada pelo Fechamento Operacional.
+//
+// Ao FECHAR um projeto/mês, recomputa o pagamento SÓ dos consultores daquele
+// projeto. Regra de produto ("atualiza a cada fechamento enquanto em aberto"):
+//   - Não existe pagamento no mês => CRIA (status OPEN).
+//   - Existe e status == OPEN      => RECONCILIA (substitui linhas + recalcula
+//                                     montantes; recomputa de TODAS as horas
+//                                     aprovadas do mês, todos os projetos).
+//   - Existe e status != OPEN      => NÃO ALTERA. Se o valor recomputado diverge
+//                                     do atual, reporta em `lockedDivergent`.
+//
+// SEGURANÇA FINANCEIRA: nunca reescreve um pagamento fora de OPEN. O update de
+// reconciliação é condicional (`where status = OPEN`) para ser robusto a corrida
+// — se o status sair de OPEN entre a leitura e a escrita, o update não afeta
+// nenhuma linha e o pagamento é tratado como travado.
+//
+// PRESERVAÇÃO DA NF: a reconciliação só apaga/recria ConsultantPaymentLine e
+// atualiza os montantes de remuneração. NÃO toca em invoiceAmount nem nos
+// ConsultantInvoiceAttachment (tabela separada; o cascade só dispara no delete
+// do próprio ConsultantPayment, que nunca ocorre aqui).
+// ---------------------------------------------------------------------------
+
+/**
+ * Tolerância para considerar dois totais como divergentes. Menor que 1 centavo:
+ * como `currentTotal`/`recomputedTotal` já passam por `round2` (centavos), uma
+ * diferença real de exatamente R$ 0,01 PRECISA ser sinalizada — por isso o
+ * limite fica abaixo de 0,01.
+ */
+const RECONCILE_DIVERGENCE_EPSILON = 0.005;
+
+export interface ReconcileLockedDivergent {
+  consultantId: string;
+  name: string;
+  currentTotal: number;
+  recomputedTotal: number;
+  status: ConsultantPaymentStatus;
+}
+
+export interface ReconcileConsultantPaymentsResult {
+  created: number;
+  refreshed: number;
+  lockedDivergent: ReconcileLockedDivergent[];
+  skippedNoCompensation: { consultantId: string; name: string }[];
+  /**
+   * Consultores cujo contrato NÃO é pagável neste fluxo (CLT puro sai como
+   * folha — só PJ/CLT_FLEX geram ConsultantPayment aqui). Não criamos/reconcili-
+   * amos: apenas contabilizamos para dar visibilidade.
+   */
+  skippedNotPayable: {
+    consultantId: string;
+    name: string;
+    contractType: ConsultantContractType;
+  }[];
+}
+
+export async function reconcileConsultantPaymentsForConsultants(input: {
+  month: number;
+  year: number;
+  consultantIds: string[];
+  audit?: {
+    actorUserId: string | null;
+    entityId: string;
+    action: string;
+  };
+}): Promise<ReconcileConsultantPaymentsResult> {
+  const result: ReconcileConsultantPaymentsResult = {
+    created: 0,
+    refreshed: 0,
+    lockedDivergent: [],
+    skippedNoCompensation: [],
+    skippedNotPayable: [],
+  };
+
+  const consultantIds = [...new Set(input.consultantIds)].filter(Boolean);
+  if (consultantIds.length === 0) return result;
+
+  /**
+   * Registra UMA divergência travada (status != OPEN, ou corrida que tirou o
+   * pagamento de OPEN): sinaliza no retorno E grava um AuditEvent com os valores
+   * sensíveis (currentTotal/recomputedTotal). Assim o dado financeiro fica no
+   * audit server-side — o payload devolvido ao cliente pelo `closeOperation` é
+   * sanitizado (sem valores).
+   */
+  const recordLockedDivergence = async (params: {
+    paymentId: string;
+    consultantId: string;
+    name: string;
+    status: ConsultantPaymentStatus;
+    currentTotal: number;
+    recomputedTotal: number;
+  }): Promise<void> => {
+    result.lockedDivergent.push({
+      consultantId: params.consultantId,
+      name: params.name,
+      currentTotal: params.currentTotal,
+      recomputedTotal: params.recomputedTotal,
+      status: params.status,
+    });
+    await prisma.auditEvent.create({
+      data: buildAuditEventData({
+        actorUserId: input.audit?.actorUserId ?? null,
+        entityType: "ConsultantPayment",
+        entityId: params.paymentId,
+        action: "CONSULTANT_PAYMENT_RECONCILE_LOCKED_DIVERGENT",
+        after: {
+          consultantId: params.consultantId,
+          status: params.status,
+          currentTotal: params.currentTotal,
+          recomputedTotal: params.recomputedTotal,
+          source: "OPERATION_CLOSING",
+        },
+      }),
+    });
+  };
+
+  const { start, end } = monthBounds(input.month, input.year);
+
+  // ESCOPO: só os consultores do projeto fechado. O `consultantId in` restringe
+  // TODAS as leituras — nunca tocamos consultores fora do escopo.
+  const entries = await prisma.timeEntry.findMany({
+    where: {
+      status: "APPROVED",
+      date: { gte: start, lt: end },
+      consultantId: { in: consultantIds },
+    },
+    include: { project: { select: { name: true } } },
+  });
+  const adHocPayments = await prisma.consultantAdHocPayment.findMany({
+    where: {
+      status: { not: "CANCELLED" },
+      payAt: { gte: start, lt: end },
+      consultantId: { in: consultantIds },
+    },
+    include: { project: { select: { name: true } } },
+  });
+
+  const byConsultant = new Map<string, typeof entries>();
+  for (const entry of entries) {
+    const list = byConsultant.get(entry.consultantId) ?? [];
+    list.push(entry);
+    byConsultant.set(entry.consultantId, list);
+  }
+  const adHocByConsultant = new Map<string, typeof adHocPayments>();
+  for (const payment of adHocPayments) {
+    const list = adHocByConsultant.get(payment.consultantId) ?? [];
+    list.push(payment);
+    adHocByConsultant.set(payment.consultantId, list);
+  }
+
+  const projectRateRows = await prisma.consultantProjectRate.findMany({
+    where: { consultantId: { in: consultantIds } },
+  });
+  const projectRateWindows = new Map<string, ProjectRateWindow[]>();
+  for (const rate of projectRateRows) {
+    const key = projectRateKey(rate.consultantId, rate.projectId);
+    const list = projectRateWindows.get(key) ?? [];
+    list.push({
+      startsAt: rate.startsAt,
+      endsAt: rate.endsAt,
+      hourlyRate: toNumber(rate.hourlyRate),
+    });
+    projectRateWindows.set(key, list);
+  }
+
+  const consultants = await prisma.consultant.findMany({
+    where: { id: { in: consultantIds } },
+    include: { compensations: true, benefits: true },
+  });
+  const consultantById = new Map(consultants.map((c) => [c.id, c]));
+
+  for (const consultantId of consultantIds) {
+    const record = consultantById.get(consultantId);
+    const name = record?.name ?? "Consultor";
+    if (!record) {
+      result.skippedNoCompensation.push({ consultantId, name });
+      continue;
+    }
+
+    const computed = computeConsultantMonthlyPayment({
+      consultantId,
+      consultantRecord: record,
+      approvedEntries: byConsultant.get(consultantId) ?? [],
+      adHocs: adHocByConsultant.get(consultantId) ?? [],
+      start,
+      projectRateWindows,
+    });
+    if (!computed) {
+      // Sem compensação vigente: nada a computar. Não tocamos em nada.
+      result.skippedNoCompensation.push({ consultantId, name });
+      continue;
+    }
+
+    // CLT puro é folha (jump-hr-compensation-agent) e NÃO gera ConsultantPayment
+    // aqui: só PJ/CLT_FLEX são pagáveis neste fluxo. Sem este guard, um CLT
+    // ganharia um pagamento invisível na tela (filtra PAYMENT_CONTRACT_TYPES) e
+    // inflaria o "N gerados". Não cria nem reconcilia; só contabiliza.
+    if (!PAYMENT_CONTRACT_TYPES.includes(computed.contractType)) {
+      result.skippedNotPayable.push({
+        consultantId,
+        name,
+        contractType: computed.contractType,
+      });
+      continue;
+    }
+
+    let existing = await prisma.consultantPayment.findUnique({
+      where: {
+        consultantId_month_year: {
+          consultantId,
+          month: input.month,
+          year: input.year,
+        },
+      },
+      select: { id: true, status: true, totalAmount: true },
+    });
+
+    // CRIAR — não existe pagamento no mês. Idempotente sob corrida: dois
+    // fechamentos concorrentes de projetos que compartilham um consultor podem
+    // ambos ler existing=null; o segundo viola o unique consultantId_month_year.
+    // Capturamos o P2002, re-lemos o pagamento e caímos no caminho de "existente"
+    // (que já é robusto), em vez de derrubar todo o reconcile num erro espúrio.
+    if (!existing) {
+      let createdRow: { id: string } | null = null;
+      try {
+        createdRow = await prisma.$transaction(async (tx) => {
+          const payment = await tx.consultantPayment.create({
+            data: {
+              consultantId,
+              month: input.month,
+              year: input.year,
+              contractType: computed.contractType,
+              cltNetAmount: computed.cltNetAmount,
+              pjAmount: computed.pjAmount,
+              benefitAmount: computed.benefitAmount,
+              totalAmount: computed.totalAmount,
+            },
+          });
+          await tx.consultantPaymentLine.createMany({
+            data: computed.lines.map((line) => ({
+              consultantPaymentId: payment.id,
+              ...line,
+            })),
+          });
+          await tx.auditEvent.create({
+            data: buildAuditEventData({
+              actorUserId: input.audit?.actorUserId ?? null,
+              entityType: "ConsultantPayment",
+              entityId: payment.id,
+              action: "CONSULTANT_PAYMENT_RECONCILE_CREATED",
+              after: {
+                consultantId,
+                month: input.month,
+                year: input.year,
+                totalAmount: computed.totalAmount,
+                source: "OPERATION_CLOSING",
+              },
+            }),
+          });
+          return { id: payment.id };
+        });
+      } catch (error) {
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === "P2002"
+        ) {
+          // Criação concorrente: re-lê e trata como existente abaixo.
+          existing = await prisma.consultantPayment.findUnique({
+            where: {
+              consultantId_month_year: {
+                consultantId,
+                month: input.month,
+                year: input.year,
+              },
+            },
+            select: { id: true, status: true, totalAmount: true },
+          });
+        } else {
+          throw error;
+        }
+      }
+      if (createdRow) {
+        result.created += 1;
+        continue;
+      }
+      // Se caiu aqui sem createdRow, houve P2002 e existing foi re-lido; num caso
+      // impossível de existing ainda null, não há o que fazer.
+      if (!existing) continue;
+    }
+
+    // RECONCILIAR — só quando ainda em OPEN. Update condicional por status.
+    if (existing.status === "OPEN") {
+      const previousTotal = toNumber(existing.totalAmount);
+      const paymentId = existing.id;
+      const reconciled = await prisma.$transaction(async (tx) => {
+        const updated = await tx.consultantPayment.updateMany({
+          where: { id: paymentId, status: "OPEN" },
+          data: {
+            contractType: computed.contractType,
+            cltNetAmount: computed.cltNetAmount,
+            pjAmount: computed.pjAmount,
+            benefitAmount: computed.benefitAmount,
+            totalAmount: computed.totalAmount,
+          },
+        });
+        // Corrida: saiu de OPEN entre a leitura e a escrita — não mexe em linhas.
+        if (updated.count !== 1) return false;
+        await tx.consultantPaymentLine.deleteMany({
+          where: { consultantPaymentId: paymentId },
+        });
+        await tx.consultantPaymentLine.createMany({
+          data: computed.lines.map((line) => ({
+            consultantPaymentId: paymentId,
+            ...line,
+          })),
+        });
+        await tx.auditEvent.create({
+          data: buildAuditEventData({
+            actorUserId: input.audit?.actorUserId ?? null,
+            entityType: "ConsultantPayment",
+            entityId: paymentId,
+            action: "CONSULTANT_PAYMENT_RECONCILE_REFRESHED",
+            before: { status: "OPEN", totalAmount: previousTotal },
+            after: {
+              totalAmount: computed.totalAmount,
+              source: "OPERATION_CLOSING",
+            },
+          }),
+        });
+        return true;
+      });
+      if (reconciled) {
+        result.refreshed += 1;
+      } else {
+        // Corrida: status mudou; trata como travado e avalia divergência.
+        const current = round2(previousTotal);
+        const recomputed = round2(computed.totalAmount);
+        if (Math.abs(current - recomputed) > RECONCILE_DIVERGENCE_EPSILON) {
+          await recordLockedDivergence({
+            paymentId,
+            consultantId,
+            name,
+            status: existing.status,
+            currentTotal: current,
+            recomputedTotal: recomputed,
+          });
+        }
+      }
+      continue;
+    }
+
+    // TRAVADO — Financeiro já começou (WAITING_FOR_INVOICE em diante) ou
+    // CANCELLED. NUNCA reescreve; só reporta divergência (audit + retorno).
+    const current = round2(toNumber(existing.totalAmount));
+    const recomputed = round2(computed.totalAmount);
+    if (Math.abs(current - recomputed) > RECONCILE_DIVERGENCE_EPSILON) {
+      await recordLockedDivergence({
+        paymentId: existing.id,
+        consultantId,
+        name,
+        status: existing.status,
+        currentTotal: current,
+        recomputedTotal: recomputed,
+      });
+    }
+  }
+
+  if (input.audit) {
+    await prisma.auditEvent.create({
+      data: buildAuditEventData({
+        actorUserId: input.audit.actorUserId,
+        entityType: "ConsultantPayment",
+        entityId: input.audit.entityId,
+        action: input.audit.action,
+        after: {
+          created: result.created,
+          refreshed: result.refreshed,
+          lockedDivergent: result.lockedDivergent.length,
+          skippedNoCompensation: result.skippedNoCompensation.length,
+          skippedNotPayable: result.skippedNotPayable.length,
+          consultants: consultantIds.length,
+        },
+      }),
+    });
+  }
+
+  return result;
 }
 
 export async function sendConsultantPaymentForecast(input: {

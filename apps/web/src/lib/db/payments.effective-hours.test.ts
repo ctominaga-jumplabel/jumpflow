@@ -57,6 +57,8 @@ vi.mock("@jumpflow/database", () => ({
     // Onda D: sem pontuais nestes cenários (regressão do fluxo por horas).
     consultantAdHocPayment: { findMany: async () => [] },
     consultant: { findMany: async () => [] },
+    // M2: sem valor/hora por projeto nestes cenários (cai no hourlyRate acordado).
+    consultantProjectRate: { findMany: async () => [] },
     $transaction: (cb: (tx: unknown) => unknown) => transaction(cb),
   },
   Prisma: { JsonNull: "__JsonNull__" },
