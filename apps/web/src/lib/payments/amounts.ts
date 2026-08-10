@@ -50,17 +50,19 @@ export function buildConsultantPaymentAmounts(
     };
   }
 
+  // PJ: modo de precificacao decide a base.
+  //  - HOURLY => horas x taxa (lineAmount ja computado; taxa = override de
+  //    projeto ?? hourlyRate). Sem horas aprovadas o lineAmount e 0 e NAO cai
+  //    para o pjAmount fixo.
+  //  - FIXED ou null/undefined (compat) => pjAmount fixo (comportamento legado).
+  const pjAmount =
+    compensation.pjRateMode === "HOURLY"
+      ? lineAmount
+      : (compensation.pjAmount ?? 0);
   return {
     cltNetAmount: 0,
-    pjAmount:
-      compensation.hourlyRate != null && lineAmount > 0
-        ? lineAmount
-        : (compensation.pjAmount ?? 0),
+    pjAmount,
     benefitAmount,
-    totalAmount:
-      (compensation.hourlyRate != null && lineAmount > 0
-        ? lineAmount
-        : (compensation.pjAmount ?? 0)) +
-      benefitAmount,
+    totalAmount: pjAmount + benefitAmount,
   };
 }

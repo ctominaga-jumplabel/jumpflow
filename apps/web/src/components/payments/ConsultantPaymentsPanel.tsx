@@ -9,7 +9,6 @@ import {
   FileCheck2,
   FileText,
   Mail,
-  RotateCw,
   Send,
   TriangleAlert,
   Upload,
@@ -36,7 +35,6 @@ import {
 } from "@/lib/payments/types";
 import {
   advanceConsultantPayment,
-  generateMonthlyConsultantPayments,
   requestConsultantInvoice,
   requestMonthlyInvoices,
   sendPaymentForecast,
@@ -102,28 +100,6 @@ export function ConsultantPaymentsPanel({
     () => payments.reduce((sum, payment) => sum + payment.totalAmount, 0),
     [payments],
   );
-
-  function generate() {
-    if (isDemo) {
-      notify("info", "Geracao local simulada.");
-      return;
-    }
-    startTransition(async () => {
-      const result = await generateMonthlyConsultantPayments({ month, year });
-      if (result.ok) {
-        const unreflected = result.data.skippedWithUnreflectedAdHoc.length;
-        notify(
-          unreflected > 0 ? "warning" : "success",
-          `${result.data.generated} pagamento(s) gerado(s). ${result.data.skippedExisting} existente(s) preservado(s).` +
-            (unreflected > 0
-              ? ` Atencao: ${unreflected} consultor(es) com remuneracao pontual no mes NAO refletida no pagamento ja existente — revise manualmente.`
-              : ""),
-        );
-      } else {
-        notify("warning", result.message);
-      }
-    });
-  }
 
   function advance(
     payment: ConsultantPaymentView,
@@ -494,15 +470,6 @@ export function ConsultantPaymentsPanel({
               onClick={requestMonthInvoices}
             >
               Solicitar NF do mês
-            </ActionButton>
-            <ActionButton
-              size="sm"
-              variant="primary"
-              icon={RotateCw}
-              disabled={isPending}
-              onClick={generate}
-            >
-              Gerar
             </ActionButton>
           </div>
         }

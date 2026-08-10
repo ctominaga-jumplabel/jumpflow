@@ -36,6 +36,7 @@ function pjRecord(hourlyRate: number, opts?: { benefits?: { type: string; amount
     compensations: [
       {
         contractType: "PJ" as const,
+        pjRateMode: "HOURLY" as const,
         hourlyRate,
         cltAmount: 0,
         pjAmount: 0,

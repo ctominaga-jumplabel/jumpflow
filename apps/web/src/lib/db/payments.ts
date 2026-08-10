@@ -396,6 +396,7 @@ export interface ComputedConsultantPayment {
 
 interface ComputeConsultantCompensation {
   contractType: ConsultantContractType;
+  pjRateMode?: "HOURLY" | "FIXED" | null;
   hourlyRate: Prisma.Decimal | number | null;
   cltAmount: Prisma.Decimal | number | null;
   pjAmount: Prisma.Decimal | number | null;
@@ -542,6 +543,7 @@ export function computeConsultantMonthlyPayment(input: {
     ? buildConsultantPaymentAmounts(
         {
           contractType: compensation.contractType,
+          pjRateMode: compensation.pjRateMode ?? null,
           hourlyRate: toNumber(compensation.hourlyRate),
           cltAmount: toNumber(compensation.cltAmount),
           pjAmount: toNumber(compensation.pjAmount),
