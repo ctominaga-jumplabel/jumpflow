@@ -6,6 +6,13 @@ import {
 
 export interface CompensationInput {
   contractType: "CLT" | "PJ" | "CLT_FLEX";
+  /**
+   * PJ pricing mode. Only meaningful for `contractType === "PJ"`.
+   *  - "HOURLY": payment = approved hours x rate (project override ?? hourlyRate).
+   *  - "FIXED" or null/undefined: payment = fixed `pjAmount` (legacy behavior).
+   * `null`/`undefined` is treated as FIXED for backward compatibility.
+   */
+  pjRateMode?: "HOURLY" | "FIXED" | null;
   hourlyRate?: number | null;
   cltAmount?: number | null;
   pjAmount?: number | null;

@@ -75,6 +75,12 @@ import { ConsultantDocumentsSection } from "./ConsultantDocumentsSection";
 import { ConsultantProfileSections } from "./ConsultantProfileSections";
 import { ConsultantProjectRatesSection } from "./ConsultantProjectRatesSection";
 
+/** Modos de precificacao PJ (so relevantes quando contractType === "PJ"). */
+const PJ_RATE_MODES: { value: "HOURLY" | "FIXED"; label: string }[] = [
+  { value: "HOURLY", label: "Por hora" },
+  { value: "FIXED", label: "Fixo mensal" },
+];
+
 const SENIORITY_FILTERS: (Seniority | "ALL")[] = [
   "ALL",
   "JUNIOR",
@@ -421,6 +427,10 @@ function ConsultantDetailModal({
 }) {
   const [identity, setIdentity] = useState<ConsultantIdentityInput | null>(null);
   const [compensation, setCompensation] = useState<CompensationInput | null>(null);
+  // Modo da secao de remuneracao:
+  //  - "edit": corrige a vigencia atual (Salvar = UPDATE por id).
+  //  - "new": cria uma nova vigencia (Salvar = CREATE, id limpo).
+  const [compMode, setCompMode] = useState<"edit" | "new">("edit");
   const [vouchers, setVouchers] = useState<{
     vr?: number;
     va?: number;
@@ -450,20 +460,57 @@ function ConsultantDetailModal({
         (profile?.contractType as ConsultantIdentityInput["contractType"]) ??
         undefined,
     } satisfies ConsultantIdentityInput);
-  const currentCompensation =
+  // Hidrata a compensacao a partir da remuneracao vigente do perfil (a de maior
+  // startsAt, exposta em `profile.compensation`). Traz o `id` e o `startsAt`
+  // reais, entao Salvar faz UPDATE da mesma linha em vez de criar duplicata. So
+  // caimos no rascunho zerado (novo registro) quando o consultor ainda nao tem
+  // nenhuma remuneracao — e ai o tipo de contrato herda a identidade.
+  const baseCompensation: CompensationInput =
     compensation ??
-    ({
-      consultantId: consultant.id,
-      contractType: "CLT_FLEX",
-      id: undefined,
-      startsAt: new Date().toISOString().slice(0, 10),
-      endsAt: undefined,
-      cltAmount: undefined,
-      pjAmount: undefined,
-      benefitCardAmount: undefined,
-      discountRulesJson: '{"version":1,"fixedDiscounts":[],"percentDiscounts":[]}',
-      note: undefined,
-    } satisfies CompensationInput);
+    (profile?.compensation
+      ? ({
+          consultantId: consultant.id,
+          id: profile.compensation.id,
+          contractType: profile.compensation.contractType,
+          pjRateMode: profile.compensation.pjRateMode,
+          startsAt: profile.compensation.startsAt,
+          endsAt: profile.compensation.endsAt ?? undefined,
+          hourlyRate: profile.compensation.hourlyRate ?? undefined,
+          cltAmount: profile.compensation.cltAmount ?? undefined,
+          pjAmount: profile.compensation.pjAmount ?? undefined,
+          benefitCardAmount: profile.compensation.benefitCardAmount ?? undefined,
+          discountRulesJson:
+            '{"version":1,"fixedDiscounts":[],"percentDiscounts":[]}',
+          note: undefined,
+        } satisfies CompensationInput)
+      : ({
+          consultantId: consultant.id,
+          id: undefined,
+          contractType:
+            (profile?.contractType as CompensationInput["contractType"]) ??
+            "CLT_FLEX",
+          pjRateMode: undefined,
+          startsAt: new Date().toISOString().slice(0, 10),
+          endsAt: undefined,
+          hourlyRate: undefined,
+          cltAmount: undefined,
+          pjAmount: undefined,
+          benefitCardAmount: undefined,
+          discountRulesJson:
+            '{"version":1,"fixedDiscounts":[],"percentDiscounts":[]}',
+          note: undefined,
+        } satisfies CompensationInput));
+
+  // Existe uma vigencia salva para corrigir? So entao oferecemos a escolha
+  // "corrigir atual vs nova vigencia" (senao, todo Salvar ja e uma criacao).
+  const hasExistingCompensation = profile?.compensation != null;
+  // Em "new" forcamos id undefined => Salvar CRIA uma nova linha em vez de
+  // sobrescrever a vigencia anterior (que continua cobrindo meses passados: o
+  // calculo usa activeOn, a vigencia de maior startsAt <= inicio do mes).
+  const currentCompensation: CompensationInput =
+    compMode === "new" && baseCompensation.id
+      ? { ...baseCompensation, id: undefined }
+      : baseCompensation;
 
   async function saveIdentity() {
     const result = await saveConsultantIdentity(currentIdentity);
@@ -727,24 +774,218 @@ function ConsultantDetailModal({
                 <BadgeDollarSign aria-hidden="true" className="size-4" />
                 Valor acordado
               </div>
+
+              {/* Corrigir a vigencia atual (UPDATE por id) vs criar uma nova
+                  vigencia (CREATE). So aparece quando ja existe uma vigencia
+                  salva; caso contrario todo Salvar ja e uma criacao. */}
+              {hasExistingCompensation ? (
+                <div className="space-y-2">
+                  <div
+                    role="radiogroup"
+                    aria-label="O que fazer com a remuneração"
+                    className="flex flex-wrap gap-2"
+                  >
+                    {(
+                      [
+                        { value: "edit", label: "Corrigir vigência atual" },
+                        { value: "new", label: "Nova vigência" },
+                      ] as const
+                    ).map((option) => {
+                      const active = compMode === option.value;
+                      return (
+                        <label
+                          key={option.value}
+                          className={cn(
+                            "flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors",
+                            active
+                              ? "border-ink bg-brand-soft text-brand-dark shadow-[2px_2px_0_0_var(--color-ink)]"
+                              : "border-border text-medium hover:border-brand hover:text-strong",
+                          )}
+                        >
+                          <input
+                            type="radio"
+                            name="compensation-mode"
+                            className="sr-only"
+                            value={option.value}
+                            checked={active}
+                            onChange={() => {
+                              onMessage(null);
+                              if (option.value === "new") {
+                                // Parte dos valores atuais, mas com id limpo e
+                                // startsAt = hoje para o operador escolher.
+                                setCompensation({
+                                  ...currentCompensation,
+                                  id: undefined,
+                                  startsAt: new Date()
+                                    .toISOString()
+                                    .slice(0, 10),
+                                });
+                                setCompMode("new");
+                              } else {
+                                // Volta a corrigir a vigencia hidratada do perfil.
+                                setCompensation(null);
+                                setCompMode("edit");
+                              }
+                            }}
+                          />
+                          {option.label}
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <p className="text-xs text-soft">
+                    {compMode === "new"
+                      ? "A nova vigência passa a valer a partir da data de início; a anterior continua valendo para os meses anteriores."
+                      : "Ajusta a vigência atual sem criar uma nova linha (corrige valores/datas do registro em vigor)."}
+                  </p>
+                </div>
+              ) : null}
+
+              {/* Vigencia: a partir de quando esta remuneracao vale. Permite data
+                  retroativa; sem fim = vigencia em aberto. */}
+              <div className="grid gap-3 md:grid-cols-2">
+                <label
+                  className="space-y-1 text-sm font-medium text-medium"
+                  htmlFor="compensation-starts-at"
+                >
+                  Vigência a partir de
+                  <input
+                    id="compensation-starts-at"
+                    type="date"
+                    required
+                    aria-label="Data de início da vigência da remuneração"
+                    value={currentCompensation.startsAt}
+                    onChange={(event) =>
+                      setCompensation({
+                        ...currentCompensation,
+                        startsAt: event.target.value,
+                      })
+                    }
+                    className={fieldClass()}
+                  />
+                  <span className="block text-xs font-normal text-soft">
+                    Data a partir da qual esta remuneração passa a valer. Use uma
+                    data retroativa (ex.: 01/07/2026) para corrigir uma vigência
+                    anterior.
+                  </span>
+                </label>
+                <label
+                  className="space-y-1 text-sm font-medium text-medium"
+                  htmlFor="compensation-ends-at"
+                >
+                  Fim da vigência (opcional)
+                  <input
+                    id="compensation-ends-at"
+                    type="date"
+                    aria-label="Data de fim da vigência da remuneração"
+                    value={currentCompensation.endsAt ?? ""}
+                    onChange={(event) =>
+                      setCompensation({
+                        ...currentCompensation,
+                        endsAt: event.target.value || undefined,
+                      })
+                    }
+                    className={fieldClass()}
+                  />
+                  <span className="block text-xs font-normal text-soft">
+                    Deixe em branco para manter a vigência em aberto.
+                  </span>
+                </label>
+              </div>
+
+              {/* Modo de remuneracao PJ: so aparece para contrato PJ. Define se o
+                  pagamento e por hora (horas aprovadas x valor/hora) ou fixo
+                  mensal. CLT/CLT FLEX mantem os campos originais. */}
+              {currentCompensation.contractType === "PJ" ? (
+                <fieldset className="space-y-2">
+                  <legend className="text-sm font-medium text-medium">
+                    Modo de remuneração PJ
+                  </legend>
+                  <div
+                    role="radiogroup"
+                    aria-label="Modo de remuneração PJ"
+                    className="flex flex-wrap gap-2"
+                  >
+                    {PJ_RATE_MODES.map((mode) => {
+                      const active =
+                        (currentCompensation.pjRateMode ?? "FIXED") ===
+                        mode.value;
+                      return (
+                        <label
+                          key={mode.value}
+                          className={cn(
+                            "flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors",
+                            active
+                              ? "border-ink bg-brand-soft text-brand-dark shadow-[2px_2px_0_0_var(--color-ink)]"
+                              : "border-border text-medium hover:border-brand hover:text-strong",
+                          )}
+                        >
+                          <input
+                            type="radio"
+                            name="pj-rate-mode"
+                            className="sr-only"
+                            value={mode.value}
+                            checked={active}
+                            onChange={() =>
+                              setCompensation({
+                                ...currentCompensation,
+                                pjRateMode: mode.value,
+                              })
+                            }
+                          />
+                          {mode.label}
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <p className="text-xs text-soft">
+                    {(currentCompensation.pjRateMode ?? "FIXED") === "HOURLY"
+                      ? "Pagamento = horas aprovadas × valor/hora."
+                      : "Pagamento = valor fixo mensal."}
+                  </p>
+                </fieldset>
+              ) : null}
+
               <div className="grid gap-3 md:grid-cols-3">
+            {currentCompensation.contractType === "PJ" ? (
+              (currentCompensation.pjRateMode ?? "FIXED") === "HOURLY" ? (
+                <NumberInput
+                  label="Valor/hora (valor/hora)"
+                  value={currentCompensation.hourlyRate ?? undefined}
+                  onChange={(value) =>
+                    setCompensation({ ...currentCompensation, hourlyRate: value })
+                  }
+                />
+              ) : (
+                <NumberInput
+                  label="Valor PJ (valor mensal)"
+                  value={currentCompensation.pjAmount ?? undefined}
+                  onChange={(value) =>
+                    setCompensation({ ...currentCompensation, pjAmount: value })
+                  }
+                />
+              )
+            ) : (
+              <>
+                <NumberInput
+                  label="Valor CLT"
+                  value={currentCompensation.cltAmount ?? undefined}
+                  onChange={(value) =>
+                    setCompensation({ ...currentCompensation, cltAmount: value })
+                  }
+                />
+                <NumberInput
+                  label="Valor PJ"
+                  value={currentCompensation.pjAmount ?? undefined}
+                  onChange={(value) =>
+                    setCompensation({ ...currentCompensation, pjAmount: value })
+                  }
+                />
+              </>
+            )}
             <NumberInput
-              label="Valor CLT"
-              value={currentCompensation.cltAmount}
-              onChange={(value) =>
-                setCompensation({ ...currentCompensation, cltAmount: value })
-              }
-            />
-            <NumberInput
-              label="Valor PJ"
-              value={currentCompensation.pjAmount}
-              onChange={(value) =>
-                setCompensation({ ...currentCompensation, pjAmount: value })
-              }
-            />
-            <NumberInput
-              label="Cartao beneficio"
-              value={currentCompensation.benefitCardAmount}
+              label="Cartão benefício"
+              value={currentCompensation.benefitCardAmount ?? undefined}
               onChange={(value) =>
                 setCompensation({
                   ...currentCompensation,
@@ -753,12 +994,12 @@ function ConsultantDetailModal({
               }
             />
             <NumberInput
-              label="VR (Vale Refeicao)"
+              label="VR (Vale Refeição)"
               value={vouchers.vr}
               onChange={(value) => setVouchers({ ...vouchers, vr: value })}
             />
             <NumberInput
-              label="VA (Vale Alimentacao)"
+              label="VA (Vale Alimentação)"
               value={vouchers.va}
               onChange={(value) => setVouchers({ ...vouchers, va: value })}
             />

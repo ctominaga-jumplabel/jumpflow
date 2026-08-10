@@ -147,6 +147,7 @@ function pjConsultant(id: string, hourlyRate: number, name = "Consultor") {
     compensations: [
       {
         contractType: "PJ" as const,
+        pjRateMode: "HOURLY" as const,
         hourlyRate,
         cltAmount: 0,
         pjAmount: 0,

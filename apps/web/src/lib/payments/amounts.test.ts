@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 import { buildConsultantPaymentAmounts } from "./amounts";
 
 describe("buildConsultantPaymentAmounts", () => {
-  it("calculates PJ from project lines plus benefits", () => {
+  it("calculates HOURLY PJ from project lines plus benefits", () => {
     expect(
       buildConsultantPaymentAmounts(
-        { contractType: "PJ", hourlyRate: 150 },
+        { contractType: "PJ", pjRateMode: "HOURLY", hourlyRate: 150 },
         [{ amount: 300 }],
         [{ amount: 1000 }, { amount: 500 }],
       ),
@@ -17,12 +17,42 @@ describe("buildConsultantPaymentAmounts", () => {
     });
   });
 
+  it("HOURLY PJ does not fall back to fixed pjAmount when there are no hours", () => {
+    expect(
+      buildConsultantPaymentAmounts(
+        { contractType: "PJ", pjRateMode: "HOURLY", hourlyRate: 150, pjAmount: 12000 },
+        [],
+        [],
+      ),
+    ).toEqual({
+      cltNetAmount: 0,
+      pjAmount: 0,
+      benefitAmount: 0,
+      totalAmount: 0,
+    });
+  });
+
   it("treats PJ fixed monthly amount as total, not hourly rate", () => {
     expect(
       buildConsultantPaymentAmounts(
-        { contractType: "PJ", pjAmount: 12000 },
+        { contractType: "PJ", pjRateMode: "FIXED", pjAmount: 12000 },
         [],
         [{ amount: 0 }],
+      ),
+    ).toEqual({
+      cltNetAmount: 0,
+      pjAmount: 12000,
+      benefitAmount: 0,
+      totalAmount: 12000,
+    });
+  });
+
+  it("treats null/absent pjRateMode as FIXED for backward compatibility", () => {
+    expect(
+      buildConsultantPaymentAmounts(
+        { contractType: "PJ", hourlyRate: 150, pjAmount: 12000 },
+        [],
+        [{ amount: 9999 }],
       ),
     ).toEqual({
       cltNetAmount: 0,

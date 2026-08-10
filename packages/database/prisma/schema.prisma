@@ -521,6 +521,14 @@ enum ConsultantContractType {
   CLT_FLEX
 }
 
+/// Como o consultor PJ e pago: por hora (valor/hora x horas aprovadas) ou fixo
+/// mensal. Aplica-se apenas quando contractType = PJ. Null = tratar como FIXED
+/// por compatibilidade; o backend decide.
+enum PjRateMode {
+  HOURLY
+  FIXED
+}
+
 enum BankAccountKind {
   CLT
   PJ
@@ -1128,6 +1136,7 @@ model ConsultantCompensation {
   hourlyRate        Decimal?               @db.Decimal(12, 2)
   cltAmount         Decimal?               @db.Decimal(12, 2)
   pjAmount          Decimal?               @db.Decimal(12, 2)
+  pjRateMode        PjRateMode?
   benefitCardAmount Decimal?               @db.Decimal(12, 2)
   discountRules     Json?
   note              String?

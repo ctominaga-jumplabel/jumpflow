@@ -266,8 +266,20 @@ export async function loadConsultantProfile(
 ): Promise<ActionResult<ConsultantProfile>> {
   try {
     ensureDatabase();
-    await requireConsultantProfileView();
-    const profile = await getConsultantProfile(consultantId);
+    const user = await requireConsultantProfileView();
+    // Gate de PII financeira: a remuneracao (hourlyRate/pjAmount/cltAmount/
+    // benefitCardAmount) so vai no payload para quem tem a view de remuneracao
+    // (mesmo gate da secao CONSULTORES_REMUNERACAO). Papeis de currico/pessoais
+    // (PROJECT_MANAGER/SALES) recebem compensation = null.
+    const canViewCompensation = await hasRoleOrPermission(
+      user,
+      FINANCIAL_ROLES,
+      CONSULTANT_COMPENSATION_CODE,
+      "view",
+    );
+    const profile = await getConsultantProfile(consultantId, {
+      canViewCompensation,
+    });
     if (!profile) {
       throw new ActionError("NOT_FOUND", "Consultor nao encontrado.");
     }
@@ -714,6 +726,10 @@ export async function saveCompensation(
     const data = {
       consultantId: parsed.consultantId,
       contractType: parsed.contractType,
+      // pjRateMode so vale para PJ; para CLT/CLT_FLEX guardamos null (o calculo
+      // ignora o modo nesses contratos). null => tratado como FIXED no calculo.
+      pjRateMode:
+        parsed.contractType === "PJ" ? (parsed.pjRateMode ?? null) : null,
       startsAt: new Date(`${parsed.startsAt}T00:00:00.000Z`),
       endsAt: toDate(parsed.endsAt),
       hourlyRate: parsed.hourlyRate,
@@ -726,6 +742,15 @@ export async function saveCompensation(
     const previous = parsed.id
       ? await prisma.consultantCompensation.findUnique({ where: { id: parsed.id } })
       : null;
+    // Guard de propriedade: um update so pode alterar uma vigencia que ja
+    // pertence ao MESMO consultor. Impede reatribuir a compensacao de outro
+    // consultor via id forjado no request.
+    if (parsed.id && previous && previous.consultantId !== parsed.consultantId) {
+      throw new ActionError(
+        "FORBIDDEN",
+        "Remuneracao nao pertence ao consultor informado.",
+      );
+    }
     const compensation = parsed.id
       ? await prisma.consultantCompensation.update({
           where: { id: parsed.id },

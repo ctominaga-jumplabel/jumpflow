@@ -378,7 +378,13 @@ export const compensationSchema = z
     id: optionalText(80),
     consultantId: entityId,
     contractType: z.enum(["CLT", "PJ", "CLT_FLEX"]),
-    startsAt: z.string().trim().min(10).max(10),
+    // Modo de precificacao PJ. So faz sentido para contractType === "PJ";
+    // opcional (UI envia "HOURLY" ou "FIXED"). null/ausente => tratado como FIXED.
+    pjRateMode: z.enum(["HOURLY", "FIXED"]).optional().nullable(),
+    startsAt: z
+      .string()
+      .trim()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, "Data invalida (use AAAA-MM-DD)."),
     endsAt: optionalDate,
     hourlyRate: optionalNumber,
     cltAmount: optionalNumber,
