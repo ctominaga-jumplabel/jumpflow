@@ -163,6 +163,17 @@ export function ConsultantDirectory({
   const [projectRates, setProjectRates] =
     useState<ConsultantProjectRatesView | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  // Tom da mensagem de feedback: "error" destaca falhas (ex.: save rejeitado
+  // pela validacao) para que nao passem despercebidas como texto neutro.
+  const [messageTone, setMessageTone] = useState<"neutral" | "error">(
+    "neutral",
+  );
+  // Fonte unica de feedback: children continuam chamando onMessage(msg) (tom
+  // neutro por padrao); fluxos que sabem que houve erro passam "error".
+  function notify(msg: string | null, tone: "neutral" | "error" = "neutral") {
+    setMessage(msg);
+    setMessageTone(msg ? tone : "neutral");
+  }
 
   // Carrega o perfil completo sob demanda (evita puxar todos os perfis na
   // listagem). Disparado no clique de "Detalhes", nunca em useEffect.
@@ -171,7 +182,7 @@ export function ConsultantDirectory({
     setProfile(null);
     setAdHoc(null);
     setProjectRates(null);
-    setMessage(null);
+    notify(null);
     // Remuneracoes pontuais + valor/hora por projeto sao dado financeiro:
     // carregados sob demanda para quem pode ver o grupo de valores. Leitura
     // tambem gated server-side nas actions.
@@ -190,7 +201,7 @@ export function ConsultantDirectory({
     const result = await loadConsultantProfile(consultant.id);
     setLoadingProfile(false);
     if (result.ok) setProfile(result.data);
-    else setMessage(result.message);
+    else notify(result.message, "error");
   }
 
   async function reloadProfile() {
@@ -388,7 +399,8 @@ export function ConsultantDirectory({
         projectRates={projectRates}
         perms={perms}
         message={message}
-        onMessage={setMessage}
+        messageTone={messageTone}
+        onMessage={notify}
         onReload={reloadProfile}
         onReloadAdHoc={reloadAdHoc}
         onReloadProjectRates={reloadProjectRates}
@@ -406,6 +418,7 @@ function ConsultantDetailModal({
   projectRates,
   perms,
   message,
+  messageTone,
   onMessage,
   onReload,
   onReloadAdHoc,
@@ -419,7 +432,8 @@ function ConsultantDetailModal({
   projectRates: ConsultantProjectRatesView | null;
   perms: ConsultantGroupPerms;
   message: string | null;
-  onMessage: (message: string | null) => void;
+  messageTone: "neutral" | "error";
+  onMessage: (message: string | null, tone?: "neutral" | "error") => void;
   onReload: () => void;
   onReloadAdHoc: () => void;
   onReloadProjectRates: () => void;
@@ -504,22 +518,44 @@ function ConsultantDetailModal({
   // Existe uma vigencia salva para corrigir? So entao oferecemos a escolha
   // "corrigir atual vs nova vigencia" (senao, todo Salvar ja e uma criacao).
   const hasExistingCompensation = profile?.compensation != null;
+  // O tipo de contrato da remuneracao segue AO VIVO a identidade (fonte unica):
+  // escolher PJ/CLT/CLT FLEX na identidade (ou no seletor desta secao, que
+  // escreve na mesma identidade) troca imediatamente o modo dos campos e o que
+  // a validacao exige — sem depender de salvar + recarregar. Fallback para o
+  // contrato da vigencia hidratada quando a identidade ainda nao foi definida.
+  const compContractType: CompensationInput["contractType"] =
+    currentIdentity.contractType === "CLT" ||
+    currentIdentity.contractType === "PJ" ||
+    currentIdentity.contractType === "CLT_FLEX"
+      ? currentIdentity.contractType
+      : baseCompensation.contractType;
   // Em "new" forcamos id undefined => Salvar CRIA uma nova linha em vez de
   // sobrescrever a vigencia anterior (que continua cobrindo meses passados: o
   // calculo usa activeOn, a vigencia de maior startsAt <= inicio do mes).
-  const currentCompensation: CompensationInput =
-    compMode === "new" && baseCompensation.id
+  const currentCompensation: CompensationInput = {
+    ...(compMode === "new" && baseCompensation.id
       ? { ...baseCompensation, id: undefined }
-      : baseCompensation;
+      : baseCompensation),
+    contractType: compContractType,
+  };
 
   async function saveIdentity() {
     const result = await saveConsultantIdentity(currentIdentity);
-    onMessage(result.ok ? "Identidade salva." : result.message);
+    onMessage(
+      result.ok ? "Identidade salva." : result.message,
+      result.ok ? "neutral" : "error",
+    );
   }
 
   async function saveFlex() {
     const result = await saveCompensation(currentCompensation);
-    onMessage(result.ok ? "Compensacao salva." : result.message);
+    // Antes o erro de validacao (ex.: "CLT FLEX exige valores CLT e PJ.")
+    // aparecia como texto neutro e passava despercebido — agora vem em tom de
+    // erro para deixar claro que nada foi salvo.
+    onMessage(
+      result.ok ? "Compensacao salva." : result.message,
+      result.ok ? "neutral" : "error",
+    );
   }
 
   async function saveVouchers() {
@@ -531,7 +567,10 @@ function ConsultantDetailModal({
       vt: vouchers.vt,
     };
     const result = await saveVoucherBenefits(input);
-    onMessage(result.ok ? "Beneficios VA/VR/VT salvos." : result.message);
+    onMessage(
+      result.ok ? "Beneficios VA/VR/VT salvos." : result.message,
+      result.ok ? "neutral" : "error",
+    );
   }
 
   // Live preview of agreed value + benefits + automatic CLT charges. Mirrors
@@ -587,7 +626,16 @@ function ConsultantDetailModal({
     >
       <div className="space-y-3">
         {message ? (
-          <p className="rounded-md border border-border bg-surface-muted px-3 py-2 text-sm text-medium">
+          <p
+            role={messageTone === "error" ? "alert" : "status"}
+            aria-live={messageTone === "error" ? "assertive" : "polite"}
+            className={cn(
+              "rounded-md px-3 py-2 text-sm",
+              messageTone === "error"
+                ? "border-2 border-danger bg-danger-soft font-medium text-danger"
+                : "border border-border bg-surface-muted text-medium",
+            )}
+          >
             {message}
           </p>
         ) : null}
@@ -774,6 +822,43 @@ function ConsultantDetailModal({
                 <BadgeDollarSign aria-hidden="true" className="size-4" />
                 Valor acordado
               </div>
+
+              {/* Tipo de contrato: self-service aqui na secao de remuneracao
+                  (mesma fonte unica da identidade). Trocar aqui ja alterna os
+                  campos entre PJ (Por hora/Fixo) e CLT/CLT FLEX imediatamente. */}
+              <label
+                className="block max-w-xs space-y-1 text-sm font-medium text-medium"
+                htmlFor="compensation-contract-type"
+              >
+                Tipo de contrato
+                <select
+                  id="compensation-contract-type"
+                  aria-label="Tipo de contrato da remuneração"
+                  disabled={!perms.compensation.edit}
+                  value={currentIdentity.contractType ?? ""}
+                  onChange={(event) => {
+                    onMessage(null);
+                    setIdentity({
+                      ...currentIdentity,
+                      contractType:
+                        (event.target.value ||
+                          undefined) as ConsultantIdentityInput["contractType"],
+                    });
+                  }}
+                  className={fieldClass()}
+                >
+                  <option value="">Nao definido</option>
+                  {CONTRACT_TYPES.map((type) => (
+                    <option key={type} value={type}>
+                      {contractTypeLabels[type]}
+                    </option>
+                  ))}
+                </select>
+                <span className="block text-xs font-normal text-soft">
+                  Define os campos exigidos: PJ usa valor/hora ou fixo mensal;
+                  CLT FLEX exige valores CLT e PJ.
+                </span>
+              </label>
 
               {/* Corrigir a vigencia atual (UPDATE por id) vs criar uma nova
                   vigencia (CREATE). So aparece quando ja existe uma vigencia
