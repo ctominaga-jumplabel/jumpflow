@@ -21,10 +21,11 @@ export interface NavGroupProps {
 }
 
 /**
- * Agrupador colapsável do menu (dropdown). Usado só no menu do Financeiro
- * (FINANCE/ADMIN). O cabeçalho abre/fecha a lista de filhos; abre por padrão
- * quando algum filho é a rota ativa. No rail colapsado degrada para os filhos
- * icon-only (sem cabeçalho), preservando o acesso.
+ * Agrupador colapsável do menu (dropdown). Usado no Financeiro, nos grupos
+ * genéricos do menu primário e na Administração. O cabeçalho abre/fecha a lista
+ * de filhos; abre por padrão quando algum filho é a rota ativa (ou quando o
+ * grupo pede `defaultOpen`, como a Administração). No rail colapsado degrada
+ * para os filhos icon-only (sem cabeçalho), preservando o acesso.
  */
 export function NavGroup({
   group,
@@ -32,9 +33,9 @@ export function NavGroup({
   collapsed = false,
   onNavigate,
 }: NavGroupProps) {
-  const { label, icon: Icon, children } = group;
+  const { label, icon: Icon, children, defaultOpen } = group;
   const hasActiveChild = children.some((child) => child.href === activeHref);
-  const [open, setOpen] = useState(hasActiveChild);
+  const [open, setOpen] = useState(hasActiveChild || Boolean(defaultOpen));
 
   // Rail colapsado: renderiza os filhos como itens icon-only (sem o cabeçalho
   // do grupo), que já expõem o rótulo como tooltip.

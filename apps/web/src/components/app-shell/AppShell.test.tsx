@@ -43,6 +43,15 @@ function renderShell(viewableNavCodes: string[] = PRIMARY_CODES) {
 describe("AppShell", () => {
   it("renders every primary navigation item", () => {
     renderShell();
+    // Grupos colapsáveis (QW-4: Projetos & Clientes, Operação, Relatórios &
+    // Análises) começam fechados. Expande cada cabeçalho de grupo (aria-expanded
+    // = "false") para confirmar que TODO item do catálogo primário está
+    // acessível para este perfil — a asserção de visibilidade por papel continua
+    // igual, só percorremos os dropdowns.
+    screen
+      .getAllByRole("button")
+      .filter((button) => button.getAttribute("aria-expanded") === "false")
+      .forEach((button) => fireEvent.click(button));
     for (const item of primaryNavigation) {
       expect(screen.getAllByText(item.label).length).toBeGreaterThan(0);
     }

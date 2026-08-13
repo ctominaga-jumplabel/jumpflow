@@ -23,6 +23,13 @@ export interface StatusBadgeProps {
    * must stand out (e.g. approval outcomes); keep off for dense table rows.
    */
   strong?: boolean;
+  /**
+   * Optional leading icon. Status must never rely on color alone (WCAG 1.4.1):
+   * the badge text already carries the meaning, and an icon can reinforce it.
+   * Purely additive — existing consumers that pass icons inside `children`
+   * keep working unchanged.
+   */
+  icon?: ReactNode;
   children: ReactNode;
   className?: string;
 }
@@ -31,6 +38,7 @@ export interface StatusBadgeProps {
 export function StatusBadge({
   tone = "neutral",
   strong = false,
+  icon,
   children,
   className,
 }: StatusBadgeProps) {
@@ -44,6 +52,11 @@ export function StatusBadge({
         className,
       )}
     >
+      {icon != null ? (
+        <span aria-hidden="true" className="inline-flex shrink-0">
+          {icon}
+        </span>
+      ) : null}
       {children}
     </span>
   );
