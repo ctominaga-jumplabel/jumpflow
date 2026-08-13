@@ -5,16 +5,18 @@ import Link from "next/link";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { appConfig } from "@/config/app";
 import {
-  adminNavigation,
   applyNavOrder,
   canSeeNavItem,
   canSeeNavItemByMatrix,
   findActiveNav,
   hasFinanceGroupedNav,
   isFinanceGroupedHref,
+  isPrimaryGroupedHref,
   primaryNavigation,
   resolveFinanceTabHref,
+  visibleAdminGroup,
   visibleFinanceGroups,
+  visiblePrimaryGroups,
 } from "@/lib/navigation";
 import type { RoleName } from "@/lib/auth/roles";
 import { cn } from "@/lib/utils";
@@ -84,12 +86,20 @@ export function Sidebar({
   // grupos são renderizados logo após o menu primário.
   const grouped = hasFinanceGroupedNav(roles);
   const financeGroups = grouped ? visibleFinanceGroups(roles, viewable) : [];
+  // Grupos genéricos do menu primário (QW-4): Projetos & Clientes, Operação e
+  // Relatórios & Análises. Valem para TODOS os perfis; cada filho mantém seu
+  // gate, então um grupo só aparece se tiver ≥1 filho visível para o usuário.
+  const primaryGroups = visiblePrimaryGroups(roles, viewable);
+  // Administração vira um dropdown recolhível (defaultOpen), no mesmo padrão.
+  const adminGroup = visibleAdminGroup(roles, viewable);
   // Apply the persisted order first, then role/matrix visibility (order is a
   // full-catalog concept; filtering after keeps the relative order intact).
+  // Itens que viraram filhos de um dropdown (primário sempre; financeiro só
+  // quando `grouped`) saem da lista plana para não duplicar.
   const primaryItems = applyNavOrder(primaryNavigation, navOrder)
     .filter(canSee)
+    .filter((item) => !isPrimaryGroupedHref(item.href))
     .filter((item) => !grouped || !isFinanceGroupedHref(item.href));
-  const adminItems = adminNavigation.filter(canSee);
 
   return (
     <div className={cn("flex h-full flex-col bg-surface", className)}>
@@ -164,6 +174,16 @@ export function Sidebar({
           />
         ))}
 
+        {primaryGroups.map((group) => (
+          <NavGroup
+            key={group.label}
+            group={group}
+            activeHref={activeHref}
+            onNavigate={onNavigate}
+            collapsed={collapsed}
+          />
+        ))}
+
         {financeGroups.map((group) => (
           <NavGroup
             key={group.label}
@@ -174,27 +194,20 @@ export function Sidebar({
           />
         ))}
 
-        {adminItems.length > 0 ? (
+        {adminGroup ? (
           <div className="pt-4">
             {collapsed ? (
               <div
                 aria-hidden="true"
                 className="mx-auto mb-1 h-px w-6 bg-border"
               />
-            ) : (
-              <p className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-soft">
-                Administração
-              </p>
-            )}
-            {adminItems.map((item) => (
-              <NavItem
-                key={item.href}
-                item={item}
-                active={item.href === activeHref}
-                onNavigate={onNavigate}
-                collapsed={collapsed}
-              />
-            ))}
+            ) : null}
+            <NavGroup
+              group={adminGroup}
+              activeHref={activeHref}
+              onNavigate={onNavigate}
+              collapsed={collapsed}
+            />
           </div>
         ) : null}
       </nav>

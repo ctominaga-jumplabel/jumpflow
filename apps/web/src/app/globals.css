@@ -32,7 +32,13 @@
   --color-brand-dark: #1237b8;
   --color-brand-soft: #dde4ff;
 
-  /* Semantic states — text tones meet WCAG AA (>=4.5:1) on their soft fills */
+  /*
+   * Semantic states — the darkened text tones pair with their -soft fill and
+   * meet WCAG AA (>=4.5:1). Verified ratios (text on soft): success 6.21,
+   * warning 6.24, danger 5.27, info (brand-dark on brand-soft) 7.34,
+   * neutral (text-medium on surface-muted) 7.18. Never use a Playful Ops
+   * accent (flow/marker/cyan/lilac) as text on these light fills.
+   */
   --color-success: #166534;
   --color-success-soft: #d6f7e4;
   --color-warning: #92400e;

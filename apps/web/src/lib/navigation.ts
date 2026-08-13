@@ -28,6 +28,7 @@ import {
   PlaneTakeoff,
   Receipt,
   ReceiptText,
+  Settings,
   ShieldCheck,
   Smile,
   Sparkles,
@@ -87,13 +88,22 @@ export interface NavItemDef {
 
 /**
  * Um AGRUPADOR do menu lateral (dropdown colapsável). Diferente de `NavItemDef`
- * (um link folha), agrupa vários `NavItemDef` sob um rótulo/ícone. Usado só no
- * menu do Financeiro (ver `financeGroupedNavigation`).
+ * (um link folha), agrupa vários `NavItemDef` sob um rótulo/ícone. Usado no menu
+ * do Financeiro (`financeGroupedNavigation`), nos grupos genéricos do menu
+ * primário (`primaryGroupedNavigation`) e na Administração
+ * (`adminGroupedNavigation`).
  */
 export interface NavGroupDef {
   label: string;
   icon: LucideIcon;
   children: NavItemDef[];
+  /**
+   * Quando true, o dropdown inicia ABERTO mesmo sem filho ativo. Usado pela
+   * Administração para preservar o comportamento anterior (seção sempre
+   * expandida), agora recolhível. Padrão: fechado (abre só se um filho é a rota
+   * ativa).
+   */
+  defaultOpen?: boolean;
 }
 
 /**
@@ -706,6 +716,30 @@ export function hasFinanceGroupedNav(roles: readonly RoleName[]): boolean {
 }
 
 /**
+ * Filtra uma lista de grupos pela visibilidade do usuário: cada filho passa pelo
+ * MESMO gate do menu plano (matrix p/ itens com `permissionCode`, senão o gate
+ * de papéis) e grupos sem nenhum filho visível são descartados. É a garantia de
+ * que um submenu NUNCA expõe uma rota que o usuário não pode ver. O spread
+ * preserva campos do grupo como `defaultOpen`.
+ */
+function filterVisibleGroups(
+  groups: readonly NavGroupDef[],
+  roles: readonly RoleName[],
+  viewableCodes: ReadonlySet<string>,
+): NavGroupDef[] {
+  const canSee = (item: NavItemDef) =>
+    item.permissionCode
+      ? canSeeNavItemByMatrix(item, viewableCodes)
+      : canSeeNavItem(item, roles);
+  return groups
+    .map((group) => ({
+      ...group,
+      children: group.children.filter(canSee),
+    }))
+    .filter((group) => group.children.length > 0);
+}
+
+/**
  * Grupos do Financeiro com os filhos já filtrados pela visibilidade do usuário
  * (mesma regra do menu plano: matrix p/ itens com `permissionCode`, senão o
  * gate de papéis). Grupos que ficam sem filhos são descartados.
@@ -714,16 +748,124 @@ export function visibleFinanceGroups(
   roles: readonly RoleName[],
   viewableCodes: ReadonlySet<string>,
 ): NavGroupDef[] {
-  const canSee = (item: NavItemDef) =>
-    item.permissionCode
-      ? canSeeNavItemByMatrix(item, viewableCodes)
-      : canSeeNavItem(item, roles);
-  return financeGroupedNavigation
-    .map((group) => ({
-      ...group,
-      children: group.children.filter(canSee),
-    }))
-    .filter((group) => group.children.length > 0);
+  return filterVisibleGroups(financeGroupedNavigation, roles, viewableCodes);
+}
+
+// --- Grupos genéricos do menu primário (QW-4) --------------------------------
+
+/**
+ * Especificação declarativa dos grupos colapsáveis do menu primário. Cada grupo
+ * referencia itens EXISTENTES de `primaryNavigation` por href, então rótulo,
+ * ícone e gate (papel/matriz) de cada filho são exatamente os do menu plano —
+ * muda só a apresentação, não a autorização. Itens de módulos desligados
+ * (EP-M07) já não estão em `primaryNavigation`, então somem do grupo sozinhos.
+ *
+ * Regras: só agrupamos onde há relação clara e ≥2 itens reais (nada de dropdown
+ * para 1 item só — ver o filtro abaixo). Os rótulos dos grupos são DISTINTOS dos
+ * rótulos dos filhos, para não gerar ambiguidade nem ruído.
+ */
+interface PrimaryNavGroupSpec {
+  label: string;
+  icon: LucideIcon;
+  /** Hrefs (na ordem desejada) dos itens de `primaryNavigation` deste grupo. */
+  hrefs: string[];
+}
+
+const primaryNavGroupSpecs: PrimaryNavGroupSpec[] = [
+  {
+    // Estrutura comercial/entrega: onde o trabalho é definido e vendido.
+    label: "Projetos & Clientes",
+    icon: FolderKanban,
+    hrefs: ["/app/projetos", "/app/clientes", "/app/comercial"],
+  },
+  {
+    // Ciclo operacional: acompanhar, aprovar e fechar o mês.
+    label: "Operação",
+    icon: Compass,
+    hrefs: [
+      "/app/operacao/cockpit",
+      "/app/operacao/fechamento",
+      "/app/aprovacoes",
+    ],
+  },
+  {
+    // Leitura/decisão: relatórios e as análises determinísticas de IA.
+    label: "Relatórios & Análises",
+    icon: BarChart3,
+    hrefs: [
+      "/app/dashboard",
+      "/app/relatorios",
+      "/app/alocacao-ia",
+      "/app/risco-projetos",
+      "/app/score",
+    ],
+  },
+];
+
+const primaryNavByHref = new Map(
+  primaryNavigation.map((item) => [item.href, item] as const),
+);
+
+/**
+ * Grupos colapsáveis do menu primário, resolvidos a partir de
+ * `primaryNavigation` (já sem os módulos desligados). Hrefs ausentes são
+ * ignorados; grupos que ficam com <2 itens reais NÃO viram dropdown (não
+ * agrupamos 1 item só). A visibilidade por usuário é aplicada depois em
+ * `visiblePrimaryGroups`.
+ */
+export const primaryGroupedNavigation: NavGroupDef[] = primaryNavGroupSpecs
+  .map((spec) => ({
+    label: spec.label,
+    icon: spec.icon,
+    children: spec.hrefs
+      .map((href) => primaryNavByHref.get(href))
+      .filter((item): item is NavItemDef => Boolean(item)),
+  }))
+  .filter((group) => group.children.length >= 2);
+
+const primaryGroupedHrefsSet = new Set(
+  primaryGroupedNavigation.flatMap((g) => g.children.map((c) => c.href)),
+);
+
+/** Whether a flat nav href is subsumed by a primary dropdown group. */
+export function isPrimaryGroupedHref(href: string): boolean {
+  return primaryGroupedHrefsSet.has(href);
+}
+
+/**
+ * Grupos primários com os filhos já filtrados pela visibilidade do usuário. Um
+ * grupo só aparece se tiver ≥1 filho visível; um grupo com todos os filhos
+ * ocultos por papel/matriz não é renderizado.
+ */
+export function visiblePrimaryGroups(
+  roles: readonly RoleName[],
+  viewableCodes: ReadonlySet<string>,
+): NavGroupDef[] {
+  return filterVisibleGroups(primaryGroupedNavigation, roles, viewableCodes);
+}
+
+/**
+ * Administração como grupo colapsável (QW-4), no mesmo padrão de dropdown do
+ * Financeiro. `defaultOpen` mantém o comportamento anterior (seção expandida),
+ * agora recolhível. Os filhos são exatamente `adminNavigation`, cada um com seu
+ * gate — a visibilidade por usuário é aplicada em `visibleAdminGroup`.
+ */
+export const adminGroupedNavigation: NavGroupDef = {
+  label: "Administração",
+  icon: Settings,
+  children: adminNavigation,
+  defaultOpen: true,
+};
+
+/**
+ * Grupo de Administração com os filhos filtrados pela visibilidade do usuário,
+ * ou `undefined` quando nenhum filho é visível (o não-admin não vê a seção).
+ */
+export function visibleAdminGroup(
+  roles: readonly RoleName[],
+  viewableCodes: ReadonlySet<string>,
+): NavGroupDef | undefined {
+  return filterVisibleGroups([adminGroupedNavigation], roles, viewableCodes)[0];
 }
 
 /**

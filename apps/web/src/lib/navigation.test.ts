@@ -1,13 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
+  adminGroupedNavigation,
   adminNavigation,
   applyNavOrder,
   canSeeNavItem,
   canSeeNavItemByMatrix,
   findActiveNav,
+  isPrimaryGroupedHref,
   navPermissionCodes,
+  primaryGroupedNavigation,
   primaryNavigation,
   resolveFinanceTabHref,
+  visibleAdminGroup,
+  visiblePrimaryGroups,
 } from "@/lib/navigation";
 import { DISABLED_MODULE_CODES } from "@/lib/modules/disabled-modules";
 import { appConfig } from "@/config/app";
@@ -164,6 +169,71 @@ describe("permission-matrix nav gating", () => {
     expect(codes).toContain("CONFIGURACOES_PERMISSOES");
     // No duplicates.
     expect(new Set(codes).size).toBe(codes.length);
+  });
+});
+
+describe("grupos colapsáveis do menu primário (QW-4)", () => {
+  const primaryHrefs = new Set(primaryNavigation.map((i) => i.href));
+
+  it("só agrupa itens reais do catálogo primário, ≥2 por grupo", () => {
+    expect(primaryGroupedNavigation.length).toBeGreaterThan(0);
+    for (const group of primaryGroupedNavigation) {
+      // Não criamos dropdown para 1 item só.
+      expect(group.children.length).toBeGreaterThanOrEqual(2);
+      for (const child of group.children) {
+        // Cada filho é um item existente de primaryNavigation (mesmo gate/label).
+        expect(primaryHrefs.has(child.href)).toBe(true);
+      }
+      // Rótulo do grupo é distinto dos rótulos dos filhos (sem ambiguidade).
+      expect(group.children.map((c) => c.label)).not.toContain(group.label);
+    }
+  });
+
+  it("isPrimaryGroupedHref marca só os hrefs que viraram filhos de dropdown", () => {
+    expect(isPrimaryGroupedHref("/app/projetos")).toBe(true);
+    expect(isPrimaryGroupedHref("/app/aprovacoes")).toBe(true);
+    // Itens que continuam planos no menu.
+    expect(isPrimaryGroupedHref("/app/horas")).toBe(false);
+    expect(isPrimaryGroupedHref("/app/minhas-notas")).toBe(false);
+  });
+
+  it("um submenu NUNCA expõe uma rota que o usuário não pode ver", () => {
+    // Usuário sem papéis e com apenas PROJETOS viável: só o filho Projetos
+    // aparece, e apenas no seu grupo; os demais filhos/grupos somem.
+    const groups = visiblePrimaryGroups([], new Set(["PROJETOS"]));
+    const visibleHrefs = groups.flatMap((g) => g.children.map((c) => c.href));
+    expect(visibleHrefs).toEqual(["/app/projetos"]);
+    // Rotas não concedidas jamais vazam para um dropdown.
+    expect(visibleHrefs).not.toContain("/app/clientes");
+    expect(visibleHrefs).not.toContain("/app/aprovacoes");
+    expect(visibleHrefs).not.toContain("/app/dashboard");
+  });
+
+  it("descarta grupos cujos filhos estão todos ocultos por papel/matriz", () => {
+    // Sem papéis e sem códigos viáveis: nenhum grupo primário é renderizado.
+    expect(visiblePrimaryGroups([], new Set())).toEqual([]);
+  });
+});
+
+describe("Administração como grupo colapsável (QW-4)", () => {
+  const adminCodes = adminNavigation
+    .map((i) => i.permissionCode)
+    .filter((c): c is string => Boolean(c));
+
+  it("inicia aberto por padrão (preserva a seção sempre expandida)", () => {
+    expect(adminGroupedNavigation.defaultOpen).toBe(true);
+    expect(adminGroupedNavigation.children).toBe(adminNavigation);
+  });
+
+  it("não é renderizado para quem não é admin", () => {
+    expect(visibleAdminGroup(["AREA_MANAGER", "FINANCE"], new Set())).toBeUndefined();
+  });
+
+  it("aparece para ADMIN com os filhos que ele pode ver", () => {
+    const group = visibleAdminGroup(["ADMIN"], new Set(adminCodes));
+    expect(group).toBeDefined();
+    expect(group?.children.length).toBeGreaterThan(0);
+    expect(group?.defaultOpen).toBe(true);
   });
 });
 
