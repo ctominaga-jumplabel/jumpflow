@@ -236,7 +236,7 @@ export function NathaliaLab({ initialRoles }: NathaliaLabProps) {
             <button
               type="button"
               onClick={() => openNathalia()}
-              className="rounded-md border-2 border-ink bg-brand px-3 py-1 text-xs font-semibold text-white shadow-[2px_2px_0_0_var(--color-ink)]"
+              className="rounded-md border-2 border-ink bg-brand-fill px-3 py-1 text-xs font-semibold text-white shadow-[2px_2px_0_0_var(--color-ink)]"
             >
               Abrir painel
             </button>
@@ -546,7 +546,7 @@ export function NathaliaLab({ initialRoles }: NathaliaLabProps) {
           <button
             type="button"
             onClick={runBrain}
-            className="rounded-md border-2 border-ink bg-brand px-4 py-2 text-sm font-semibold text-white shadow-[2px_2px_0_0_var(--color-ink)]"
+            className="rounded-md border-2 border-ink bg-brand-fill px-4 py-2 text-sm font-semibold text-white shadow-[2px_2px_0_0_var(--color-ink)]"
           >
             Perguntar
           </button>
@@ -636,7 +636,7 @@ export function NathaliaLab({ initialRoles }: NathaliaLabProps) {
           <button
             type="button"
             onClick={() => openNathalia()}
-            className="rounded-md border-2 border-ink bg-brand px-3 py-1 text-xs font-semibold text-white shadow-[2px_2px_0_0_var(--color-ink)]"
+            className="rounded-md border-2 border-ink bg-brand-fill px-3 py-1 text-xs font-semibold text-white shadow-[2px_2px_0_0_var(--color-ink)]"
           >
             Abrir painel ao vivo
           </button>

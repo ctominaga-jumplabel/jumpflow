@@ -46,7 +46,7 @@ export function RankingPanel({
                 }`}
               >
                 <div className="flex items-center gap-3">
-                  <span className="grid size-8 place-items-center rounded-md border-2 border-ink bg-marker text-sm font-bold text-ink">
+                  <span className="grid size-8 place-items-center rounded-md border-2 border-on-accent bg-marker text-sm font-bold text-on-accent">
                     {row.position}
                   </span>
                   <div>

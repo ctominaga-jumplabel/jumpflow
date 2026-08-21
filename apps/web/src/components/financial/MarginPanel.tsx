@@ -10,13 +10,13 @@ import { createCostRate } from "@/app/app/projetos/actions";
 import type { AllocationMarginRow, ProjectMarginRow } from "@/lib/db/margin";
 
 const inputCls =
-  "rounded-md border border-[#d7d8cf] bg-white px-2 py-1 text-sm text-ink w-24";
+  "rounded-md border border-border bg-surface px-2 py-1 text-sm text-ink w-24";
 
 function marginColor(pct: number | null): string {
   if (pct == null) return "text-soft";
-  if (pct < 0) return "text-[#b91c1c]";
-  if (pct < 20) return "text-[#92400e]";
-  return "text-[#166534]";
+  if (pct < 0) return "text-danger";
+  if (pct < 20) return "text-warning";
+  return "text-success";
 }
 
 export function MarginPanel({
@@ -106,7 +106,7 @@ export function MarginPanel({
               onChange={(e) => setCost(e.target.value)}
             />
             <button
-              className="text-[#2457ff] disabled:opacity-50"
+              className="text-brand disabled:opacity-50"
               disabled={isPending}
               onClick={() => submitCost(a.allocationId)}
             >
@@ -173,7 +173,7 @@ export function MarginPanel({
                     : ""}
                 </span>
                 {project.totals.hasMissingCost ? (
-                  <span className="ml-2 text-xs text-[#92400e]">
+                  <span className="ml-2 text-xs text-warning">
                     custo incompleto
                   </span>
                 ) : null}

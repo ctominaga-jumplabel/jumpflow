@@ -60,7 +60,7 @@ export function SurveyDashboardPanel({
               onClick={() => setSelectedId(s.id)}
               className={
                 selectedId === s.id
-                  ? "rounded-md border-2 border-ink bg-marker px-3 py-1.5 text-xs font-semibold text-ink shadow-[2px_2px_0_0_var(--color-ink)]"
+                  ? "rounded-md border-2 border-on-accent bg-marker px-3 py-1.5 text-xs font-semibold text-on-accent shadow-[2px_2px_0_0_var(--color-ink)]"
                   : "rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-medium hover:bg-surface-muted"
               }
             >
@@ -241,7 +241,7 @@ function ProgressBar({ value }: { value: number }) {
   return (
     <div className="h-2.5 w-full overflow-hidden rounded-full border border-border bg-surface-muted">
       <div
-        className="h-full bg-brand"
+        className="h-full bg-brand-fill"
         style={{ width: `${clamped * 100}%` }}
       />
     </div>

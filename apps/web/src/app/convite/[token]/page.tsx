@@ -78,7 +78,7 @@ export default async function ConvitePage({
             <Link
               href="/login"
               className={cn(
-                "mt-7 inline-flex items-center justify-center gap-2 rounded-md bg-brand px-5 py-2.5 text-sm font-semibold text-white hover:bg-brand-dark",
+                "mt-7 inline-flex items-center justify-center gap-2 rounded-md bg-brand-fill px-5 py-2.5 text-sm font-semibold text-white hover:bg-brand-fill-hover",
                 tactileButton,
                 focusRing,
               )}

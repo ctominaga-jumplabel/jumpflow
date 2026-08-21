@@ -6,6 +6,7 @@ import type { AppUser } from "@/lib/auth/types";
 import { primaryRoleLabel } from "@/lib/auth/roles";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { NotificationBell } from "./NotificationBell";
+import { ThemeToggle } from "./ThemeToggle";
 import type { NotificationView } from "@/lib/db/notifications";
 import { cn } from "@/lib/utils";
 import { focusRing } from "@/lib/styles";
@@ -63,6 +64,8 @@ export function Topbar({
           Ambiente MVP
         </StatusBadge>
 
+        <ThemeToggle className={cn(iconButton, focusRing)} />
+
         <FullscreenButton />
 
         {/* Item 3: central de notificações real. O badge reflete apenas
@@ -74,7 +77,7 @@ export function Topbar({
         />
 
         <div className="flex items-center gap-3 rounded-md border border-transparent py-1 pl-2 sm:border-border sm:pl-1 sm:pr-3">
-          <span className="grid size-8 place-items-center rounded-full border-2 border-ink bg-brand text-xs font-semibold text-white">
+          <span className="grid size-8 place-items-center rounded-full border-2 border-ink bg-brand-fill text-xs font-semibold text-white">
             {initialsFromName(user.name)}
           </span>
           <span className="hidden flex-col leading-tight sm:flex">

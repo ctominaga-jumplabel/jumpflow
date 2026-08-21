@@ -155,7 +155,7 @@ export function SurveyResponseModal({
                       onClick={() => setAnswer(q.id, { choiceValue: option })}
                       className={
                         a.choiceValue === option
-                          ? "rounded-md border-2 border-ink bg-marker px-3 py-1.5 text-xs font-semibold text-ink shadow-[2px_2px_0_0_var(--color-ink)]"
+                          ? "rounded-md border-2 border-on-accent bg-marker px-3 py-1.5 text-xs font-semibold text-on-accent shadow-[2px_2px_0_0_var(--color-ink)]"
                           : "rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-medium hover:bg-surface-muted"
                       }
                     >
@@ -204,7 +204,7 @@ function ScaleButtons({
           onClick={() => onChange(n)}
           className={
             value === n
-              ? "grid size-9 place-items-center rounded-md border-2 border-ink bg-marker text-sm font-semibold text-ink shadow-[2px_2px_0_0_var(--color-ink)]"
+              ? "grid size-9 place-items-center rounded-md border-2 border-on-accent bg-marker text-sm font-semibold text-on-accent shadow-[2px_2px_0_0_var(--color-ink)]"
               : "grid size-9 place-items-center rounded-md border border-border bg-surface text-sm font-semibold text-medium hover:bg-surface-muted"
           }
         >

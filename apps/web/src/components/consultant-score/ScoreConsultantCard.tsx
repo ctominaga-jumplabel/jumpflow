@@ -128,7 +128,7 @@ export function ScoreConsultantCard({
               </div>
               <div className="h-2 w-full overflow-hidden rounded-full border border-ink/20 bg-surface-muted">
                 <div
-                  className={`h-full rounded-full ${f.available ? "bg-brand" : "bg-ink/20"}`}
+                  className={`h-full rounded-full ${f.available ? "bg-brand-fill" : "bg-ink/20"}`}
                   style={{ width: `${Math.round(f.score01 * 100)}%` }}
                 />
               </div>

@@ -70,8 +70,16 @@ export function LoginView({
         className="relative w-full max-w-4xl"
       >
         <div className="overflow-hidden rounded-[var(--radius-card)] border-2 border-ink bg-surface shadow-[6px_6px_0_0_var(--color-ink)] lg:grid lg:grid-cols-[1.05fr_1fr]">
-          {/* Brand pane (lg only): identity + flow composition. */}
-          <aside className="relative hidden flex-col justify-between overflow-hidden bg-ink p-9 text-white lg:flex">
+          {/* Brand pane (lg only): identity + flow composition. Deliberately a
+              DARK brand block in both themes — pin `--ink` to its light-mode
+              (dark) value so `bg-ink`/`text-ink` chips/`border-ink` inside stay
+              dark even under data-theme="dark" (the pane would otherwise invert
+              to light and swallow its white text). CSS custom properties resolve
+              at the point of use, so this scoped override cascades correctly. */}
+          <aside
+            style={{ ["--ink" as string]: "#111814" }}
+            className="relative hidden flex-col justify-between overflow-hidden bg-ink p-9 text-white lg:flex"
+          >
             <div
               aria-hidden="true"
               className="absolute inset-0 opacity-[0.07]"
@@ -256,7 +264,7 @@ function SubmitButton({
       className={cn(
         "inline-flex w-full items-center justify-center gap-2 rounded-md px-5 py-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-70",
         variant === "primary"
-          ? "bg-brand text-white hover:bg-brand-dark"
+          ? "bg-brand-fill text-white hover:bg-brand-fill-hover"
           : "border-2 border-ink bg-surface text-strong hover:bg-canvas",
         tactileButton,
         focusRing,

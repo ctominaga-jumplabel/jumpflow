@@ -565,7 +565,7 @@ export function TimeEntryForm({
                   className={cn(
                     "flex h-9 cursor-pointer items-center justify-center rounded-md border text-xs font-semibold",
                     value.mode === mode
-                      ? "border-ink bg-marker text-ink"
+                      ? "border-on-accent bg-marker text-on-accent"
                       : "border-border bg-surface text-medium",
                   )}
                 >
@@ -720,7 +720,7 @@ export function TimeEntryForm({
                   className={cn(
                     "flex h-9 cursor-pointer items-center justify-center rounded-md border text-xs font-semibold",
                     value.weekdays.includes(day.value)
-                      ? "border-ink bg-marker text-ink"
+                      ? "border-on-accent bg-marker text-on-accent"
                       : "border-border bg-surface text-medium",
                   )}
                 >

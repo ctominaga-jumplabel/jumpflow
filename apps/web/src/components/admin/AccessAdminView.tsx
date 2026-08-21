@@ -150,7 +150,7 @@ function InviteLinkCallout({
   return (
     <div className="rounded-[var(--radius-card)] border-2 border-ink bg-warning-soft p-5 shadow-[4px_4px_0_0_var(--color-ink)]">
       <div className="flex items-start gap-3">
-        <span className="grid size-9 shrink-0 place-items-center rounded-md border-2 border-ink bg-marker text-ink">
+        <span className="grid size-9 shrink-0 place-items-center rounded-md border-2 border-on-accent bg-marker text-on-accent">
           <KeyRound aria-hidden="true" className="size-5" />
         </span>
         <div className="min-w-0 flex-1">
@@ -277,7 +277,7 @@ function InviteForm({
                   className={cn(
                     "inline-flex cursor-pointer items-center gap-2 rounded-md border-2 px-3 py-1.5 text-sm font-semibold transition-colors",
                     checked
-                      ? "border-ink bg-marker text-ink shadow-[2px_2px_0_0_var(--color-ink)]"
+                      ? "border-on-accent bg-marker text-on-accent shadow-[2px_2px_0_0_var(--color-ink)]"
                       : "border-ink/20 bg-surface text-medium hover:border-ink/40",
                     "outline-none focus-within:ring-2 focus-within:ring-brand focus-within:ring-offset-2 focus-within:ring-offset-surface",
                   )}
@@ -436,7 +436,7 @@ function UserRow({
                 className={cn(
                   "inline-flex cursor-pointer items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-semibold transition-colors",
                   checked
-                    ? "border-ink bg-marker text-ink"
+                    ? "border-on-accent bg-marker text-on-accent"
                     : "border-ink/15 bg-surface-muted text-medium hover:border-ink/30",
                   "outline-none focus-within:ring-2 focus-within:ring-brand focus-within:ring-offset-2 focus-within:ring-offset-surface",
                 )}

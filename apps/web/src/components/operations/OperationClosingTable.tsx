@@ -410,7 +410,7 @@ export function OperationClosingTable({
                 onClick={() => setFilter(f.key)}
                 className={
                   filter === f.key
-                    ? "rounded-md border-2 border-ink bg-brand px-2.5 py-1 text-xs font-semibold text-white"
+                    ? "rounded-md border-2 border-ink bg-brand-fill px-2.5 py-1 text-xs font-semibold text-white"
                     : "rounded-md border border-border bg-surface px-2.5 py-1 text-xs font-semibold text-medium hover:bg-surface-muted/60"
                 }
               >

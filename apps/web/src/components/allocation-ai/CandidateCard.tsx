@@ -101,7 +101,7 @@ export function CandidateCard({
               </div>
               <div className="h-2 w-full overflow-hidden rounded-full border border-ink/20 bg-surface-muted">
                 <div
-                  className="h-full rounded-full bg-brand"
+                  className="h-full rounded-full bg-brand-fill"
                   style={{ width: `${Math.round(f.score01 * 100)}%` }}
                 />
               </div>

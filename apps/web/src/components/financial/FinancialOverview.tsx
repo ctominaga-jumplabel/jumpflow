@@ -194,7 +194,7 @@ export function FinancialOverview({
             <a
               href={apuracaoHref}
               className={cn(
-                "inline-flex h-10 items-center justify-center gap-2 rounded-md border-2 border-ink bg-brand px-5 text-sm font-semibold text-white shadow-[3px_3px_0_0_var(--color-ink)] transition-[transform,box-shadow] duration-150 hover:-translate-x-px hover:-translate-y-px hover:shadow-[4px_4px_0_0_var(--color-ink)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[1px_1px_0_0_var(--color-ink)]",
+                "inline-flex h-10 items-center justify-center gap-2 rounded-md border-2 border-ink bg-brand-fill px-5 text-sm font-semibold text-white shadow-[3px_3px_0_0_var(--color-ink)] transition-[transform,box-shadow] duration-150 hover:-translate-x-px hover:-translate-y-px hover:shadow-[4px_4px_0_0_var(--color-ink)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[1px_1px_0_0_var(--color-ink)]",
                 focusRing,
               )}
             >

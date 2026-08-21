@@ -16,9 +16,9 @@ import { cn } from "@/lib/utils";
 /** Cor da margem por faixa — mesma semântica do MarginPanel. */
 function marginColor(pct: number | null): string {
   if (pct == null) return "text-soft";
-  if (pct < 0) return "text-[#b91c1c]";
-  if (pct < 20) return "text-[#92400e]";
-  return "text-[#166534]";
+  if (pct < 0) return "text-danger";
+  if (pct < 20) return "text-warning";
+  return "text-success";
 }
 
 function money(value: number | null): string {
@@ -199,7 +199,7 @@ export function ProjectTrackingPanel({
       </div>
 
       {tracking.planned.hasMissingCost || tracking.realized.hasMissingCost ? (
-        <p className="text-xs text-[#92400e]">
+        <p className="text-xs text-warning">
           <TrendingUp size={13} className="mr-1 inline" />
           Custo incompleto: há alocações sem custo/h
           {tracking.hasUnallocatedApprovedHours
@@ -223,10 +223,10 @@ export function ProjectTrackingPanel({
                   className={cn(
                     "ml-2 font-semibold",
                     budgetPct > 100
-                      ? "text-[#b91c1c]"
+                      ? "text-danger"
                       : budgetPct >= 80
-                        ? "text-[#92400e]"
-                        : "text-[#166534]",
+                        ? "text-warning"
+                        : "text-success",
                   )}
                 >
                   {formatPercent(budgetPct)}
@@ -245,10 +245,10 @@ export function ProjectTrackingPanel({
               className={cn(
                 "h-full rounded-full",
                 budgetPct != null && budgetPct > 100
-                  ? "bg-[#b91c1c]"
+                  ? "bg-danger"
                   : budgetPct != null && budgetPct >= 80
-                    ? "bg-[#92400e]"
-                    : "bg-[#166534]",
+                    ? "bg-warning"
+                    : "bg-success",
               )}
               style={{ width: `${Math.min(budgetPct ?? 0, 100)}%` }}
             />

@@ -90,7 +90,7 @@ export default async function TermsPage() {
             <button
               type="submit"
               className={cn(
-                "inline-flex w-full items-center justify-center rounded-md bg-brand px-5 py-2.5 text-sm font-semibold text-white hover:bg-brand-dark sm:w-auto",
+                "inline-flex w-full items-center justify-center rounded-md bg-brand-fill px-5 py-2.5 text-sm font-semibold text-white hover:bg-brand-fill-hover sm:w-auto",
                 tactileButton,
                 focusRing,
               )}

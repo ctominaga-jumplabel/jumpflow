@@ -166,7 +166,7 @@ export function AcceptInviteForm({
         disabled={isPending}
         aria-busy={isPending}
         className={cn(
-          "inline-flex w-full items-center justify-center gap-2 rounded-md bg-brand px-5 py-3 text-sm font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-70",
+          "inline-flex w-full items-center justify-center gap-2 rounded-md bg-brand-fill px-5 py-3 text-sm font-semibold text-white hover:bg-brand-fill-hover disabled:cursor-not-allowed disabled:opacity-70",
           tactileButton,
           focusRing,
         )}
