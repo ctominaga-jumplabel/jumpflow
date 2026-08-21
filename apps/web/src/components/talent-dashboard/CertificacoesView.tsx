@@ -15,6 +15,7 @@ import { MetricCard } from "@/components/ui/MetricCard";
 import { DataTable, type DataTableColumn } from "@/components/ui/DataTable";
 import { DataToolbar } from "@/components/ui/DataToolbar";
 import { FilterChip } from "@/components/ui/FilterChip";
+import { Modal } from "@/components/ui/Modal";
 import { StatusBadge, type StatusTone } from "@/components/ui/StatusBadge";
 import { focusRing, focusRingInput } from "@/lib/styles";
 import { cn } from "@/lib/utils";
@@ -206,21 +207,16 @@ export function CertificacoesView({
       cell: (row) => (
         <button
           type="button"
-          onClick={() =>
-            setSelected((cur) => (cur === row.name ? null : row.name))
-          }
+          onClick={() => setSelected(row.name)}
           className={cn(
             "flex items-center gap-1.5 text-left font-semibold text-strong hover:text-brand-dark",
             focusRing,
           )}
-          aria-expanded={selected === row.name}
+          title="Ver quem possui esta credencial"
         >
           <ChevronRight
             aria-hidden="true"
-            className={cn(
-              "size-4 shrink-0 text-soft transition-transform",
-              selected === row.name && "rotate-90",
-            )}
+            className="size-4 shrink-0 text-soft"
           />
           {row.name}
         </button>
@@ -430,61 +426,61 @@ export function CertificacoesView({
           }
         />
 
-        {selected ? (
-          <div className="border-t-2 border-ink bg-surface-muted/40 px-5 py-4">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <h3 className="text-sm font-semibold text-strong">
-                Quem possui: {selected}
-              </h3>
-              <button
-                type="button"
-                onClick={() => setSelected(null)}
-                className={cn(
-                  "rounded-md px-2 py-1 text-xs font-medium text-soft hover:text-strong",
-                  focusRing,
-                )}
-              >
-                Fechar
-              </button>
-            </div>
-            {selectedHolders.length === 0 ? (
-              <p className="text-sm text-soft">
-                Nenhum consultor com esta credencial.
-              </p>
-            ) : (
-              <ul className="grid gap-1 sm:grid-cols-2">
-                {selectedHolders.map((h) => (
-                  <li key={h.id}>
-                    <button
-                      type="button"
-                      onClick={() => onOpenConsultant(h.id)}
-                      className={cn(
-                        "flex w-full items-center justify-between gap-2 rounded-md border border-border bg-surface px-3 py-2 text-left transition-colors hover:bg-surface-muted",
-                        focusRing,
-                      )}
-                    >
-                      <span className="min-w-0">
-                        <span className="block truncate text-sm font-medium text-strong">
-                          {h.name}
-                        </span>
-                        <span className="block truncate text-xs text-soft">
-                          {h.issuer}
-                          {h.expiresAt
-                            ? ` · válido até ${formatDate(h.expiresAt)}`
-                            : ""}
-                        </span>
-                      </span>
-                      <StatusBadge tone={EXPIRY_TONE[h.expiry]}>
-                        {CERT_EXPIRY_LABEL[h.expiry]}
-                      </StatusBadge>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        ) : null}
       </SectionPanel>
+
+      {/* Modal com quem possui a credencial (portal → sempre centralizado e
+          visível; substitui o painel inline que caía abaixo da tabela). */}
+      <Modal
+        open={selected != null}
+        onClose={() => setSelected(null)}
+        title={selected ? `Quem possui: ${selected}` : "Credencial"}
+        description={
+          selectedHolders.length > 0
+            ? `${selectedHolders.length} consultor(es) com esta credencial. Clique para abrir o perfil.`
+            : undefined
+        }
+      >
+        {selectedHolders.length === 0 ? (
+          <p className="text-sm text-soft">
+            Nenhum consultor com esta credencial.
+          </p>
+        ) : (
+          <ul className="space-y-1.5">
+            {selectedHolders.map((h) => (
+              <li key={h.id}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Abre o perfil (modal do shell) e fecha o da credencial
+                    // para não empilhar dois diálogos.
+                    onOpenConsultant(h.id);
+                    setSelected(null);
+                  }}
+                  className={cn(
+                    "flex w-full items-center justify-between gap-2 rounded-md border border-border bg-surface px-3 py-2 text-left transition-colors hover:bg-surface-muted",
+                    focusRing,
+                  )}
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-medium text-strong">
+                      {h.name}
+                    </span>
+                    <span className="block truncate text-xs text-soft">
+                      {h.issuer}
+                      {h.expiresAt
+                        ? ` · válido até ${formatDate(h.expiresAt)}`
+                        : ""}
+                    </span>
+                  </span>
+                  <StatusBadge tone={EXPIRY_TONE[h.expiry]}>
+                    {CERT_EXPIRY_LABEL[h.expiry]}
+                  </StatusBadge>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Modal>
     </div>
   );
 }
