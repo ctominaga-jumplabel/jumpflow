@@ -37,6 +37,7 @@ import {
   Target,
   TrendingUp,
   Trophy,
+  Radar,
   Users,
   Wallet,
 } from "lucide-react";
@@ -217,6 +218,28 @@ const primaryNavigationRaw: NavItemDef[] = [
     permissionCode: "SKILLS",
     icon: GraduationCap,
     description: "Matriz de competências técnicas e comportamentais.",
+  },
+  {
+    // Painel de Talentos: dashboard de skills & certificações ligado ao banco
+    // (Visão Executiva, Talent Finder, Skills, Certificações, Consultores,
+    // Matriz, Banco de Inativos, Governança). Reusa a permissão CONSULTORES
+    // (código ATIVO e já semeado em prod) para audiência de gestão/Pessoas —
+    // evita mintar um código novo que a matriz negaria antes do seed. NÃO reusar
+    // COMPETENCIAS: está em disabled-modules.ts e o menu esconderia a aba. O
+    // escopo/PII é reforçado no servidor. Discoverability, não a fronteira.
+    label: "Painel de Talentos",
+    href: "/app/painel-talentos",
+    permissionCode: "CONSULTORES",
+    icon: Radar,
+    description:
+      "Dashboard de skills e certificações: busca de talentos, matriz e governança da base.",
+    requiredRoles: [
+      "ADMIN",
+      "PEOPLE",
+      "AREA_MANAGER",
+      "PROJECT_MANAGER",
+      "SALES",
+    ],
   },
   {
     // Talentos (Onda 0): catálogo de skills, perfis de competência e matriz de
