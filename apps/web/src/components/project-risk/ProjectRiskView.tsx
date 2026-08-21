@@ -154,7 +154,7 @@ function countByLevel(results: RiskResult[]): Record<RiskLevel, number> {
 
 function GovernanceNote({ financialIncluded }: { financialIncluded: boolean }) {
   return (
-    <p className="rounded-md border-2 border-ink bg-marker/60 px-3 py-2 text-xs font-medium text-ink">
+    <p className="rounded-md border-2 border-on-accent bg-marker/60 px-3 py-2 text-xs font-medium text-on-accent">
       O nível de risco é <strong>determinístico e transparente</strong> (burn
       rate, prazo{financialIncluded ? ", margem" : ""} e feedbacks de
       preocupação), com o peso de cada sinal visível. A IA é uma{" "}

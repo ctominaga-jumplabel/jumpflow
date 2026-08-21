@@ -7,30 +7,62 @@
  * shadows reserved for high-value elements (CTA, KPIs, key cards, empty states);
  * lists, tables and forms stay clean and scannable. No auto dark inversion.
  */
+/*
+ * Palette is defined as PLAIN cascading variables here (not directly in
+ * @theme), so a theme can override them at runtime. `@theme inline` below maps
+ * each Tailwind color token to `var(--…)`; because it is `inline`, the utility
+ * classes compile to `var(--…)` and follow whatever value is in scope — which
+ * is what lets `[data-theme="dark"]` re-skin the whole app with no `dark:`
+ * variants and no per-component changes. Light is the default (JumpFlow's
+ * identity); dark is opt-in via the day/night toggle (cookie-persisted, applied
+ * on the server so there is no flash).
+ */
 :root {
-  --background: #f7f5ea;
-  --foreground: #111814;
-}
+  color-scheme: light;
 
-@theme inline {
   /* Surfaces */
-  --color-canvas: #f7f5ea;
-  --color-surface: #ffffff;
-  --color-surface-muted: #eceff3;
+  --canvas: #f7f5ea;
+  --surface: #ffffff;
+  --surface-muted: #eceff3;
 
   /* Text */
-  --color-strong: #111814;
-  --color-medium: #42524a;
-  --color-soft: #6d756f;
+  --strong: #111814;
+  --medium: #42524a;
+  --soft: #6d756f;
 
   /* Lines — soft 1px line for dense UI, ink for Playful Ops strong borders */
-  --color-border: #d7d8cf;
-  --color-ink: #111814;
+  --border: #d7d8cf;
+  /*
+   * Ink drives BOTH the strong 2px border and the hard "brutalist" offset
+   * shadow (used inline as `var(--color-ink)` in ~45 components). In dark it
+   * flips to a light tone so the border AND the offset shadow read as a light
+   * outline/echo on the dark surface — a deliberate dark neo-brutalist look,
+   * keeping a single source of truth instead of splitting border vs shadow.
+   */
+  --ink: #111814;
 
-  /* Action / brand */
-  --color-brand: #2457ff;
-  --color-brand-dark: #1237b8;
-  --color-brand-soft: #dde4ff;
+  /*
+   * Action / brand. `--brand` is the ON-SURFACE action color (text links,
+   * icons, focus ring, borders). In dark it must be LIGHT to read on the dark
+   * surface, which makes it too light for white text on a solid fill — so CTA
+   * BACKGROUNDS use the dedicated `--brand-fill` / `--brand-fill-hover` pair
+   * (dark enough for white text ≥AA in both themes). In light all three
+   * coincide with today's values, so light mode is unchanged.
+   */
+  --brand: #2457ff;
+  --brand-dark: #1237b8;
+  --brand-soft: #dde4ff;
+  --brand-fill: #2457ff;
+  --brand-fill-hover: #1237b8;
+
+  /*
+   * Text/icon/border color that sits ON a constant Playful Ops accent block
+   * (marker/flow/cyan/accent). Those accents do NOT flip between themes, so
+   * their foreground must not flip either — this stays dark ink in both themes
+   * (unlike `--ink`, which flips light in dark). Fixes light text vanishing on
+   * yellow chips in dark.
+   */
+  --on-accent: #111814;
 
   /*
    * Semantic states — the darkened text tones pair with their -soft fill and
@@ -39,18 +71,137 @@
    * neutral (text-medium on surface-muted) 7.18. Never use a Playful Ops
    * accent (flow/marker/cyan/lilac) as text on these light fills.
    */
-  --color-success: #166534;
-  --color-success-soft: #d6f7e4;
-  --color-warning: #92400e;
-  --color-warning-soft: #fff0c2;
-  --color-danger: #b91c1c;
-  --color-danger-soft: #ffe1e2;
+  --success: #166534;
+  --success-soft: #d6f7e4;
+  --warning: #92400e;
+  --warning-soft: #fff0c2;
+  --danger: #b91c1c;
+  --danger-soft: #ffe1e2;
 
   /* Playful Ops accents — for blocks, markers and icon chips (not body text) */
-  --color-flow: #32d583;
-  --color-marker: #ffd43b;
-  --color-cyan: #39c6d6;
-  --color-accent: #a78bfa;
+  --flow: #32d583;
+  --marker: #ffd43b;
+  --cyan: #39c6d6;
+  --accent: #a78bfa;
+
+  --background: #f7f5ea;
+  --foreground: #111814;
+}
+
+/*
+ * Dark theme — same ROLES, re-skinned. Applied when <html data-theme="dark">
+ * (the toggle / server cookie). Semantic -soft fills become deep tints and the
+ * text tones become light so status badges keep AA on the dark fills; ink
+ * flips light (see note above). Accents (flow/marker/cyan/accent) stay as
+ * block/marker colors — never body text — same rule as light.
+ */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --canvas: #12161a;
+  --surface: #1a2027;
+  --surface-muted: #262f38;
+
+  --strong: #eef2ec;
+  --medium: #aeb8b1;
+  --soft: #838e87;
+
+  --border: #333d45;
+  --ink: #e7ece6;
+
+  --brand: #6b8dff;
+  --brand-dark: #a9beff;
+  --brand-soft: #21305a;
+  /* CTA fills: dark enough for white text (white/#3358e6=5.71, hover 6.99). */
+  --brand-fill: #3358e6;
+  --brand-fill-hover: #274bd0;
+  /* on-accent stays dark (inherited from :root); accents don't flip. */
+
+  --success: #4ade80;
+  --success-soft: #123626;
+  --warning: #fbbf24;
+  --warning-soft: #3a2c08;
+  --danger: #f87171;
+  --danger-soft: #40191a;
+
+  --flow: #32d583;
+  --marker: #ffd43b;
+  --cyan: #4dd6e6;
+  --accent: #b3a0ff;
+
+  --background: #12161a;
+  --foreground: #eef2ec;
+}
+
+/*
+ * Print/PDF always uses the light palette. Print routes (e.g. the curriculum
+ * print page) live under the root layout, so a user with the dark cookie would
+ * otherwise print a dark page. Force light tokens here regardless of theme.
+ */
+@media print {
+  :root,
+  [data-theme="dark"] {
+    color-scheme: light;
+    --canvas: #f7f5ea;
+    --surface: #ffffff;
+    --surface-muted: #eceff3;
+    --strong: #111814;
+    --medium: #42524a;
+    --soft: #6d756f;
+    --border: #d7d8cf;
+    --ink: #111814;
+    --brand: #2457ff;
+    --brand-dark: #1237b8;
+    --brand-soft: #dde4ff;
+    --brand-fill: #2457ff;
+    --brand-fill-hover: #1237b8;
+    --success: #166534;
+    --success-soft: #d6f7e4;
+    --warning: #92400e;
+    --warning-soft: #fff0c2;
+    --danger: #b91c1c;
+    --danger-soft: #ffe1e2;
+    --background: #f7f5ea;
+    --foreground: #111814;
+  }
+}
+
+@theme inline {
+  /* Surfaces */
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+
+  /* Text */
+  --color-strong: var(--strong);
+  --color-medium: var(--medium);
+  --color-soft: var(--soft);
+
+  /* Lines */
+  --color-border: var(--border);
+  --color-ink: var(--ink);
+
+  /* Action / brand */
+  --color-brand: var(--brand);
+  --color-brand-dark: var(--brand-dark);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-fill: var(--brand-fill);
+  --color-brand-fill-hover: var(--brand-fill-hover);
+  --color-on-accent: var(--on-accent);
+
+  /* Semantic states */
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+
+  /* Playful Ops accents */
+  --color-flow: var(--flow);
+  --color-marker: var(--marker);
+  --color-cyan: var(--cyan);
+  --color-accent: var(--accent);
 
   /* Aliases used by base elements */
   --color-background: var(--background);

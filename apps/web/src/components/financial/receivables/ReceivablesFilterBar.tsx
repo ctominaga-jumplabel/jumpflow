@@ -192,7 +192,7 @@ export function ReceivablesFilterBar({
                     <span
                       className={cn(
                         "grid size-4 shrink-0 place-items-center rounded border-2 border-ink",
-                        checked ? "bg-brand text-white" : "bg-surface",
+                        checked ? "bg-brand-fill text-white" : "bg-surface",
                       )}
                     >
                       {checked ? (
@@ -251,7 +251,7 @@ export function ReceivablesFilterBar({
         <button
           type="submit"
           className={cn(
-            "inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border-2 border-ink bg-brand px-5 text-sm font-semibold text-white shadow-[3px_3px_0_0_var(--color-ink)] transition-[transform,box-shadow] duration-150 hover:-translate-x-px hover:-translate-y-px hover:shadow-[4px_4px_0_0_var(--color-ink)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[1px_1px_0_0_var(--color-ink)]",
+            "inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border-2 border-ink bg-brand-fill px-5 text-sm font-semibold text-white shadow-[3px_3px_0_0_var(--color-ink)] transition-[transform,box-shadow] duration-150 hover:-translate-x-px hover:-translate-y-px hover:shadow-[4px_4px_0_0_var(--color-ink)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[1px_1px_0_0_var(--color-ink)]",
             focusRing,
           )}
         >

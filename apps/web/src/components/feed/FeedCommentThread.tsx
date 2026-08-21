@@ -167,7 +167,7 @@ function CommentItem({
               onClick={submitEdit}
               disabled={pending || !draft.trim()}
               className={cn(
-                "inline-flex items-center gap-1 rounded-md bg-brand px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-50",
+                "inline-flex items-center gap-1 rounded-md bg-brand-fill px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-50",
                 focusRing,
               )}
             >
@@ -317,7 +317,7 @@ function CommentComposer({
             onClick={submit}
             disabled={pending || !trimmed || remaining < 0}
             className={cn(
-              "rounded-md bg-brand px-3 py-1 text-xs font-semibold text-white disabled:opacity-50",
+              "rounded-md bg-brand-fill px-3 py-1 text-xs font-semibold text-white disabled:opacity-50",
               focusRing,
             )}
           >
@@ -375,7 +375,7 @@ export function Avatar({
     <span
       aria-hidden="true"
       className={cn(
-        "grid shrink-0 place-items-center rounded-full border-2 border-ink bg-marker font-semibold text-ink",
+        "grid shrink-0 place-items-center rounded-full border-2 border-on-accent bg-marker font-semibold text-on-accent",
         size === "sm" ? "size-6 text-xs" : "size-9 text-sm",
       )}
     >

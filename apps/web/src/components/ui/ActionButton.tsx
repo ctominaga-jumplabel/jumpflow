@@ -7,7 +7,7 @@ export type ActionVariant = "primary" | "secondary" | "success" | "danger";
 export type ActionSize = "sm" | "md";
 
 const variantStyles: Record<ActionVariant, string> = {
-  primary: "bg-brand text-white",
+  primary: "bg-brand-fill text-white",
   secondary: "bg-surface text-strong",
   success: "bg-success-soft text-success",
   danger: "bg-danger-soft text-danger",

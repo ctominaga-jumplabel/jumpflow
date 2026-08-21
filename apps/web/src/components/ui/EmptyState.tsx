@@ -26,7 +26,7 @@ export function EmptyState({
         className,
       )}
     >
-      <span className="grid size-12 place-items-center rounded-md border-2 border-ink bg-marker text-ink shadow-[2px_2px_0_0_var(--color-ink)]">
+      <span className="grid size-12 place-items-center rounded-md border-2 border-on-accent bg-marker text-on-accent shadow-[2px_2px_0_0_var(--color-ink)]">
         <Icon aria-hidden="true" className="size-6" />
       </span>
       <h3 className="mt-4 text-base font-semibold text-strong">{title}</h3>

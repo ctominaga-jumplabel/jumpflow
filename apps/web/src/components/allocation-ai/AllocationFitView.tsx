@@ -172,7 +172,7 @@ export function AllocationFitView({
                       aria-pressed={active}
                       className={
                         active
-                          ? "rounded-md border-2 border-ink bg-brand px-3 py-1 text-xs font-semibold text-white shadow-[2px_2px_0_0_var(--color-ink)]"
+                          ? "rounded-md border-2 border-ink bg-brand-fill px-3 py-1 text-xs font-semibold text-white shadow-[2px_2px_0_0_var(--color-ink)]"
                           : "rounded-md border-2 border-ink bg-surface px-3 py-1 text-xs font-semibold text-strong"
                       }
                     >
@@ -198,7 +198,7 @@ export function AllocationFitView({
       </SectionPanel>
 
       {/* Aviso de governança */}
-      <p className="rounded-md border-2 border-ink bg-marker/60 px-3 py-2 text-xs font-medium text-ink">
+      <p className="rounded-md border-2 border-on-accent bg-marker/60 px-3 py-2 text-xs font-medium text-on-accent">
         A IA é uma <strong>sugestão</strong> com fatores transparentes. A decisão
         de alocar é sempre <strong>humana</strong>; esta tela não cria alocações.
         {financialIncluded

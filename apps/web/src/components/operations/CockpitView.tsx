@@ -974,7 +974,7 @@ function DailyEntryToggle({
         aria-hidden="true"
         className={cn(
           "relative h-4 w-7 rounded-full transition-colors",
-          required ? "bg-brand" : "bg-ink/25",
+          required ? "bg-brand-fill" : "bg-ink/25",
         )}
       >
         <span

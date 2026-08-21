@@ -26,8 +26,8 @@ export interface LauncherViewProps {
  */
 const sectorIconTone: Record<LauncherSectorTone, string> = {
   receber: "bg-success text-white",
-  pagar: "bg-brand text-white",
-  pendentes: "bg-marker text-ink",
+  pagar: "bg-brand-fill text-white",
+  pendentes: "bg-marker text-on-accent",
 };
 
 /**

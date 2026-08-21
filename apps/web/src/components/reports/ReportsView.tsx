@@ -167,7 +167,7 @@ export function ReportsView({
                   "rounded px-3 py-1.5 text-sm font-semibold transition-colors",
                   focusRing,
                   active
-                    ? "bg-brand text-white"
+                    ? "bg-brand-fill text-white"
                     : "text-medium hover:bg-surface-muted",
                 )}
               >

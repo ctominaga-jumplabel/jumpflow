@@ -24,7 +24,7 @@ export function FilterChip({ label, active = false, count, onClick }: FilterChip
         "inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-semibold transition-[transform,box-shadow,background-color] duration-150",
         focusRing,
         active
-          ? "border-2 border-ink bg-marker text-ink shadow-[2px_2px_0_0_var(--color-ink)]"
+          ? "border-2 border-on-accent bg-marker text-on-accent shadow-[2px_2px_0_0_var(--color-ink)]"
           : "border-border bg-surface text-medium hover:bg-surface-muted",
       )}
     >

@@ -53,9 +53,9 @@ const ROLE_NAMES = [
 ];
 
 const inputCls =
-  "rounded-md border border-[#d7d8cf] bg-white px-2.5 py-1.5 text-sm text-ink";
+  "rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm text-ink";
 const btnPrimary =
-  "inline-flex items-center gap-1.5 rounded-md border-2 border-ink bg-[#2457ff] px-3 py-1.5 text-sm font-bold text-white shadow-[3px_3px_0_#111814] disabled:opacity-60";
+  "inline-flex items-center gap-1.5 rounded-md border-2 border-ink bg-brand-fill px-3 py-1.5 text-sm font-bold text-white shadow-[3px_3px_0_0_var(--color-ink)] disabled:opacity-60";
 
 export function NotificationRulesView({
   rules,
@@ -96,10 +96,10 @@ export function NotificationRulesView({
   return (
     <div className="space-y-6">
       {/* Create rule */}
-      <section className="rounded-md border-2 border-ink bg-white p-4 shadow-[4px_4px_0_#111814]">
+      <section className="rounded-md border-2 border-ink bg-surface p-4 shadow-[4px_4px_0_0_var(--color-ink)]">
         <h2 className="mb-3 text-sm font-bold text-ink">Nova regra</h2>
         <div className="flex flex-wrap items-end gap-3">
-          <label className="flex flex-col gap-1 text-xs text-[#6d756f]">
+          <label className="flex flex-col gap-1 text-xs text-soft">
             Evento
             <select
               className={inputCls}
@@ -113,7 +113,7 @@ export function NotificationRulesView({
               ))}
             </select>
           </label>
-          <label className="flex flex-col gap-1 text-xs text-[#6d756f]">
+          <label className="flex flex-col gap-1 text-xs text-soft">
             Escopo
             <select
               className={inputCls}
@@ -128,7 +128,7 @@ export function NotificationRulesView({
             </select>
           </label>
           {scope === "PROJECT" && (
-            <label className="flex flex-col gap-1 text-xs text-[#6d756f]">
+            <label className="flex flex-col gap-1 text-xs text-soft">
               Projeto
               <select
                 className={inputCls}
@@ -144,7 +144,7 @@ export function NotificationRulesView({
               </select>
             </label>
           )}
-          <label className="flex flex-col gap-1 text-xs text-[#6d756f]">
+          <label className="flex flex-col gap-1 text-xs text-soft">
             Canal
             <select
               className={inputCls}
@@ -173,7 +173,7 @@ export function NotificationRulesView({
           </button>
           {msg && (
             <span
-              className={`text-sm ${msg.ok ? "text-[#166534]" : "text-[#b91c1c]"}`}
+              className={`text-sm ${msg.ok ? "text-success" : "text-danger"}`}
             >
               {msg.text}
             </span>
@@ -183,7 +183,7 @@ export function NotificationRulesView({
 
       {/* Existing rules */}
       {rules.length === 0 ? (
-        <p className="text-sm text-[#6d756f]">
+        <p className="text-sm text-soft">
           Nenhuma regra cadastrada. Crie a primeira acima — sem regras, nenhum
           e-mail é enviado.
         </p>
@@ -226,8 +226,8 @@ function RuleCard({
 
   return (
     <section
-      className={`rounded-md border bg-white p-4 ${
-        rule.active ? "border-[#d7d8cf]" : "border-dashed border-[#d7d8cf] opacity-70"
+      className={`rounded-md border bg-surface p-4 ${
+        rule.active ? "border-border" : "border-dashed border-border opacity-70"
       }`}
     >
       <header className="mb-3 flex flex-wrap items-center gap-2">
@@ -248,7 +248,7 @@ function RuleCard({
             Ativa
           </label>
           <button
-            className="text-[#b91c1c]"
+            className="text-danger"
             title="Remover regra"
             disabled={pending}
             onClick={() => act(() => deleteRule({ id: rule.id }))}
@@ -261,20 +261,20 @@ function RuleCard({
       {/* Recipients */}
       <ul className="mb-3 space-y-1">
         {rule.recipients.length === 0 && (
-          <li className="text-xs text-[#92400e]">
+          <li className="text-xs text-warning">
             Sem destinatários — esta regra não envia nada.
           </li>
         )}
         {rule.recipients.map((rec) => (
           <li
             key={rec.id}
-            className="flex items-center gap-2 text-sm text-[#42524a]"
+            className="flex items-center gap-2 text-sm text-medium"
           >
             <Badge>{RECIPIENT_TYPES[rec.type]}</Badge>
             <span>{rec.address ?? "(dinâmico)"}</span>
             {rec.channel === "TEAMS" && <Badge>Teams</Badge>}
             <button
-              className="text-[#b91c1c]"
+              className="text-danger"
               title="Remover destinatário"
               disabled={pending}
               onClick={() => act(() => removeRecipient({ id: rec.id }))}
@@ -286,7 +286,7 @@ function RuleCard({
       </ul>
 
       {/* Add recipient */}
-      <div className="flex flex-wrap items-end gap-2 border-t border-[#eceff3] pt-3">
+      <div className="flex flex-wrap items-end gap-2 border-t border-surface-muted pt-3">
         <select
           className={inputCls}
           value={type}
@@ -344,7 +344,7 @@ function RuleCard({
           onChange={(e) => setName(e.target.value)}
         />
         <button
-          className="inline-flex items-center gap-1 rounded-md border border-ink bg-white px-2.5 py-1.5 text-sm font-semibold text-ink"
+          className="inline-flex items-center gap-1 rounded-md border border-ink bg-surface px-2.5 py-1.5 text-sm font-semibold text-ink"
           disabled={pending}
           onClick={() => {
             act(async () => {
@@ -365,7 +365,7 @@ function RuleCard({
         >
           <Plus size={14} /> Adicionar
         </button>
-        {err && <span className="text-sm text-[#b91c1c]">{err}</span>}
+        {err && <span className="text-sm text-danger">{err}</span>}
       </div>
     </section>
   );
@@ -373,7 +373,7 @@ function RuleCard({
 
 function Badge({ children }: { children: React.ReactNode }) {
   return (
-    <span className="rounded bg-[#eceff3] px-2 py-0.5 text-xs font-medium text-[#42524a]">
+    <span className="rounded bg-surface-muted px-2 py-0.5 text-xs font-medium text-medium">
       {children}
     </span>
   );

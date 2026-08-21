@@ -121,7 +121,7 @@ export function AppShell({
               role="dialog"
               aria-modal="true"
               aria-label="Navegação"
-              className="fixed inset-y-0 left-0 z-50 w-72 max-w-[85%] border-r-2 border-ink shadow-[6px_0_0_0_rgba(17,24,20,0.12)]"
+              className="fixed inset-y-0 left-0 z-50 w-72 max-w-[85%] border-r-2 border-ink shadow-[6px_0_0_0_color-mix(in_srgb,var(--color-ink)_12%,transparent)]"
             >
               <button
                 type="button"

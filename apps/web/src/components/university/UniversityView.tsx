@@ -115,7 +115,7 @@ export function UniversityView({
                 "rounded-md border-2 border-ink px-3 py-1.5 text-sm font-semibold",
                 focusRing,
                 tab === t.id
-                  ? "bg-brand text-white shadow-[2px_2px_0_0_var(--color-ink)]"
+                  ? "bg-brand-fill text-white shadow-[2px_2px_0_0_var(--color-ink)]"
                   : "bg-surface text-strong",
               )}
             >

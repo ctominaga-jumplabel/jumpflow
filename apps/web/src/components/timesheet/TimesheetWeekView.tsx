@@ -1305,7 +1305,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
 
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center gap-3">
-          <span className="grid size-10 shrink-0 place-items-center rounded-md border-2 border-ink bg-marker text-ink shadow-[2px_2px_0_0_var(--color-ink)]">
+          <span className="grid size-10 shrink-0 place-items-center rounded-md border-2 border-on-accent bg-marker text-on-accent shadow-[2px_2px_0_0_var(--color-ink)]">
             <CalendarDays aria-hidden="true" className="size-5" />
           </span>
           <div>
@@ -1678,7 +1678,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
                   className={cn(
                     "flex h-9 cursor-pointer items-center justify-center rounded-md border text-xs font-semibold",
                     defaultValue.weekdays.includes(day.value)
-                      ? "border-ink bg-marker text-ink"
+                      ? "border-on-accent bg-marker text-on-accent"
                       : "border-border bg-surface text-medium",
                   )}
                 >

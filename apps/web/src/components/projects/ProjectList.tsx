@@ -134,7 +134,7 @@ export function ProjectList({
                 <div
                   className={cn(
                     "h-full rounded-full",
-                    pct > 100 ? "bg-danger" : "bg-brand",
+                    pct > 100 ? "bg-danger" : "bg-brand-fill",
                   )}
                   style={{ width: `${Math.min(pct, 100)}%` }}
                 />

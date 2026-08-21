@@ -153,7 +153,7 @@ function countByBand(results: ScoreResult[]): Record<ScoreBand, number> {
 
 function GovernanceNote({ financialIncluded }: { financialIncluded: boolean }) {
   return (
-    <p className="rounded-md border-2 border-ink bg-marker/60 px-3 py-2 text-xs font-medium text-ink">
+    <p className="rounded-md border-2 border-on-accent bg-marker/60 px-3 py-2 text-xs font-medium text-on-accent">
       O score é <strong>determinístico e transparente</strong> (avaliações,
       consistência de apontamento, certificações, capacitação, saldo de feedback
       {financialIncluded ? " e realização financeira" : ""}), com o peso de cada

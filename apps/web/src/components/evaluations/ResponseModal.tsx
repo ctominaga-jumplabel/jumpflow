@@ -193,7 +193,7 @@ export function ResponseModal({
                         className={
                           "flex size-10 items-center justify-center rounded-md border-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50 " +
                           (active
-                            ? "border-ink bg-brand text-white shadow-[2px_2px_0_0_var(--color-ink)]"
+                            ? "border-ink bg-brand-fill text-white shadow-[2px_2px_0_0_var(--color-ink)]"
                             : "border-border bg-surface text-medium")
                         }
                       >
