@@ -70,7 +70,12 @@ export default async function RelatoriosPage({
           mode="demo"
           tab={tab}
           includeFinancials={includeFinancials}
-          filterOptions={{ clients: [], projects: [], consultants: [] }}
+          filterOptions={{
+            clients: [],
+            projects: [],
+            consultants: [],
+            allocations: [],
+          }}
           rawParams={flat}
         />
       </div>
