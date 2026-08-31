@@ -362,6 +362,24 @@ export function buildExpensesWhere(
 }
 
 /**
+ * Postgres limita uma prepared statement a 32767 bind variables. Um `IN (...)`
+ * de ids conta 1 bind por elemento, então um export-all (até EXPORT_ALL_LIMIT =
+ * 50k linhas) estoura o limite (P2035). Fatiamos as consultas de Approval por
+ * lotes bem abaixo do teto; os entityIds são únicos por entidade, então cada id
+ * cai em exatamente um lote e a coleta "mais recente por entidade" continua
+ * correta (sem colisão entre lotes).
+ */
+const APPROVAL_IN_CHUNK = 20_000;
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    out.push(items.slice(i, i + size));
+  }
+  return out;
+}
+
+/**
  * Resolve the ISO datetime of the latest Approval per entity, ordered desc and
  * collapsed to the first (newest) per entityId.
  */
@@ -371,14 +389,16 @@ async function loadLatestApprovalAt(
 ): Promise<Map<string, string>> {
   const out = new Map<string, string>();
   if (entityIds.length === 0) return out;
-  const approvals = await prisma.approval.findMany({
-    where: { entityType, entityId: { in: entityIds } },
-    orderBy: { createdAt: "desc" },
-    select: { entityId: true, createdAt: true },
-  });
-  for (const approval of approvals) {
-    if (!out.has(approval.entityId)) {
-      out.set(approval.entityId, approval.createdAt.toISOString());
+  for (const slice of chunk(entityIds, APPROVAL_IN_CHUNK)) {
+    const approvals = await prisma.approval.findMany({
+      where: { entityType, entityId: { in: slice } },
+      orderBy: { createdAt: "desc" },
+      select: { entityId: true, createdAt: true },
+    });
+    for (const approval of approvals) {
+      if (!out.has(approval.entityId)) {
+        out.set(approval.entityId, approval.createdAt.toISOString());
+      }
     }
   }
   return out;
@@ -391,14 +411,16 @@ async function loadLatestApprovalComment(
 ): Promise<Map<string, string>> {
   const out = new Map<string, string>();
   if (entityIds.length === 0) return out;
-  const approvals = await prisma.approval.findMany({
-    where: { entityType, entityId: { in: entityIds } },
-    orderBy: { createdAt: "desc" },
-    select: { entityId: true, comment: true },
-  });
-  for (const approval of approvals) {
-    if (!out.has(approval.entityId) && approval.comment) {
-      out.set(approval.entityId, approval.comment);
+  for (const slice of chunk(entityIds, APPROVAL_IN_CHUNK)) {
+    const approvals = await prisma.approval.findMany({
+      where: { entityType, entityId: { in: slice } },
+      orderBy: { createdAt: "desc" },
+      select: { entityId: true, comment: true },
+    });
+    for (const approval of approvals) {
+      if (!out.has(approval.entityId) && approval.comment) {
+        out.set(approval.entityId, approval.comment);
+      }
     }
   }
   return out;
