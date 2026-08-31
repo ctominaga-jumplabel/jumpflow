@@ -4,8 +4,10 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { TimesheetWeekView } from "@/components/timesheet/TimesheetWeekView";
 import { HorasConsultaPanel } from "@/components/timesheet/HorasConsultaPanel";
+import { OnBehalfConsultantPicker } from "@/components/timesheet/OnBehalfConsultantPicker";
 import { requireUser } from "@/lib/auth/guards";
 import { hasRole } from "@/lib/auth/route-permissions";
+import { canActOnBehalf } from "@/lib/db/on-behalf";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { isStorageConfigured } from "@/lib/storage/provider";
 import {
@@ -115,9 +117,41 @@ export default async function HorasPage({ searchParams }: HorasPageProps) {
 
   const params = await searchParams;
 
-  // Personal weekly editor — only for users linked to a Consultant.
+  // Lançamento "em nome de" (on-behalf): um Gestor de Área/Admin escolhe um
+  // consultor (via `?consultor=`) e o editor passa a operar a grade DELE. A
+  // trava de alocação de cada gravação garante o "consultor precisa estar no
+  // projeto"; aqui só resolvemos o alvo e alimentamos o seletor.
+  const actingOnBehalf = canActOnBehalf(user);
+  let onBehalfConsultants: { id: string; name: string }[] = [];
+  let onBehalfTarget: { id: string; name: string } | null = null;
+  if (actingOnBehalf) {
+    const { listOnBehalfConsultants, findActiveConsultantById } = await import(
+      "@/lib/db/on-behalf"
+    );
+    const selectedId =
+      typeof params.consultor === "string" ? params.consultor : undefined;
+    const [list, target] = await Promise.all([
+      listOnBehalfConsultants(),
+      selectedId ? findActiveConsultantById(selectedId) : Promise.resolve(null),
+    ]);
+    onBehalfConsultants = list;
+    onBehalfTarget = target ? { id: target.id, name: target.name } : null;
+  }
+  // Quem o editor renderiza: o consultor-alvo (on-behalf) ou o próprio usuário.
+  const editorConsultant = onBehalfTarget ?? consultant;
+
+  const onBehalfPicker = actingOnBehalf ? (
+    <OnBehalfConsultantPicker
+      consultants={onBehalfConsultants}
+      selectedId={onBehalfTarget?.id}
+      selfLabel={consultant ? "Meus lançamentos" : "Selecione um consultor"}
+      hint="Lance horas por um consultor alocado. Ele precisa estar no projeto (alocação ativa) para o lançamento ser aceito. A auditoria registra você como autor."
+    />
+  ) : null;
+
+  // Personal weekly editor — for the acting consultant (self or on-behalf target).
   let editor = null;
-  if (consultant) {
+  if (editorConsultant) {
     const weekStart = parseWeekParam(params.semana);
     // Safe fallback: an invalid filter value is dropped, defaults take over.
     const filter = parseTimesheetFilter(params);
@@ -139,14 +173,19 @@ export default async function HorasPage({ searchParams }: HorasPageProps) {
     const { prisma } = await import("@jumpflow/database");
     const [week, period, projects, defaultOptions, holidays, timeOff] =
       await Promise.all([
-        getWeekForConsultant(consultant.id, weekStart, filter),
-        getPeriodForConsultant(consultant.id, periodStart, periodEnd, filter),
+        getWeekForConsultant(editorConsultant.id, weekStart, filter),
+        getPeriodForConsultant(
+          editorConsultant.id,
+          periodStart,
+          periodEnd,
+          filter,
+        ),
         // The project dropdown lists the consultant's scope, narrowed by the
         // chosen project status so the options match the active filter.
-        listAllowedProjects(consultant.id, weekStart, filter.projectStatus),
-        listTimesheetDefaultOptions(consultant.id, weekStart),
+        listAllowedProjects(editorConsultant.id, weekStart, filter.projectStatus),
+        listTimesheetDefaultOptions(editorConsultant.id, weekStart),
         getHolidayLookup(weekStart, weekEnd),
-        getTimeOffLookup(consultant.id, weekStart, weekEnd),
+        getTimeOffLookup(editorConsultant.id, weekStart, weekEnd),
       ]);
     // Trava A (cadeado na grade): quais (projeto, competência) da semana já
     // tiveram o faturamento liberado. Resolvido em UMA consulta pelos projetos
@@ -165,10 +204,13 @@ export default async function HorasPage({ searchParams }: HorasPageProps) {
         holidays={holidays}
         timeOff={timeOff}
         filter={filter}
-        canExportCsv={canExportCsv}
+        // O CSV do editor re-escopa ao usuário logado; em modo on-behalf ele
+        // traria os dados do gestor (não do alvo) — some para não confundir.
+        canExportCsv={onBehalfTarget ? false : canExportCsv}
         canEditBillable={canEditBillable}
         attachmentsAvailable={attachmentsAvailable}
         billingLockedKeys={billingLockedKeys}
+        onBehalfOf={onBehalfTarget}
       />
     );
   }
@@ -204,6 +246,7 @@ export default async function HorasPage({ searchParams }: HorasPageProps) {
   return (
     <div className="space-y-6">
       {header}
+      {onBehalfPicker}
       {editor}
       {panel}
     </div>

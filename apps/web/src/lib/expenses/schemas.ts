@@ -14,6 +14,16 @@ import { parseIsoDateUtc } from "@/lib/timesheet/week";
  */
 const idSchema = z.string().trim().min(1, "Identificador obrigatório.");
 
+/**
+ * Lançamento "em nome de" (on-behalf): id do consultor-alvo. Opcional — presente
+ * só quando um Gestor de Área/Admin lança despesas por outro consultor. A
+ * AUTORIZAÇÃO e a existência do consultor são reforçadas no servidor
+ * (resolveActingConsultant); aqui só carregamos o id.
+ */
+const onBehalfField = {
+  onBehalfOfConsultantId: idSchema.optional(),
+} as const;
+
 const isoDateSchema = z
   .string()
   .refine((value) => parseIsoDateUtc(value) !== null, {
@@ -126,6 +136,7 @@ export const expenseInputSchema = z.object({
   amount: amountSchema,
   description: descriptionSchema,
   invoiceNumber: invoiceNumberSchema,
+  ...onBehalfField,
 });
 
 export type ExpenseInput = z.infer<typeof expenseInputSchema>;
@@ -155,6 +166,7 @@ export const createExpenseBatchSchema = z.object({
     .array(expenseItemSchema)
     .min(1, "Adicione ao menos um item de despesa.")
     .max(50, "Máximo de 50 itens por lançamento."),
+  ...onBehalfField,
 });
 
 export type CreateExpenseBatchInput = z.infer<typeof createExpenseBatchSchema>;
@@ -172,6 +184,7 @@ export const updateExpenseInputSchema = z
     /** Optional so legacy rows (sem categoria) can still be edited. */
     category: categorySchema.optional(),
     ...mileageFieldsSchema,
+    ...onBehalfField,
   })
   .superRefine(refineMileage);
 
@@ -182,11 +195,15 @@ export const mileageCalcInputSchema = z.object({
   origin: addressSchema,
   destination: addressSchema,
   roundTrip: z.boolean().default(false),
+  ...onBehalfField,
 });
 
 export type MileageCalcInput = z.infer<typeof mileageCalcInputSchema>;
 
-export const expenseIdInputSchema = z.object({ id: idSchema });
+export const expenseIdInputSchema = z.object({
+  id: idSchema,
+  ...onBehalfField,
+});
 
 export type ExpenseIdInput = z.infer<typeof expenseIdInputSchema>;
 
@@ -237,6 +254,9 @@ export const setPaymentSchema = z
 
 export type SetPaymentInput = z.infer<typeof setPaymentSchema>;
 
-export const receiptInputSchema = z.object({ expenseId: idSchema });
+export const receiptInputSchema = z.object({
+  expenseId: idSchema,
+  ...onBehalfField,
+});
 
 export type ReceiptInput = z.infer<typeof receiptInputSchema>;

@@ -17,6 +17,16 @@ import { JUSTIFICATION_MAX_LENGTH } from "@/lib/shared/justification";
  */
 const idSchema = z.string().trim().min(1, "Identificador obrigatório.");
 
+/**
+ * Lançamento "em nome de" (on-behalf): id do consultor-alvo. Opcional — presente
+ * só quando um Gestor de Área/Admin lança pela grade de outro consultor. A
+ * AUTORIZAÇÃO (quem pode) e a existência do consultor são reforçadas no servidor
+ * (resolveActingConsultant); aqui só carregamos o id.
+ */
+const onBehalfField = {
+  onBehalfOfConsultantId: idSchema.optional(),
+} as const;
+
 const isoDateSchema = z
   .string()
   .refine((value) => parseIsoDateUtc(value) !== null, {
@@ -110,6 +120,7 @@ export const timeEntryInputSchema = refineClock(
     billable: z.boolean(),
     nonBillableReason: nonBillableReasonSchema,
     multiplier: multiplierSchema,
+    ...onBehalfField,
   }),
 );
 
@@ -138,6 +149,7 @@ export const weeklyTimeEntryInputSchema = refineClock(
     billable: z.boolean(),
     nonBillableReason: nonBillableReasonSchema,
     multiplier: multiplierSchema,
+    ...onBehalfField,
   }),
 );
 
@@ -153,18 +165,23 @@ export const updateTimeEntryInputSchema = refineClock(
     multiplier: multiplierSchema,
     /** Optional move to another day of the SAME week. */
     date: isoDateSchema.optional(),
+    ...onBehalfField,
   }),
 );
 
 export type UpdateTimeEntryInput = z.input<typeof updateTimeEntryInputSchema>;
 
-export const deleteTimeEntryInputSchema = z.object({ id: idSchema });
+export const deleteTimeEntryInputSchema = z.object({
+  id: idSchema,
+  ...onBehalfField,
+});
 
 export type DeleteTimeEntryInput = z.infer<typeof deleteTimeEntryInputSchema>;
 
 export const weekActionInputSchema = z.object({
   /** Monday of the target week (snapped server-side if needed). */
   weekStart: isoDateSchema,
+  ...onBehalfField,
 });
 
 export type WeekActionInput = z.infer<typeof weekActionInputSchema>;
@@ -181,6 +198,7 @@ export const copyPreviousWeekInputSchema = z.object({
     .trim()
     .max(500, "Descrição deve ter no máximo 500 caracteres.")
     .optional(),
+  ...onBehalfField,
 });
 
 export type CopyPreviousWeekInput = z.infer<typeof copyPreviousWeekInputSchema>;
@@ -196,6 +214,7 @@ export const saveTimesheetDefaultInputSchema = refineClock(
       .max(7, "Selecione no maximo sete dias."),
     description: descriptionSchema,
     billable: z.boolean(),
+    ...onBehalfField,
   }),
 );
 
@@ -206,6 +225,7 @@ export type SaveTimesheetDefaultInput = z.infer<
 export const applyTimesheetDefaultInputSchema = z.object({
   allocationId: idSchema,
   weekStart: isoDateSchema,
+  ...onBehalfField,
 });
 
 export type ApplyTimesheetDefaultInput = z.infer<

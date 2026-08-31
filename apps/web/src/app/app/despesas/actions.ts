@@ -15,6 +15,7 @@ import {
   findActiveAllocation,
   getConsultantForUser,
 } from "@/lib/db/timesheet";
+import { canActOnBehalf, findActiveConsultantById } from "@/lib/db/on-behalf";
 import { resolveDbUser } from "@/lib/db/users";
 import {
   COMMENT_REQUIRED_MESSAGE,
@@ -104,6 +105,37 @@ async function requireConsultant(user: AppUser) {
     );
   }
   return consultant;
+}
+
+/**
+ * Resolve o consultor cujas despesas serão gravadas.
+ *
+ * - Sem `onBehalfOfConsultantId`: o próprio usuário logado (fluxo do consultor).
+ * - Com `onBehalfOfConsultantId` (lançamento "em nome de"): exige Gestor de
+ *   Área/Admin (canActOnBehalf) e resolve o consultor-alvo ATIVO. A regra
+ *   "consultor precisa estar no projeto" vale pela trava de alocação de cada
+ *   gravação (ensureActiveAllocation), não aqui. O ATOR real (dbUser) segue como
+ *   autor de toda auditoria.
+ */
+async function resolveActingConsultant(
+  user: AppUser,
+  onBehalfOfConsultantId: string | undefined,
+) {
+  if (!onBehalfOfConsultantId) {
+    const consultant = await requireConsultant(user);
+    return { consultant, onBehalf: false };
+  }
+  if (!canActOnBehalf(user)) {
+    throw new ActionError(
+      "FORBIDDEN",
+      "Apenas Gestor de Área ou Admin podem lançar em nome de um consultor.",
+    );
+  }
+  const consultant = await findActiveConsultantById(onBehalfOfConsultantId);
+  if (!consultant) {
+    throw new ActionError("NOT_FOUND", "Consultor não encontrado ou inativo.");
+  }
+  return { consultant, onBehalf: true };
 }
 
 function parseInput<T>(schema: ZodType<T>, input: unknown): T {
@@ -377,8 +409,11 @@ export async function createExpense(
   try {
     ensureDatabase();
     const user = await requireUser();
-    const consultant = await requireConsultant(user);
     const parsed = parseInput(expenseInputSchema, input);
+    const { consultant } = await resolveActingConsultant(
+      user,
+      parsed.onBehalfOfConsultantId,
+    );
     // Schema guarantees a valid date; always midnight UTC (date-only).
     const date = parseIsoDateUtc(parsed.date)!;
 
@@ -429,8 +464,11 @@ export async function createExpenseBatch(
   try {
     ensureDatabase();
     const user = await requireUser();
-    const consultant = await requireConsultant(user);
     const parsed = parseInput(createExpenseBatchSchema, input);
+    const { consultant } = await resolveActingConsultant(
+      user,
+      parsed.onBehalfOfConsultantId,
+    );
 
     const project = await ensureOpenProject(parsed.projectId);
     // Item 12: os tipos de despesa são dinâmicos — valida os códigos contra o
@@ -519,8 +557,11 @@ export async function updateExpense(
   try {
     ensureDatabase();
     const user = await requireUser();
-    const consultant = await requireConsultant(user);
     const parsed = parseInput(updateExpenseInputSchema, input);
+    const { consultant } = await resolveActingConsultant(
+      user,
+      parsed.onBehalfOfConsultantId,
+    );
 
     const expense = await loadOwnedEditableExpense(consultant.id, parsed.id);
 
@@ -627,8 +668,9 @@ export async function calculateMileage(
 ): Promise<ActionResult<MileageCalcResult>> {
   try {
     const user = await requireUser();
-    await requireConsultant(user);
     const parsed = parseInput(mileageCalcInputSchema, input);
+    // Gate: consultor (fluxo próprio) ou gestor lançando em nome de um alvo válido.
+    await resolveActingConsultant(user, parsed.onBehalfOfConsultantId);
 
     const ratePerKm = isDatabaseConfigured()
       ? await getMileageRatePerKm()
@@ -682,8 +724,11 @@ export async function deleteExpense(
   try {
     ensureDatabase();
     const user = await requireUser();
-    const consultant = await requireConsultant(user);
     const parsed = parseInput(expenseIdInputSchema, input);
+    const { consultant } = await resolveActingConsultant(
+      user,
+      parsed.onBehalfOfConsultantId,
+    );
 
     const expense = await loadOwnedEditableExpense(consultant.id, parsed.id, {
       lockMessage:
@@ -750,10 +795,15 @@ async function saveReceipt(
         "Anexos indisponíveis: storage não configurado.",
       );
     }
-    const consultant = await requireConsultant(user);
     const parsed = parseInput(receiptInputSchema, {
       expenseId: formData.get("expenseId"),
+      onBehalfOfConsultantId:
+        formData.get("onBehalfOfConsultantId") ?? undefined,
     });
+    const { consultant } = await resolveActingConsultant(
+      user,
+      parsed.onBehalfOfConsultantId,
+    );
 
     const file = formData.get("file");
     if (!(file instanceof File)) {
@@ -882,8 +932,11 @@ export async function submitExpense(
   try {
     ensureDatabase();
     const user = await requireUser();
-    const consultant = await requireConsultant(user);
     const parsed = parseInput(expenseIdInputSchema, input);
+    const { consultant } = await resolveActingConsultant(
+      user,
+      parsed.onBehalfOfConsultantId,
+    );
 
     const expense = await prisma.expense.findUnique({
       where: { id: parsed.id },
