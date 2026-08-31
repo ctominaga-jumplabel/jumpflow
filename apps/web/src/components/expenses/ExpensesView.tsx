@@ -100,6 +100,12 @@ export interface ExpensesViewProps {
   expenseTypes?: ExpenseTypeOption[];
   /** Taxa global R$/km (Política de Reembolso) para o Reembolso Quilometragem. */
   mileageRatePerKm?: number | null;
+  /**
+   * Lançamento "em nome de" (on-behalf): quando presente, as despesas operadas
+   * são DESTE consultor e cada action carrega `onBehalfOfConsultantId`. Só um
+   * Gestor de Área/Admin recebe isso (o servidor reforça a autorização).
+   */
+  onBehalfOf?: { id: string; name: string } | null;
 }
 
 /** Tipos nativos como opções — fallback para demo mode (sem banco/registro). */
@@ -116,6 +122,9 @@ const BUILTIN_EXPENSE_TYPES: ExpenseTypeOption[] = EXPENSE_CATEGORIES.map(
 export function ExpensesView(props: ExpensesViewProps) {
   const isDemo = props.mode === "demo";
   const storageAvailable = isDemo ? true : (props.storageAvailable ?? false);
+  // Lançamento "em nome de": id do consultor-alvo (undefined = fluxo próprio).
+  const onBehalfOf = props.onBehalfOf ?? null;
+  const onBehalfId = onBehalfOf?.id;
   // Item 12: tipos do registro (ou nativos em demo). Opções ativas para o form,
   // mapa código→rótulo (todos, inclusive inativos) para exibir na lista.
   const allTypes = props.expenseTypes ?? BUILTIN_EXPENSE_TYPES;
@@ -206,7 +215,11 @@ export function ExpensesView(props: ExpensesViewProps) {
       return;
     }
     startTransition(async () => {
-      const saved = await updateExpenseAction({ id: editingId, ...value });
+      const saved = await updateExpenseAction({
+        id: editingId,
+        ...value,
+        onBehalfOfConsultantId: onBehalfId,
+      });
       if (!saved.ok) {
         notify("warning", saved.message);
         return;
@@ -218,6 +231,7 @@ export function ExpensesView(props: ExpensesViewProps) {
         const formData = new FormData();
         formData.set("expenseId", expenseId);
         formData.set("file", file);
+        if (onBehalfId) formData.set("onBehalfOfConsultantId", onBehalfId);
         const hadAttachment = Boolean(editing?.attachment);
         const attached = hadAttachment
           ? await replaceReceipt(formData)
@@ -236,7 +250,10 @@ export function ExpensesView(props: ExpensesViewProps) {
       }
 
       if (mode === "SUBMITTED") {
-        const submitted = await submitExpenseAction({ id: expenseId });
+        const submitted = await submitExpenseAction({
+          id: expenseId,
+          onBehalfOfConsultantId: onBehalfId,
+        });
         if (submitted.ok) {
           messages.push("enviada para aprovação");
         } else {
@@ -276,6 +293,7 @@ export function ExpensesView(props: ExpensesViewProps) {
           distanceOutboundKm: it.distanceOutboundKm,
           distanceReturnKm: it.distanceReturnKm,
         })),
+        onBehalfOfConsultantId: onBehalfId,
       });
       if (!created.ok) {
         notify("warning", created.message);
@@ -291,11 +309,15 @@ export function ExpensesView(props: ExpensesViewProps) {
           const formData = new FormData();
           formData.set("expenseId", expenseId);
           formData.set("file", file);
+          if (onBehalfId) formData.set("onBehalfOfConsultantId", onBehalfId);
           const result = await attachReceipt(formData);
           if (result.ok) attached += 1;
         }
         if (mode === "SUBMITTED") {
-          const result = await submitExpenseAction({ id: expenseId });
+          const result = await submitExpenseAction({
+            id: expenseId,
+            onBehalfOfConsultantId: onBehalfId,
+          });
           if (result.ok) submitted += 1;
         }
       }
@@ -410,7 +432,10 @@ export function ExpensesView(props: ExpensesViewProps) {
       return;
     }
     startTransition(async () => {
-      const result = await deleteExpenseAction({ id: expense.id });
+      const result = await deleteExpenseAction({
+        id: expense.id,
+        onBehalfOfConsultantId: onBehalfId,
+      });
       if (result.ok) notify("success", "Despesa excluída.");
       else notify("warning", result.message);
     });
@@ -433,7 +458,10 @@ export function ExpensesView(props: ExpensesViewProps) {
       return;
     }
     startTransition(async () => {
-      const result = await submitExpenseAction({ id: expense.id });
+      const result = await submitExpenseAction({
+        id: expense.id,
+        onBehalfOfConsultantId: onBehalfId,
+      });
       if (result.ok) notify("success", "Despesa enviada para aprovação.");
       else notify("warning", result.message);
     });
@@ -489,7 +517,10 @@ export function ExpensesView(props: ExpensesViewProps) {
         ratePerKm: props.mileageRatePerKm ?? null,
       };
     }
-    const result = await calculateMileageAction(input);
+    const result = await calculateMileageAction({
+      ...input,
+      onBehalfOfConsultantId: onBehalfId,
+    });
     if (!result.ok) {
       notify("warning", result.message);
       return null;
@@ -571,6 +602,17 @@ export function ExpensesView(props: ExpensesViewProps) {
         </div>
       ) : null}
 
+      {onBehalfOf ? (
+        <div className="flex items-center gap-2 rounded-md border border-info/30 bg-info-soft px-3 py-2 text-sm font-medium text-info">
+          <TriangleAlert aria-hidden="true" className="size-4 shrink-0" />
+          <span>
+            Lançando despesas em nome de <strong>{onBehalfOf.name}</strong>. Só
+            projetos com alocação ativa dele aparecem; a auditoria registra você
+            como autor.
+          </span>
+        </div>
+      ) : null}
+
       <ExpenseSummaryCards totals={totals} />
 
       <FeedbackBanner message={feedback} />
@@ -580,7 +622,11 @@ export function ExpensesView(props: ExpensesViewProps) {
         description="Refine por status, projeto e período."
         action={
           <div className="flex items-center gap-2">
-            {isDemo ? null : <ExportExcelButton href={expenseXlsxHref()} />}
+            {/* O XLSX re-escopa ao usuário logado; em modo on-behalf traria os
+                dados do gestor (não do alvo) — some para não confundir. */}
+            {isDemo || onBehalfOf ? null : (
+              <ExportExcelButton href={expenseXlsxHref()} />
+            )}
             <ActionButton
               variant="primary"
               size="sm"

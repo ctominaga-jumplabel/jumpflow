@@ -258,6 +258,13 @@ export interface TimesheetWeekViewProps {
    * edição — mesmo em status editável. Resolvido no servidor (sem N+1).
    */
   billingLockedKeys?: string[];
+  /**
+   * Lançamento "em nome de" (on-behalf): quando presente, a grade opera os
+   * lançamentos DESTE consultor e cada action carrega `onBehalfOfConsultantId`.
+   * Só um Gestor de Área/Admin recebe isso (o servidor reforça a autorização).
+   * Null/ausente = o usuário lança para si mesmo.
+   */
+  onBehalfOf?: { id: string; name: string } | null;
 }
 
 export interface TimesheetDefaultOption extends TimeEntryFormProject {
@@ -641,6 +648,10 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
   // preserva demo/gestão. Anexo depende de storage configurado (db only).
   const canEditBillable = props.canEditBillable ?? true;
   const attachmentsAvailable = !isDemo && (props.attachmentsAvailable ?? false);
+  // Lançamento "em nome de": id do consultor-alvo (undefined = fluxo próprio).
+  // Injetado em cada action de gravação para o servidor gravar na grade dele.
+  const onBehalfOf = props.onBehalfOf ?? null;
+  const onBehalfId = onBehalfOf?.id;
   const formProjects = isDemo ? demoProjects : dbProjects;
   // Demo project dropdown: narrow by the chosen project status (db mode gets the
   // already-narrowed list from the server via listAllowedProjects).
@@ -824,6 +835,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
         weekdays: defaultValue.weekdays,
         billable: defaultValue.billable,
         description: defaultValue.description,
+        onBehalfOfConsultantId: onBehalfId,
       });
       if (result.ok) {
         router.refresh();
@@ -853,6 +865,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
         weekdays: defaultValue.weekdays,
         billable: defaultValue.billable,
         description: defaultValue.description,
+        onBehalfOfConsultantId: onBehalfId,
       });
       if (!saved.ok) {
         setDefaultError(saved.message);
@@ -861,6 +874,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
       const result = await applyTimesheetDefaultAction({
         allocationId: defaultValue.allocationId,
         weekStart: week.startDate,
+        onBehalfOfConsultantId: onBehalfId,
       });
       if (!result.ok) {
         setDefaultError(result.message);
@@ -940,10 +954,14 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
       const fd = new FormData();
       fd.set("id", entryId);
       fd.set("file", attachment.file);
+      if (onBehalfId) fd.set("onBehalfOfConsultantId", onBehalfId);
       const result = await attachTimeEntryFile(fd);
       return result.ok ? null : result.message;
     }
-    const result = await removeTimeEntryAttachment({ id: entryId });
+    const result = await removeTimeEntryAttachment({
+      id: entryId,
+      onBehalfOfConsultantId: onBehalfId,
+    });
     return result.ok ? null : result.message;
   }
 
@@ -994,6 +1012,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
           billable: value.billable,
           nonBillableReason: value.nonBillableReason || undefined,
           multiplier: value.multiplier,
+          onBehalfOfConsultantId: onBehalfId,
         });
         if (result.ok) {
           setFormOpen(false);
@@ -1022,6 +1041,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
             nonBillableReason: value.nonBillableReason || undefined,
             multiplier: value.multiplier,
             date: value.date,
+            onBehalfOfConsultantId: onBehalfId,
           })
         : await createTimeEntry({
             projectId: editingRow?.projectId ?? value.projectId,
@@ -1035,6 +1055,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
             billable: value.billable,
             nonBillableReason: value.nonBillableReason || undefined,
             multiplier: value.multiplier,
+            onBehalfOfConsultantId: onBehalfId,
           });
       if (result.ok) {
         setFormOpen(false);
@@ -1086,7 +1107,10 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
       return;
     }
     startTransition(async () => {
-      const result = await deleteTimeEntry({ id: entryId });
+      const result = await deleteTimeEntry({
+        id: entryId,
+        onBehalfOfConsultantId: onBehalfId,
+      });
       if (result.ok) {
         setFormOpen(false);
         notify("success", "Lançamento excluído.");
@@ -1222,6 +1246,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
         const result = await copyPreviousWeekAction({
           weekStart: week.startDate,
           description: description || undefined,
+          onBehalfOfConsultantId: onBehalfId,
         });
         if (!result.ok) {
           notify("warning", result.message);
@@ -1299,6 +1324,17 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
           <TriangleAlert aria-hidden="true" className="size-4 shrink-0" />
           <span>
             Modo demonstração: banco não configurado. Nada será persistido.
+          </span>
+        </div>
+      ) : null}
+
+      {onBehalfOf ? (
+        <div className="flex items-center gap-2 rounded-md border border-info/30 bg-info-soft px-3 py-2 text-sm font-medium text-info">
+          <TriangleAlert aria-hidden="true" className="size-4 shrink-0" />
+          <span>
+            Lançando horas em nome de <strong>{onBehalfOf.name}</strong>. Só
+            projetos com alocação ativa dele aparecem; a auditoria registra você
+            como autor.
           </span>
         </div>
       ) : null}
@@ -1526,7 +1562,9 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
                       }
                       billingLocked={lockedDays.some(Boolean)}
                       billingLockedDays={lockedDays}
-                      onRequestReopen={isDemo ? undefined : handleRequestReopen}
+                      onRequestReopen={
+                        isDemo || onBehalfId ? undefined : handleRequestReopen
+                      }
                       reopenBusy={isPending}
                     />
                   );

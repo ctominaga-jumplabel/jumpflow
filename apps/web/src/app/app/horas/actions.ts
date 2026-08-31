@@ -15,6 +15,7 @@ import {
   getConsultantForUser,
   recomputePeriodStatus,
 } from "@/lib/db/timesheet";
+import { canActOnBehalf, findActiveConsultantById } from "@/lib/db/on-behalf";
 import { findConfirmedTimeOffCovering } from "@/lib/db/time-off";
 import { resolveDbUser } from "@/lib/db/users";
 import { transcribeAudio } from "@/lib/transcription/transcribe";
@@ -354,6 +355,44 @@ async function requireConsultant(user: AppUser) {
   return consultant;
 }
 
+/**
+ * Resolve o consultor cujos lançamentos serão gravados.
+ *
+ * - Sem `onBehalfOfConsultantId`: o próprio usuário logado (requireConsultant) —
+ *   fluxo padrão do consultor.
+ * - Com `onBehalfOfConsultantId` (lançamento "em nome de"): exige que o ator seja
+ *   Gestor de Área/Admin (canActOnBehalf) e resolve o consultor-alvo ATIVO. A
+ *   regra "consultor precisa estar no projeto" NÃO é checada aqui — vale a trava
+ *   de alocação de cada gravação (ensureActiveAllocation), então um alvo sem
+ *   alocação na data simplesmente não consegue lançar (NO_ACTIVE_ALLOCATION).
+ *
+ * O ATOR real (dbUser) continua sendo o autor de toda auditoria; `onBehalf`
+ * sinaliza que a linha pertence a outro consultor, para enriquecer o registro.
+ */
+async function resolveActingConsultant(
+  user: AppUser,
+  onBehalfOfConsultantId: string | undefined,
+) {
+  if (!onBehalfOfConsultantId) {
+    const consultant = await requireConsultant(user);
+    return { consultant, onBehalf: false };
+  }
+  if (!canActOnBehalf(user)) {
+    throw new ActionError(
+      "FORBIDDEN",
+      "Apenas Gestor de Área ou Admin podem lançar em nome de um consultor.",
+    );
+  }
+  const consultant = await findActiveConsultantById(onBehalfOfConsultantId);
+  if (!consultant) {
+    throw new ActionError(
+      "NOT_FOUND",
+      "Consultor não encontrado ou inativo.",
+    );
+  }
+  return { consultant, onBehalf: true };
+}
+
 async function requireDbUser(user: AppUser) {
   // FK columns (actorUserId) need the REAL db user id — the dev session id
   // ("dev-user") does not exist in the database.
@@ -475,8 +514,11 @@ export async function createTimeEntry(
   try {
     ensureDatabase();
     const user = await requireUser();
-    const consultant = await requireConsultant(user);
     const parsed = parseInput(timeEntryInputSchema, input);
+    const { consultant, onBehalf } = await resolveActingConsultant(
+      user,
+      parsed.onBehalfOfConsultantId,
+    );
     // Schema guarantees a valid date; always midnight UTC (date-only).
     const date = parseIsoDateUtc(parsed.date)!;
 
@@ -625,7 +667,12 @@ export async function createTimeEntry(
           entityType: "TimeEntry",
           entityId: saved.id,
           action: "TIME_ENTRY_SUBMITTED_ON_SAVE",
-          after: { entryId: saved.id, hours: Number(saved.hours), merged },
+          after: {
+            entryId: saved.id,
+            hours: Number(saved.hours),
+            merged,
+            ...(onBehalf ? { onBehalfOfConsultantId: consultant.id } : {}),
+          },
         }),
       });
       // P9: auditoria dedicada quando um gestor torna o lançamento não faturável.
@@ -667,8 +714,11 @@ export async function createWeeklyTimeEntries(
   try {
     ensureDatabase();
     const user = await requireUser();
-    const consultant = await requireConsultant(user);
     const parsed = parseInput(weeklyTimeEntryInputSchema, input);
+    const { consultant, onBehalf } = await resolveActingConsultant(
+      user,
+      parsed.onBehalfOfConsultantId,
+    );
     const weekStart = weekStartOf(parseIsoDateUtc(parsed.weekStart)!);
     const weekEnd = addDays(weekStart, 6);
 
@@ -819,6 +869,7 @@ export async function createWeeklyTimeEntries(
               entryId: created.id,
               hours: Number(created.hours),
               date: created.date.toISOString().slice(0, 10),
+              ...(onBehalf ? { onBehalfOfConsultantId: consultant.id } : {}),
             },
           }),
         });
@@ -857,8 +908,11 @@ export async function updateTimeEntry(
   try {
     ensureDatabase();
     const user = await requireUser();
-    const consultant = await requireConsultant(user);
     const parsed = parseInput(updateTimeEntryInputSchema, input);
+    const { consultant, onBehalf } = await resolveActingConsultant(
+      user,
+      parsed.onBehalfOfConsultantId,
+    );
 
     const entry = await prisma.timeEntry.findUnique({
       where: { id: parsed.id },
@@ -1059,7 +1113,11 @@ export async function updateTimeEntry(
           // SUBMITTED -> SUBMITTED edit is an in-place re-submission of a
           // still-pending entry, distinct from correcting a REJECTED one.
           before: { status: previousStatus },
-          after: { entryId: entry.id, resubmit: true },
+          after: {
+            entryId: entry.id,
+            resubmit: true,
+            ...(onBehalf ? { onBehalfOfConsultantId: consultant.id } : {}),
+          },
         }),
       });
       // P9: auditoria dedicada quando o gestor torna o lançamento não faturável.
@@ -1115,8 +1173,11 @@ export async function deleteTimeEntry(
   try {
     ensureDatabase();
     const user = await requireUser();
-    const consultant = await requireConsultant(user);
     const parsed = parseInput(deleteTimeEntryInputSchema, input);
+    const { consultant } = await resolveActingConsultant(
+      user,
+      parsed.onBehalfOfConsultantId,
+    );
 
     const entry = await prisma.timeEntry.findUnique({
       where: { id: parsed.id },
@@ -1229,8 +1290,11 @@ export async function saveTimesheetDefault(
   try {
     ensureDatabase();
     const user = await requireUser();
-    const consultant = await requireConsultant(user);
     const parsed = parseInput(saveTimesheetDefaultInputSchema, input);
+    const { consultant } = await resolveActingConsultant(
+      user,
+      parsed.onBehalfOfConsultantId,
+    );
     // Sobreaviso (ON_CALL) não pode virar padrão semanal: é irregular e o
     // TimesheetDefault não tem coluna de fator de remuneração, então aplicá-lo
     // criaria lançamentos com multiplier 1.00 e superpagaria o sobreaviso.
@@ -1308,8 +1372,11 @@ export async function applyTimesheetDefault(
   try {
     ensureDatabase();
     const user = await requireUser();
-    const consultant = await requireConsultant(user);
     const parsed = parseInput(applyTimesheetDefaultInputSchema, input);
+    const { consultant } = await resolveActingConsultant(
+      user,
+      parsed.onBehalfOfConsultantId,
+    );
     const weekStart = weekStartOf(parseIsoDateUtc(parsed.weekStart)!);
     const weekEnd = addDays(weekStart, 6);
     const dbUser = await requireDbUser(user);
@@ -1500,8 +1567,11 @@ export async function copyPreviousWeek(
   try {
     ensureDatabase();
     const user = await requireUser();
-    const consultant = await requireConsultant(user);
     const parsed = parseInput(copyPreviousWeekInputSchema, input);
+    const { consultant } = await resolveActingConsultant(
+      user,
+      parsed.onBehalfOfConsultantId,
+    );
     // Single week-level description applied to every copied entry (the modal).
     // Blank = keep each source entry's own description.
     const weekDescription = parsed.description?.trim() || null;
@@ -1663,8 +1733,11 @@ export async function submitWeek(
   try {
     ensureDatabase();
     const user = await requireUser();
-    const consultant = await requireConsultant(user);
     const parsed = parseInput(weekActionInputSchema, input);
+    const { consultant } = await resolveActingConsultant(
+      user,
+      parsed.onBehalfOfConsultantId,
+    );
     const startDate = weekStartOf(parseIsoDateUtc(parsed.weekStart)!);
     const endDate = addDays(startDate, 6);
 
@@ -2091,6 +2164,9 @@ const ATTACHMENT_VIEW_ROLES = [
 // Não validamos com .cuid(): ids do seed não são cuid (apenas string não vazia).
 const attachmentIdSchema = z.object({
   id: z.string().trim().min(1, "Identificador obrigatório."),
+  // Lançamento "em nome de": id do consultor-alvo (opcional). Autorização e
+  // existência reforçadas por resolveActingConsultant.
+  onBehalfOfConsultantId: z.string().trim().min(1).optional(),
 });
 
 /**
@@ -2129,8 +2205,15 @@ export async function attachTimeEntryFile(
         "Anexos indisponíveis: storage não configurado.",
       );
     }
-    const consultant = await requireConsultant(user);
-    const parsed = parseInput(attachmentIdSchema, { id: formData.get("id") });
+    const parsed = parseInput(attachmentIdSchema, {
+      id: formData.get("id"),
+      onBehalfOfConsultantId:
+        formData.get("onBehalfOfConsultantId") ?? undefined,
+    });
+    const { consultant } = await resolveActingConsultant(
+      user,
+      parsed.onBehalfOfConsultantId,
+    );
 
     const file = formData.get("file");
     if (!(file instanceof File)) {
@@ -2156,7 +2239,7 @@ export async function attachTimeEntryFile(
     if (entry.consultantId !== consultant.id) {
       throw new ActionError(
         "FORBIDDEN",
-        "Você só pode anexar nos seus próprios lançamentos.",
+        "Você só pode anexar em lançamentos deste consultor.",
       );
     }
     if (entry.period.status === "CLOSED") {
@@ -2295,8 +2378,11 @@ export async function removeTimeEntryAttachment(
   try {
     ensureDatabase();
     const user = await requireUser();
-    const consultant = await requireConsultant(user);
     const parsed = parseInput(attachmentIdSchema, input);
+    const { consultant } = await resolveActingConsultant(
+      user,
+      parsed.onBehalfOfConsultantId,
+    );
 
     const entry = await prisma.timeEntry.findUnique({
       where: { id: parsed.id },
@@ -2311,7 +2397,7 @@ export async function removeTimeEntryAttachment(
     if (entry.consultantId !== consultant.id) {
       throw new ActionError(
         "FORBIDDEN",
-        "Você só pode remover anexos dos seus próprios lançamentos.",
+        "Você só pode remover anexos de lançamentos deste consultor.",
       );
     }
     if (!entry.attachment) {

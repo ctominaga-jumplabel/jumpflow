@@ -5,11 +5,13 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ExpensesView } from "@/components/expenses/ExpensesView";
 import { ExpenseApprovalsSection } from "@/components/expenses/ExpenseApprovalsSection";
+import { OnBehalfConsultantPicker } from "@/components/timesheet/OnBehalfConsultantPicker";
 import { requireUser } from "@/lib/auth/guards";
 import {
   REIMBURSEMENT_POLICY_ROLES,
   hasRole,
 } from "@/lib/auth/route-permissions";
+import { canActOnBehalf } from "@/lib/db/on-behalf";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { isStorageConfigured } from "@/lib/storage/provider";
 import type { ApprovalItem } from "@/lib/mock-data/approvals";
@@ -26,7 +28,13 @@ export const metadata: Metadata = { title: "Despesas" };
  * financeira) das despesas na própria tela (P14), reusando as mesmas actions da
  * fila /app/aprovacoes, e um atalho para a Política de Reembolso (P12).
  */
-export default async function DespesasPage() {
+interface DespesasPageProps {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}
+
+export default async function DespesasPage({
+  searchParams,
+}: DespesasPageProps) {
   const user = await requireUser();
   const today = new Date().toISOString().slice(0, 10);
   const canManagePolicy = hasRole(user, REIMBURSEMENT_POLICY_ROLES);
@@ -70,6 +78,30 @@ export default async function DespesasPage() {
   const { listExpenseTypeOptions } = await import("@/lib/db/expense-types");
 
   const consultant = await getConsultantForUser(user);
+
+  // Lançamento "em nome de" (on-behalf): um Gestor de Área/Admin escolhe um
+  // consultor (via `?consultor=`) e a tela passa a operar as despesas DELE. A
+  // trava de alocação de cada gravação garante o "consultor precisa estar no
+  // projeto"; aqui só resolvemos o alvo e alimentamos o seletor.
+  const actingOnBehalf = canActOnBehalf(user);
+  const params = await searchParams;
+  let onBehalfConsultants: { id: string; name: string }[] = [];
+  let onBehalfTarget: { id: string; name: string } | null = null;
+  if (actingOnBehalf) {
+    const { listOnBehalfConsultants, findActiveConsultantById } = await import(
+      "@/lib/db/on-behalf"
+    );
+    const selectedId =
+      typeof params.consultor === "string" ? params.consultor : undefined;
+    const [list, target] = await Promise.all([
+      listOnBehalfConsultants(),
+      selectedId ? findActiveConsultantById(selectedId) : Promise.resolve(null),
+    ]);
+    onBehalfConsultants = list;
+    onBehalfTarget = target ? { id: target.id, name: target.name } : null;
+  }
+  const editorConsultant = onBehalfTarget ?? consultant;
+
   const [policyRules, expenseTypes, mileageRatePerKm] = await Promise.all([
     getActivePolicyRules(),
     listExpenseTypeOptions(),
@@ -102,15 +134,25 @@ export default async function DespesasPage() {
     <ExpenseApprovalsSection items={approvalItems} />
   ) : null;
 
-  if (!consultant) {
+  const onBehalfPicker = actingOnBehalf ? (
+    <OnBehalfConsultantPicker
+      consultants={onBehalfConsultants}
+      selectedId={onBehalfTarget?.id}
+      selfLabel={consultant ? "Minhas despesas" : "Selecione um consultor"}
+      hint="Lance despesas por um consultor alocado. Ele precisa estar no projeto (alocação ativa na data) para o lançamento ser aceito. A auditoria registra você como autor."
+    />
+  ) : null;
+
+  if (!editorConsultant) {
     return (
       <div className="space-y-6">
         {header}
+        {onBehalfPicker}
         {approvalsBlock ?? (
           <EmptyState
             icon={UserX}
             title="Sem vínculo de consultor"
-            description="Seu usuário não está vinculado a um consultor. Contate um administrador."
+            description="Seu usuário não está vinculado a um consultor. Selecione um consultor acima para lançar em nome dele ou contate um administrador."
           />
         )}
       </div>
@@ -118,17 +160,18 @@ export default async function DespesasPage() {
   }
 
   const [expenses, projects] = await Promise.all([
-    listExpensesForConsultant(consultant.id),
-    listExpenseProjects(consultant.id),
+    listExpensesForConsultant(editorConsultant.id),
+    listExpenseProjects(editorConsultant.id),
   ]);
 
   return (
     <div className="space-y-6">
       {header}
+      {onBehalfPicker}
       {approvalsBlock}
       <ExpensesView
         mode="db"
-        consultantName={consultant.name}
+        consultantName={editorConsultant.name}
         today={today}
         expenses={expenses}
         projects={projects}
@@ -136,6 +179,7 @@ export default async function DespesasPage() {
         policyRules={policyRules}
         expenseTypes={expenseTypes}
         mileageRatePerKm={mileageRatePerKm}
+        onBehalfOf={onBehalfTarget}
       />
     </div>
   );
