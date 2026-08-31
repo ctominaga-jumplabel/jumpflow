@@ -1,3 +1,6 @@
+"use client";
+
+import { useMemo, useState } from "react";
 import { Download } from "lucide-react";
 import { SectionPanel } from "@/components/ui/SectionPanel";
 import { ActionButton } from "@/components/ui/ActionButton";
@@ -41,19 +44,31 @@ const STATUS_ORDER = [
 export interface HorasConsultaPanelProps {
   /** RBAC-scoped hours report (current page). */
   report: HoursReport;
-  /** Scoped dropdown options (clients/projects/consultants). */
+  /** Scoped dropdown options (clients/projects/consultants + allocation graph). */
   options: ReportFilterOptions;
   /** Current raw query params (reflected in the form fields and links). */
   values: Record<string, string>;
+}
+
+/** Seleção corrente dos três filtros conjuntos (cliente/projeto/consultor). */
+interface LinkedSelection {
+  clientId: string;
+  projectId: string;
+  consultantId: string;
 }
 
 /**
  * Read-only multi-consultant hours consultation for managers on the Horas
  * screen. Reuses the Relatorios pipeline end-to-end: the rows come from
  * `getHoursReport` (RBAC + financial masking on the server) and the table is
- * the same `HoursReportTable`. The "Exportar CSV" link points at the shared
- * `/api/relatorios/horas` endpoint with the same filters (whole filtered set —
- * no pagination params). Query string is the source of truth; no client state.
+ * the same `HoursReportTable`. Query string is the source of truth.
+ *
+ * FILTROS CONJUNTOS (client-side): Cliente, Projeto e Consultor se restringem
+ * mutuamente NA SELEÇÃO (sem submit) — escolher um projeto deixa no seletor de
+ * consultor apenas quem está nele; escolher um consultor deixa em Projeto apenas
+ * onde ele está alocado; Cliente afunila os dois. As LINHAS de lançamento só são
+ * refiltradas ao clicar em "Aplicar filtros" (o form faz um GET e o servidor
+ * reconsulta). O grafo (options.allocations) mora no cliente para a cascata.
  */
 export function HorasConsultaPanel({
   report,
@@ -61,6 +76,125 @@ export function HorasConsultaPanel({
   values,
 }: HorasConsultaPanelProps) {
   const v = (key: string) => values[key] ?? "";
+
+  // Estado local dos três filtros conjuntos (semente = filtros já aplicados).
+  const [sel, setSel] = useState<LinkedSelection>({
+    clientId: v("clientId"),
+    projectId: v("projectId"),
+    consultantId: v("consultantId"),
+  });
+
+  // Índices do grafo de alocação para a cascata (memoizados).
+  const graph = useMemo(() => {
+    /** Adiciona `value` ao conjunto de `key` (criando-o na primeira vez). */
+    const add = (map: Map<string, Set<string>>, key: string, value: string) => {
+      let set = map.get(key);
+      if (!set) {
+        set = new Set();
+        map.set(key, set);
+      }
+      set.add(value);
+    };
+    const projectsByConsultant = new Map<string, Set<string>>();
+    const consultantsByProject = new Map<string, Set<string>>();
+    const clientByProject = new Map<string, string>();
+    for (const p of options.projects) clientByProject.set(p.id, p.clientId);
+    // Consultores por cliente (via o projeto de cada alocação).
+    const consultantsByClient = new Map<string, Set<string>>();
+    for (const a of options.allocations) {
+      add(projectsByConsultant, a.consultantId, a.projectId);
+      add(consultantsByProject, a.projectId, a.consultantId);
+      const clientId = clientByProject.get(a.projectId);
+      if (clientId) add(consultantsByClient, clientId, a.consultantId);
+    }
+    return {
+      projectsByConsultant,
+      consultantsByProject,
+      clientByProject,
+      consultantsByClient,
+    };
+  }, [options.allocations, options.projects]);
+
+  /** Consultores que têm ao menos um projeto do cliente informado. */
+  const consultantsInClient = graph.consultantsByClient;
+
+  // Listas disponíveis: cada seletor é afunilado pelos OUTROS dois filtros.
+  const availableProjects = useMemo(() => {
+    return options.projects.filter(
+      (p) =>
+        (!sel.clientId || p.clientId === sel.clientId) &&
+        (!sel.consultantId ||
+          graph.projectsByConsultant.get(sel.consultantId)?.has(p.id)),
+    );
+  }, [options.projects, sel.clientId, sel.consultantId, graph]);
+
+  const availableConsultants = useMemo(() => {
+    return options.consultants.filter(
+      (c) =>
+        (!sel.projectId ||
+          graph.consultantsByProject.get(sel.projectId)?.has(c.id)) &&
+        (!sel.clientId || consultantsInClient.get(sel.clientId)?.has(c.id)),
+    );
+  }, [
+    options.consultants,
+    sel.projectId,
+    sel.clientId,
+    graph,
+    consultantsInClient,
+  ]);
+
+  const availableClients = useMemo(() => {
+    return options.clients.filter((cl) => {
+      if (sel.projectId) {
+        return graph.clientByProject.get(sel.projectId) === cl.id;
+      }
+      if (sel.consultantId) {
+        return consultantsInClient.get(cl.id)?.has(sel.consultantId) ?? false;
+      }
+      return true;
+    });
+  }, [options.clients, sel.projectId, sel.consultantId, graph, consultantsInClient]);
+
+  /**
+   * Reconcilia a seleção após uma mudança: se um valor selecionado deixou de
+   * estar disponível (por causa do filtro que acabou de mudar), é limpo. Como o
+   * usuário mexe em UM campo por vez e limpar só ALARGA as listas, uma passada
+   * basta para nunca restar uma seleção inválida.
+   */
+  function applyChange(next: LinkedSelection): void {
+    const projectOk =
+      !next.projectId ||
+      ((!next.clientId ||
+        graph.clientByProject.get(next.projectId) === next.clientId) &&
+        (!next.consultantId ||
+          (graph.projectsByConsultant
+            .get(next.consultantId)
+            ?.has(next.projectId) ??
+            false)));
+    const reconciled: LinkedSelection = {
+      ...next,
+      projectId: projectOk ? next.projectId : "",
+    };
+    const consultantOk =
+      !reconciled.consultantId ||
+      ((!reconciled.projectId ||
+        (graph.consultantsByProject
+          .get(reconciled.projectId)
+          ?.has(reconciled.consultantId) ??
+          false)) &&
+        (!reconciled.clientId ||
+          (consultantsInClient
+            .get(reconciled.clientId)
+            ?.has(reconciled.consultantId) ??
+            false)));
+    if (!consultantOk) reconciled.consultantId = "";
+    const clientOk =
+      !reconciled.clientId ||
+      (!reconciled.projectId ||
+        graph.clientByProject.get(reconciled.projectId) === reconciled.clientId);
+    if (!clientOk) reconciled.clientId = "";
+    setSel(reconciled);
+  }
 
   /** Build a `/app/horas` href for a page, preserving filters + pageSize. */
   function pageHref(page: number): string {
@@ -100,7 +234,7 @@ export function HorasConsultaPanel({
   return (
     <SectionPanel
       title="Consultar lançamentos"
-      description="Visualização somente leitura de horas por cliente e consultor, no escopo do seu acesso."
+      description="Visualização somente leitura de horas por cliente e consultor, no escopo do seu acesso. Cliente, Projeto e Consultor se afunilam entre si — as linhas são refiltradas ao aplicar."
     >
       <div className="px-5 py-4">
         <form method="get" action="/app/horas">
@@ -144,11 +278,14 @@ export function HorasConsultaPanel({
               <select
                 id="hc-client"
                 name="clientId"
-                defaultValue={v("clientId")}
+                value={sel.clientId}
+                onChange={(e) =>
+                  applyChange({ ...sel, clientId: e.target.value })
+                }
                 className={fieldClass}
               >
                 <option value="">Todos</option>
-                {options.clients.map((c) => (
+                {availableClients.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
                   </option>
@@ -163,11 +300,14 @@ export function HorasConsultaPanel({
               <select
                 id="hc-consultant"
                 name="consultantId"
-                defaultValue={v("consultantId")}
+                value={sel.consultantId}
+                onChange={(e) =>
+                  applyChange({ ...sel, consultantId: e.target.value })
+                }
                 className={fieldClass}
               >
                 <option value="">Todos</option>
-                {options.consultants.map((c) => (
+                {availableConsultants.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
                   </option>
@@ -182,11 +322,14 @@ export function HorasConsultaPanel({
               <select
                 id="hc-project"
                 name="projectId"
-                defaultValue={v("projectId")}
+                value={sel.projectId}
+                onChange={(e) =>
+                  applyChange({ ...sel, projectId: e.target.value })
+                }
                 className={fieldClass}
               >
                 <option value="">Todos</option>
-                {options.projects.map((p) => (
+                {availableProjects.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}
                   </option>

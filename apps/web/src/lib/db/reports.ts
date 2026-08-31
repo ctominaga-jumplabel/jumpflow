@@ -1034,6 +1034,13 @@ export interface ReportFilterOptions {
   clients: { id: string; name: string }[];
   projects: { id: string; name: string; clientId: string }[];
   consultants: { id: string; name: string }[];
+  /**
+   * Pares (consultor, projeto) para os filtros CONJUNTOS: dado um projeto, os
+   * consultores que nele há; dado um consultor, os projetos em que está alocado.
+   * Inclui alocações de qualquer status (o painel consulta horas históricas, que
+   * podem vir de alocações já encerradas). Escopado como o resto das opções.
+   */
+  allocations: { consultantId: string; projectId: string }[];
 }
 
 /**
@@ -1046,7 +1053,7 @@ export async function getReportFilterOptions(
 ): Promise<ReportFilterOptions> {
   const scope = await resolveReportScope(user);
   if (!scopeHasUniverse(scope)) {
-    return { clients: [], projects: [], consultants: [] };
+    return { clients: [], projects: [], consultants: [], allocations: [] };
   }
 
   const projectWhere: Where = {};
@@ -1055,10 +1062,18 @@ export async function getReportFilterOptions(
   const consultantWhere: Where = {};
   if (scope.ownConsultantId) consultantWhere.id = scope.ownConsultantId;
 
+  // Escopo das alocações do grafo (filtros conjuntos): PM vê alocações dos
+  // projetos que gerencia; um consultor restrito vê as próprias; broad vê todas.
+  const allocationWhere: Where = {};
+  if (scope.managerUserId) {
+    allocationWhere.project = { managerUserId: scope.managerUserId };
+  }
+  if (scope.ownConsultantId) allocationWhere.consultantId = scope.ownConsultantId;
+
   // A consultant restricted to own data should still only see projects they
   // have entries/expenses on, but a simple full list scoped by management is
   // enough for the dropdowns; the read functions enforce the real scope.
-  const [projects, consultants] = await Promise.all([
+  const [projects, consultants, allocations] = await Promise.all([
     prisma.project.findMany({
       where: scope.managerUserId ? projectWhere : undefined,
       select: {
@@ -1073,6 +1088,14 @@ export async function getReportFilterOptions(
       where: scope.ownConsultantId ? consultantWhere : undefined,
       select: { id: true, name: true },
       orderBy: { name: "asc" },
+    }),
+    prisma.allocation.findMany({
+      where:
+        scope.managerUserId || scope.ownConsultantId
+          ? allocationWhere
+          : undefined,
+      select: { consultantId: true, projectId: true },
+      distinct: ["consultantId", "projectId"],
     }),
   ]);
 
@@ -1089,6 +1112,10 @@ export async function getReportFilterOptions(
       clientId: p.clientId,
     })),
     consultants: consultants.map((c) => ({ id: c.id, name: c.name })),
+    allocations: allocations.map((a) => ({
+      consultantId: a.consultantId,
+      projectId: a.projectId,
+    })),
   };
 }
 

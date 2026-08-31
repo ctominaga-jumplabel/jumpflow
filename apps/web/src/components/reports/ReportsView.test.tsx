@@ -11,6 +11,10 @@ const filterOptions: ReportFilterOptions = {
     { id: "cons-a", name: "Consultor A" },
     { id: "cons-b", name: "Consultor B" },
   ],
+  allocations: [
+    { consultantId: "cons-a", projectId: "proj-a" },
+    { consultantId: "cons-b", projectId: "proj-a" },
+  ],
 };
 
 /** A full set of filters + sort + pageSize as a server would pass them raw. */

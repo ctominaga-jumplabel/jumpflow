@@ -17,6 +17,10 @@ const options: ReportFilterOptions = {
     { id: "cons-a", name: "Consultor A" },
     { id: "cons-b", name: "Consultor B" },
   ],
+  allocations: [
+    { consultantId: "cons-a", projectId: "proj-a" },
+    { consultantId: "cons-b", projectId: "proj-b" },
+  ],
 };
 
 /** The <details> element wrapping the advanced filters. */
