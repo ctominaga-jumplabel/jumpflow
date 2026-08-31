@@ -19,6 +19,7 @@ import { parseTimesheetFilter } from "@/lib/timesheet/filters";
 import {
   DEFAULT_PAGE_SIZE,
   hoursReportFilterSchema,
+  type HoursReportFilter,
 } from "@/lib/reports/schemas";
 
 export const metadata: Metadata = { title: "Horas" };
@@ -230,9 +231,16 @@ export default async function HorasPage({ searchParams }: HorasPageProps) {
       pageSize: flat.pageSize || String(DEFAULT_PAGE_SIZE),
     };
     const parsed = hoursReportFilterSchema.safeParse(flatForReport);
+    // Fallback SEGURO: um filtro inválido (ex.: um `sort` do editor que não
+    // existe no schema do relatório) não pode virar `{}` — isso ligaria o
+    // export-all (take 50k) no render da tela e estouraria o limite de binds do
+    // Postgres. Sem filtro válido, mantém a paginação padrão.
+    const reportFilter: HoursReportFilter = parsed.success
+      ? parsed.data
+      : { page: 1, pageSize: DEFAULT_PAGE_SIZE as HoursReportFilter["pageSize"] };
     const [filterOptions, report] = await Promise.all([
       getReportFilterOptions(user),
-      getHoursReport(user, parsed.success ? parsed.data : {}),
+      getHoursReport(user, reportFilter),
     ]);
     panel = (
       <HorasConsultaPanel
