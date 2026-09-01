@@ -100,7 +100,7 @@ describe("findActiveConsultantById", () => {
 });
 
 describe("listOnBehalfConsultants", () => {
-  it("lista ativos com alocação ativa em projeto não encerrado, ordenados por nome", async () => {
+  it("sem projeto: ativos com alocação ativa em projeto não encerrado, por nome", async () => {
     h.results.findMany = [
       { id: "c1", name: "Ana" },
       { id: "c2", name: "Bruno" },
@@ -115,6 +115,22 @@ describe("listOnBehalfConsultants", () => {
         status: "ACTIVE",
         allocations: {
           some: { status: "ACTIVE", project: { status: { not: "CLOSED" } } },
+        },
+      },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    });
+  });
+
+  it("com projeto: restringe a quem tem alocação ativa NESSE projeto (filtro conjunto)", async () => {
+    h.results.findMany = [{ id: "c1", name: "Ana" }];
+    const list = await listOnBehalfConsultants("proj-xyz");
+    expect(list).toEqual([{ id: "c1", name: "Ana" }]);
+    expect(h.calls.findMany[0]).toEqual({
+      where: {
+        status: "ACTIVE",
+        allocations: {
+          some: { status: "ACTIVE", projectId: "proj-xyz" },
         },
       },
       select: { id: true, name: true },
