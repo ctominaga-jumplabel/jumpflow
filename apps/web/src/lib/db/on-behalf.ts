@@ -38,15 +38,25 @@ export interface OnBehalfConsultantOption {
  * Consultores que um gestor pode alcançar no seletor "Lançar em nome de":
  * ATIVOS e com ao menos uma alocação ATIVA em projeto não encerrado (só esses
  * têm onde lançar). Ordenados por nome.
+ *
+ * Filtro CONJUNTO com o projeto (opcional): quando um projeto está filtrado no
+ * editor de Horas (`projectId`), a lista se restringe aos consultores com
+ * alocação ATIVA NESSE projeto — "apenas os consultores alocados nele". Sem
+ * projeto, lista todos os elegíveis.
  */
-export async function listOnBehalfConsultants(): Promise<
-  OnBehalfConsultantOption[]
-> {
+export async function listOnBehalfConsultants(
+  projectId?: string,
+): Promise<OnBehalfConsultantOption[]> {
   const rows = await prisma.consultant.findMany({
     where: {
       status: "ACTIVE",
       allocations: {
-        some: { status: "ACTIVE", project: { status: { not: "CLOSED" } } },
+        some: {
+          status: "ACTIVE",
+          ...(projectId
+            ? { projectId }
+            : { project: { status: { not: "CLOSED" } } }),
+        },
       },
     },
     select: { id: true, name: true },

@@ -131,8 +131,14 @@ export default async function HorasPage({ searchParams }: HorasPageProps) {
     );
     const selectedId =
       typeof params.consultor === "string" ? params.consultor : undefined;
+    // Filtro conjunto: se um projeto está filtrado no editor, o seletor "Lançar
+    // em nome de" lista só os consultores com alocação ativa NESSE projeto.
+    const filteredProjectId =
+      typeof params.projectId === "string" && params.projectId.trim()
+        ? params.projectId.trim()
+        : undefined;
     const [list, target] = await Promise.all([
-      listOnBehalfConsultants(),
+      listOnBehalfConsultants(filteredProjectId),
       selectedId ? findActiveConsultantById(selectedId) : Promise.resolve(null),
     ]);
     onBehalfConsultants = list;
