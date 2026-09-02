@@ -123,25 +123,23 @@ export default async function HorasPage({ searchParams }: HorasPageProps) {
   // trava de alocação de cada gravação garante o "consultor precisa estar no
   // projeto"; aqui só resolvemos o alvo e alimentamos o seletor.
   const actingOnBehalf = canActOnBehalf(user);
-  let onBehalfConsultants: { id: string; name: string }[] = [];
+  let onBehalfPickerData: import("@/lib/db/on-behalf").OnBehalfPickerData = {
+    consultants: [],
+    projects: [],
+    allocations: [],
+  };
   let onBehalfTarget: { id: string; name: string } | null = null;
   if (actingOnBehalf) {
-    const { listOnBehalfConsultants, findActiveConsultantById } = await import(
+    const { getOnBehalfPickerData, findActiveConsultantById } = await import(
       "@/lib/db/on-behalf"
     );
     const selectedId =
       typeof params.consultor === "string" ? params.consultor : undefined;
-    // Filtro conjunto: se um projeto está filtrado no editor, o seletor "Lançar
-    // em nome de" lista só os consultores com alocação ativa NESSE projeto.
-    const filteredProjectId =
-      typeof params.projectId === "string" && params.projectId.trim()
-        ? params.projectId.trim()
-        : undefined;
-    const [list, target] = await Promise.all([
-      listOnBehalfConsultants(filteredProjectId),
+    const [data, target] = await Promise.all([
+      getOnBehalfPickerData(),
       selectedId ? findActiveConsultantById(selectedId) : Promise.resolve(null),
     ]);
-    onBehalfConsultants = list;
+    onBehalfPickerData = data;
     onBehalfTarget = target ? { id: target.id, name: target.name } : null;
   }
   // Quem o editor renderiza: o consultor-alvo (on-behalf) ou o próprio usuário.
@@ -149,10 +147,10 @@ export default async function HorasPage({ searchParams }: HorasPageProps) {
 
   const onBehalfPicker = actingOnBehalf ? (
     <OnBehalfConsultantPicker
-      consultants={onBehalfConsultants}
+      data={onBehalfPickerData}
       selectedId={onBehalfTarget?.id}
       selfLabel={consultant ? "Meus lançamentos" : "Selecione um consultor"}
-      hint="Lance horas por um consultor alocado. Ele precisa estar no projeto (alocação ativa) para o lançamento ser aceito. A auditoria registra você como autor."
+      hint="Lance horas por um consultor alocado. Filtre por projeto para achar quem está nele; ele precisa ter alocação ativa para o lançamento ser aceito. A auditoria registra você como autor."
     />
   ) : null;
 

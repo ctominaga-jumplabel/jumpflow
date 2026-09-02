@@ -34,33 +34,62 @@ export interface OnBehalfConsultantOption {
   name: string;
 }
 
+export interface OnBehalfPickerData {
+  /** Consultores elegíveis (ativos com alocação ativa em projeto não encerrado). */
+  consultants: OnBehalfConsultantOption[];
+  /** Projetos não encerrados que têm ao menos um desses consultores alocados. */
+  projects: { id: string; name: string }[];
+  /** Pares (consultor, projeto) para a cascata client-side projeto→consultor. */
+  allocations: { consultantId: string; projectId: string }[];
+}
+
 /**
- * Consultores que um gestor pode alcançar no seletor "Lançar em nome de":
- * ATIVOS e com ao menos uma alocação ATIVA em projeto não encerrado (só esses
- * têm onde lançar). Ordenados por nome.
- *
- * Filtro CONJUNTO com o projeto (opcional): quando um projeto está filtrado no
- * editor de Horas (`projectId`), a lista se restringe aos consultores com
- * alocação ATIVA NESSE projeto — "apenas os consultores alocados nele". Sem
- * projeto, lista todos os elegíveis.
+ * Dados do seletor "Lançar em nome de" com o grafo para o FILTRO CONJUNTO
+ * client-side: escolher um projeto afunila a lista de consultores NA SELEÇÃO
+ * (sem recarregar). Uma única leitura das alocações ATIVAS (consultor ativo,
+ * projeto não encerrado) deriva as três listas — consultores, projetos e o grafo
+ * — de forma consistente. Escopo amplo (só ADMIN/AREA_MANAGER chegam aqui).
  */
-export async function listOnBehalfConsultants(
-  projectId?: string,
-): Promise<OnBehalfConsultantOption[]> {
-  const rows = await prisma.consultant.findMany({
+export async function getOnBehalfPickerData(): Promise<OnBehalfPickerData> {
+  const rows = await prisma.allocation.findMany({
     where: {
       status: "ACTIVE",
-      allocations: {
-        some: {
-          status: "ACTIVE",
-          ...(projectId
-            ? { projectId }
-            : { project: { status: { not: "CLOSED" } } }),
-        },
-      },
+      consultant: { status: "ACTIVE" },
+      project: { status: { not: "CLOSED" } },
     },
-    select: { id: true, name: true },
-    orderBy: { name: "asc" },
+    select: {
+      consultantId: true,
+      projectId: true,
+      consultant: { select: { name: true } },
+      project: { select: { name: true } },
+    },
   });
-  return rows;
+  const consultantMap = new Map<string, string>();
+  const projectMap = new Map<string, string>();
+  const pairs = new Set<string>();
+  const allocations: { consultantId: string; projectId: string }[] = [];
+  for (const row of rows) {
+    consultantMap.set(row.consultantId, row.consultant.name);
+    projectMap.set(row.projectId, row.project.name);
+    const key = `${row.consultantId}|${row.projectId}`;
+    if (!pairs.has(key)) {
+      pairs.add(key);
+      allocations.push({
+        consultantId: row.consultantId,
+        projectId: row.projectId,
+      });
+    }
+  }
+  const byName = (a: { name: string }, b: { name: string }) =>
+    a.name.localeCompare(b.name, "pt-BR");
+  return {
+    consultants: [...consultantMap.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort(byName),
+    projects: [...projectMap.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort(byName),
+    allocations,
+  };
 }
+
