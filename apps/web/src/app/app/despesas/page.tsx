@@ -85,19 +85,23 @@ export default async function DespesasPage({
   // projeto"; aqui só resolvemos o alvo e alimentamos o seletor.
   const actingOnBehalf = canActOnBehalf(user);
   const params = await searchParams;
-  let onBehalfConsultants: { id: string; name: string }[] = [];
+  let onBehalfPickerData: import("@/lib/db/on-behalf").OnBehalfPickerData = {
+    consultants: [],
+    projects: [],
+    allocations: [],
+  };
   let onBehalfTarget: { id: string; name: string } | null = null;
   if (actingOnBehalf) {
-    const { listOnBehalfConsultants, findActiveConsultantById } = await import(
+    const { getOnBehalfPickerData, findActiveConsultantById } = await import(
       "@/lib/db/on-behalf"
     );
     const selectedId =
       typeof params.consultor === "string" ? params.consultor : undefined;
-    const [list, target] = await Promise.all([
-      listOnBehalfConsultants(),
+    const [data, target] = await Promise.all([
+      getOnBehalfPickerData(),
       selectedId ? findActiveConsultantById(selectedId) : Promise.resolve(null),
     ]);
-    onBehalfConsultants = list;
+    onBehalfPickerData = data;
     onBehalfTarget = target ? { id: target.id, name: target.name } : null;
   }
   const editorConsultant = onBehalfTarget ?? consultant;
@@ -136,10 +140,10 @@ export default async function DespesasPage({
 
   const onBehalfPicker = actingOnBehalf ? (
     <OnBehalfConsultantPicker
-      consultants={onBehalfConsultants}
+      data={onBehalfPickerData}
       selectedId={onBehalfTarget?.id}
       selfLabel={consultant ? "Minhas despesas" : "Selecione um consultor"}
-      hint="Lance despesas por um consultor alocado. Ele precisa estar no projeto (alocação ativa na data) para o lançamento ser aceito. A auditoria registra você como autor."
+      hint="Lance despesas por um consultor alocado. Filtre por projeto para achar quem está nele; ele precisa ter alocação ativa na data para o lançamento ser aceito. A auditoria registra você como autor."
     />
   ) : null;
 

@@ -11,13 +11,16 @@ import type { RoleName } from "@/lib/auth/roles";
  */
 
 const h = vi.hoisted(() => {
-  const calls: { findFirst: unknown[]; findMany: unknown[] } = {
+  const calls: {
+    findFirst: unknown[];
+    allocationFindMany: unknown[];
+  } = {
     findFirst: [],
-    findMany: [],
+    allocationFindMany: [],
   };
   const results = {
     findFirst: null as unknown,
-    findMany: [] as unknown[],
+    allocationFindMany: [] as unknown[],
   };
   return { calls, results };
 });
@@ -29,9 +32,11 @@ vi.mock("@jumpflow/database", () => ({
         h.calls.findFirst.push(args);
         return h.results.findFirst;
       },
+    },
+    allocation: {
       findMany: async (args: unknown) => {
-        h.calls.findMany.push(args);
-        return h.results.findMany;
+        h.calls.allocationFindMany.push(args);
+        return h.results.allocationFindMany;
       },
     },
   },
@@ -41,7 +46,7 @@ import {
   canActOnBehalf,
   ON_BEHALF_ROLES,
   findActiveConsultantById,
-  listOnBehalfConsultants,
+  getOnBehalfPickerData,
 } from "./on-behalf";
 
 function userWithRoles(roles: RoleName[]): AppUser {
@@ -56,9 +61,9 @@ function userWithRoles(roles: RoleName[]): AppUser {
 
 afterEach(() => {
   h.calls.findFirst.length = 0;
-  h.calls.findMany.length = 0;
+  h.calls.allocationFindMany.length = 0;
   h.results.findFirst = null;
-  h.results.findMany = [];
+  h.results.allocationFindMany = [];
 });
 
 describe("canActOnBehalf", () => {
@@ -99,42 +104,67 @@ describe("findActiveConsultantById", () => {
   });
 });
 
-describe("listOnBehalfConsultants", () => {
-  it("sem projeto: ativos com alocação ativa em projeto não encerrado, por nome", async () => {
-    h.results.findMany = [
-      { id: "c1", name: "Ana" },
-      { id: "c2", name: "Bruno" },
-    ];
-    const list = await listOnBehalfConsultants();
-    expect(list).toEqual([
-      { id: "c1", name: "Ana" },
-      { id: "c2", name: "Bruno" },
-    ]);
-    expect(h.calls.findMany[0]).toEqual({
+describe("getOnBehalfPickerData", () => {
+  it("consulta só alocações ativas de consultor ativo em projeto não encerrado", async () => {
+    h.results.allocationFindMany = [];
+    await getOnBehalfPickerData();
+    expect(h.calls.allocationFindMany[0]).toEqual({
       where: {
         status: "ACTIVE",
-        allocations: {
-          some: { status: "ACTIVE", project: { status: { not: "CLOSED" } } },
-        },
+        consultant: { status: "ACTIVE" },
+        project: { status: { not: "CLOSED" } },
       },
-      select: { id: true, name: true },
-      orderBy: { name: "asc" },
+      select: {
+        consultantId: true,
+        projectId: true,
+        consultant: { select: { name: true } },
+        project: { select: { name: true } },
+      },
     });
   });
 
-  it("com projeto: restringe a quem tem alocação ativa NESSE projeto (filtro conjunto)", async () => {
-    h.results.findMany = [{ id: "c1", name: "Ana" }];
-    const list = await listOnBehalfConsultants("proj-xyz");
-    expect(list).toEqual([{ id: "c1", name: "Ana" }]);
-    expect(h.calls.findMany[0]).toEqual({
-      where: {
-        status: "ACTIVE",
-        allocations: {
-          some: { status: "ACTIVE", projectId: "proj-xyz" },
-        },
+  it("deriva consultores/projetos/grafo dedup e ordenados por nome", async () => {
+    h.results.allocationFindMany = [
+      // Bruno aparece em dois projetos; a dupla (Bruno,projB) repete uma vez.
+      {
+        consultantId: "c2",
+        projectId: "pB",
+        consultant: { name: "Bruno" },
+        project: { name: "Projeto B" },
       },
-      select: { id: true, name: true },
-      orderBy: { name: "asc" },
-    });
+      {
+        consultantId: "c1",
+        projectId: "pA",
+        consultant: { name: "Ana" },
+        project: { name: "Projeto A" },
+      },
+      {
+        consultantId: "c2",
+        projectId: "pB",
+        consultant: { name: "Bruno" },
+        project: { name: "Projeto B" },
+      },
+      {
+        consultantId: "c2",
+        projectId: "pA",
+        consultant: { name: "Bruno" },
+        project: { name: "Projeto A" },
+      },
+    ];
+    const data = await getOnBehalfPickerData();
+    expect(data.consultants).toEqual([
+      { id: "c1", name: "Ana" },
+      { id: "c2", name: "Bruno" },
+    ]);
+    expect(data.projects).toEqual([
+      { id: "pA", name: "Projeto A" },
+      { id: "pB", name: "Projeto B" },
+    ]);
+    // Pares únicos (a dupla Bruno/pB não duplica).
+    expect(data.allocations).toEqual([
+      { consultantId: "c2", projectId: "pB" },
+      { consultantId: "c1", projectId: "pA" },
+      { consultantId: "c2", projectId: "pA" },
+    ]);
   });
 });
