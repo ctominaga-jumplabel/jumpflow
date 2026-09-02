@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { SectionPanel } from "@/components/ui/SectionPanel";
 import { ActionButton } from "@/components/ui/ActionButton";
@@ -91,11 +92,79 @@ export function TimesheetFilters({
   const isDemo = mode === "demo";
 
   // Distinct clients in the consultant's project scope, for the Cliente filter.
-  const clients = Array.from(
-    new Map(projects.map((p) => [p.clientId, p.clientName])).entries(),
-  )
-    .map(([id, name]) => ({ id, name }))
-    .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+  const clients = useMemo(
+    () =>
+      Array.from(
+        new Map(projects.map((p) => [p.clientId, p.clientName])).entries(),
+      )
+        .map(([id, name]) => ({ id, name }))
+        .sort((a, b) => a.name.localeCompare(b.name, "pt-BR")),
+    [projects],
+  );
+
+  // Mapa projeto → cliente para a cascata Cliente↔Projeto (filtros CONJUNTOS).
+  const projectClient = useMemo(
+    () => new Map(projects.map((p) => [p.id, p.clientId])),
+    [projects],
+  );
+
+  // Estado local do par Cliente/Projeto NO MODO DB (form GET): a cascata afunila
+  // as opções NA SELEÇÃO, sem submeter — as linhas só são refiltradas no
+  // "Aplicar filtros". No modo DEMO o pai (`filter`) é a fonte e re-renderiza a
+  // cada mudança, então derivamos direto dele. Semeia o Cliente pelo do Projeto
+  // aplicado quando só o projeto veio na URL.
+  const [dbClientId, setDbClientId] = useState(
+    filter.clientId ??
+      (filter.projectId ? (projectClient.get(filter.projectId) ?? "") : ""),
+  );
+  const [dbProjectId, setDbProjectId] = useState(filter.projectId ?? "");
+  const activeClientId = isDemo ? (filter.clientId ?? "") : dbClientId;
+  const activeProjectId = isDemo ? (filter.projectId ?? "") : dbProjectId;
+
+  // Opções afuniladas: Projeto pelo Cliente escolhido; Cliente pelo Projeto.
+  const availableProjects = activeClientId
+    ? projects.filter((p) => p.clientId === activeClientId)
+    : projects;
+  const availableClients = activeProjectId
+    ? clients.filter((c) => c.id === projectClient.get(activeProjectId))
+    : clients;
+
+  /** Troca o Cliente: afunila Projeto e limpa o projeto que saiu do cliente. */
+  function changeClient(value: string): void {
+    const keepProject =
+      value && activeProjectId && projectClient.get(activeProjectId) !== value
+        ? ""
+        : activeProjectId;
+    if (isDemo) {
+      const next: TimesheetFilter = { ...filter };
+      if (value) next.clientId = value;
+      else delete next.clientId;
+      if (keepProject) next.projectId = keepProject;
+      else delete next.projectId;
+      onChange?.(next);
+    } else {
+      setDbClientId(value);
+      if (keepProject !== activeProjectId) setDbProjectId(keepProject);
+    }
+  }
+
+  /** Troca o Projeto: alinha o Cliente ao cliente do projeto escolhido. */
+  function changeProject(value: string): void {
+    const nextClient = value
+      ? (projectClient.get(value) ?? activeClientId)
+      : activeClientId;
+    if (isDemo) {
+      const next: TimesheetFilter = { ...filter };
+      if (value) next.projectId = value;
+      else delete next.projectId;
+      if (nextClient) next.clientId = nextClient;
+      else delete next.clientId;
+      onChange?.(next);
+    } else {
+      setDbProjectId(value);
+      if (value && nextClient) setDbClientId(nextClient);
+    }
+  }
 
   /**
    * CSV export of the consultant's own entries via the shared Relatorios
@@ -196,10 +265,11 @@ export function TimesheetFilters({
             id="hf-client"
             name="clientId"
             className={fieldClass}
-            {...bind("clientId", filter.clientId)}
+            value={activeClientId}
+            onChange={(e) => changeClient(e.target.value)}
           >
             <option value="">Todos</option>
-            {clients.map((c) => (
+            {availableClients.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
               </option>
@@ -215,10 +285,11 @@ export function TimesheetFilters({
             id="hf-project"
             name="projectId"
             className={fieldClass}
-            {...bind("projectId", filter.projectId)}
+            value={activeProjectId}
+            onChange={(e) => changeProject(e.target.value)}
           >
             <option value="">Todos</option>
-            {projects.map((p) => (
+            {availableProjects.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name} · {p.clientName}
               </option>
