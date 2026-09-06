@@ -122,6 +122,7 @@ export default async function AppLayout({
       navOrder={navOrder}
       notifications={notifications}
       unreadCount={unreadCount}
+      assistantDocked={nathaliaEnabled}
     >
       {children}
       {/* Nathal.IA — contextual assistant, authenticated app only, gated by the
