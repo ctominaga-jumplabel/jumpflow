@@ -5,6 +5,7 @@ import {
   Check,
   ChevronDown,
   ClipboardCheck,
+  Clock,
   Download,
   FileText,
   ListChecks,
@@ -1211,6 +1212,13 @@ function ApprovalRow({
     setJustificationAttachError(null);
   }
 
+  // Data/hora do ENVIO. Fora da leitura principal (ver comentário no
+  // detalhe), exposta sob hover/leitor de tela no relógio do cabeçalho.
+  const submittedAtLabel = `Enviado em ${new Date(item.submittedAt).toLocaleString(
+    "pt-BR",
+    { dateStyle: "short", timeStyle: "short" },
+  )}`;
+
   return (
     <li>
       <div className="flex items-start gap-3 px-5 py-4">
@@ -1268,6 +1276,14 @@ function ApprovalRow({
 
         <div className="flex shrink-0 flex-col items-end gap-1.5">
           <div className="flex items-center gap-2">
+            <span
+              role="img"
+              title={submittedAtLabel}
+              aria-label={submittedAtLabel}
+              className="grid size-5 shrink-0 cursor-help place-items-center rounded-md border border-border bg-surface-muted text-soft transition-colors hover:border-brand hover:text-brand"
+            >
+              <Clock aria-hidden="true" className="size-3" />
+            </span>
             <span className="text-xs font-semibold tabular-nums text-medium">
               {isExpense
                 ? formatCurrency(item.amount ?? 0)
@@ -1379,15 +1395,10 @@ function ApprovalRow({
                 </dt>
                 <dd className="text-medium">{item.activitySummary}</dd>
               </div>
-              <div>
-                <dt className="text-xs text-soft">Enviado em</dt>
-                <dd className="font-medium text-strong">
-                  {new Date(item.submittedAt).toLocaleString("pt-BR", {
-                    dateStyle: "short",
-                    timeStyle: "short",
-                  })}
-                </dd>
-              </div>
+              {/* A data de ENVIO saiu do detalhe: ao lado do período
+                  lançado (ex.: envio em 02/09 de horas de 31/08) ela confundia
+                  a leitura da fila. Continua disponível sob demanda, no
+                  relógio do cabeçalho da linha. */}
               <div>
                 <dt className="text-xs text-soft">Origem</dt>
                 <dd className="font-medium text-strong">

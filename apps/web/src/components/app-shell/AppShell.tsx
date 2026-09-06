@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -10,6 +11,24 @@ import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
 import { useSidebarCollapsed } from "./use-sidebar-collapsed";
 import type { NotificationView } from "@/lib/db/notifications";
+
+/**
+ * Rotas que renderizam em LARGURA TOTAL da coluna, sem o `max-w-7xl`
+ * centralizado. São grades operacionais densas (muitas colunas por linha) em
+ * que o corte em 1280px empurrava as colunas da direita para fora e obrigava a
+ * rolagem horizontal — a queixa de Operações na tela de Horas. Sem o
+ * `mx-auto`, o conteúdo cresce para a ESQUERDA (encostando na sidebar) e a
+ * direita fica reservada para a Nathal.IA, que é ancorada no viewport.
+ */
+const FULL_WIDTH_ROUTES = ["/app/horas"] as const;
+
+/** Whether `pathname` is (or is under) one of the full-width routes. */
+function isFullWidthRoute(pathname: string | null): boolean {
+  if (!pathname) return false;
+  return FULL_WIDTH_ROUTES.some(
+    (route) => pathname === route || pathname.startsWith(`${route}/`),
+  );
+}
 
 export interface AppShellProps {
   /** Current authenticated user (real or dev), resolved on the server. */
@@ -32,6 +51,11 @@ export interface AppShellProps {
    * badge is shown only when > 0 (no phantom count).
    */
   unreadCount?: number;
+  /**
+   * Whether Nathal.IA is mounted in this shell. When she is, wide screens keep
+   * a right gutter free so the docked assistant never sits on top of a grid.
+   */
+  assistantDocked?: boolean;
   children: React.ReactNode;
 }
 
@@ -47,11 +71,14 @@ export function AppShell({
   navOrder = {},
   notifications = [],
   unreadCount = 0,
+  assistantDocked = false,
   children,
 }: AppShellProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useSidebarCollapsed();
   const reduce = useReducedMotion();
+  const pathname = usePathname();
+  const fullWidth = isFullWidthRoute(pathname);
   const drawerRef = useRef<HTMLDivElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
 
@@ -161,7 +188,16 @@ export function AppShell({
           notifications={notifications}
           unreadCount={unreadCount}
         />
-        <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        <main
+          className={cn(
+            "w-full px-4 py-6 sm:px-6 lg:px-8 lg:py-8",
+            fullWidth ? "max-w-none" : "mx-auto max-w-7xl",
+            // Calha à direita: a Nathal.IA é `position: fixed` no canto
+            // inferior direito do viewport, então só a largura total precisa
+            // abrir espaço para ela. Sem a assistente montada não há calha.
+            fullWidth && assistantDocked && "xl:pr-32 2xl:pr-44",
+          )}
+        >
           {children}
         </main>
       </div>
