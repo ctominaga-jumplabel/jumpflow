@@ -821,6 +821,11 @@ model User {
   // Central de notificacoes in-app (item 3): notificacoes recebidas por este
   // usuario. Removida em cascata com o usuario.
   appNotifications            AppNotification[]           @relation("AppNotificationUser")
+  // COE (Centro Operacional de Excelencia). Autoria com onDelete SetNull:
+  // remover o usuario nao apaga a curadoria do nucleo nem as propostas de time,
+  // apenas desvincula quem registrou.
+  coeMembersAdded             CoeMember[]                 @relation("CoeMemberAddedBy")
+  coeSquadsCreated            CoeSquad[]                  @relation("CoeSquadCreatedBy")
   createdAt                   DateTime                    @default(now())
   updatedAt                   DateTime                    @updatedAt
 }
@@ -1027,6 +1032,10 @@ model Consultant {
   checkpoints         Checkpoint[]
   opportunities       Opportunity[]
   cases               Case[]
+  // COE: curadoria (no maximo um registro por consultor) e participacao em
+  // propostas de time. Ver CoeMember / CoeSquadMember.
+  coeMembership       CoeMember?
+  coeSquadMemberships CoeSquadMember[]
   createdAt           DateTime                       @default(now())
   updatedAt           DateTime                       @updatedAt
 }
@@ -1562,6 +1571,7 @@ model Project {
   adHocPayments               ConsultantAdHocPayment[]
   consultantProjectRates      ConsultantProjectRate[]
   plannedProfiles             ProjectPlannedProfile[]
+  coeSquads                   CoeSquad[]
   createdAt                   DateTime                     @default(now())
   updatedAt                   DateTime                     @updatedAt
 
@@ -3421,4 +3431,94 @@ model NavigationOrder {
   updatedAt DateTime @updatedAt
 
   @@index([position])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COE — Centro Operacional de Excelencia
+//
+// Curadoria de consultores ESTRATEGICOS (o "nucleo") + composicao de times para
+// PARALELIZAR frentes de trabalho em um projeto. A composicao em si e um
+// read-model derivado (skills validadas + disponibilidade + historico), calculado
+// sob demanda pela engine pura (apps/web/src/lib/coe/engine.ts). O que persiste
+// aqui e apenas (a) quem faz parte do nucleo e (b) a PROPOSTA de time salva.
+//
+// Fronteira financeira: nenhuma tabela do COE guarda custo/valor. O fator
+// financeiro do ranking e computado em memoria e so para FINANCIAL_ROLES; o
+// snapshot gravado em CoeSquadMember.slotScore e o score composto (0..100), que
+// NAO permite reconstruir valores. Ver docs/coe-centro-operacional-excelencia.md.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum CoeSquadStatus {
+  /// Rascunho de trabalho de quem esta compondo o time.
+  DRAFT
+  /// Proposta formalizada para decisao humana de alocacao.
+  PROPOSED
+  /// Historico: nao aparece mais nas listas ativas.
+  ARCHIVED
+}
+
+/// Nucleo do COE: um consultor marcado como estrategico, com a sua area de
+/// excelencia. `active=false` preserva o historico de curadoria sem remover a
+/// linha (e sem quebrar propostas antigas). Um consultor tem no maximo um
+/// registro (@unique), entao entrar/sair do nucleo e alternar `active`.
+model CoeMember {
+  id           String     @id @default(cuid())
+  consultantId String     @unique
+  consultant   Consultant @relation(fields: [consultantId], references: [id], onDelete: Cascade)
+  /// Area de excelencia curada (texto livre, ex.: "Dados & Analytics").
+  focusArea    String
+  note         String?
+  active       Boolean    @default(true)
+  addedById    String?
+  addedBy      User?      @relation("CoeMemberAddedBy", fields: [addedById], references: [id], onDelete: SetNull)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([active])
+  @@index([addedById])
+}
+
+/// Uma PROPOSTA de time para paralelizar frentes de um projeto. Nao cria e nao
+/// substitui Allocation: a alocacao real continua sendo uma decisao humana no
+/// modulo de Projetos. Guarda a janela considerada para reproduzir a leitura.
+model CoeSquad {
+  id          String           @id @default(cuid())
+  projectId   String
+  project     Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name        String
+  status      CoeSquadStatus   @default(DRAFT)
+  /// Inicio da janela de disponibilidade considerada (date-only, UTC).
+  periodStart DateTime?        @db.Date
+  weeks       Int              @default(4)
+  note        String?
+  createdById String?
+  createdBy   User?            @relation("CoeSquadCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  members     CoeSquadMember[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@index([projectId, createdAt])
+  @@index([createdById])
+}
+
+/// Um slot (uma frente paralela) da proposta, com a pessoa sugerida/escolhida.
+/// `slotKey` e estavel dentro da proposta, por isso o @@unique — um slot nunca
+/// tem duas pessoas. onDelete Restrict no consultor: uma proposta viva impede o
+/// apagamento silencioso de quem foi proposto.
+model CoeSquadMember {
+  id           String     @id @default(cuid())
+  squadId      String
+  squad        CoeSquad   @relation(fields: [squadId], references: [id], onDelete: Cascade)
+  consultantId String
+  consultant   Consultant @relation(fields: [consultantId], references: [id], onDelete: Restrict)
+  slotKey      String
+  slotLabel    String
+  /// Snapshot do score COMPOSTO do slot (0..100) no momento da proposta. Nunca
+  /// contem custo, valor de venda ou margem.
+  slotScore    Int
+  createdAt    DateTime   @default(now())
+
+  @@unique([squadId, slotKey])
+  @@index([squadId])
+  @@index([consultantId])
 }

@@ -10,6 +10,7 @@ import { ALLOCATION_AI_READ_ROLES } from "@/lib/allocation-ai/visibility";
 import { PROJECT_RISK_READ_ROLES } from "@/lib/project-risk/visibility";
 import { CONSULTANT_SCORE_READ_ROLES } from "@/lib/consultant-score/visibility";
 import { CHECKPOINT_READ_ROLES } from "@/lib/checkpoint/visibility";
+import { COE_READ_ROLES } from "@/lib/coe/visibility";
 
 /**
  * Pure RBAC primitives and the central route → roles map.
@@ -276,6 +277,16 @@ export const routePermissions: RouteRule[] = [
   // financeiro é gateado no servidor (includeFinancialFactor); a IA é SUGESTÃO,
   // não cria alocação. Regra específica antes da `/app` ampla.
   { prefix: "/app/alocacao-ia", access: ALLOCATION_AI_READ_ROLES },
+  // COE — Centro Operacional de Excelencia (Talentos, Inteligencia): curadoria
+  // do nucleo de consultores estrategicos + composicao de time para paralelizar
+  // frentes de um projeto. Le quem aloca (ADMIN/AREA_MANAGER/PROJECT_MANAGER/
+  // SALES) mais PEOPLE, que cura o nucleo; FINANCE fica de fora (o COE e uma
+  // superficie de capacidade, nao financeira). As DUAS fronteiras de escrita
+  // (curar o nucleo x propor time) sao gateadas nas server actions, nao aqui, e
+  // o fator financeiro do ranking e gateado no servidor
+  // (includeFinancialFactor). A composicao e SUGESTAO: nao cria alocacao.
+  // Regra especifica antes da `/app` ampla.
+  { prefix: "/app/coe", access: COE_READ_ROLES },
   // IA de Risco de Projeto (Talentos, Prioridade 3 — §8.3): nível semáforo
   // GREEN/YELLOW/RED determinístico por burn rate, prazo, [margem] e feedbacks
   // CONCERN. Acesso aos gestores de projeto (ADMIN/AREA_MANAGER/PROJECT_MANAGER)

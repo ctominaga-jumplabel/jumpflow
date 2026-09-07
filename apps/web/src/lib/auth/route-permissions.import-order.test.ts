@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 // A ORDEM destes imports é o objeto do teste: os módulos de visibilidade vêm
 // PRIMEIRO, como acontece quando a página de um módulo é o ponto de entrada.
+import "@/lib/coe/visibility";
 import "@/lib/allocation-ai/visibility";
 import "@/lib/project-risk/visibility";
 import "@/lib/consultant-score/visibility";
@@ -21,6 +22,7 @@ import { accessForPath, routePermissions } from "@/lib/auth/route-permissions";
  */
 describe("route-permissions — ordem de inicialização", () => {
   const guarded = [
+    "/app/coe",
     "/app/alocacao-ia",
     "/app/risco-projetos",
     "/app/score",

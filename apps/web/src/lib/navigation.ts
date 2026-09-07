@@ -5,6 +5,7 @@ import {
   Banknote,
   BellRing,
   BookOpen,
+  Boxes,
   Building2,
   Calculator,
   CalendarCheck,
@@ -283,6 +284,28 @@ const primaryNavigationRaw: NavItemDef[] = [
     icon: Sparkles,
     description: "Ranking de consultores por aderência a uma alocação, com breakdown transparente.",
     requiredRoles: ["ADMIN", "AREA_MANAGER", "PROJECT_MANAGER", "SALES"],
+  },
+  {
+    // COE — Centro Operacional de Excelência (Talentos, Inteligência): núcleo de
+    // consultores estratégicos e composição de time para paralelizar frentes de
+    // um projeto. Visível a quem aloca + PEOPLE (que cura o núcleo); as DUAS
+    // escritas (curar núcleo × propor time) têm gates próprios nas server
+    // actions e o fator financeiro do ranking é gateado no servidor. A
+    // composição é sugestão, não cria alocação. Discoverability, não a fronteira
+    // de segurança.
+    label: "COE",
+    href: "/app/coe",
+    permissionCode: "COE",
+    icon: Boxes,
+    description:
+      "Núcleo de consultores estratégicos e composição de times para paralelizar frentes de projeto.",
+    requiredRoles: [
+      "ADMIN",
+      "PEOPLE",
+      "AREA_MANAGER",
+      "PROJECT_MANAGER",
+      "SALES",
+    ],
   },
   {
     // IA de Risco de Projeto (Talentos, Prioridade 3 — §8.3): semáforo
