@@ -1,5 +1,6 @@
 import type { AppUser } from "./types";
 import type { RoleName } from "./roles";
+import { FINANCIAL_ROLES } from "./roles";
 import { FEEDBACK_READ_ROLES } from "@/lib/feedback/visibility";
 import { EVALUATION_READ_ROLES } from "@/lib/evaluations/visibility";
 import { DEVELOPMENT_READ_ROLES } from "@/lib/development/visibility";
@@ -20,11 +21,12 @@ import { CHECKPOINT_READ_ROLES } from "@/lib/checkpoint/visibility";
 export type RouteAccess = RoleName[] | "ALL";
 
 /**
- * Roles allowed to see financial fields (valor hora, custo hora, budget) and
- * the Financeiro module. Single source of truth so route guards and in-page
- * field masking (e.g. Projetos) never drift apart.
+ * Reexport de {@link FINANCIAL_ROLES}, que agora vive em `./roles` (módulo
+ * folha) para quebrar o ciclo de import com os módulos de visibilidade — ver o
+ * comentário na definição. Mantido aqui para não quebrar os consumidores
+ * históricos, que continuam importando de `route-permissions`.
  */
-export const FINANCIAL_ROLES: RoleName[] = ["ADMIN", "AREA_MANAGER", "FINANCE"];
+export { FINANCIAL_ROLES };
 
 /**
  * Roles que ACESSAM Contas a Receber/Pagar e a jornada de apuração/envio

@@ -25,6 +25,21 @@ export const roleLabels: Record<RoleName, string> = {
   SALES: "Comercial",
 };
 
+/**
+ * Roles allowed to see financial fields (valor hora, custo hora, budget) and
+ * the Financeiro module. Single source of truth so route guards and in-page
+ * field masking (e.g. Projetos) never drift apart.
+ *
+ * Vive AQUI, no módulo folha, e não em `route-permissions.ts`, para quebrar um
+ * ciclo de import real: cada módulo de visibilidade (`lib/<modulo>/visibility`)
+ * precisa desta lista, e `route-permissions` importa desses mesmos módulos para
+ * montar `routePermissions`. Com a constante lá, a inicialização de um
+ * visibility ANTES de route-permissions resolvia o binding como `undefined` e a
+ * regra de rota do módulo nascia SEM `access`. `route-permissions` reexporta o
+ * símbolo, então todos os consumidores históricos seguem funcionando.
+ */
+export const FINANCIAL_ROLES: RoleName[] = ["ADMIN", "AREA_MANAGER", "FINANCE"];
+
 export function isRoleName(value: unknown): value is RoleName {
   return (
     typeof value === "string" &&
