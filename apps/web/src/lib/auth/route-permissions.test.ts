@@ -116,6 +116,21 @@ describe("accessForPath", () => {
     ]);
   });
 
+  it("routes the COE to quem aloca + PEOPLE, sem FINANCE", () => {
+    // O COE e uma superficie de CAPACIDADE: PEOPLE entra (cura o nucleo) e o
+    // FINANCE fica de fora. As duas fronteiras de ESCRITA (curar nucleo x propor
+    // time) sao gateadas nas server actions, nao pela rota.
+    expect(accessForPath("/app/coe")).toEqual([
+      "ADMIN",
+      "PEOPLE",
+      "AREA_MANAGER",
+      "PROJECT_MANAGER",
+      "SALES",
+    ]);
+    // A regra especifica resolve ANTES da `/app` ampla, inclusive em subrotas.
+    expect(accessForPath("/app/coe/qualquer")).not.toBe("ALL");
+  });
+
   it("restricts the automacoes module to ADMIN and AREA_MANAGER", () => {
     expect(accessForPath("/app/automacoes")).toEqual(["ADMIN", "AREA_MANAGER"]);
     expect(accessForPath("/app/automacoes/aprovacao-automatica")).toEqual([

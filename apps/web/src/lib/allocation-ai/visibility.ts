@@ -1,5 +1,8 @@
 import type { RoleName } from "@/lib/auth/roles";
-import { FINANCIAL_ROLES } from "@/lib/auth/route-permissions";
+// Importado do módulo FOLHA (não de `route-permissions`): `route-permissions`
+// importa ESTE arquivo para montar a regra de rota, e o ciclo fazia a constante
+// resolver como `undefined` conforme a ordem de inicialização.
+import { FINANCIAL_ROLES } from "@/lib/auth/roles";
 
 /**
  * Pure RBAC helpers for the IA de Alocação (§8.2). No I/O. The page guard and the

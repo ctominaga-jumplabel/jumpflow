@@ -1188,6 +1188,15 @@ const PERMISSION_CATALOG = [
   { code: "ALOCACAO_IA", name: "IA de Alocação", module: "Inteligência", sort: 80, view: PROJECT_WRITE },
   { code: "RISCO_PROJETOS", name: "Risco de Projetos", module: "Inteligência", sort: 81, view: ["AREA_MANAGER", "PROJECT_MANAGER", "FINANCE"] },
   { code: "SCORE_CONSULTOR", name: "Score do Consultor", module: "Inteligência", sort: 82, view: ["PEOPLE", "AREA_MANAGER", "FINANCE", "CONSULTANT"] },
+  // COE — Centro Operacional de Excelência. SÓ `view` é semeado, de propósito.
+  // O módulo tem DUAS escritas com fronteiras diferentes — curar o núcleo
+  // (ADMIN/PEOPLE/AREA_MANAGER) e propor time (PROJECT_WRITE) — e um único code
+  // não consegue distingui-las: conceder `COE.edit` abriria as duas de uma vez.
+  // Elas são checadas por PAPEL nas server actions. Semear create/edit aqui
+  // sugeriria um controle que a matriz não exerce (revogar não bloquearia
+  // nada), então não semeamos. Separar em codes-filhos (nos moldes de
+  // CONSULTORES_*) é a evolução natural se a matriz precisar governá-las.
+  { code: "COE", name: "COE — Centro Operacional de Excelência", module: "Inteligência", sort: 83, view: [...new Set([...PROJECT_WRITE, "PEOPLE"])] },
 
   // Feed social interno (Melhoria #5, fatia 1). Todos os usuários ativos veem,
   // postam e editam (edição do próprio conteúdo; pin/moderação são refinados na

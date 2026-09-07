@@ -1,5 +1,6 @@
 import type { AppUser } from "./types";
 import type { RoleName } from "./roles";
+import { FINANCIAL_ROLES } from "./roles";
 import { FEEDBACK_READ_ROLES } from "@/lib/feedback/visibility";
 import { EVALUATION_READ_ROLES } from "@/lib/evaluations/visibility";
 import { DEVELOPMENT_READ_ROLES } from "@/lib/development/visibility";
@@ -9,6 +10,7 @@ import { ALLOCATION_AI_READ_ROLES } from "@/lib/allocation-ai/visibility";
 import { PROJECT_RISK_READ_ROLES } from "@/lib/project-risk/visibility";
 import { CONSULTANT_SCORE_READ_ROLES } from "@/lib/consultant-score/visibility";
 import { CHECKPOINT_READ_ROLES } from "@/lib/checkpoint/visibility";
+import { COE_READ_ROLES } from "@/lib/coe/visibility";
 
 /**
  * Pure RBAC primitives and the central route → roles map.
@@ -20,11 +22,12 @@ import { CHECKPOINT_READ_ROLES } from "@/lib/checkpoint/visibility";
 export type RouteAccess = RoleName[] | "ALL";
 
 /**
- * Roles allowed to see financial fields (valor hora, custo hora, budget) and
- * the Financeiro module. Single source of truth so route guards and in-page
- * field masking (e.g. Projetos) never drift apart.
+ * Reexport de {@link FINANCIAL_ROLES}, que agora vive em `./roles` (módulo
+ * folha) para quebrar o ciclo de import com os módulos de visibilidade — ver o
+ * comentário na definição. Mantido aqui para não quebrar os consumidores
+ * históricos, que continuam importando de `route-permissions`.
  */
-export const FINANCIAL_ROLES: RoleName[] = ["ADMIN", "AREA_MANAGER", "FINANCE"];
+export { FINANCIAL_ROLES };
 
 /**
  * Roles que ACESSAM Contas a Receber/Pagar e a jornada de apuração/envio
@@ -274,6 +277,16 @@ export const routePermissions: RouteRule[] = [
   // financeiro é gateado no servidor (includeFinancialFactor); a IA é SUGESTÃO,
   // não cria alocação. Regra específica antes da `/app` ampla.
   { prefix: "/app/alocacao-ia", access: ALLOCATION_AI_READ_ROLES },
+  // COE — Centro Operacional de Excelencia (Talentos, Inteligencia): curadoria
+  // do nucleo de consultores estrategicos + composicao de time para paralelizar
+  // frentes de um projeto. Le quem aloca (ADMIN/AREA_MANAGER/PROJECT_MANAGER/
+  // SALES) mais PEOPLE, que cura o nucleo; FINANCE fica de fora (o COE e uma
+  // superficie de capacidade, nao financeira). As DUAS fronteiras de escrita
+  // (curar o nucleo x propor time) sao gateadas nas server actions, nao aqui, e
+  // o fator financeiro do ranking e gateado no servidor
+  // (includeFinancialFactor). A composicao e SUGESTAO: nao cria alocacao.
+  // Regra especifica antes da `/app` ampla.
+  { prefix: "/app/coe", access: COE_READ_ROLES },
   // IA de Risco de Projeto (Talentos, Prioridade 3 — §8.3): nível semáforo
   // GREEN/YELLOW/RED determinístico por burn rate, prazo, [margem] e feedbacks
   // CONCERN. Acesso aos gestores de projeto (ADMIN/AREA_MANAGER/PROJECT_MANAGER)
