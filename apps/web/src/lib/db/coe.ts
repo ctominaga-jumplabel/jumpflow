@@ -47,6 +47,49 @@ import { buildCoeCompositionMock, buildCoeMembersMock } from "./coe.mock";
  * sugestão nunca é gravada como Allocation.
  */
 
+/**
+ * A migration do COE ainda nao foi aplicada neste banco.
+ *
+ * Existe porque o build da Vercel roda `db:generate && build` — ele NAO aplica
+ * migrations. Entao o codigo pode chegar em producao antes do schema, e as
+ * tabelas do COE simplesmente nao existem ainda. Sem este tratamento a tela
+ * quebrava com 500; com ele o modulo aparece vazio e DIZ o que falta.
+ *
+ * O recorte e estreito de proposito: so P2021 (tabela inexistente) e P2022
+ * (coluna inexistente). Qualquer outro erro continua subindo — engolir falha de
+ * banco de verdade transformaria um incidente em "lista vazia".
+ */
+function isCoeSchemaPending(error: unknown): boolean {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    (error.code === "P2021" || error.code === "P2022")
+  );
+}
+
+/** Mensagem unica exibida enquanto o schema do COE nao existe. */
+export const SCHEMA_PENDING_NOTICE =
+  "O modulo COE esta no ar, mas a migracao do banco ainda nao foi aplicada. Rode `npm run db:deploy` (e `npm run db:seed`) para liberar a curadoria e a composicao.";
+
+/**
+ * Executa uma leitura do COE devolvendo `fallback` quando o schema ainda nao
+ * existe. Registra em log para o estado nao passar silencioso em producao.
+ */
+async function readOrPending<T>(
+  label: string,
+  read: () => Promise<T>,
+  fallback: T,
+): Promise<T> {
+  try {
+    return await read();
+  } catch (error) {
+    if (isCoeSchemaPending(error)) {
+      console.warn(`[coe] schema ainda nao migrado (${label})`);
+      return fallback;
+    }
+    throw error;
+  }
+}
+
 function decimalToNumber(
   value: Prisma.Decimal | null | undefined,
 ): number | null {
@@ -107,6 +150,10 @@ export async function listCoeSkillOptions(): Promise<AllocationSkillOption[]> {
  */
 export async function listCoeMembers(): Promise<CoeMemberView[]> {
   if (!isDatabaseConfigured()) return buildCoeMembersMock();
+  return readOrPending("listCoeMembers", () => readCoeMembers(), []);
+}
+
+async function readCoeMembers(): Promise<CoeMemberView[]> {
   const rows = await prisma.coeMember.findMany({
     select: {
       id: true,
@@ -163,6 +210,14 @@ export async function listCoeMembers(): Promise<CoeMemberView[]> {
  */
 export async function listCoeCandidateOptions(): Promise<CoeCandidateOption[]> {
   if (!isDatabaseConfigured()) return [];
+  return readOrPending(
+    "listCoeCandidateOptions",
+    () => readCoeCandidates(),
+    [],
+  );
+}
+
+async function readCoeCandidates(): Promise<CoeCandidateOption[]> {
   const rows = await prisma.consultant.findMany({
     where: {
       status: "ACTIVE",
@@ -434,6 +489,41 @@ export async function getCoeComposition(
     return buildCoeCompositionMock(query, includeFinancial);
   }
 
+  return readOrPending(
+    "getCoeComposition",
+    () => readCoeComposition(query, includeFinancial),
+    emptyCompositionBundle(query, includeFinancial, SCHEMA_PENDING_NOTICE),
+  );
+}
+
+/** Bundle vazio, usado sem frentes e enquanto o schema nao existe. */
+function emptyCompositionBundle(
+  query: CoeCompositionQueryInput,
+  includeFinancial: boolean,
+  notice: string | null,
+): CoeCompositionBundle {
+  return {
+    projectId: null,
+    projectName: null,
+    clientName: null,
+    slotsSource: "NONE",
+    composition: { assignments: [], unfilled: 0 },
+    periods: [],
+    availabilityRows: [],
+    requiredSkills: [],
+    financialIncluded: includeFinancial,
+    scope: query.scope,
+    candidatePoolSize: 0,
+    coePoolSize: 0,
+    notice,
+    fromMock: false,
+  };
+}
+
+async function readCoeComposition(
+  query: CoeCompositionQueryInput,
+  includeFinancial: boolean,
+): Promise<CoeCompositionBundle> {
   const target = await resolveTarget(query, includeFinancial);
 
   const periodStart = query.periodStart
@@ -682,6 +772,10 @@ export async function getCoeComposition(
 /** As propostas de time, mais recentes primeiro. Arquivadas incluídas. */
 export async function listCoeSquads(): Promise<CoeSquadView[]> {
   if (!isDatabaseConfigured()) return [];
+  return readOrPending("listCoeSquads", () => readCoeSquads(), []);
+}
+
+async function readCoeSquads(): Promise<CoeSquadView[]> {
   const rows = await prisma.coeSquad.findMany({
     select: {
       id: true,
