@@ -273,6 +273,36 @@ As escritas ficam naturalmente inalcançáveis nesse estado: sem candidatos o bo
 de incluir está desabilitado, e sem `projectId` resolvido o de salvar proposta
 não renderiza.
 
+## 7.2 Publicar o modulo (ordem e armadilha)
+
+A tela **nao aparece** — nem para o ADMIN — enquanto o code `COE` nao existir na
+matriz. Em producao `getCurrentMatrix` usa a matriz PERSISTIDA
+(`loadPermissionMatrixForUser`); o `fullControlMatrix()` vale apenas em
+`AUTH_DEV_MODE` ou sem banco. Sem a linha `Permission`, `matrixAllows(…, "COE",
+"view")` e falso para todos: o item some do menu e a URL direta cai em
+`/access-denied`.
+
+Ordem para publicar:
+
+```bash
+npm run db:deploy      # 1. cria as tabelas (aditivo, seguro)
+npm run db:grant-coe   # 2. libera o code COE na matriz
+```
+
+**Nao use `npm run db:seed` para isso.** `seedRolePermissions` faz `upsert` com
+`update` em TODAS as celulas de TODAS as permissoes do catalogo: rodar o seed
+completo num banco em uso **reescreve a matriz inteira** para os defaults,
+apagando os ajustes feitos pelo ADMIN em `/app/admin/permissoes`. Os seeds de
+demo sao inofensivos (gateados pelo dev user, que exige `AUTH_DEV_MODE=true`),
+mas a matriz nao.
+
+`db:grant-coe` (`packages/database/prisma/grant-coe-permission.mjs`) toca
+exclusivamente a permissao `COE` e as suas celulas de papel, com `canView` para
+ADMIN/PEOPLE/AREA_MANAGER/PROJECT_MANAGER/SALES. Idempotente.
+
+Alternativa sem script: criar o code `COE` a mao em `/app/admin/permissoes`
+(a tela cria funcionalidades e edita a matriz) e marcar `view` nos mesmos papeis.
+
 ## 8. Testes
 
 79 testes ao todo:
