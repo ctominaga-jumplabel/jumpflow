@@ -20,6 +20,7 @@
     "db:migrate": "npm run db:migrate --workspace @jumpflow/database",
     "db:deploy": "npm run db:deploy --workspace @jumpflow/database",
     "db:seed": "npm run db:seed --workspace @jumpflow/database",
+    "db:grant-coe": "npm run db:grant-coe --workspace @jumpflow/database",
     "db:studio": "npm run db:studio --workspace @jumpflow/database"
   },
   "devDependencies": {

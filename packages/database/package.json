@@ -9,6 +9,7 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:seed": "node prisma/seed.mjs",
+    "db:grant-coe": "node prisma/grant-coe-permission.mjs",
     "db:studio": "prisma studio"
   },
   "prisma": {
