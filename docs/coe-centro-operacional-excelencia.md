@@ -253,9 +253,29 @@ núcleo sintético e devolve `fromMock: true`. A tela rotula os dados como
 demonstração. Espelha o que a IA de Alocação e o Mapa de Disponibilidade já
 fazem.
 
+### 7.1 Código em produção antes da migration
+
+O `buildCommand` da Vercel é `npm run db:generate && npm run build` — ele **não
+aplica migrations**. Logo o código pode chegar em produção antes do schema, e as
+tabelas do COE ainda não existirem.
+
+Nesse estado as leituras degradam: `isCoeSchemaPending` reconhece **apenas**
+P2021 (tabela inexistente) e P2022 (coluna inexistente), devolve o estado vazio e
+a tela mostra `SCHEMA_PENDING_NOTICE`, que diz exatamente o que rodar. Sem isso a
+página respondia 500.
+
+O recorte é estreito de propósito: qualquer outro erro de banco **continua
+subindo**. Engolir uma falha real transformaria um incidente em "lista vazia" —
+o oposto do que a tela deve comunicar. Coberto por
+`lib/db/coe.schema-pending.test.ts`, que testa as duas metades do contrato.
+
+As escritas ficam naturalmente inalcançáveis nesse estado: sem candidatos o botão
+de incluir está desabilitado, e sem `projectId` resolvido o de salvar proposta
+não renderiza.
+
 ## 8. Testes
 
-70 testes ao todo:
+79 testes ao todo:
 
 - `lib/coe/engine.test.ts` (39): aderência de senioridade, saturação do score,
   não repetição, encaixe por senioridade, frentes vazias, determinismo, população
@@ -270,6 +290,8 @@ fazem.
   pessoa).
 - `lib/auth/route-permissions.import-order.test.ts` (8): regressão do ciclo de
   import (§3.6), cobrindo COE, IA de Alocação, Risco e Score.
+- `lib/db/coe.schema-pending.test.ts` (9): degradação quando a migration ainda
+  não rodou (§7.1) **e** a garantia de que outros erros de banco propagam.
 
 ## 9. Evolução natural
 

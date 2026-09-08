@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import {
   Ban,
   Copy,
@@ -13,6 +13,7 @@ import {
   Users,
 } from "lucide-react";
 import { SectionPanel } from "@/components/ui/SectionPanel";
+import { DataToolbar } from "@/components/ui/DataToolbar";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { ActionButton } from "@/components/ui/ActionButton";
@@ -31,6 +32,20 @@ import {
   regenerateInvite,
   revokeInvite,
 } from "@/app/app/admin/acessos/actions";
+
+/**
+ * Normaliza o termo de busca: sem acentos e sem caixa. Um admin procurando
+ * "jose" precisa achar "José" — exigir o acento exato transformaria a busca em
+ * adivinhação. Mesmo idioma NFD já usado em `lib/skills/suggestions.ts` e
+ * `lib/expenses/policy-schemas.ts`.
+ */
+function normalizeSearch(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
 
 const thClass =
   "px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-soft";
@@ -79,16 +94,17 @@ export function AccessAdminView({ users, invitations }: AccessAdminViewProps) {
     link: string;
   } | null>(null);
 
-  function announceInvite(
-    result: Awaited<ReturnType<typeof inviteUser>>,
-  ) {
+  function announceInvite(result: Awaited<ReturnType<typeof inviteUser>>) {
     if (!result.ok) {
       notify("warning", result.message);
       return;
     }
     if (result.data.emailed) {
       setGeneratedLink(null);
-      notify("success", `Convite enviado por e-mail para ${result.data.email}.`);
+      notify(
+        "success",
+        `Convite enviado por e-mail para ${result.data.email}.`,
+      );
       return;
     }
     if (result.data.link) {
@@ -318,10 +334,35 @@ function UsersPanel({
   users: AccessUserView[];
   notify: ReturnType<typeof useFeedback>["notify"];
 }) {
+  const [search, setSearch] = useState("");
+
+  const term = normalizeSearch(search);
+  const matches = useMemo(
+    () =>
+      term.length === 0
+        ? users
+        : users.filter(
+            (user) =>
+              normalizeSearch(user.name).includes(term) ||
+              normalizeSearch(user.email).includes(term),
+          ),
+    [users, term],
+  );
+  const filtering = term.length > 0;
+
   return (
     <SectionPanel
       title="Usuários"
       description="Grupos de acesso e status. Edite os grupos pelos seletores; bloqueie ou reative pelo botão de status."
+      action={
+        users.length > 0 ? (
+          <span className="text-xs text-soft">
+            {filtering
+              ? `${matches.length} de ${users.length}`
+              : `${users.length} usuário${users.length === 1 ? "" : "s"}`}
+          </span>
+        ) : undefined
+      }
     >
       {users.length === 0 ? (
         <EmptyState
@@ -331,34 +372,58 @@ function UsersPanel({
           className="border-0 shadow-none"
         />
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse">
-            <thead>
-              <tr className="border-b-2 border-ink">
-                <th scope="col" className={thClass}>
-                  Pessoa
-                </th>
-                <th scope="col" className={thClass}>
-                  Grupos de acesso
-                </th>
-                <th scope="col" className={thClass}>
-                  Status
-                </th>
-                <th scope="col" className={thClass}>
-                  Último acesso
-                </th>
-                <th scope="col" className={`${thClass} text-right`}>
-                  Ação
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((user) => (
-                <UserRow key={user.id} user={user} notify={notify} />
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <>
+          <div className="border-b border-border px-4 py-3">
+            <DataToolbar
+              search={{
+                value: search,
+                onChange: setSearch,
+                placeholder: "Buscar por nome ou e-mail…",
+                label: "Buscar usuário por nome ou e-mail",
+              }}
+            />
+          </div>
+
+          {matches.length === 0 ? (
+            // Estado distinto de "nenhum usuário ainda": aqui existem usuários,
+            // só nenhum casa com o termo — convidar alguém não é a saída.
+            <EmptyState
+              icon={Users}
+              title="Nenhum usuário corresponde à busca"
+              description={`Nada encontrado para “${search.trim()}”. Ajuste o termo — a busca ignora acentos e maiúsculas.`}
+              className="border-0 shadow-none"
+            />
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr className="border-b-2 border-ink">
+                    <th scope="col" className={thClass}>
+                      Pessoa
+                    </th>
+                    <th scope="col" className={thClass}>
+                      Grupos de acesso
+                    </th>
+                    <th scope="col" className={thClass}>
+                      Status
+                    </th>
+                    <th scope="col" className={thClass}>
+                      Último acesso
+                    </th>
+                    <th scope="col" className={`${thClass} text-right`}>
+                      Ação
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {matches.map((user) => (
+                    <UserRow key={user.id} user={user} notify={notify} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
     </SectionPanel>
   );
