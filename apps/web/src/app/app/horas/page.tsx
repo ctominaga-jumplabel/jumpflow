@@ -10,6 +10,8 @@ import { hasRole } from "@/lib/auth/route-permissions";
 import { canActOnBehalf } from "@/lib/db/on-behalf";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { isStorageConfigured } from "@/lib/storage/provider";
+import { isTranscriptionEnabled } from "@/lib/transcription/flags";
+import { isTranscriptionConfigured } from "@/lib/transcription/provider";
 import {
   addDays,
   monthRangeOf,
@@ -101,6 +103,11 @@ export default async function HorasPage({ searchParams }: HorasPageProps) {
   // Anexo opcional do lançamento (melhoria #2): só é oferecido quando o object
   // storage está configurado (degrade honesto quando ausente).
   const attachmentsAvailable = isStorageConfigured();
+  // Transcrição por voz da descrição: só oferece o microfone quando a flag ESTÁ
+  // ligada E existe provider + credencial no servidor. Sem isso a gravação
+  // funcionaria mas a transcrição voltaria vazia — degrade honesto: esconder.
+  const transcriptionAvailable =
+    isTranscriptionEnabled() && isTranscriptionConfigured();
 
   // A user who is neither a consultant nor a manager has nothing to show here.
   if (!consultant && !isManager) {
@@ -214,6 +221,7 @@ export default async function HorasPage({ searchParams }: HorasPageProps) {
         canExportCsv={onBehalfTarget ? false : canExportCsv}
         canEditBillable={canEditBillable}
         attachmentsAvailable={attachmentsAvailable}
+        transcriptionAvailable={transcriptionAvailable}
         billingLockedKeys={billingLockedKeys}
         onBehalfOf={onBehalfTarget}
       />

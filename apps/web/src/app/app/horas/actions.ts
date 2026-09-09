@@ -19,6 +19,8 @@ import { canActOnBehalf, findActiveConsultantById } from "@/lib/db/on-behalf";
 import { findConfirmedTimeOffCovering } from "@/lib/db/time-off";
 import { resolveDbUser } from "@/lib/db/users";
 import { transcribeAudio } from "@/lib/transcription/transcribe";
+import { isTranscriptionEnabled } from "@/lib/transcription/flags";
+import { isTranscriptionConfigured } from "@/lib/transcription/provider";
 import {
   ACTIVITY_AUDIO_MAX_BYTES,
   type TranscribeActivityAudioResult,
@@ -2678,6 +2680,21 @@ export async function transcribeActivityAudio(
     // Autorização: qualquer usuário autenticado pode transcrever a própria fala
     // que vai digitar na descrição. Sem persistência, sem escopo de consultor.
     await requireUser();
+
+    // A flag de CLIENTE (NEXT_PUBLIC_TRANSCRIPTION) só decide se o microfone
+    // aparece; transcrever de fato exige TRANSCRIPTION_PROVIDER + credencial no
+    // SERVIDOR. Sem isso o seam devolveria um NO_RESULT genérico ("Nenhuma
+    // transcrição disponível") depois de gravar e enviar o áudio inteiro — o
+    // sintoma de "a gravação não funciona". Cortamos aqui, dizendo o que falta.
+    // Quando a flag está desligada, o próprio seam responde DISABLED.
+    if (isTranscriptionEnabled() && !isTranscriptionConfigured()) {
+      return {
+        ok: false,
+        reason: "NOT_CONFIGURED",
+        message:
+          "Transcrição indisponível: nenhum provedor de voz configurado neste ambiente. Fale com um administrador.",
+      };
+    }
 
     const audio = formData.get("audio");
     if (!(audio instanceof Blob)) {

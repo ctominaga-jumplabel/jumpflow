@@ -165,6 +165,13 @@ export interface TimeEntryFormProps {
    * oferecido. `false` (demo/sem storage) esconde o campo (degrade honesto).
    */
   attachmentsAvailable?: boolean;
+  /**
+   * A transcrição por voz está de fato utilizável: resolvido no SERVIDOR (flag
+   * + provider + credencial). `false` esconde o microfone — a flag de cliente
+   * sozinha não basta, porque sem provider a gravação acontece e a transcrição
+   * volta vazia. Default `false` (degrade honesto).
+   */
+  transcriptionAvailable?: boolean;
   /** Anexo já persistido do lançamento sendo editado (nome do arquivo). */
   initialAttachment?: TimeEntryAttachmentMeta | null;
 }
@@ -177,6 +184,10 @@ const inputClass = (invalid: boolean) =>
   );
 
 const labelClass = "mb-1 block text-xs font-semibold text-medium";
+
+/** Rótulo de seção do modal (mesmo token dos micro-rótulos do design system). */
+const sectionLabelClass =
+  "text-[11px] font-semibold uppercase tracking-wide text-soft";
 
 const emptyValue = (days: WeekDay[]): TimeEntryFormValue => ({
   mode: "daily",
@@ -219,6 +230,7 @@ export function TimeEntryForm({
   onDelete,
   busy = false,
   attachmentsAvailable = false,
+  transcriptionAvailable = false,
   initialAttachment = null,
 }: TimeEntryFormProps) {
   const [value, setValue] = useState<TimeEntryFormValue>(
@@ -368,9 +380,11 @@ export function TimeEntryForm({
   const hasTimeOffBlock = timeOffBlocks.length > 0;
 
   const isEditing = Boolean(initial);
-  // Flag de cliente (NEXT_PUBLIC_TRANSCRIPTION). Quando off, o mic some e o
-  // fluxo de digitar manualmente segue intacto.
-  const voiceEnabled = isTranscriptionEnabled();
+  // O microfone exige as DUAS pontas: a flag de cliente
+  // (NEXT_PUBLIC_TRANSCRIPTION, que decide se a feature existe no build) e o
+  // sinal do servidor de que há provider + credencial. Faltando qualquer uma, o
+  // mic some e o fluxo de digitar manualmente segue intacto.
+  const voiceEnabled = isTranscriptionEnabled() && transcriptionAvailable;
 
   /**
    * Aplica o texto transcrito à descrição: anexa ao que já existe (preservando
@@ -520,420 +534,448 @@ export function TimeEntryForm({
           </ActionButton>
         </>
       }
+      // O lançamento tem muitos campos (projeto, modo, atividade, dia, 4
+      // horários, descrição, anexo). No max-w-lg padrão do Modal tudo empilha e
+      // exige rolagem; aqui a largura extra permite agrupar em seções e colocar
+      // o relógio de ponto numa única linha cronológica.
+      className="max-w-4xl"
     >
       <form
-        className="space-y-4"
+        className="space-y-5"
         onSubmit={(e) => {
           e.preventDefault();
           handleSubmit();
         }}
       >
-        <div>
-          <label htmlFor="entry-project" className={labelClass}>
-            Projeto
-          </label>
-          <select
-            id="entry-project"
-            value={value.projectId}
-            onChange={(e) => setValue((v) => ({ ...v, projectId: e.target.value }))}
-            disabled={isEditing}
-            aria-invalid={showErrors && errors.projectId}
-            className={cn(
-              inputClass(showErrors && errors.projectId),
-              isEditing && "cursor-not-allowed opacity-70",
-            )}
-          >
-            <option value="">Selecione um projeto</option>
-            {projects.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name} · {p.clientName}
-              </option>
-            ))}
-          </select>
-          {showErrors && errors.projectId ? (
-            <p className="mt-1 text-xs text-danger">Selecione um projeto.</p>
-          ) : null}
-        </div>
+        {/* Seção 1 — Lançamento: o QUE está sendo apontado (projeto, modo,
+            atividade e dia) e os avisos/bloqueios que dependem da data. */}
+        <section className="space-y-4">
+          <p className={sectionLabelClass}>Lançamento</p>
 
-        {!isEditing ? (
-          <fieldset>
-            <legend className={labelClass}>Modo</legend>
-            <div className="grid grid-cols-2 gap-2">
-              {(["daily", "weekly"] as const).map((mode) => (
-                <label
-                  key={mode}
-                  className={cn(
-                    "flex h-9 cursor-pointer items-center justify-center rounded-md border text-xs font-semibold",
-                    value.mode === mode
-                      ? "border-on-accent bg-marker text-on-accent"
-                      : "border-border bg-surface text-medium",
-                  )}
-                >
-                  <input
-                    type="radio"
-                    name="entry-mode"
-                    value={mode}
-                    checked={value.mode === mode}
-                    onChange={() => setValue((v) => ({ ...v, mode }))}
-                    className="sr-only"
-                  />
-                  {mode === "daily" ? "Diário" : "Semanal"}
-                </label>
-              ))}
-            </div>
-          </fieldset>
-        ) : null}
-
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <label htmlFor="entry-activity" className={labelClass}>
-              Atividade
-            </label>
-            <select
-              id="entry-activity"
-              value={value.activity}
-              onChange={(e) => {
-                const activity = e.target.value as ActivityType;
-                setValue((v) => {
-                  const wasOnCall = v.activity === "ON_CALL";
-                  const isOnCall = activity === "ON_CALL";
-                  if (isOnCall && !wasOnCall) {
-                    // Entering ON_CALL: sugerir o fator usual e marcar como não
-                    // faturável por padrão (sobreaviso normalmente não é faturado).
-                    // ON_CALL não faturável é regra de negócio → sem justificativa.
-                    return {
-                      ...v,
-                      activity,
-                      multiplier: DEFAULT_ON_CALL_MULTIPLIER,
-                      billable: false,
-                      nonBillableReason: "",
-                    };
-                  }
-                  if (!isOnCall && wasOnCall) {
-                    // Leaving ON_CALL: voltar aos defaults de atividade normal.
-                    return {
-                      ...v,
-                      activity,
-                      multiplier: 1,
-                      billable: true,
-                      nonBillableReason: "",
-                    };
-                  }
-                  return { ...v, activity };
-                });
-              }}
-              disabled={isEditing}
-              className={cn(
-                inputClass(false),
-                isEditing && "cursor-not-allowed opacity-70",
-              )}
-            >
-              {creatableActivityOrder.map((activity) => (
-                <option key={activity} value={activity}>
-                  {activityLabels[activity]}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label htmlFor="entry-day" className={labelClass}>
-              Dia
-            </label>
-            <select
-              id="entry-day"
-              value={value.date}
-              onChange={(e) =>
-                setValue((v) => ({ ...v, date: e.target.value }))
-              }
-              className={inputClass(false)}
-            >
-              {days.map((day) => {
-                const dayHoliday = resolveProjectHoliday(
-                  holidays,
-                  value.projectId,
-                  day.date,
-                );
-                return (
-                  <option key={day.date} value={day.date}>
-                    {day.label} · {day.date.slice(8, 10)}/{day.date.slice(5, 7)}
-                    {dayHoliday ? " · Feriado" : ""}
-                  </option>
-                );
-              })}
-            </select>
-          </div>
-        </div>
-
-        {/* Aviso NÃO-BLOQUEANTE: o dia escolhido é feriado. Não impede o
-            submit — apenas sinaliza. */}
-        {selectedHolidayName ? (
-          <div
-            role="status"
-            className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm font-medium text-warning"
-          >
-            <CalendarClock aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-            <span>
-              Você está apontando em um feriado ({selectedHolidayName}). Você
-              ainda pode salvar normalmente.
-            </span>
-          </div>
-        ) : null}
-
-        {/* BLOQUEIO (Onda D): Dia Útil em dia de ausência confirmada. Diferente
-            do feriado, aqui o salvar é impedido (o servidor recusaria com
-            TIME_OFF_CONFLICT). */}
-        {hasTimeOffBlock ? (
-          <div
-            role="alert"
-            className="flex items-start gap-2 rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-sm font-medium text-danger"
-          >
-            <CalendarClock aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-            <div className="space-y-1">
-              <p>
-                {timeOffBlocks.length > 1
-                  ? "Você possui ausência confirmada nestas datas:"
-                  : "Você possui ausência confirmada nesta data:"}
-              </p>
-              <ul
-                className={timeOffBlocks.length > 1 ? "list-inside list-disc" : ""}
-              >
-                {timeOffBlocks.map((b) => (
-                  <li key={b.date}>
-                    {b.date.slice(8, 10)}/{b.date.slice(5, 7)} ({b.label})
-                  </li>
-                ))}
-              </ul>
-              <p>
-                Não é possível lançar Dia Útil aqui. Ajuste a data ou a atividade.
-              </p>
-            </div>
-          </div>
-        ) : null}
-
-        {value.mode === "weekly" && !isEditing ? (
-          <fieldset>
-            <legend className={labelClass}>Dias da semana</legend>
-            <div className="grid grid-cols-4 gap-2 sm:grid-cols-7">
-              {weekdayOptions.map((day) => (
-                <label
-                  key={day.value}
-                  className={cn(
-                    "flex h-9 cursor-pointer items-center justify-center rounded-md border text-xs font-semibold",
-                    value.weekdays.includes(day.value)
-                      ? "border-on-accent bg-marker text-on-accent"
-                      : "border-border bg-surface text-medium",
-                  )}
-                >
-                  <input
-                    type="checkbox"
-                    checked={value.weekdays.includes(day.value)}
-                    onChange={() => toggleWeekday(day.value)}
-                    className="sr-only"
-                  />
-                  {day.label}
-                </label>
-              ))}
-            </div>
-            {showErrors && errors.weekdays ? (
-              <p className="mt-1 text-xs text-danger">
-                Selecione ao menos um dia.
-              </p>
-            ) : null}
-          </fieldset>
-        ) : null}
-
-        <fieldset>
-          <legend className={labelClass}>Horários</legend>
-          <ClockFields
-            value={value.clock}
-            onChange={(clock) => setValue((v) => ({ ...v, clock }))}
-            showError={showErrors}
-            idPrefix="entry"
-          />
-        </fieldset>
-
-        {value.activity === "ON_CALL" ? (
-          <div>
-            <label htmlFor="entry-multiplier" className={labelClass}>
-              Fator de remuneração
-            </label>
-            <input
-              id="entry-multiplier"
-              type="number"
-              min="0"
-              step="0.01"
-              value={value.multiplier}
-              onChange={(e) =>
-                setValue((v) => ({
-                  ...v,
-                  // Mantém vazio como 0 controlado; o servidor valida > 0.
-                  multiplier:
-                    e.target.value === "" ? 0 : Number(e.target.value),
-                }))
-              }
-              aria-invalid={showErrors && errors.multiplier}
-              className={cn(
-                inputClass(showErrors && errors.multiplier),
-                "w-32",
-              )}
-            />
-            {showErrors && errors.multiplier ? (
-              <p className="mt-1 text-xs text-danger">
-                O fator deve ser maior que zero.
-              </p>
-            ) : (
-              <p className="mt-1 text-xs text-soft">
-                Sobreaviso é remunerado pelo equivalente (horas × fator).
-                Equivalente:{" "}
-                <span className="font-semibold tabular-nums text-medium">
-                  {formatHours(effectiveHours)}
-                </span>
-                .
-              </p>
-            )}
-          </div>
-        ) : null}
-
-        <div>
-          <label htmlFor="entry-description" className={labelClass}>
-            Descrição
-          </label>
-          <textarea
-            id="entry-description"
-            value={value.description}
-            onChange={(e) =>
-              setValue((v) => ({ ...v, description: e.target.value }))
-            }
-            rows={2}
-            placeholder="O que foi feito neste dia."
-            aria-invalid={showErrors && errors.description}
-            className={cn(inputClass(showErrors && errors.description), "resize-y")}
-          />
-          {showErrors && errors.description ? (
-            <p className="mt-1 text-xs text-danger">Descrição é obrigatória.</p>
-          ) : null}
-          {voiceEnabled ? (
-            <ActivityVoiceButton
-              onTranscribed={applyTranscription}
-              disabled={busy}
-            />
-          ) : null}
-        </div>
-
-        {/* "Faturável" NÃO é mais definido no apontamento: virou uma definição de
-            gestão, flagável por dia na tela de Aprovação. Novos lançamentos
-            entram como faturáveis por padrão (ON_CALL como não faturável por
-            regra de negócio); a gestão decide depois na aprovação. */}
-
-        {/* Hora extra: indica o excedente sobre o padrão do projeto e que o
-            anexo de aprovação do gestor é obrigatório para salvar. */}
-        {hasOvertime ? (
-          <div className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm font-medium text-warning">
-            <TriangleAlert
-              aria-hidden="true"
-              className="mt-0.5 size-4 shrink-0"
-            />
-            <span>
-              {overtimeHours} h de hora extra (acima de {standardHoursPerDay} h/dia
-              do projeto).{" "}
-              {attachmentsAvailable
-                ? "Anexe o comprovante de aprovação do gestor para salvar."
-                : "Anexo de aprovação indisponível neste ambiente."}
-            </span>
-          </div>
-        ) : null}
-
-        {/* Anexo opcional (melhoria #2): exceção disponível em qualquer
-            lançamento diário. Enviado após salvar, com o id retornado. Hora
-            extra torna o anexo OBRIGATÓRIO (bloqueio no submit). */}
-        {attachmentFieldVisible ? (
-          <div>
-            <span className="mb-1 block text-xs font-semibold text-medium">
-              Anexo{" "}
-              <span className="font-normal text-soft">
-                {hasOvertime
-                  ? "(obrigatório p/ hora extra · PDF, JPG, PNG ou WEBP, até 10 MB)"
-                  : "(opcional · PDF, JPG, PNG ou WEBP, até 10 MB)"}
-              </span>
-            </span>
-            {attachFile ? (
-              <div className="flex items-center gap-3 rounded-md border border-border bg-surface-muted/50 px-3 py-2">
-                <FileText
-                  aria-hidden="true"
-                  className="size-4 shrink-0 text-medium"
-                />
-                <p className="min-w-0 flex-1 truncate text-sm font-medium text-strong">
-                  {attachFile.name}
-                </p>
-                <button
-                  type="button"
-                  onClick={clearPickedAttachment}
-                  aria-label="Remover arquivo selecionado"
-                  className={cn(
-                    "grid size-7 shrink-0 place-items-center rounded-md text-medium transition-colors hover:bg-surface hover:text-strong",
-                    focusRing,
-                  )}
-                >
-                  <X aria-hidden="true" className="size-4" />
-                </button>
-              </div>
-            ) : initialAttachment && !removeAttachment ? (
-              <div className="flex items-center gap-3 rounded-md border border-border bg-surface-muted/50 px-3 py-2">
-                <FileText
-                  aria-hidden="true"
-                  className="size-4 shrink-0 text-medium"
-                />
-                <p className="min-w-0 flex-1 truncate text-sm font-medium text-strong">
-                  {initialAttachment.fileName}
-                </p>
-                <label
-                  htmlFor={attachInputId}
-                  className={cn(
-                    "shrink-0 cursor-pointer rounded-md px-2 py-1 text-xs font-semibold text-brand transition-colors hover:bg-surface",
-                    focusRing,
-                  )}
-                >
-                  Substituir
-                </label>
-                <button
-                  type="button"
-                  onClick={markAttachmentForRemoval}
-                  aria-label="Remover anexo"
-                  className={cn(
-                    "grid size-7 shrink-0 place-items-center rounded-md text-medium transition-colors hover:bg-surface hover:text-strong",
-                    focusRing,
-                  )}
-                >
-                  <X aria-hidden="true" className="size-4" />
-                </button>
-              </div>
-            ) : (
-              <label
-                htmlFor={attachInputId}
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label htmlFor="entry-project" className={labelClass}>
+                Projeto
+              </label>
+              <select
+                id="entry-project"
+                value={value.projectId}
+                onChange={(e) =>
+                  setValue((v) => ({ ...v, projectId: e.target.value }))
+                }
+                disabled={isEditing}
+                aria-invalid={showErrors && errors.projectId}
                 className={cn(
-                  "flex cursor-pointer items-center gap-2 rounded-md border border-dashed border-border bg-surface px-3 py-2.5 text-sm text-medium transition-colors hover:border-brand hover:text-strong",
-                  focusRing,
+                  inputClass(showErrors && errors.projectId),
+                  isEditing && "cursor-not-allowed opacity-70",
                 )}
               >
-                <Paperclip aria-hidden="true" className="size-4" />
-                Anexar arquivo
-              </label>
-            )}
-            <input
-              ref={attachInputRef}
-              id={attachInputId}
-              type="file"
-              accept={ATTACH_ACCEPT}
-              className="sr-only"
-              onChange={(e) => handleAttachFiles(e.target.files)}
-            />
-            {attachError ? (
-              <p role="alert" className="mt-1 text-xs font-medium text-danger">
-                {attachError}
-              </p>
+                <option value="">Selecione um projeto</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} · {p.clientName}
+                  </option>
+                ))}
+              </select>
+              {showErrors && errors.projectId ? (
+                <p className="mt-1 text-xs text-danger">Selecione um projeto.</p>
+              ) : null}
+            </div>
+
+            {!isEditing ? (
+              <fieldset>
+                <legend className={labelClass}>Modo</legend>
+                <div className="grid grid-cols-2 gap-2">
+                  {(["daily", "weekly"] as const).map((mode) => (
+                    <label
+                      key={mode}
+                      className={cn(
+                        "flex h-9 cursor-pointer items-center justify-center rounded-md border text-xs font-semibold",
+                        value.mode === mode
+                          ? "border-on-accent bg-marker text-on-accent"
+                          : "border-border bg-surface text-medium",
+                      )}
+                    >
+                      <input
+                        type="radio"
+                        name="entry-mode"
+                        value={mode}
+                        checked={value.mode === mode}
+                        onChange={() => setValue((v) => ({ ...v, mode }))}
+                        className="sr-only"
+                      />
+                      {mode === "daily" ? "Diário" : "Semanal"}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
             ) : null}
           </div>
-        ) : null}
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label htmlFor="entry-activity" className={labelClass}>
+                Atividade
+              </label>
+              <select
+                id="entry-activity"
+                value={value.activity}
+                onChange={(e) => {
+                  const activity = e.target.value as ActivityType;
+                  setValue((v) => {
+                    const wasOnCall = v.activity === "ON_CALL";
+                    const isOnCall = activity === "ON_CALL";
+                    if (isOnCall && !wasOnCall) {
+                      // Entering ON_CALL: sugerir o fator usual e marcar como não
+                      // faturável por padrão (sobreaviso normalmente não é faturado).
+                      // ON_CALL não faturável é regra de negócio → sem justificativa.
+                      return {
+                        ...v,
+                        activity,
+                        multiplier: DEFAULT_ON_CALL_MULTIPLIER,
+                        billable: false,
+                        nonBillableReason: "",
+                      };
+                    }
+                    if (!isOnCall && wasOnCall) {
+                      // Leaving ON_CALL: voltar aos defaults de atividade normal.
+                      return {
+                        ...v,
+                        activity,
+                        multiplier: 1,
+                        billable: true,
+                        nonBillableReason: "",
+                      };
+                    }
+                    return { ...v, activity };
+                  });
+                }}
+                disabled={isEditing}
+                className={cn(
+                  inputClass(false),
+                  isEditing && "cursor-not-allowed opacity-70",
+                )}
+              >
+                {creatableActivityOrder.map((activity) => (
+                  <option key={activity} value={activity}>
+                    {activityLabels[activity]}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="entry-day" className={labelClass}>
+                Dia
+              </label>
+              <select
+                id="entry-day"
+                value={value.date}
+                onChange={(e) => setValue((v) => ({ ...v, date: e.target.value }))}
+                className={inputClass(false)}
+              >
+                {days.map((day) => {
+                  const dayHoliday = resolveProjectHoliday(
+                    holidays,
+                    value.projectId,
+                    day.date,
+                  );
+                  return (
+                    <option key={day.date} value={day.date}>
+                      {day.label} · {day.date.slice(8, 10)}/{day.date.slice(5, 7)}
+                      {dayHoliday ? " · Feriado" : ""}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+          </div>
+
+          {value.mode === "weekly" && !isEditing ? (
+            <fieldset>
+              <legend className={labelClass}>Dias da semana</legend>
+              <div className="grid grid-cols-4 gap-2 sm:grid-cols-7">
+                {weekdayOptions.map((day) => (
+                  <label
+                    key={day.value}
+                    className={cn(
+                      "flex h-9 cursor-pointer items-center justify-center rounded-md border text-xs font-semibold",
+                      value.weekdays.includes(day.value)
+                        ? "border-on-accent bg-marker text-on-accent"
+                        : "border-border bg-surface text-medium",
+                    )}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={value.weekdays.includes(day.value)}
+                      onChange={() => toggleWeekday(day.value)}
+                      className="sr-only"
+                    />
+                    {day.label}
+                  </label>
+                ))}
+              </div>
+              {showErrors && errors.weekdays ? (
+                <p className="mt-1 text-xs text-danger">
+                  Selecione ao menos um dia.
+                </p>
+              ) : null}
+            </fieldset>
+          ) : null}
+
+          {/* Aviso NÃO-BLOQUEANTE: o dia escolhido é feriado. Não impede o
+              submit — apenas sinaliza. */}
+          {selectedHolidayName ? (
+            <div
+              role="status"
+              className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm font-medium text-warning"
+            >
+              <CalendarClock aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+              <span>
+                Você está apontando em um feriado ({selectedHolidayName}). Você
+                ainda pode salvar normalmente.
+              </span>
+            </div>
+          ) : null}
+
+          {/* BLOQUEIO (Onda D): Dia Útil em dia de ausência confirmada. Diferente
+              do feriado, aqui o salvar é impedido (o servidor recusaria com
+              TIME_OFF_CONFLICT). */}
+          {hasTimeOffBlock ? (
+            <div
+              role="alert"
+              className="flex items-start gap-2 rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-sm font-medium text-danger"
+            >
+              <CalendarClock aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+              <div className="space-y-1">
+                <p>
+                  {timeOffBlocks.length > 1
+                    ? "Você possui ausência confirmada nestas datas:"
+                    : "Você possui ausência confirmada nesta data:"}
+                </p>
+                <ul
+                  className={timeOffBlocks.length > 1 ? "list-inside list-disc" : ""}
+                >
+                  {timeOffBlocks.map((b) => (
+                    <li key={b.date}>
+                      {b.date.slice(8, 10)}/{b.date.slice(5, 7)} ({b.label})
+                    </li>
+                  ))}
+                </ul>
+                <p>
+                  Não é possível lançar Dia Útil aqui. Ajuste a data ou a atividade.
+                </p>
+              </div>
+            </div>
+          ) : null}
+        </section>
+
+        {/* Seção 2 — Horários: o relógio de ponto em ordem CRONOLÓGICA numa só
+            linha (Início → Pausa → Retorno → Saída), mais o que deriva das
+            horas (fator de Sobreaviso e o aviso de hora extra). */}
+        <section className="space-y-4 border-t border-border pt-5">
+          <fieldset>
+            <legend className={cn(sectionLabelClass, "mb-2")}>Horários</legend>
+            <ClockFields
+              value={value.clock}
+              onChange={(clock) => setValue((v) => ({ ...v, clock }))}
+              showError={showErrors}
+              idPrefix="entry"
+              layout="row"
+            />
+          </fieldset>
+
+          {value.activity === "ON_CALL" ? (
+            <div>
+              <label htmlFor="entry-multiplier" className={labelClass}>
+                Fator de remuneração
+              </label>
+              <input
+                id="entry-multiplier"
+                type="number"
+                min="0"
+                step="0.01"
+                value={value.multiplier}
+                onChange={(e) =>
+                  setValue((v) => ({
+                    ...v,
+                    // Mantém vazio como 0 controlado; o servidor valida > 0.
+                    multiplier: e.target.value === "" ? 0 : Number(e.target.value),
+                  }))
+                }
+                aria-invalid={showErrors && errors.multiplier}
+                className={cn(inputClass(showErrors && errors.multiplier), "w-32")}
+              />
+              {showErrors && errors.multiplier ? (
+                <p className="mt-1 text-xs text-danger">
+                  O fator deve ser maior que zero.
+                </p>
+              ) : (
+                <p className="mt-1 text-xs text-soft">
+                  Sobreaviso é remunerado pelo equivalente (horas × fator).
+                  Equivalente:{" "}
+                  <span className="font-semibold tabular-nums text-medium">
+                    {formatHours(effectiveHours)}
+                  </span>
+                  .
+                </p>
+              )}
+            </div>
+          ) : null}
+
+          {/* Hora extra: indica o excedente sobre o padrão do projeto e que o
+              anexo de aprovação do gestor é obrigatório para salvar. */}
+          {hasOvertime ? (
+            <div className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm font-medium text-warning">
+              <TriangleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+              <span>
+                {overtimeHours} h de hora extra (acima de {standardHoursPerDay} h/dia
+                do projeto).{" "}
+                {attachmentsAvailable
+                  ? "Anexe o comprovante de aprovação do gestor para salvar."
+                  : "Anexo de aprovação indisponível neste ambiente."}
+              </span>
+            </div>
+          ) : null}
+        </section>
+
+        {/* Seção 3 — Descrição e anexo, lado a lado na largura extra do modal.
+            "Faturável" NÃO é mais definido no apontamento: virou uma definição
+            de gestão, flagável por dia na tela de Aprovação. Novos lançamentos
+            entram como faturáveis por padrão (ON_CALL como não faturável por
+            regra de negócio); a gestão decide depois na aprovação. */}
+        <section className="space-y-4 border-t border-border pt-5">
+          <p className={sectionLabelClass}>
+            {attachmentFieldVisible ? "Descrição e anexo" : "Descrição"}
+          </p>
+
+          <div
+            className={cn(
+              "grid gap-4",
+              attachmentFieldVisible && "lg:grid-cols-2",
+            )}
+          >
+            <div>
+              <label htmlFor="entry-description" className={labelClass}>
+                Descrição
+              </label>
+              <textarea
+                id="entry-description"
+                value={value.description}
+                onChange={(e) =>
+                  setValue((v) => ({ ...v, description: e.target.value }))
+                }
+                rows={4}
+                placeholder="O que foi feito neste dia."
+                aria-invalid={showErrors && errors.description}
+                className={cn(
+                  inputClass(showErrors && errors.description),
+                  "resize-y",
+                )}
+              />
+              {showErrors && errors.description ? (
+                <p className="mt-1 text-xs text-danger">Descrição é obrigatória.</p>
+              ) : null}
+              {voiceEnabled ? (
+                <ActivityVoiceButton
+                  onTranscribed={applyTranscription}
+                  disabled={busy}
+                />
+              ) : null}
+            </div>
+
+            {/* Anexo opcional (melhoria #2): exceção disponível em qualquer
+                lançamento diário. Enviado após salvar, com o id retornado. Hora
+                extra torna o anexo OBRIGATÓRIO (bloqueio no submit). */}
+            {attachmentFieldVisible ? (
+              <div>
+                <span className="mb-1 block text-xs font-semibold text-medium">
+                  Anexo{" "}
+                  <span className="font-normal text-soft">
+                    {hasOvertime
+                      ? "(obrigatório p/ hora extra · PDF, JPG, PNG ou WEBP, até 10 MB)"
+                      : "(opcional · PDF, JPG, PNG ou WEBP, até 10 MB)"}
+                  </span>
+                </span>
+                {attachFile ? (
+                  <div className="flex items-center gap-3 rounded-md border border-border bg-surface-muted/50 px-3 py-2">
+                    <FileText
+                      aria-hidden="true"
+                      className="size-4 shrink-0 text-medium"
+                    />
+                    <p className="min-w-0 flex-1 truncate text-sm font-medium text-strong">
+                      {attachFile.name}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={clearPickedAttachment}
+                      aria-label="Remover arquivo selecionado"
+                      className={cn(
+                        "grid size-7 shrink-0 place-items-center rounded-md text-medium transition-colors hover:bg-surface hover:text-strong",
+                        focusRing,
+                      )}
+                    >
+                      <X aria-hidden="true" className="size-4" />
+                    </button>
+                  </div>
+                ) : initialAttachment && !removeAttachment ? (
+                  <div className="flex items-center gap-3 rounded-md border border-border bg-surface-muted/50 px-3 py-2">
+                    <FileText
+                      aria-hidden="true"
+                      className="size-4 shrink-0 text-medium"
+                    />
+                    <p className="min-w-0 flex-1 truncate text-sm font-medium text-strong">
+                      {initialAttachment.fileName}
+                    </p>
+                    <label
+                      htmlFor={attachInputId}
+                      className={cn(
+                        "shrink-0 cursor-pointer rounded-md px-2 py-1 text-xs font-semibold text-brand transition-colors hover:bg-surface",
+                        focusRing,
+                      )}
+                    >
+                      Substituir
+                    </label>
+                    <button
+                      type="button"
+                      onClick={markAttachmentForRemoval}
+                      aria-label="Remover anexo"
+                      className={cn(
+                        "grid size-7 shrink-0 place-items-center rounded-md text-medium transition-colors hover:bg-surface hover:text-strong",
+                        focusRing,
+                      )}
+                    >
+                      <X aria-hidden="true" className="size-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <label
+                    htmlFor={attachInputId}
+                    className={cn(
+                      "flex cursor-pointer items-center gap-2 rounded-md border border-dashed border-border bg-surface px-3 py-2.5 text-sm text-medium transition-colors hover:border-brand hover:text-strong",
+                      focusRing,
+                    )}
+                  >
+                    <Paperclip aria-hidden="true" className="size-4" />
+                    Anexar arquivo
+                  </label>
+                )}
+                <input
+                  ref={attachInputRef}
+                  id={attachInputId}
+                  type="file"
+                  accept={ATTACH_ACCEPT}
+                  className="sr-only"
+                  onChange={(e) => handleAttachFiles(e.target.files)}
+                />
+                {attachError ? (
+                  <p role="alert" className="mt-1 text-xs font-medium text-danger">
+                    {attachError}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        </section>
       </form>
 
 

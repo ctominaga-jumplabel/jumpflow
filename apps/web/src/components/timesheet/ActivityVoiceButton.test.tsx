@@ -3,7 +3,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 /**
  * Cobertura da transcrição por voz (Melhoria #3):
- *  - o botão de mic só aparece no form quando isTranscriptionEnabled() é true;
+ *  - o botão de mic só aparece no form quando isTranscriptionEnabled() é true E
+ *    o servidor confirmou provider configurado (transcriptionAvailable);
  *  - com MediaRecorder/getUserMedia mockados (jsdom não os tem) e a action
  *    mockada, a transcrição preenche a Descrição.
  *
@@ -34,7 +35,7 @@ const projects: TimeEntryFormProject[] = [
   { id: "p1", name: "Atlas", clientId: "c1", clientName: "Vix" },
 ];
 
-function renderForm() {
+function renderForm(transcriptionAvailable = true) {
   return render(
     <TimeEntryForm
       open
@@ -42,6 +43,7 @@ function renderForm() {
       projects={projects}
       days={days}
       onSubmit={vi.fn()}
+      transcriptionAvailable={transcriptionAvailable}
     />,
   );
 }
@@ -114,12 +116,22 @@ describe("TimeEntryForm — mic de transcrição (Melhoria #3)", () => {
     ).toBeNull();
   });
 
-  it("mostra o botão de gravar quando a flag está ligada", () => {
+  it("mostra o botão de gravar quando a flag está ligada e há provider", () => {
     h.enabled.mockReturnValue(true);
     renderForm();
     expect(
       screen.getByRole("button", { name: /gravar descrição por voz/i }),
     ).not.toBeNull();
+  });
+
+  it("não mostra o botão quando o servidor não tem provider configurado", () => {
+    // Flag de cliente ligada, mas sem TRANSCRIPTION_PROVIDER/credencial no
+    // servidor: gravar funcionaria e a transcrição voltaria vazia — some.
+    h.enabled.mockReturnValue(true);
+    renderForm(false);
+    expect(
+      screen.queryByRole("button", { name: /gravar descrição por voz/i }),
+    ).toBeNull();
   });
 
   it("transcreve e preenche a Descrição", async () => {
