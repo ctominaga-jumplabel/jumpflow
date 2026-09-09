@@ -62,6 +62,37 @@ const inputClass = (invalid: boolean) =>
 
 const labelClass = "mb-1 block text-xs font-semibold text-medium";
 
+/** Um campo de horário do relógio de ponto (rótulo + input type=time). */
+function TimeField({
+  id,
+  label,
+  value,
+  invalid,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  invalid: boolean;
+  onChange: (next: string) => void;
+}) {
+  return (
+    <div>
+      <label htmlFor={id} className={labelClass}>
+        {label}
+      </label>
+      <input
+        id={id}
+        type="time"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        aria-invalid={invalid}
+        className={inputClass(invalid)}
+      />
+    </div>
+  );
+}
+
 export interface ClockFieldsProps {
   value: ClockFieldsValue;
   onChange: (value: ClockFieldsValue) => void;
@@ -69,6 +100,13 @@ export interface ClockFieldsProps {
   showError?: boolean;
   /** Optional id prefix to keep labels unique when rendered more than once. */
   idPrefix?: string;
+  /**
+   * `"grid"` (default) lays the fields out two per row — 2x2 when there is a
+   * break, still chronological reading left-to-right/top-to-bottom. Fits a
+   * narrow modal. `"row"` puts all four in a SINGLE chronological row and needs
+   * a wide container (the entry modal), so `type="time"` inputs stay readable.
+   */
+  layout?: "grid" | "row";
 }
 
 /**
@@ -81,6 +119,7 @@ export function ClockFields({
   onChange,
   showError = false,
   idPrefix = "clock",
+  layout = "grid",
 }: ClockFieldsProps) {
   const hours = clockHours(value);
   const invalid = hours === null;
@@ -91,67 +130,51 @@ export function ClockFields({
     breakEnd: value.hasBreak ? value.breakEnd : null,
   });
 
+  const invalidNow = showError && invalid;
+
   return (
     <div className="space-y-3">
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div>
-          <label htmlFor={`${idPrefix}-start`} className={labelClass}>
-            Início
-          </label>
-          <input
-            id={`${idPrefix}-start`}
-            type="time"
-            value={value.startTime}
-            onChange={(e) => onChange({ ...value, startTime: e.target.value })}
-            aria-invalid={showError && invalid}
-            className={inputClass(showError && invalid)}
-          />
-        </div>
-        <div>
-          <label htmlFor={`${idPrefix}-end`} className={labelClass}>
-            Saída
-          </label>
-          <input
-            id={`${idPrefix}-end`}
-            type="time"
-            value={value.endTime}
-            onChange={(e) => onChange({ ...value, endTime: e.target.value })}
-            aria-invalid={showError && invalid}
-            className={inputClass(showError && invalid)}
-          />
-        </div>
-      </div>
-
-      {value.hasBreak ? (
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div>
-            <label htmlFor={`${idPrefix}-break-start`} className={labelClass}>
-              Pausa
-            </label>
-            <input
+      {/* Ordem CRONOLÓGICA do dia: Início -> Pausa -> Retorno -> Saída. Sem
+          pausa, sobram só Início -> Saída. */}
+      <div
+        className={cn(
+          "grid grid-cols-2 gap-3",
+          layout === "row" && value.hasBreak && "sm:grid-cols-4",
+        )}
+      >
+        <TimeField
+          id={`${idPrefix}-start`}
+          label="Início"
+          value={value.startTime}
+          invalid={invalidNow}
+          onChange={(startTime) => onChange({ ...value, startTime })}
+        />
+        {value.hasBreak ? (
+          <>
+            <TimeField
               id={`${idPrefix}-break-start`}
-              type="time"
+              label="Pausa"
               value={value.breakStart}
-              onChange={(e) => onChange({ ...value, breakStart: e.target.value })}
-              aria-invalid={showError && invalid}
-              className={inputClass(showError && invalid)}
+              invalid={invalidNow}
+              onChange={(breakStart) => onChange({ ...value, breakStart })}
             />
-          </div>
-          <div>
-            <label htmlFor={`${idPrefix}-break-end`} className={labelClass}>
-              Retorno
-            </label>
-            <input
+            <TimeField
               id={`${idPrefix}-break-end`}
-              type="time"
+              label="Retorno"
               value={value.breakEnd}
-              onChange={(e) => onChange({ ...value, breakEnd: e.target.value })}
-              aria-invalid={showError && invalid}
-              className={inputClass(showError && invalid)}
+              invalid={invalidNow}
+              onChange={(breakEnd) => onChange({ ...value, breakEnd })}
             />
-          </div>
-        </div>
-      ) : null}
+          </>
+        ) : null}
+        <TimeField
+          id={`${idPrefix}-end`}
+          label="Saída"
+          value={value.endTime}
+          invalid={invalidNow}
+          onChange={(endTime) => onChange({ ...value, endTime })}
+        />
+      </div>
 
       <div className="flex items-center justify-between gap-3">
         {value.hasBreak ? (

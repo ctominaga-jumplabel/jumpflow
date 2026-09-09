@@ -9,8 +9,11 @@ import { focusRing } from "@/lib/styles";
 /**
  * Botão de transcrição por voz da Descrição (Melhoria #3).
  *
- * Só é renderizado pelo formulário quando `isTranscriptionEnabled()` (a flag de
- * cliente NEXT_PUBLIC_TRANSCRIPTION). Captura áudio com MediaRecorder
+ * Só é renderizado pelo formulário quando a flag de cliente
+ * (`isTranscriptionEnabled()` / NEXT_PUBLIC_TRANSCRIPTION) está ligada E o
+ * servidor confirmou que existe provider + credencial
+ * (`transcriptionAvailable`) — oferecer o mic sem provider grava o áudio e
+ * devolve transcrição vazia. Captura áudio com MediaRecorder
  * (getUserMedia), envia para a server action `transcribeActivityAudio` e
  * devolve o texto via `onTranscribed` para o formulário decidir como aplicar.
  *
@@ -27,6 +30,26 @@ export interface ActivityVoiceButtonProps {
   onTranscribed: (text: string) => void;
   /** Desabilita o controle (ex.: enquanto uma ação do form está em voo). */
   disabled?: boolean;
+}
+
+/**
+ * Extensão coerente com o mimeType gravado. O Gemini usa o `mime_type` do
+ * inline_data, mas a API da OpenAI decide o formato pelo NOME do arquivo — um
+ * `.webm` fixo faria o áudio do Safari (audio/mp4) ser rejeitado.
+ */
+function audioFileName(mimeType: string): string {
+  const base = mimeType.split(";")[0].trim().toLowerCase();
+  const ext =
+    base === "audio/mp4" || base === "audio/m4a" || base === "audio/x-m4a"
+      ? "mp4"
+      : base === "audio/ogg"
+        ? "ogg"
+        : base === "audio/mpeg" || base === "audio/mp3"
+          ? "mp3"
+          : base === "audio/wav" || base === "audio/x-wav"
+            ? "wav"
+            : "webm";
+  return `descricao.${ext}`;
 }
 
 /** Pega o primeiro mimeType de áudio suportado pelo MediaRecorder do navegador. */
@@ -77,8 +100,18 @@ export function ActivityVoiceButton({
     // senão um novo getUserMedia sobrescreveria streamRef/recorderRef e vazaria
     // o primeiro stream (mic preso ligado).
     if (state !== "idle") return;
+    if (typeof navigator === "undefined") return;
+    // `navigator.mediaDevices` só existe em contexto seguro: HTTPS ou
+    // localhost. Aberto por IP da rede em http (ex.: http://192.168.x.x:3000) a
+    // API simplesmente não está lá — a mensagem genérica de "navegador" mandava
+    // o usuário para o lugar errado. Distinguimos as duas causas.
+    if (typeof window !== "undefined" && window.isSecureContext === false) {
+      setError(
+        "Gravação por voz exige uma conexão segura (HTTPS) ou localhost. Abra o JumpFlow por HTTPS.",
+      );
+      return;
+    }
     if (
-      typeof navigator === "undefined" ||
       !navigator.mediaDevices?.getUserMedia ||
       typeof MediaRecorder === "undefined"
     ) {
@@ -123,7 +156,7 @@ export function ActivityVoiceButton({
     setState("transcribing");
     try {
       const form = new FormData();
-      form.set("audio", blob, "descricao.webm");
+      form.set("audio", blob, audioFileName(mimeType));
       const result = await transcribeActivityAudio(form);
       if (result.ok) {
         onTranscribed(result.text);

@@ -252,6 +252,12 @@ export interface TimesheetWeekViewProps {
    */
   attachmentsAvailable?: boolean;
   /**
+   * db mode: a transcrição por voz da descrição está realmente utilizável —
+   * flag ligada E provider + credencial presentes no servidor. Default `false`
+   * (demo/sem provider) esconde o microfone em vez de oferecer algo que falha.
+   */
+  transcriptionAvailable?: boolean;
+  /**
    * db mode (Fase 4d / Trava A): chaves `${projectId}:${YYYY-MM}` cujo
    * faturamento já foi liberado para o Financeiro. Uma linha cuja (projeto,
    * competência) está nesse conjunto fica congelada — cadeado + tooltip, sem
@@ -648,6 +654,8 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
   // preserva demo/gestão. Anexo depende de storage configurado (db only).
   const canEditBillable = props.canEditBillable ?? true;
   const attachmentsAvailable = !isDemo && (props.attachmentsAvailable ?? false);
+  const transcriptionAvailable =
+    !isDemo && (props.transcriptionAvailable ?? false);
   // Lançamento "em nome de": id do consultor-alvo (undefined = fluxo próprio).
   // Injetado em cada action de gravação para o servidor gravar na grade dele.
   const onBehalfOf = props.onBehalfOf ?? null;
@@ -1606,6 +1614,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
         onDelete={!isDemo && editingRow ? handleDeleteEntry : undefined}
         busy={isPending}
         attachmentsAvailable={attachmentsAvailable}
+        transcriptionAvailable={transcriptionAvailable}
         initialAttachment={editAttachment}
       />
 
