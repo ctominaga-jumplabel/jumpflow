@@ -3,6 +3,8 @@ import { cookies } from "next/headers";
 import { Geist, Geist_Mono } from "next/font/google";
 import { appConfig } from "@/config/app";
 import { THEME_COOKIE, type Theme } from "@/lib/theme";
+import { ExperienceProvider } from "@/lib/experience/ExperienceProvider";
+import { ExperienceSwitcher } from "@/lib/experience/ExperienceSwitcher";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -39,7 +41,21 @@ export default async function RootLayout({
       data-theme={theme}
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      {/*
+        Jump Experience Registry (P6): o provider apenas ESCREVE variáveis CSS no
+        <html> a partir de um Experience Pack publicado pelo Jump Value, e sabe
+        desfazer isso. Nenhuma regra de negócio, rota ou permissão passa por ele
+        — o tema original (light/dark por cookie, resolvido acima no servidor)
+        continua sendo a base e volta inteiro no reset.
+        O switcher é ferramenta de demonstração e nasce desligado em produção
+        (NEXT_PUBLIC_EXPERIENCE_SWITCHER).
+      */}
+      <body className="min-h-full flex flex-col">
+        <ExperienceProvider>
+          {children}
+          <ExperienceSwitcher />
+        </ExperienceProvider>
+      </body>
     </html>
   );
 }
