@@ -13,7 +13,7 @@ import {
 import { Modal } from "@/components/ui/Modal";
 import { ActionButton } from "@/components/ui/ActionButton";
 import { cn } from "@/lib/utils";
-import { focusRing, focusRingInput } from "@/lib/styles";
+import { focusRing, focusRingInput, quietPanel } from "@/lib/styles";
 import {
   activityLabels,
   creatableActivityOrder,
@@ -174,6 +174,15 @@ export interface TimeEntryFormProps {
   transcriptionAvailable?: boolean;
   /** Anexo já persistido do lançamento sendo editado (nome do arquivo). */
   initialAttachment?: TimeEntryAttachmentMeta | null;
+  /**
+   * Renderiza o formulário SEM overlay, como painel na própria página
+   * (direção Operational Minimal). O corpo, a validação e as ações são os
+   * mesmos; muda só o container. A confirmação "Dia Útil em feriado" continua
+   * sendo modal nos dois casos — é destrutiva e precisa prender o foco.
+   *
+   * Default `false` (modal), então os consumidores existentes não mudam.
+   */
+  inline?: boolean;
 }
 
 const inputClass = (invalid: boolean) =>
@@ -232,6 +241,7 @@ export function TimeEntryForm({
   attachmentsAvailable = false,
   transcriptionAvailable = false,
   initialAttachment = null,
+  inline = false,
 }: TimeEntryFormProps) {
   const [value, setValue] = useState<TimeEntryFormValue>(
     initial ?? emptyValue(days),
@@ -491,55 +501,49 @@ export function TimeEntryForm({
     });
   }
 
-  return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      title={isEditing ? "Editar lançamento" : "Novo lançamento"}
-      description={
-        isEditing
-          ? "Informe projeto, atividade, dia e horários."
-          : "Informe projeto, atividade, modo e horários."
-      }
-      footer={
-        <>
-          {isEditing && onDelete ? (
-            <ActionButton
-              variant="danger"
-              size="sm"
-              icon={Trash2}
-              disabled={busy}
-              onClick={() => onDelete(value)}
-              className="mr-auto"
-            >
-              Excluir
-            </ActionButton>
-          ) : null}
-          <ActionButton
-            variant="secondary"
-            size="sm"
-            disabled={busy}
-            onClick={onClose}
-          >
-            Cancelar
-          </ActionButton>
-          <ActionButton
-            variant="primary"
-            size="sm"
-            icon={Save}
-            disabled={busy || hasTimeOffBlock}
-            onClick={handleSubmit}
-          >
-            Salvar
-          </ActionButton>
-        </>
-      }
-      // O lançamento tem muitos campos (projeto, modo, atividade, dia, 4
-      // horários, descrição, anexo). No max-w-lg padrão do Modal tudo empilha e
-      // exige rolagem; aqui a largura extra permite agrupar em seções e colocar
-      // o relógio de ponto numa única linha cronológica.
-      className="max-w-4xl"
-    >
+  const formTitle = isEditing ? "Editar lançamento" : "Novo lançamento";
+  const formDescription = isEditing
+    ? "Informe projeto, atividade, dia e horários."
+    : "Informe projeto, atividade, modo e horários.";
+
+  const formActions = (
+    <>
+      {isEditing && onDelete ? (
+        <ActionButton
+          variant="danger"
+          size="sm"
+          tactile={!inline}
+          icon={Trash2}
+          disabled={busy}
+          onClick={() => onDelete(value)}
+          className="mr-auto"
+        >
+          Excluir
+        </ActionButton>
+      ) : null}
+      <ActionButton
+        variant="secondary"
+        size="sm"
+        tactile={!inline}
+        disabled={busy}
+        onClick={onClose}
+      >
+        Cancelar
+      </ActionButton>
+      <ActionButton
+        variant="primary"
+        size="sm"
+        tactile={!inline}
+        icon={Save}
+        disabled={busy || hasTimeOffBlock}
+        onClick={handleSubmit}
+      >
+        Salvar
+      </ActionButton>
+    </>
+  );
+
+  const formBody = (
       <form
         className="space-y-5"
         onSubmit={(e) => {
@@ -592,7 +596,9 @@ export function TimeEntryForm({
                       className={cn(
                         "flex h-9 cursor-pointer items-center justify-center rounded-md border text-xs font-semibold",
                         value.mode === mode
-                          ? "border-on-accent bg-marker text-on-accent"
+                          ? inline
+                            ? "border-ops-accent-ink bg-ops-accent-soft text-ops-accent-ink"
+                            : "border-on-accent bg-marker text-on-accent"
                           : "border-border bg-surface text-medium",
                       )}
                     >
@@ -700,7 +706,9 @@ export function TimeEntryForm({
                     className={cn(
                       "flex h-9 cursor-pointer items-center justify-center rounded-md border text-xs font-semibold",
                       value.weekdays.includes(day.value)
-                        ? "border-on-accent bg-marker text-on-accent"
+                        ? inline
+                          ? "border-ops-accent-ink bg-ops-accent-soft text-ops-accent-ink"
+                          : "border-on-accent bg-marker text-on-accent"
                         : "border-border bg-surface text-medium",
                     )}
                   >
@@ -977,11 +985,9 @@ export function TimeEntryForm({
           </div>
         </section>
       </form>
+  );
 
-
-      {/* Confirmação "Dia Útil em feriado" (Onda A-ext). Segue o padrão de
-          Modal do design system (mesmo componente usado pelos demais fluxos de
-          Horas). Confirmar salva; cancelar mantém o formulário aberto. */}
+  const holidayConfirm = (
       <Modal
         open={confirmHoliday}
         onClose={() => setConfirmHoliday(false)}
@@ -1032,6 +1038,47 @@ export function TimeEntryForm({
           </div>
         </div>
       </Modal>
+  );
+
+  // Inline (direcao Operational Minimal): o mesmo formulario, sem overlay. O
+  // lancamento e a acao mais repetida da tela; tirar o modal remove um passo de
+  // foco e mantem a grade visivel ao lado do que esta sendo editado. O corpo, a
+  // validacao e as acoes sao os MESMOS objetos — muda so o container.
+  if (inline) {
+    if (!open) return null;
+    return (
+      <section
+        aria-label={formTitle}
+        className={cn(quietPanel, "overflow-hidden")}
+      >
+        <header className="border-b border-border px-5 py-4">
+          <h3 className="text-sm font-semibold text-strong">{formTitle}</h3>
+          <p className="mt-0.5 text-xs text-soft">{formDescription}</p>
+        </header>
+        <div className="px-5 py-4">{formBody}</div>
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border bg-surface-muted/40 px-5 py-3">
+          {formActions}
+        </div>
+        {holidayConfirm}
+      </section>
+    );
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={formTitle}
+      description={formDescription}
+      footer={formActions}
+      // O lançamento tem muitos campos (projeto, modo, atividade, dia, 4
+      // horários, descrição, anexo). No max-w-lg padrão do Modal tudo empilha e
+      // exige rolagem; aqui a largura extra permite agrupar em seções e colocar
+      // o relógio de ponto numa única linha cronológica.
+      className="max-w-4xl"
+    >
+      {formBody}
+      {holidayConfirm}
     </Modal>
   );
 }

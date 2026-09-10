@@ -21,10 +21,17 @@ const PRECEDENCE: DayState[] = [
   "empty",
 ];
 
+/*
+ * Preenchimento das células. Usa os tokens de BLOCO (acentos vivos), não os
+ * tons semânticos de texto: `--warning` (#92400e) e `--success` (#166534) são
+ * escurecidos para ler como texto sobre os fundos `-soft`, e viram um marrom
+ * e um verde sujos quando aplicados como área. A regra é a mesma do design
+ * system — acento preenche, tom semântico escreve.
+ */
 const stateStyles: Record<DayState, string> = {
-  pending: "bg-warning",
+  pending: "bg-ops-accent",
   rejected: "bg-danger",
-  approved: "bg-success",
+  approved: "bg-flow",
   auto: "bg-brand",
   empty: "bg-surface-muted",
 };
@@ -143,8 +150,8 @@ export function MonthHeatmap({
     <div className={cn("px-5 py-4", className)}>
       <div className="overflow-x-auto">
         <div className="min-w-[560px] space-y-1.5">
-          <div className="flex items-center gap-2">
-            <span className="w-32 shrink-0" />
+          <div className="flex items-center gap-2 bg-surface">
+            <span className="sticky left-0 z-10 w-32 shrink-0 bg-inherit" />
             <div
               className="grid flex-1 gap-[3px]"
               style={{
@@ -189,7 +196,7 @@ export function MonthHeatmap({
             );
 
             const label = (
-              <span className="flex w-32 shrink-0 items-center gap-1.5 truncate text-xs text-strong">
+              <span className="sticky left-0 z-10 flex w-32 shrink-0 items-center gap-1.5 truncate bg-inherit pr-2 text-xs text-strong">
                 <span className="truncate">{row.name}</span>
                 {row.pending > 0 ? (
                   <span
@@ -202,7 +209,10 @@ export function MonthHeatmap({
 
             if (!onSelectConsultant) {
               return (
-                <div key={row.name} className="flex items-center gap-2">
+                <div
+                  key={row.name}
+                  className="flex items-center gap-2 bg-surface"
+                >
                   {label}
                   {cells}
                 </div>
@@ -220,7 +230,12 @@ export function MonthHeatmap({
                 className={cn(
                   "flex w-full items-center gap-2 rounded-md px-1 py-0.5 text-left transition-colors",
                   "outline-none focus-visible:ring-2 focus-visible:ring-brand",
-                  selected ? "bg-brand-soft" : "hover:bg-surface-muted",
+                  // Fundo explícito: o rótulo fixo herda daqui, então a cor
+                  // precisa existir (transparente deixaria as células
+                  // passarem por baixo do nome ao rolar).
+                  selected
+                    ? "bg-brand-soft"
+                    : "bg-surface hover:bg-surface-muted",
                 )}
               >
                 {label}

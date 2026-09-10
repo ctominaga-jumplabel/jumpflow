@@ -78,6 +78,25 @@
   --danger: #b91c1c;
   --danger-soft: #ffe1e2;
 
+  /*
+   * Acento da direção Operational Minimal (telas /nova). Vem do protótipo
+   * "Jump · Controle de Ponto v2.0", que usa laranja AO LADO do azul — não no
+   * lugar dele: o azul segue como link, foco e informação; o laranja marca
+   * início de seção, o dia corrente e a ação primária dessas telas.
+   *
+   * Está partido em dois pelo mesmo motivo que `--brand` / `--brand-fill`: o
+   * laranja do protótipo (#ef7e19) tem contraste 2.74 sobre branco e 2.74 com
+   * texto branco por cima — reprova AA nos dois sentidos. Então o vivo fica
+   * só para PREENCHIMENTO/marcador e o escurecido carrega texto.
+   * Verificado: ink 5.28 sobre branco, 4.83 sobre canvas, 4.65 sobre o soft;
+   * branco sobre fill 5.28 (hover 7.18).
+   */
+  --ops-accent: #ef7e19;
+  --ops-accent-ink: #ae5103;
+  --ops-accent-fill: #ae5103;
+  --ops-accent-fill-hover: #8f4102;
+  --ops-accent-soft: #fdeee0;
+
   /* Playful Ops accents — for blocks, markers and icon chips (not body text) */
   --flow: #32d583;
   --marker: #ffd43b;
@@ -129,6 +148,17 @@
   --cyan: #4dd6e6;
   --accent: #b3a0ff;
 
+  /*
+   * Operational Minimal no escuro: o ink clareia para ler sobre a superfície
+   * escura (7.95 sobre surface, 8.80 sobre canvas, 7.06 sobre o soft) e o fill
+   * escurece o suficiente para o texto branco (4.80). O `--ops-accent` vivo NÃO
+   * muda — como os demais acentos, ele é bloco/marcador, nunca texto.
+   */
+  --ops-accent-ink: #f2a35c;
+  --ops-accent-fill: #b8560a;
+  --ops-accent-fill-hover: #a34c04;
+  --ops-accent-soft: #3a2410;
+
   --background: #12161a;
   --foreground: #eef2ec;
 }
@@ -161,6 +191,11 @@
     --warning-soft: #fff0c2;
     --danger: #b91c1c;
     --danger-soft: #ffe1e2;
+    --ops-accent: #ef7e19;
+    --ops-accent-ink: #ae5103;
+    --ops-accent-fill: #ae5103;
+    --ops-accent-fill-hover: #8f4102;
+    --ops-accent-soft: #fdeee0;
     --background: #f7f5ea;
     --foreground: #111814;
   }
@@ -197,6 +232,13 @@
   --color-danger: var(--danger);
   --color-danger-soft: var(--danger-soft);
 
+  /* Operational Minimal (telas /nova) */
+  --color-ops-accent: var(--ops-accent);
+  --color-ops-accent-ink: var(--ops-accent-ink);
+  --color-ops-accent-fill: var(--ops-accent-fill);
+  --color-ops-accent-fill-hover: var(--ops-accent-fill-hover);
+  --color-ops-accent-soft: var(--ops-accent-soft);
+
   /* Playful Ops accents */
   --color-flow: var(--flow);
   --color-marker: var(--marker);
@@ -219,7 +261,7 @@
    * lendo como um objeto separado do canvas. Não substitui `--radius-card` —
    * as duas direções convivem enquanto a validação estiver em curso.
    */
-  --radius-panel: 12px;
+  --radius-panel: 16px;
 }
 
 body {

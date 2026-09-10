@@ -15,12 +15,16 @@ const variantStyles: Record<ActionVariant, string> = {
 
 /**
  * Tratamento plano (`tactile={false}`), para a direção Operational Minimal.
+ * A ação PRIMÁRIA aqui usa o acento laranja da direção; o azul continua sendo
+ * link, foco e informação, como no protótipo de referência (que mantém as duas
+ * cores: `.btn.primary` laranja e `.btn.info` azul).
  * Sem borda ink nem sombra dura: a hierarquia entre primário e secundário passa
  * a vir só do preenchimento, que é o que permite cinco botões conviverem numa
  * barra sem que todos gritem igual.
  */
 const flatVariantStyles: Record<ActionVariant, string> = {
-  primary: "border border-transparent bg-brand-fill text-white hover:bg-brand-fill-hover",
+  primary:
+    "border border-transparent bg-ops-accent-fill text-white hover:bg-ops-accent-fill-hover",
   secondary:
     "border border-border bg-surface text-medium hover:bg-surface-muted hover:text-strong",
   success:
