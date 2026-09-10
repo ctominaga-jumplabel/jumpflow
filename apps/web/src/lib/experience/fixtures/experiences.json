@@ -1,1 +1,206 @@
-{"total":2,"experiencias":[{"id":2,"slug":"governance-compass-liquid-glass","nome":"Governance Compass — Liquid Glass","descricao":"","repository_id":2,"ideia_id":null,"source_provider":"github","source_repository":"https://github.com/ctominaga-jump/jumpcompass.git","source_branch":"main","source_commit":"9d4716b57630b32789157df59b6ea7c7f10a8fdb","detected_framework":"static-html","detected_styling":["tailwind","css-variables"],"classification":["Glassmorphism","Liquid Glass","Skeuomorphic"],"status":"published","current_version":1,"preview":{"radius":"10px","styling":["tailwind","css-variables"],"swatches":[{"nome":"background","valor":"#fff"},{"nome":"border","valor":"#d8d5e6"},{"nome":"surface","valor":"rgba(113,71,232,.06)"},{"nome":"surfaceAlt","valor":"rgba(255,255,255,.02)"},{"nome":"primary","valor":"#7147E8"},{"nome":"warning","valor":"#FF7A3D"},{"nome":"text","valor":"#F3F0FF"},{"nome":"textMuted","valor":"#A9A2C6"},{"nome":"success","valor":"#15803D"},{"nome":"primaryContrast","valor":"#ffffff"}],"temGlass":true,"framework":"static-html","temSombra":true,"fontFamily":"\"Segoe UI\", system-ui, Helvetica, Arial, sans-serif","componentes":["badge","button","card","input","panel","table"],"classification":["Glassmorphism","Liquid Glass","Skeuomorphic"]},"origem":"manual","created_by":null,"criado_em":"2026-09-10T01:06:49.969014+00:00","atualizado_em":"2026-09-10T01:06:49.973154+00:00","produto_titulo":null,"repositorio_nome":"GovernanceCompass","versoes":1},{"id":1,"slug":"migratemind-dark-tech-glass","nome":"MigrateMind — Dark Tech Glass","descricao":"","repository_id":1,"ideia_id":null,"source_provider":"github","source_repository":"https://github.com/ctominaga-jump/MigrateMind.git","source_branch":"feat/migrate-mcp-f4","source_commit":"c03fd18c713c5422061b5c9d085bbfda07bd67bd","detected_framework":"static-html","detected_styling":["css-variables"],"classification":["Dark Tech","Glassmorphism","Skeuomorphic"],"status":"published","current_version":1,"preview":{"radius":"8px","styling":["css-variables"],"swatches":[{"nome":"background","valor":"#2c3145"},{"nome":"border","valor":"rgba(37,225,159,0.25)"},{"nome":"success","valor":"rgba(37,225,159,0.35)"},{"nome":"text","valor":"rgba(255,255,255,0.95)"},{"nome":"primary","valor":"#04130E"},{"nome":"surface","valor":"#2c3145"},{"nome":"primaryContrast","valor":"#ffffff"},{"nome":"textMuted","valor":"rgba(255,255,255,0.62)"}],"temGlass":true,"framework":"static-html","temSombra":true,"fontFamily":"inhe","componentes":["alert","avatar","badge","button","card","input","modal","navbar","panel","select","sidebar","table","textarea","tooltip"],"classification":["Dark Tech","Glassmorphism","Skeuomorphic"]},"origem":"manual","created_by":null,"criado_em":"2026-09-10T01:06:49.783742+00:00","atualizado_em":"2026-09-10T01:06:49.795798+00:00","produto_titulo":null,"repositorio_nome":"MigrateMind","versoes":1}]}
+{
+ "total": 2,
+ "experiencias": [
+  {
+   "id": 2,
+   "slug": "governance-compass-liquid-glass",
+   "nome": "Governance Compass — Liquid Glass",
+   "descricao": "",
+   "repository_id": 2,
+   "ideia_id": null,
+   "source_provider": "github",
+   "source_repository": "https://github.com/ctominaga-jump/jumpcompass.git",
+   "source_branch": "main",
+   "source_commit": "9d4716b57630b32789157df59b6ea7c7f10a8fdb",
+   "detected_framework": "static-html",
+   "detected_styling": [
+    "tailwind",
+    "css-variables"
+   ],
+   "classification": [
+    "Glassmorphism",
+    "Liquid Glass",
+    "Skeuomorphic"
+   ],
+   "status": "published",
+   "current_version": 1,
+   "preview": {
+    "radius": "10px",
+    "styling": [
+     "tailwind",
+     "css-variables"
+    ],
+    "swatches": [
+     {
+      "nome": "background",
+      "valor": "#fff"
+     },
+     {
+      "nome": "border",
+      "valor": "#d8d5e6"
+     },
+     {
+      "nome": "surface",
+      "valor": "rgba(113,71,232,.06)"
+     },
+     {
+      "nome": "surfaceAlt",
+      "valor": "rgba(255,255,255,.02)"
+     },
+     {
+      "nome": "primary",
+      "valor": "#7147E8"
+     },
+     {
+      "nome": "warning",
+      "valor": "#FF7A3D"
+     },
+     {
+      "nome": "text",
+      "valor": "#F3F0FF"
+     },
+     {
+      "nome": "textMuted",
+      "valor": "#A9A2C6"
+     },
+     {
+      "nome": "success",
+      "valor": "#15803D"
+     },
+     {
+      "nome": "primaryContrast",
+      "valor": "#ffffff"
+     }
+    ],
+    "temGlass": true,
+    "framework": "static-html",
+    "temSombra": true,
+    "fontFamily": "\"Segoe UI\", system-ui, Helvetica, Arial, sans-serif",
+    "componentes": [
+     "badge",
+     "button",
+     "card",
+     "input",
+     "panel",
+     "table"
+    ],
+    "classification": [
+     "Glassmorphism",
+     "Liquid Glass",
+     "Skeuomorphic"
+    ]
+   },
+   "origem": "manual",
+   "created_by": null,
+   "criado_em": "2026-09-10T01:06:49.969014+00:00",
+   "atualizado_em": "2026-09-10T01:06:49.973154+00:00",
+   "produto_titulo": null,
+   "repositorio_nome": "GovernanceCompass",
+   "versoes": 1
+  },
+  {
+   "id": 1,
+   "slug": "migratemind-dark-tech-glass",
+   "nome": "MigrateMind — Dark Tech Glass",
+   "descricao": "",
+   "repository_id": 1,
+   "ideia_id": 1,
+   "source_provider": "github",
+   "source_repository": "https://github.com/ctominaga-jump/MigrateMind.git",
+   "source_branch": "feat/migrate-mcp-f4",
+   "source_commit": "c03fd18c713c5422061b5c9d085bbfda07bd67bd",
+   "detected_framework": "static-html",
+   "detected_styling": [
+    "css-variables"
+   ],
+   "classification": [
+    "Dark Tech",
+    "Glassmorphism",
+    "Skeuomorphic"
+   ],
+   "status": "published",
+   "current_version": 2,
+   "preview": {
+    "radius": "10px",
+    "styling": [
+     "css-variables"
+    ],
+    "swatches": [
+     {
+      "nome": "background",
+      "valor": "#090B15"
+     },
+     {
+      "nome": "surface",
+      "valor": "#161823"
+     },
+     {
+      "nome": "surfaceAlt",
+      "valor": "#1B1E2B"
+     },
+     {
+      "nome": "border",
+      "valor": "rgba(255,255,255,0.07)"
+     },
+     {
+      "nome": "success",
+      "valor": "#25E19F"
+     },
+     {
+      "nome": "warning",
+      "valor": "#F08A21"
+     },
+     {
+      "nome": "danger",
+      "valor": "#FB6E6E"
+     },
+     {
+      "nome": "info",
+      "valor": "#5C9DF5"
+     },
+     {
+      "nome": "text",
+      "valor": "#F4F6FA"
+     },
+     {
+      "nome": "textMuted",
+      "valor": "#AEB6C5"
+     }
+    ],
+    "temGlass": true,
+    "framework": "static-html",
+    "temSombra": true,
+    "fontFamily": "Inter, \"Segoe UI\", system-ui, sans-serif",
+    "componentes": [
+     "alert",
+     "avatar",
+     "badge",
+     "button",
+     "card",
+     "input",
+     "modal",
+     "navbar",
+     "panel",
+     "progress",
+     "select",
+     "sidebar",
+     "table",
+     "textarea",
+     "tooltip"
+    ],
+    "classification": [
+     "Dark Tech",
+     "Glassmorphism",
+     "Skeuomorphic"
+    ]
+   },
+   "origem": "analise",
+   "created_by": null,
+   "criado_em": "2026-09-10T02:30:04.580212+00:00",
+   "atualizado_em": "2026-09-10T02:30:14.606333+00:00",
+   "produto_titulo": "MigrateMind",
+   "repositorio_nome": "MigrateMind",
+   "versoes": 2
+  }
+ ]
+}
