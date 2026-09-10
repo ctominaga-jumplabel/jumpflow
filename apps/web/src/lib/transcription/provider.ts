@@ -23,8 +23,17 @@ export const TRANSCRIPTION_MODELS = {
   /** OpenAI speech-to-text (Whisper family / gpt-4o-transcribe). */
   OPENAI_WHISPER: "whisper-1",
   OPENAI_GPT4O_TRANSCRIBE: "gpt-4o-transcribe",
-  /** Google Gemini multimodal audio understanding. */
-  GEMINI_FLASH: "gemini-2.0-flash",
+  /**
+   * Google Gemini multimodal audio understanding.
+   *
+   * ATENÇÃO: modelo Gemini é alvo móvel. `gemini-2.0-flash` era o default aqui
+   * e foi DESCONTINUADO — a API passou a responder HTTP 404, que o provider
+   * traduzia num `NO_RESULT` genérico ("Nenhuma transcrição disponível"), como
+   * se fosse áudio ruim. Ao trocar, valide contra a lista real da chave
+   * (`GET /v1beta/models`) e teste com áudio de verdade: `gemini-3.5-transcribe`
+   * parece o candidato óbvio pelo nome, mas devolve texto VAZIO neste formato.
+   */
+  GEMINI_FLASH: "gemini-3.8-flash",
 } as const;
 
 export type TranscriptionModel =
@@ -173,7 +182,7 @@ interface GeminiResponse {
  * instructing a verbatim pt-BR transcription, and reads back
  * `candidates[0].content.parts[*].text`. Reads the key from `GOOGLE_API_KEY`
  * (or `GEMINI_API_KEY`) and the model from `GEMINI_TRANSCRIPTION_MODEL` (default
- * `gemini-2.0-flash`). Applies a 30s AbortController timeout. Degrades honestly:
+ * `gemini-3.8-flash`). Applies a 30s AbortController timeout. Degrades honestly:
  * on ANY failure (no key, oversized inline audio, HTTP error, timeout, empty
  * candidate) it returns `null` so the caller falls back to manual typing.
  */
@@ -238,6 +247,19 @@ export class GeminiTranscriptionProvider implements TranscriptionProvider {
       );
 
       if (!response.ok) {
+        // 404 aqui quer dizer "modelo inexistente/descontinuado", NÃO "áudio
+        // ruim" — foi exatamente assim que a transcrição parou de funcionar em
+        // produção sem ninguém notar. Grita o suficiente para o próximo
+        // encerramento de modelo ser óbvio no log.
+        if (response.status === 404) {
+          console.error(
+            `[transcription] Gemini: modelo "${model}" não existe (HTTP 404). ` +
+              "Provavelmente foi descontinuado — confira GET /v1beta/models " +
+              "com a chave em uso e ajuste GEMINI_TRANSCRIPTION_MODEL ou o " +
+              "default no código.",
+          );
+          return null;
+        }
         console.error(
           `[transcription] Gemini HTTP ${response.status} ${response.statusText}`,
         );
