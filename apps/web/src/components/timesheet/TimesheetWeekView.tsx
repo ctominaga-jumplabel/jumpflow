@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, useTransition } from "react";
+import { Fragment, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   CalendarDays,
@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/SectionPanel";
 import { SectionLabel } from "@/components/ui/SectionLabel";
 import { DayStatusBanner } from "./DayStatusBanner";
+import { PeriodDayGrid } from "./PeriodDayGrid";
 import { StatTile } from "@/components/ui/StatTile";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -484,12 +485,14 @@ function PeriodOverview({
   currentWeekStart,
   onSelectWeek,
   variant = "brutal",
+  todayIso,
 }: {
   period: TimesheetPeriodOverview;
   currentWeekStart: string;
   /** Navigate to (and open) the week starting on the given Monday. */
   onSelectWeek: (mondayIso: string) => void;
   variant?: SectionPanelVariant;
+  todayIso?: string;
 }) {
   const kind = periodKind(period.days.length);
 
@@ -505,6 +508,13 @@ function PeriodOverview({
       >
         <div className="grid gap-4 px-5 py-4 lg:grid-cols-[220px_minmax(0,1fr)]">
           <PeriodSummaryColumn period={period} />
+          <div className="space-y-4">
+          <PeriodDayGrid
+            days={period.days}
+            padToWeekday
+            todayIso={todayIso}
+            onOpenWeek={onSelectWeek}
+          />
           <ul className="space-y-2">
             {weeks.map((week) => {
               const dominant = week.statuses[0] ?? "DRAFT";
@@ -543,6 +553,7 @@ function PeriodOverview({
               );
             })}
           </ul>
+          </div>
         </div>
       </SectionPanel>
     );
@@ -556,54 +567,9 @@ function PeriodOverview({
     >
       <div className="grid gap-4 px-5 py-4 lg:grid-cols-[220px_minmax(0,1fr)]">
         <PeriodSummaryColumn period={period} />
-        <div className="grid grid-cols-7 gap-1">
-          {period.days.map((day) => {
-            const dominant = day.entries[0]?.status ?? "DRAFT";
-            const entriesTitle =
-              day.entries.length > 0
-                ? day.entries
-                    .map(
-                      (entry) =>
-                        `${entry.projectName}: ${formatHours(entry.hours)} · ${entry.activityLabel} · ${entry.status}`,
-                    )
-                    .join("\n")
-                : "Sem lançamentos";
-            const title = day.holidayName
-              ? `Feriado: ${day.holidayName}\n${entriesTitle}`
-              : entriesTitle;
-            return (
-              <div
-                key={day.date}
-                title={title}
-                className={cn(
-                  "min-h-14 rounded-md border px-2 py-1 text-xs",
-                  day.totalHours > 0
-                    ? statusToneClass[dominant]
-                    : "border-border bg-surface text-soft",
-                  day.holidayName && "ring-1 ring-inset ring-warning/40",
-                )}
-              >
-                <div className="flex items-center justify-between gap-1">
-                  <span className="font-semibold">{day.date.slice(8, 10)}</span>
-                  <span className="tabular-nums">
-                    {day.totalHours > 0 ? formatHours(day.totalHours) : "-"}
-                  </span>
-                </div>
-                {day.holidayName ? (
-                  <p className="mt-1 truncate text-[10px] font-medium text-warning">
-                    Feriado
-                  </p>
-                ) : null}
-                {day.entries.length > 0 ? (
-                  <p className="mt-1 truncate text-[11px]">
-                    {day.entries[0].projectName}
-                    {day.entries.length > 1 ? ` +${day.entries.length - 1}` : ""}
-                  </p>
-                ) : null}
-              </div>
-            );
-          })}
-        </div>
+        {/* Mesma célula/detalhe do período mensal: um dia é um botão que
+            revela o que foi lançado, não um bloco com `title` no hover. */}
+        <PeriodDayGrid days={period.days} todayIso={todayIso} />
       </div>
     </SectionPanel>
   );
@@ -768,6 +734,31 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
   function dayIndexOf(date: string): number {
     return week.days.findIndex((d) => d.date === date);
   }
+
+  /**
+   * Formulário inline da direção quiet. Um único nó, montado em UM dos dois
+   * lugares (nunca nos dois): acima da grade quando é um lançamento novo,
+   * dentro da linha quando está editando. Duas instâncias simultâneas
+   * duplicariam o estado interno do form.
+   */
+  const inlineEntryForm = quiet ? (
+    <TimeEntryForm
+      inline
+      open={formOpen}
+      onClose={() => setFormOpen(false)}
+      projects={formProjects}
+      days={week.days}
+      holidays={holidays}
+      timeOff={timeOff}
+      initial={editInitial}
+      onSubmit={handleSubmitEntry}
+      onDelete={!isDemo && editingRow ? handleDeleteEntry : undefined}
+      busy={isPending}
+      attachmentsAvailable={attachmentsAvailable}
+      transcriptionAvailable={transcriptionAvailable}
+      initialAttachment={editAttachment}
+    />
+  ) : null;
 
   function openNew() {
     setEditingRow(null);
@@ -1356,12 +1347,19 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
   return (
     <div className="space-y-4">
       {isDemo ? (
-        <div className="flex items-center gap-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm font-medium text-warning">
-          <TriangleAlert aria-hidden="true" className="size-4 shrink-0" />
-          <span>
-            Modo demonstração: banco não configurado. Nada será persistido.
+        quiet ? (
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-muted px-3 py-1 text-xs font-semibold text-medium">
+            <TriangleAlert aria-hidden="true" className="size-3.5 shrink-0" />
+            Modo demonstração — nada é persistido
           </span>
-        </div>
+        ) : (
+          <div className="flex items-center gap-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm font-medium text-warning">
+            <TriangleAlert aria-hidden="true" className="size-4 shrink-0" />
+            <span>
+              Modo demonstração: banco não configurado. Nada será persistido.
+            </span>
+          </div>
+        )
       ) : null}
 
       {onBehalfOf ? (
@@ -1440,7 +1438,9 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
         </div>
       )}
 
-      {quiet ? (
+      {/* Em demo não há "hoje" a reportar (a semana é fixa) e o chip acima já
+          diz que nada é persistido — o banner só repetiria a mensagem. */}
+      {quiet && !isDemo ? (
         <DayStatusBanner
           week={week}
           todayIso={props.todayIso}
@@ -1516,6 +1516,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
             counts[status] > 0 ? (
               <StatusBadge
                 key={status}
+                pill={quiet}
                 tone={
                   status === "APPROVED"
                     ? "success"
@@ -1540,6 +1541,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
         onChange={isDemo ? setDemoFilter : undefined}
         onClear={isDemo ? () => setDemoFilter({}) : undefined}
         canExportCsv={props.canExportCsv}
+        variant={presentation}
       />
 
       {hasActiveTimesheetFilter(activeFilter) ? (
@@ -1553,6 +1555,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
         currentWeekStart={week.startDate}
         onSelectWeek={goToWeek}
         variant={presentation}
+        todayIso={props.todayIso}
       />
 
       {quiet ? (
@@ -1562,6 +1565,9 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
           Lançamentos da semana
         </SectionLabel>
       ) : null}
+
+      {/* Lançamento novo: o form abre acima da grade, que continua visível. */}
+      {quiet && formOpen && !editingRow ? inlineEntryForm : null}
 
       <SectionPanel
         id="horas-grade"
@@ -1635,7 +1641,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
                           // da grade sem precisar contar colunas.
                           quiet &&
                             day.date === props.todayIso &&
-                            "bg-brand-soft/70 text-brand-dark",
+                            "bg-ops-accent-soft text-ops-accent-ink",
                         )}
                       >
                         {day.label}
@@ -1668,7 +1674,12 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
               <tbody className="divide-y divide-border">
                 {week.rows.map((row) => {
                   const lockedDays = rowBillingLockedDays(row);
-                  return (
+                  // Direção quiet: editar expande o formulário DENTRO da
+                  // tabela, sob a linha em edição, em vez de abrir overlay. O
+                  // contexto (as outras linhas, os totais) fica à vista.
+                  const editingHere =
+                    quiet && formOpen && editingRow?.id === row.id;
+                  const rowNode = (
                     <TimeEntryRow
                       key={row.id}
                       row={row}
@@ -1687,6 +1698,20 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
                       }
                       reopenBusy={isPending}
                     />
+                  );
+                  if (!editingHere) return rowNode;
+                  return (
+                    <Fragment key={row.id}>
+                      {rowNode}
+                      <tr>
+                        <td
+                          colSpan={week.days.length + 4}
+                          className="bg-surface-muted/40 p-4"
+                        >
+                          {inlineEntryForm}
+                        </td>
+                      </tr>
+                    </Fragment>
                   );
                 })}
               </tbody>
@@ -1727,6 +1752,10 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
         )}
       </SectionPanel>
 
+      {/* Modal: tratamento clássico. Na direção quiet o MESMO formulário é
+          montado inline (acima da grade para um lançamento novo, dentro da
+          linha ao editar) — ver `entryForm` e o corpo da tabela. */}
+      {quiet ? null : (
       <TimeEntryForm
         open={formOpen}
         onClose={() => setFormOpen(false)}
@@ -1742,6 +1771,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
         transcriptionAvailable={transcriptionAvailable}
         initialAttachment={editAttachment}
       />
+      )}
 
       <Modal
         open={defaultOpen}

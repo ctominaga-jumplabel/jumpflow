@@ -59,12 +59,17 @@ export const tactileButton =
  * ───────────────────────────────────────────────────────────────────────── */
 
 /**
- * Painel "quiet": hairline de 1px, sem sombra dura, raio maior. Contraparte
- * calma de `brutalBorder + brutalShadow` para telas densas de operação, onde
- * a moldura forte compete com o dado.
+ * Painel "quiet": hairline de 1px, raio maior e uma sombra difusa mínima —
+ * contraparte calma de `brutalBorder + brutalShadow` para telas densas de
+ * operação, onde a moldura forte compete com o dado. A sombra é o que separa o
+ * painel do canvas sem precisar de borda pesada.
+ *
+ * `overflow-hidden` é necessário, não estético: esses painéis carregam tabelas
+ * de largura total, e sem ele o canto da primeira célula do cabeçalho vaza por
+ * fora do raio.
  */
 export const quietPanel =
-  "rounded-[var(--radius-panel)] border border-border bg-surface";
+  "overflow-hidden rounded-[var(--radius-panel)] border border-border bg-surface shadow-[0_1px_2px_rgba(17,24,20,0.04),0_6px_20px_-12px_rgba(17,24,20,0.10)]";
 
 /**
  * Micro-rótulo de campo/coluna: caixa alta com tracking, um passo abaixo do

@@ -22,7 +22,7 @@ export function SectionLabel({ children, aside, className }: SectionLabelProps) 
     <div className={cn("flex items-baseline gap-2.5", className)}>
       <span
         aria-hidden="true"
-        className="font-mono text-sm font-semibold tracking-tight text-brand"
+        className="font-mono text-sm font-semibold tracking-tight text-ops-accent-ink"
       >
         &gt;&gt;&gt;
       </span>

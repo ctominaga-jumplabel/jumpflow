@@ -1,8 +1,12 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { usePathname } from "next/navigation";
 import { ChevronDown } from "lucide-react";
-import { SectionPanel } from "@/components/ui/SectionPanel";
+import {
+  SectionPanel,
+  type SectionPanelVariant,
+} from "@/components/ui/SectionPanel";
 import { ActionButton } from "@/components/ui/ActionButton";
 import { ExportExcelButton } from "@/components/ui/ExportExcelButton";
 import { focusRing } from "@/lib/styles";
@@ -51,7 +55,7 @@ const labelClass = "mb-1 block text-xs font-semibold text-medium";
 
 export interface TimesheetFiltersProps {
   /**
-   * "db": a plain GET form to `/app/horas` — the server reads `searchParams`
+   * "db": a plain GET form to a rota atual — o servidor lê `searchParams`
    * and the filtered `week` comes back already reduced (query string is the
    * source of truth). "demo": controlled inputs that call `onChange`/`onClear`
    * so the local state applies the SAME filters client-side.
@@ -72,6 +76,8 @@ export interface TimesheetFiltersProps {
    * users (no role beyond CONSULTANT); decided on the server.
    */
   canExportCsv?: boolean;
+  /** Tratamento visual, herdado da tela que renderiza os filtros. */
+  variant?: SectionPanelVariant;
 }
 
 /**
@@ -88,7 +94,18 @@ export function TimesheetFilters({
   onChange,
   onClear,
   canExportCsv = false,
+  variant = "brutal",
 }: TimesheetFiltersProps) {
+  const quiet = variant === "quiet";
+  /*
+   * O submit precisa voltar para a ROTA ATUAL. Com `action="/app/horas"` fixo,
+   * aplicar um filtro em `/app/horas/nova` jogava o usuário para a tela
+   * clássica — o filtro funcionava e a direção visual trocava sozinha.
+   */
+  // Fallback para a rota clássica quando não há contexto de router (teste
+  // unitário, render fora do App Router): preserva o comportamento anterior
+  // em vez de emitir um form sem `action`.
+  const routePath = usePathname() ?? "/app/horas";
   const isDemo = mode === "demo";
 
   // Distinct clients in the consultant's project scope, for the Cliente filter.
@@ -450,17 +467,18 @@ export function TimesheetFilters({
             type="button"
             variant="secondary"
             size="sm"
+            tactile={!quiet}
             onClick={onClear}
           >
             Limpar
           </ActionButton>
         ) : (
           <>
-            <ActionButton type="submit" variant="primary" size="sm">
+            <ActionButton type="submit" variant="primary" size="sm" tactile={!quiet}>
               Aplicar filtros
             </ActionButton>
             <a
-              href={`/app/horas?semana=${weekStart}`}
+              href={`${routePath}?semana=${weekStart}`}
               className={cn(
                 "inline-flex h-8 items-center rounded-md border border-border bg-surface px-3 text-xs font-semibold text-medium hover:bg-surface-muted",
                 focusRing,
@@ -499,13 +517,14 @@ export function TimesheetFilters({
 
   return (
     <SectionPanel
+      variant={variant}
       title="Filtros"
       description="Reduza a semana por status, projeto, atividade e cobrança."
     >
       {isDemo ? (
         <div className="px-5 py-4">{content}</div>
       ) : (
-        <form method="get" action="/app/horas" className="px-5 py-4">
+        <form method="get" action={routePath} className="px-5 py-4">
           {/* The week stays the primary unit: preserve it on every apply. */}
           <input type="hidden" name="semana" value={weekStart} />
           {content}

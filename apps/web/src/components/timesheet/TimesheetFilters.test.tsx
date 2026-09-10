@@ -1,6 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { TimesheetFilters } from "./TimesheetFilters";
+
+/**
+ * `usePathname` controla para ONDE o form GET e o "Limpar" apontam. O default
+ * `null` reproduz o render sem contexto de router (o fallback para a rota
+ * clássica); os testes de rota trocam o valor.
+ */
+const pathnameMock = vi.fn<() => string | null>(() => null);
+vi.mock("next/navigation", () => ({
+  usePathname: () => pathnameMock(),
+}));
 import type { TimesheetFilter } from "@/lib/timesheet/filters";
 
 /**
@@ -209,6 +219,28 @@ describe("TimesheetFilters (db mode) — form and clear", () => {
       'input[type="hidden"][name="semana"]',
     ) as HTMLInputElement | null;
     expect(hidden?.value).toBe("2026-06-08");
+  });
+
+  /*
+   * Regressão: com `/app/horas` fixo no `action` e no href do "Limpar",
+   * aplicar ou limpar um filtro em `/app/horas/nova` devolvia o usuário para a
+   * tela clássica — o filtro funcionava e o tratamento visual trocava sozinho
+   * no meio da validação lado a lado. Os dois destinos seguem a rota atual.
+   */
+  it("keeps the user on the current route when filtering from /nova", () => {
+    pathnameMock.mockReturnValue("/app/horas/nova");
+    try {
+      const { container } = renderDb({ status: "DRAFT" }, "2026-06-08");
+      expect(container.querySelector("form")?.getAttribute("action")).toBe(
+        "/app/horas/nova",
+      );
+      expect(screen.getByRole("link", { name: /^Limpar$/ })).toHaveAttribute(
+        "href",
+        "/app/horas/nova?semana=2026-06-08",
+      );
+    } finally {
+      pathnameMock.mockReturnValue(null);
+    }
   });
 
   it("points Clear at the current week with no other params", () => {

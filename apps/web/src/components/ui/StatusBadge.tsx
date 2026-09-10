@@ -24,6 +24,12 @@ export interface StatusBadgeProps {
    */
   strong?: boolean;
   /**
+   * Forma de pílula (`rounded-full`) em vez do retângulo arredondado padrão.
+   * Usada pela direção Operational Minimal, onde a etiqueta de situação é
+   * pílula. Puramente visual — o tom e o texto não mudam.
+   */
+  pill?: boolean;
+  /**
    * Optional leading icon. Status must never rely on color alone (WCAG 1.4.1):
    * the badge text already carries the meaning, and an icon can reinforce it.
    * Purely additive — existing consumers that pass icons inside `children`
@@ -38,6 +44,7 @@ export interface StatusBadgeProps {
 export function StatusBadge({
   tone = "neutral",
   strong = false,
+  pill = false,
   icon,
   children,
   className,
@@ -45,7 +52,8 @@ export function StatusBadge({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-semibold",
+        "inline-flex items-center gap-1.5 border px-2 py-0.5 text-xs font-semibold",
+        pill ? "rounded-full px-2.5" : "rounded-md",
         toneStyles[tone],
         strong &&
           "border-2 border-ink shadow-[2px_2px_0_0_var(--color-ink)]",

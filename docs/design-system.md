@@ -30,19 +30,36 @@ As duas rotas de cada par renderizam **o mesmo componente**, com os mesmos dados
 
 O que a direcao quiet muda:
 
-- Moldura: hairline de 1px e raio `--radius-panel` (12px) no lugar da borda ink de 2px + sombra dura.
+- Moldura: hairline de 1px, raio `--radius-panel` (16px) e sombra difusa minima no lugar da borda ink de 2px + sombra dura. O painel leva `overflow-hidden` porque carrega tabela de largura total.
 - Cabecalho de painel: opcional. O titulo sai de dentro do painel e vira `SectionLabel` acima dele.
 - Numeros de tempo em `font-mono` (`opsNum`), micro-rotulos em caixa alta com tracking (`opsLabel`).
-- KPI sem caixa (`StatTile`) no lugar do `MetricCard`; contagem de fila como `CounterPill`.
-- Botoes planos (`ActionButton tactile={false}`).
-- Aprovacoes ganha `MonthHeatmap` (panorama consultor x dia) e filtros em disclosure fechado.
-- Horas ganha `DayStatusBanner` (estado de hoje em uma frase) e destaque da coluna do dia corrente.
+- KPI sem caixa (`StatTile`) no lugar do `MetricCard`; contagem de fila como `CounterPill`; etiquetas e chips em formato de pilula (`StatusBadge pill`, `FilterChip tactile={false}`).
+- Botoes planos (`ActionButton tactile={false}`), com a acao primaria no acento laranja.
+- Aprovacoes ganha `MonthHeatmap` (panorama consultor x dia, coluna de nomes fixa no scroll) e filtros em disclosure fechado.
+- Horas ganha `DayStatusBanner` (estado de hoje em uma frase), destaque da coluna do dia corrente e o formulario de lancamento INLINE (`TimeEntryForm inline`) no lugar do modal.
+
+### Acento Operational Minimal (laranja)
+
+O protótipo "Jump · Controle de Ponto v2.0" usa laranja **ao lado** do azul, nao no lugar dele: `.btn.primary` laranja, `.btn.info` azul, e um ocre separado para pendencia. Isso resolveu o impasse que mantinha o laranja fora — nao e preciso trocar a cor de acao do produto.
+
+Tokens: `--ops-accent` (preenchimento/marcador), `--ops-accent-ink` (texto/icone), `--ops-accent-fill` / `--ops-accent-fill-hover` (fundo de botao com texto branco), `--ops-accent-soft` (tinte).
+
+O laranja esta partido em dois pelo mesmo motivo que `--brand` / `--brand-fill`: o `#ef7e19` do prototipo da 2.74 de contraste sobre branco E 2.74 com texto branco por cima — reprova AA nos dois sentidos. Medicoes do prototipo inteiro, para referencia de quem for adotar mais coisas de la:
+
+| par | ratio | AA |
+| --- | --- | --- |
+| branco sobre o botao laranja `#EF7E19` | 2.74 | reprova |
+| laranja como texto/link | 2.48–2.74 | reprova |
+| ocre de pendencia sobre seu fundo | 2.89 | reprova |
+| `ink-faint` `#9A9FA5` (micro-rotulos) | 2.67 | reprova |
+| ok / approved / danger sobre fundos soft | 3.69–4.16 | so texto grande |
+
+Regra pratica, ja aplicada: **acento preenche, tom semantico escreve.** As celulas do `MonthHeatmap` usam `--ops-accent` / `--flow` (acentos vivos), nao `--warning` / `--success`, que sao tons de TEXTO escurecidos e viram um marrom/verde sujos como area.
 
 O que a direcao quiet **nao** muda, de proposito:
 
-- A cor de acao continua `--brand` (azul). A referencia usa laranja, mas la o laranja e ao mesmo tempo CTA e "pendente" — no JumpFlow pendencia ja e ambar. Trocar as duas coisas de uma vez impediria atribuir o resultado da validacao a uma causa. Decisao em aberto.
 - A sidebar continua clara. Ela e do shell, nao da tela: uma sidebar escura valeria para as duas rotas do par e destruiria a comparacao.
-- O lancamento continua em modal (`TimeEntryForm`). O formulario inline da referencia exigiria reescrever a validacao do form; decisao em aberto.
+- A tipografia continua Geist. O prototipo usa Sora como display; uma terceira familia nao se paga.
 
 Regra para quem for mexer nessas telas: **nao "corrigir" as rotas `/nova` para o tratamento Playful Ops**. Elas estao assim de proposito ate a direcao ser decidida. Quando for, a rota perdedora, o `ViewSwitch` e a prop `presentation` saem juntos, e esta secao e substituida pela direcao vencedora.
 

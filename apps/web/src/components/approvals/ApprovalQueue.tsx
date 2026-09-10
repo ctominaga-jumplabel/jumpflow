@@ -718,12 +718,22 @@ export function ApprovalQueue({
   return (
     <div className="space-y-4">
       {demoBanner ? (
-        <div className="flex items-center gap-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm font-medium text-warning">
-          <TriangleAlert aria-hidden="true" className="size-4 shrink-0" />
-          <span>
-            Modo demonstração: banco não configurado. Nada será persistido.
+        quiet ? (
+          // Chip em vez de faixa: o aviso é permanente enquanto não há banco,
+          // e uma faixa de largura total ocupando o topo a cada render vira
+          // ruído. O texto é o mesmo — o peso é que muda.
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-muted px-3 py-1 text-xs font-semibold text-medium">
+            <TriangleAlert aria-hidden="true" className="size-3.5 shrink-0" />
+            Modo demonstração — nada é persistido
           </span>
-        </div>
+        ) : (
+          <div className="flex items-center gap-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm font-medium text-warning">
+            <TriangleAlert aria-hidden="true" className="size-4 shrink-0" />
+            <span>
+              Modo demonstração: banco não configurado. Nada será persistido.
+            </span>
+          </div>
+        )
       ) : null}
 
       {quiet ? (
@@ -753,6 +763,7 @@ export function ApprovalQueue({
             key={f.value}
             label={f.label}
             active={kind === f.value}
+            tactile={!quiet}
             onClick={() => setKind(f.value)}
           />
         ))}
@@ -970,6 +981,7 @@ export function ApprovalQueue({
                 <ActionButton
                   variant="secondary"
                   size="sm"
+                  tactile={!quiet}
                   disabled={
                     filters.status === "ALL" &&
                     !filters.client &&
@@ -1008,12 +1020,14 @@ export function ApprovalQueue({
             count={pending.length}
             active={tab === "PENDING"}
             onClick={() => switchTab("PENDING")}
+            tactile={!quiet}
           />
           <FilterChip
             label="Histórico"
             count={history.length}
             active={tab === "HISTORY"}
             onClick={() => switchTab("HISTORY")}
+            tactile={!quiet}
           />
         </div>
 
@@ -1080,6 +1094,7 @@ export function ApprovalQueue({
                 <ActionButton
                   variant="secondary"
                   size="sm"
+                  tactile={!quiet}
                   icon={ListChecks}
                   disabled={isPending}
                   onClick={toggleAllVisible}
@@ -1090,6 +1105,7 @@ export function ApprovalQueue({
                   <ActionButton
                     variant="secondary"
                     size="sm"
+                    tactile={!quiet}
                     icon={Undo2}
                     disabled={isPending || selectedItems.length === 0}
                     onClick={() => decideMany("REOPEN")}
@@ -1100,6 +1116,7 @@ export function ApprovalQueue({
                 <ActionButton
                   variant="success"
                   size="sm"
+                  tactile={!quiet}
                   icon={Check}
                   disabled={isPending || selectedItems.length === 0}
                   onClick={() => decideMany("APPROVED")}
@@ -1109,6 +1126,7 @@ export function ApprovalQueue({
                 <ActionButton
                   variant="danger"
                   size="sm"
+                  tactile={!quiet}
                   icon={X}
                   disabled={isPending || selectedItems.length === 0}
                   onClick={() => decideMany("REJECTED")}
@@ -1416,11 +1434,11 @@ function ApprovalRow({
               >
                 {item.consultantName}
               </p>
-              <StatusBadge tone={isExpense ? "warning" : "info"}>
+              <StatusBadge pill={quiet} tone={isExpense ? "warning" : "info"}>
                 {isExpense ? "Despesa" : "Horas"}
               </StatusBadge>
               {isExpense && item.stage ? (
-                <StatusBadge tone="neutral">
+                <StatusBadge pill={quiet} tone="neutral">
                   Etapa: {approvalStageLabels[item.stage]}
                 </StatusBadge>
               ) : null}
@@ -1458,6 +1476,7 @@ function ApprovalRow({
               <ActionButton
                 variant="success"
                 size={quiet ? "md" : "sm"}
+                tactile={!quiet}
                 icon={Check}
                 disabled={busy}
                 onClick={handleApprove}
@@ -1467,6 +1486,7 @@ function ApprovalRow({
               <ActionButton
                 variant="danger"
                 size={quiet ? "md" : "sm"}
+                tactile={!quiet}
                 icon={X}
                 disabled={busy}
                 aria-expanded={rejectOpen}
@@ -1516,6 +1536,7 @@ function ApprovalRow({
             <ActionButton
               variant="danger"
               size="sm"
+              tactile={!quiet}
               icon={X}
               disabled={busy}
               onClick={confirmReject}
@@ -1525,6 +1546,7 @@ function ApprovalRow({
             <ActionButton
               variant="secondary"
               size="sm"
+              tactile={!quiet}
               disabled={busy}
               onClick={cancelReject}
             >
@@ -1718,6 +1740,7 @@ function ApprovalRow({
             <ActionButton
               variant="secondary"
               size="sm"
+              tactile={!quiet}
               disabled={busy}
               onClick={cancelNonBillable}
             >
@@ -1726,6 +1749,7 @@ function ApprovalRow({
             <ActionButton
               variant="primary"
               size="sm"
+              tactile={!quiet}
               icon={Check}
               disabled={busy}
               onClick={confirmNonBillable}
