@@ -15,6 +15,37 @@ Usar o portal da Jump como base de marca, mas nao como copia direta de layout. O
 - Fragmentos reutilizaveis em `apps/web/src/lib/styles.ts`: `brutalBorder`, `brutalShadow`, `brutalShadowSm`, `brutalShadowPressed`, `tactileButton`, alem de `focusRing` e `focusRingInput`.
 - Aplicar borda forte + sombra dura apenas em elementos de alto valor; nunca em linhas de tabela, itens de lista ou campos de formulario.
 
+### Direcao alternativa em validacao: Operational Minimal
+
+> Status: **em validacao lado a lado**, nao aprovada. Playful Ops continua sendo a direcao padrao do produto.
+
+A partir de referencias funcionais trazidas pelo time, existe um segundo tratamento visual servido em rotas paralelas, para o usuario comparar em uso real:
+
+| Tela | Playful Ops (padrao) | Operational Minimal (validacao) |
+| --- | --- | --- |
+| Horas | `/app/horas` | `/app/horas/nova` |
+| Aprovacoes | `/app/aprovacoes` | `/app/aprovacoes/nova` |
+
+As duas rotas de cada par renderizam **o mesmo componente**, com os mesmos dados, os mesmos guards e as mesmas server actions — muda apenas a prop `presentation` (`"brutal"` | `"quiet"`). Isso e deliberado: qualquer divergencia de comportamento entre as rotas contaminaria a comparacao.
+
+O que a direcao quiet muda:
+
+- Moldura: hairline de 1px e raio `--radius-panel` (12px) no lugar da borda ink de 2px + sombra dura.
+- Cabecalho de painel: opcional. O titulo sai de dentro do painel e vira `SectionLabel` acima dele.
+- Numeros de tempo em `font-mono` (`opsNum`), micro-rotulos em caixa alta com tracking (`opsLabel`).
+- KPI sem caixa (`StatTile`) no lugar do `MetricCard`; contagem de fila como `CounterPill`.
+- Botoes planos (`ActionButton tactile={false}`).
+- Aprovacoes ganha `MonthHeatmap` (panorama consultor x dia) e filtros em disclosure fechado.
+- Horas ganha `DayStatusBanner` (estado de hoje em uma frase) e destaque da coluna do dia corrente.
+
+O que a direcao quiet **nao** muda, de proposito:
+
+- A cor de acao continua `--brand` (azul). A referencia usa laranja, mas la o laranja e ao mesmo tempo CTA e "pendente" — no JumpFlow pendencia ja e ambar. Trocar as duas coisas de uma vez impediria atribuir o resultado da validacao a uma causa. Decisao em aberto.
+- A sidebar continua clara. Ela e do shell, nao da tela: uma sidebar escura valeria para as duas rotas do par e destruiria a comparacao.
+- O lancamento continua em modal (`TimeEntryForm`). O formulario inline da referencia exigiria reescrever a validacao do form; decisao em aberto.
+
+Regra para quem for mexer nessas telas: **nao "corrigir" as rotas `/nova` para o tratamento Playful Ops**. Elas estao assim de proposito ate a direcao ser decidida. Quando for, a rota perdedora, o `ViewSwitch` e a prop `presentation` saem juntos, e esta secao e substituida pela direcao vencedora.
+
 ## 2. Principios
 
 - Operacional antes de decorativo.

@@ -13,6 +13,21 @@ const variantStyles: Record<ActionVariant, string> = {
   danger: "bg-danger-soft text-danger",
 };
 
+/**
+ * Tratamento plano (`tactile={false}`), para a direção Operational Minimal.
+ * Sem borda ink nem sombra dura: a hierarquia entre primário e secundário passa
+ * a vir só do preenchimento, que é o que permite cinco botões conviverem numa
+ * barra sem que todos gritem igual.
+ */
+const flatVariantStyles: Record<ActionVariant, string> = {
+  primary: "border border-transparent bg-brand-fill text-white hover:bg-brand-fill-hover",
+  secondary:
+    "border border-border bg-surface text-medium hover:bg-surface-muted hover:text-strong",
+  success:
+    "border border-success/30 bg-success-soft text-success hover:bg-success-soft/70",
+  danger: "border border-danger/30 bg-danger-soft text-danger hover:bg-danger-soft/70",
+};
+
 const sizeStyles: Record<ActionSize, string> = {
   sm: "h-8 px-3 text-xs",
   md: "h-10 px-4 text-sm",
@@ -23,6 +38,12 @@ export interface ActionButtonProps
   variant?: ActionVariant;
   size?: ActionSize;
   icon?: LucideIcon;
+  /**
+   * Acabamento Playful Ops (borda ink + sombra dura que "afunda" no clique).
+   * `false` entrega o botão plano da direção Operational Minimal. Default
+   * `true` — os consumidores existentes não mudam.
+   */
+  tactile?: boolean;
   children: ReactNode;
 }
 
@@ -35,6 +56,7 @@ export function ActionButton({
   variant = "primary",
   size = "md",
   icon: Icon,
+  tactile = true,
   children,
   className,
   type = "button",
@@ -45,9 +67,9 @@ export function ActionButton({
       type={type}
       className={cn(
         "inline-flex items-center justify-center gap-2 rounded-md font-semibold disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none",
-        tactileButton,
+        tactile ? tactileButton : "transition-colors",
         focusRing,
-        variantStyles[variant],
+        tactile ? variantStyles[variant] : flatVariantStyles[variant],
         sizeStyles[size],
         className,
       )}

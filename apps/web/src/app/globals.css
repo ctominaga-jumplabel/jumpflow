@@ -212,6 +212,14 @@
 
   /* Low radius, premium-by-finish */
   --radius-card: 8px;
+  /*
+   * Raio dos painéis "quiet" (direção Operational Minimal, telas /nova de
+   * Horas e Aprovações). Maior que `--radius-card` de propósito: sem a borda
+   * ink de 2px e sem a sombra dura, o painel precisa do raio para continuar
+   * lendo como um objeto separado do canvas. Não substitui `--radius-card` —
+   * as duas direções convivem enquanto a validação estiver em curso.
+   */
+  --radius-panel: 12px;
 }
 
 body {
