@@ -17,13 +17,19 @@ import {
 import { ActionButton } from "@/components/ui/ActionButton";
 import { ExportExcelButton } from "@/components/ui/ExportExcelButton";
 import { Modal } from "@/components/ui/Modal";
-import { SectionPanel } from "@/components/ui/SectionPanel";
+import {
+  SectionPanel,
+  type SectionPanelVariant,
+} from "@/components/ui/SectionPanel";
+import { SectionLabel } from "@/components/ui/SectionLabel";
+import { CounterPill } from "@/components/ui/CounterPill";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import { MonthHeatmap } from "./MonthHeatmap";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { FilterChip } from "@/components/ui/FilterChip";
 import { FeedbackBanner, useFeedback } from "@/components/ui/Feedback";
 import { cn } from "@/lib/utils";
-import { focusRing, focusRingInput } from "@/lib/styles";
+import { focusRing, focusRingInput, opsLabel, opsNum } from "@/lib/styles";
 import { formatCurrency, formatHours } from "@/lib/format";
 import {
   attachBillableJustificationFile,
@@ -183,6 +189,16 @@ export interface ApprovalQueueProps {
    * não faturável pode ser oferecido no detalhe. Absent/false ⇒ só o motivo textual.
    */
   billableAttachmentsAvailable?: boolean;
+  /**
+   * Tratamento visual. `brutal` (padrão) é a tela clássica em `/app/aprovacoes`.
+   * `quiet` é a direção Operational Minimal servida em `/app/aprovacoes/nova`,
+   * em validação lado a lado.
+   *
+   * Só a MOLDURA muda: filtros, escopo por papel, server actions, auditoria e
+   * regras de decisão são exatamente os mesmos objetos nos dois modos — é o que
+   * torna a comparação um teste de visual, e não de produto.
+   */
+  presentation?: SectionPanelVariant;
 }
 
 const STATUS_VALUES: ReadonlySet<StatusFilter> = new Set(
@@ -256,7 +272,9 @@ export function ApprovalQueue({
   reportFilterOptions,
   canEditBillable = false,
   billableAttachmentsAvailable = false,
+  presentation = "brutal",
 }: ApprovalQueueProps) {
+  const quiet = presentation === "quiet";
   // Local decisions apply only to mock items; db items refresh via the server.
   // PENDING here is a reopen (a decided item sent back to the pending queue).
   const [mockDecisions, setMockDecisions] = useState<
@@ -371,6 +389,43 @@ export function ApprovalQueue({
   }, [demoBanner, kind, filters]);
 
   const counts = useMemo(() => summarizeApprovals(filtered), [filtered]);
+
+  /**
+   * Mês do mapa. Vem do início do período filtrado (que por padrão já é a
+   * competência vigente, QW-1), então navegar o período move o mapa junto — não
+   * há um segundo seletor de mês competindo com o filtro de data.
+   */
+  const heatmapMonth = useMemo(() => {
+    const source = filters.startDate || new Date().toISOString().slice(0, 10);
+    return source.slice(0, 7);
+  }, [filters.startDate]);
+
+  const heatmapMonthLabel = useMemo(() => {
+    const [year, month] = heatmapMonth.split("-").map(Number);
+    if (!year || !month) return heatmapMonth;
+    return new Date(year, month - 1, 1).toLocaleDateString("pt-BR", {
+      month: "long",
+      year: "numeric",
+    });
+  }, [heatmapMonth]);
+
+  /**
+   * Quantos filtros de conteúdo estão ativos. O período fica de fora de
+   * propósito: ele SEMPRE tem valor (default = mês vigente), então contá-lo
+   * marcaria a tela como filtrada o tempo todo e o aviso perderia o sentido.
+   */
+  const activeFilterCount = useMemo(
+    () =>
+      [
+        filters.status !== "ALL",
+        Boolean(filters.client),
+        Boolean(filters.project),
+        Boolean(filters.consultant),
+        Boolean(filters.activity),
+      ].filter(Boolean).length,
+    [filters],
+  );
+  const hasActiveFilters = activeFilterCount > 0;
   const pending = useMemo(() => pendingApprovals(filtered), [filtered]);
   const history = useMemo(() => decidedApprovals(filtered), [filtered]);
 
@@ -671,12 +726,24 @@ export function ApprovalQueue({
         </div>
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-2">
-        <StatusBadge tone="warning">{counts.pending} pendentes</StatusBadge>
-        <StatusBadge tone="success">{counts.approved} aprovadas</StatusBadge>
-        <StatusBadge tone="danger">{counts.rejected} reprovadas</StatusBadge>
-        <StatusBadge tone="info">{counts.automatic} automáticas</StatusBadge>
-      </div>
+      {quiet ? (
+        // A contagem é a primeira leitura do gestor; na direção quiet ela sai
+        // do tamanho de etiqueta de tabela e vira pílula com o número em
+        // escala. Mesmos dados, mesma origem (`summarizeApprovals`).
+        <div className="flex flex-wrap items-center gap-2.5">
+          <CounterPill tone="warning" count={counts.pending} label="pendentes" />
+          <CounterPill tone="success" count={counts.approved} label="aprovadas" />
+          <CounterPill tone="danger" count={counts.rejected} label="reprovadas" />
+          <CounterPill tone="info" count={counts.automatic} label="automáticas" />
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusBadge tone="warning">{counts.pending} pendentes</StatusBadge>
+          <StatusBadge tone="success">{counts.approved} aprovadas</StatusBadge>
+          <StatusBadge tone="danger">{counts.rejected} reprovadas</StatusBadge>
+          <StatusBadge tone="info">{counts.automatic} automáticas</StatusBadge>
+        </div>
+      )}
 
       <FeedbackBanner message={feedback} />
 
@@ -691,195 +758,248 @@ export function ApprovalQueue({
         ))}
       </div>
 
-      <SectionPanel
-        title="Filtros"
-        description="Combine período, status, projeto, consultor e atividade."
+      {quiet ? (
+        // Mapa do mês: índice da fila, não substituto dela. Responde "quem está
+        // pendente e desde quando" antes de qualquer scroll; clicar numa linha
+        // aplica o MESMO filtro de consultor que o painel abaixo já expunha.
+        <section className="space-y-3">
+          <SectionLabel aside={heatmapMonthLabel}>Mapa do mês</SectionLabel>
+          <SectionPanel variant="quiet">
+            <MonthHeatmap
+              items={byKind}
+              month={heatmapMonth}
+              selectedConsultant={filters.consultant}
+              onSelectConsultant={(name) =>
+                setFilters((current) => ({ ...current, consultant: name }))
+              }
+            />
+          </SectionPanel>
+        </section>
+      ) : null}
+
+      {/* Direção quiet: os filtros saem do caminho por padrão. Eles NÃO
+          somem — o deep-link do fechamento operacional
+          (?consultant=&project=&status=) continua alimentando o mesmo
+          estado, e o disclosure abre já preenchido quando um filtro veio
+          da URL, para o gestor nunca ver uma lista filtrada sem saber por
+          quê. Fora do modo quiet, `open` fixo reproduz a tela clássica. */}
+      <details
+        open={!quiet || hasActiveFilters}
+        className={quiet ? "group" : undefined}
       >
-        <div className="grid gap-4 px-5 py-4 sm:grid-cols-2 lg:grid-cols-5">
-          <div>
-            <label htmlFor="approval-start" className="mb-1 block text-xs font-semibold text-medium">
-              Início
-            </label>
-            <input
-              id="approval-start"
-              type="date"
-              value={filters.startDate}
-              onChange={(event) =>
-                setFilters((current) => ({ ...current, startDate: event.target.value }))
-              }
-              className={cn(
-                "h-9 w-full rounded-md border border-border bg-surface px-3 text-sm text-strong",
-                focusRing,
-              )}
-            />
-          </div>
-          <div>
-            <label htmlFor="approval-end" className="mb-1 block text-xs font-semibold text-medium">
-              Fim
-            </label>
-            <input
-              id="approval-end"
-              type="date"
-              value={filters.endDate}
-              onChange={(event) =>
-                setFilters((current) => ({ ...current, endDate: event.target.value }))
-              }
-              className={cn(
-                "h-9 w-full rounded-md border border-border bg-surface px-3 text-sm text-strong",
-                focusRing,
-              )}
-            />
-          </div>
-          <div>
-            <label htmlFor="approval-status" className="mb-1 block text-xs font-semibold text-medium">
-              Status
-            </label>
-            <select
-              id="approval-status"
-              value={filters.status}
-              onChange={(event) =>
-                setFilters((current) => ({
-                  ...current,
-                  status: event.target.value as StatusFilter,
-                }))
-              }
-              className={cn(
-                "h-9 w-full rounded-md border border-border bg-surface px-3 text-sm text-strong",
-                focusRing,
-              )}
-            >
-              {STATUS_FILTERS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label htmlFor="approval-client" className="mb-1 block text-xs font-semibold text-medium">
-              Cliente
-            </label>
-            <select
-              id="approval-client"
-              value={filters.client}
-              onChange={(event) =>
-                setFilters((current) => ({ ...current, client: event.target.value }))
-              }
-              className={cn(
-                "h-9 w-full rounded-md border border-border bg-surface px-3 text-sm text-strong",
-                focusRing,
-              )}
-            >
-              <option value="">Todos</option>
-              {filterOptions.clients.map((client) => (
-                <option key={client} value={client}>
-                  {client}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label htmlFor="approval-project" className="mb-1 block text-xs font-semibold text-medium">
-              Projeto
-            </label>
-            <select
-              id="approval-project"
-              value={filters.project}
-              onChange={(event) =>
-                setFilters((current) => ({ ...current, project: event.target.value }))
-              }
-              className={cn(
-                "h-9 w-full rounded-md border border-border bg-surface px-3 text-sm text-strong",
-                focusRing,
-              )}
-            >
-              <option value="">Todos</option>
-              {filterOptions.projects.map((project) => (
-                <option key={project} value={project}>
-                  {project}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label htmlFor="approval-consultant" className="mb-1 block text-xs font-semibold text-medium">
-              Consultor
-            </label>
-            <select
-              id="approval-consultant"
-              value={filters.consultant}
-              onChange={(event) =>
-                setFilters((current) => ({ ...current, consultant: event.target.value }))
-              }
-              className={cn(
-                "h-9 w-full rounded-md border border-border bg-surface px-3 text-sm text-strong",
-                focusRing,
-              )}
-            >
-              <option value="">Todos</option>
-              {filterOptions.consultants.map((consultant) => (
-                <option key={consultant} value={consultant}>
-                  {consultant}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="sm:col-span-2 lg:col-span-4">
-            <label htmlFor="approval-activity" className="mb-1 block text-xs font-semibold text-medium">
-              Atividade
-            </label>
-            <select
-              id="approval-activity"
-              value={filters.activity}
-              onChange={(event) =>
-                setFilters((current) => ({ ...current, activity: event.target.value }))
-              }
-              className={cn(
-                "h-9 w-full rounded-md border border-border bg-surface px-3 text-sm text-strong",
-                focusRing,
-              )}
-            >
-              <option value="">Todas</option>
-              {filterOptions.activities.map((activity) => (
-                <option key={activity} value={activity}>
-                  {activity}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="flex items-end gap-2">
-            <ActionButton
-              variant="secondary"
-              size="sm"
-              disabled={
-                filters.status === "ALL" &&
-                !filters.client &&
-                !filters.project &&
-                !filters.consultant &&
-                !filters.activity &&
-                !filters.startDate &&
-                !filters.endDate
-              }
-              onClick={() => setFilters(emptyFilters)}
-            >
-              Limpar
-            </ActionButton>
-            {csvHref ? (
-              <a
-                href={csvHref}
-                className={cn(
-                  "inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-xs font-semibold text-medium hover:bg-surface-muted",
-                  focusRing,
-                )}
-              >
-                <Download aria-hidden="true" className="size-3.5" />
-                Exportar CSV
-              </a>
-            ) : null}
-            {xlsxHref ? <ExportExcelButton href={xlsxHref} /> : null}
-          </div>
-        </div>
-      </SectionPanel>
+        <summary
+          className={cn(
+            "mb-3 inline-flex cursor-pointer list-none items-center gap-2 rounded-md px-1 py-1 text-xs font-semibold text-medium hover:text-strong",
+            focusRing,
+            !quiet && "hidden",
+          )}
+        >
+          <ChevronDown
+            aria-hidden="true"
+            className="size-4 transition-transform group-open:rotate-180"
+          />
+          Filtros
+          {activeFilterCount > 0 ? (
+            <span className={cn("text-soft", opsNum)}>
+              ({activeFilterCount} ativo{activeFilterCount === 1 ? "" : "s"})
+            </span>
+          ) : null}
+        </summary>
+          <SectionPanel
+            variant={presentation}
+            title={quiet ? undefined : "Filtros"}
+            description={
+              quiet
+                ? undefined
+                : "Combine período, status, projeto, consultor e atividade."
+            }
+          >
+            <div className="grid gap-4 px-5 py-4 sm:grid-cols-2 lg:grid-cols-5">
+              <div>
+                <label htmlFor="approval-start" className="mb-1 block text-xs font-semibold text-medium">
+                  Início
+                </label>
+                <input
+                  id="approval-start"
+                  type="date"
+                  value={filters.startDate}
+                  onChange={(event) =>
+                    setFilters((current) => ({ ...current, startDate: event.target.value }))
+                  }
+                  className={cn(
+                    "h-9 w-full rounded-md border border-border bg-surface px-3 text-sm text-strong",
+                    focusRing,
+                  )}
+                />
+              </div>
+              <div>
+                <label htmlFor="approval-end" className="mb-1 block text-xs font-semibold text-medium">
+                  Fim
+                </label>
+                <input
+                  id="approval-end"
+                  type="date"
+                  value={filters.endDate}
+                  onChange={(event) =>
+                    setFilters((current) => ({ ...current, endDate: event.target.value }))
+                  }
+                  className={cn(
+                    "h-9 w-full rounded-md border border-border bg-surface px-3 text-sm text-strong",
+                    focusRing,
+                  )}
+                />
+              </div>
+              <div>
+                <label htmlFor="approval-status" className="mb-1 block text-xs font-semibold text-medium">
+                  Status
+                </label>
+                <select
+                  id="approval-status"
+                  value={filters.status}
+                  onChange={(event) =>
+                    setFilters((current) => ({
+                      ...current,
+                      status: event.target.value as StatusFilter,
+                    }))
+                  }
+                  className={cn(
+                    "h-9 w-full rounded-md border border-border bg-surface px-3 text-sm text-strong",
+                    focusRing,
+                  )}
+                >
+                  {STATUS_FILTERS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="approval-client" className="mb-1 block text-xs font-semibold text-medium">
+                  Cliente
+                </label>
+                <select
+                  id="approval-client"
+                  value={filters.client}
+                  onChange={(event) =>
+                    setFilters((current) => ({ ...current, client: event.target.value }))
+                  }
+                  className={cn(
+                    "h-9 w-full rounded-md border border-border bg-surface px-3 text-sm text-strong",
+                    focusRing,
+                  )}
+                >
+                  <option value="">Todos</option>
+                  {filterOptions.clients.map((client) => (
+                    <option key={client} value={client}>
+                      {client}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="approval-project" className="mb-1 block text-xs font-semibold text-medium">
+                  Projeto
+                </label>
+                <select
+                  id="approval-project"
+                  value={filters.project}
+                  onChange={(event) =>
+                    setFilters((current) => ({ ...current, project: event.target.value }))
+                  }
+                  className={cn(
+                    "h-9 w-full rounded-md border border-border bg-surface px-3 text-sm text-strong",
+                    focusRing,
+                  )}
+                >
+                  <option value="">Todos</option>
+                  {filterOptions.projects.map((project) => (
+                    <option key={project} value={project}>
+                      {project}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="approval-consultant" className="mb-1 block text-xs font-semibold text-medium">
+                  Consultor
+                </label>
+                <select
+                  id="approval-consultant"
+                  value={filters.consultant}
+                  onChange={(event) =>
+                    setFilters((current) => ({ ...current, consultant: event.target.value }))
+                  }
+                  className={cn(
+                    "h-9 w-full rounded-md border border-border bg-surface px-3 text-sm text-strong",
+                    focusRing,
+                  )}
+                >
+                  <option value="">Todos</option>
+                  {filterOptions.consultants.map((consultant) => (
+                    <option key={consultant} value={consultant}>
+                      {consultant}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="sm:col-span-2 lg:col-span-4">
+                <label htmlFor="approval-activity" className="mb-1 block text-xs font-semibold text-medium">
+                  Atividade
+                </label>
+                <select
+                  id="approval-activity"
+                  value={filters.activity}
+                  onChange={(event) =>
+                    setFilters((current) => ({ ...current, activity: event.target.value }))
+                  }
+                  className={cn(
+                    "h-9 w-full rounded-md border border-border bg-surface px-3 text-sm text-strong",
+                    focusRing,
+                  )}
+                >
+                  <option value="">Todas</option>
+                  {filterOptions.activities.map((activity) => (
+                    <option key={activity} value={activity}>
+                      {activity}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex items-end gap-2">
+                <ActionButton
+                  variant="secondary"
+                  size="sm"
+                  disabled={
+                    filters.status === "ALL" &&
+                    !filters.client &&
+                    !filters.project &&
+                    !filters.consultant &&
+                    !filters.activity &&
+                    !filters.startDate &&
+                    !filters.endDate
+                  }
+                  onClick={() => setFilters(emptyFilters)}
+                >
+                  Limpar
+                </ActionButton>
+                {csvHref ? (
+                  <a
+                    href={csvHref}
+                    className={cn(
+                      "inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-xs font-semibold text-medium hover:bg-surface-muted",
+                      focusRing,
+                    )}
+                  >
+                    <Download aria-hidden="true" className="size-3.5" />
+                    Exportar CSV
+                  </a>
+                ) : null}
+                {xlsxHref ? <ExportExcelButton href={xlsxHref} /> : null}
+              </div>
+            </div>
+          </SectionPanel>
+      </details>
 
       <div className="space-y-4">
         <div className="flex items-center gap-2">
@@ -923,6 +1043,7 @@ export function ApprovalQueue({
         {list.length > 0 ? (
           <SectionPanel
             id="aprovacoes-acoes"
+            variant={presentation}
             title={tab === "PENDING" ? "Decisão em massa" : "Revisão em massa"}
             description={
               tab === "PENDING"
@@ -1001,10 +1122,13 @@ export function ApprovalQueue({
 
         <SectionPanel
           id="aprovacoes-fila"
+          variant={presentation}
           title={tab === "PENDING" ? "Fila de aprovação" : "Decisões recentes"}
           description={
             tab === "PENDING"
-              ? "Lançamentos de horas e despesas aguardando decisão. Expanda uma linha para ver o detalhe e decidir."
+              ? quiet
+                ? "Lançamentos de horas e despesas aguardando decisão."
+                : "Lançamentos de horas e despesas aguardando decisão. Expanda uma linha para ver o detalhe e decidir."
               : "Aprovações e reprovações já registradas."
           }
         >
@@ -1042,6 +1166,7 @@ export function ApprovalQueue({
                   canEditBillable={canEditBillable}
                   attachmentsAvailable={billableAttachmentsAvailable}
                   onSetBillable={setBillable}
+                  presentation={presentation}
                 />
               ))}
             </ul>
@@ -1050,6 +1175,19 @@ export function ApprovalQueue({
       </div>
     </div>
   );
+}
+
+/**
+ * Iniciais para o avatar da direção quiet. Primeiro + último nome (não os dois
+ * primeiros): "Ana Paula Ferraz" vira AF, que distingue de "Ana Paula Souza" —
+ * sobrenome é o que separa homônimos numa lista de consultores.
+ */
+function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  const first = parts[0]![0] ?? "";
+  const last = parts.length > 1 ? (parts[parts.length - 1]![0] ?? "") : "";
+  return (first + last).toUpperCase();
 }
 
 interface ApprovalRowProps {
@@ -1070,6 +1208,7 @@ interface ApprovalRowProps {
     reason: string,
     file?: File,
   ) => void;
+  presentation: SectionPanelVariant;
 }
 
 /**
@@ -1096,8 +1235,16 @@ function ApprovalRow({
   canEditBillable,
   attachmentsAvailable,
   onSetBillable,
+  presentation,
 }: ApprovalRowProps) {
-  const [expanded, setExpanded] = useState(false);
+  const quiet = presentation === "quiet";
+  /**
+   * Na direção quiet o item nasce ABERTO. O detalhe (atividade, dias,
+   * justificativa anterior) é o que sustenta a decisão — mantê-lo atrás de um
+   * clique transforma cada aprovação em duas interações. O acordeão continua
+   * existindo: quem quiser densidade fecha o item.
+   */
+  const [expanded, setExpanded] = useState(quiet);
   // Inline rejection: the "Reprovar" button reveals this field; confirming
   // without a justification surfaces an inline message (never silently no-ops).
   const [rejectOpen, setRejectOpen] = useState(false);
@@ -1249,9 +1396,24 @@ function ApprovalRow({
               expanded && "rotate-180",
             )}
           />
+          {quiet ? (
+            // Iniciais: âncora visual por pessoa numa lista onde o gestor
+            // procura por consultor. Decorativa — o nome está ao lado em texto.
+            <span
+              aria-hidden="true"
+              className="grid size-8 shrink-0 place-items-center rounded-full bg-strong text-[11px] font-bold text-canvas"
+            >
+              {initialsOf(item.consultantName)}
+            </span>
+          ) : null}
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <p className="text-sm font-medium text-strong">
+              <p
+                className={cn(
+                  "font-medium text-strong",
+                  quiet ? "text-[15px]" : "text-sm",
+                )}
+              >
                 {item.consultantName}
               </p>
               <StatusBadge tone={isExpense ? "warning" : "info"}>
@@ -1295,7 +1457,7 @@ function ApprovalRow({
             <div className="flex gap-1.5">
               <ActionButton
                 variant="success"
-                size="sm"
+                size={quiet ? "md" : "sm"}
                 icon={Check}
                 disabled={busy}
                 onClick={handleApprove}
@@ -1304,7 +1466,7 @@ function ApprovalRow({
               </ActionButton>
               <ActionButton
                 variant="danger"
-                size="sm"
+                size={quiet ? "md" : "sm"}
                 icon={X}
                 disabled={busy}
                 aria-expanded={rejectOpen}
@@ -1388,9 +1550,37 @@ function ApprovalRow({
       >
         <div className="overflow-hidden">
           <div className="space-y-3 pb-4 pl-12 pr-5">
-            <dl className="grid grid-cols-2 gap-3 text-sm">
-              <div className="col-span-2">
-                <dt className="text-xs text-soft">
+            <dl
+              className={cn(
+                "grid gap-3 text-sm",
+                // Quiet: quatro colunas de rótulo/valor, como a referência. Os
+                // números que o gestor compara (horas/valor, período) sobem
+                // para cá em vez de ficarem espremidos no canto do cabeçalho.
+                quiet ? "sm:grid-cols-2 lg:grid-cols-4" : "grid-cols-2",
+              )}
+            >
+              {quiet ? (
+                <>
+                  <div>
+                    <dt className={opsLabel}>Período lançado</dt>
+                    <dd className={cn("font-medium text-strong", opsNum)}>
+                      {item.period}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className={opsLabel}>
+                      {isExpense ? "Valor" : "Horas"}
+                    </dt>
+                    <dd className={cn("font-medium text-strong", opsNum)}>
+                      {isExpense
+                        ? formatCurrency(item.amount ?? 0)
+                        : formatHours(item.hours)}
+                    </dd>
+                  </div>
+                </>
+              ) : null}
+              <div className={quiet ? undefined : "col-span-2"}>
+                <dt className={quiet ? opsLabel : "text-xs text-soft"}>
                   {isExpense ? "Descrição" : "Atividade"}
                 </dt>
                 <dd className="text-medium">{item.activitySummary}</dd>
@@ -1400,15 +1590,32 @@ function ApprovalRow({
                   a leitura da fila. Continua disponível sob demanda, no
                   relógio do cabeçalho da linha. */}
               <div>
-                <dt className="text-xs text-soft">Origem</dt>
+                <dt className={quiet ? opsLabel : "text-xs text-soft"}>
+                  Origem
+                </dt>
                 <dd className="font-medium text-strong">
                   {item.source === "db" ? "Banco" : "Demo"}
                 </dd>
               </div>
               {item.comment ? (
-                <div className="col-span-2">
-                  <dt className="text-xs text-soft">Justificativa anterior</dt>
-                  <dd className="text-medium">{item.comment}</dd>
+                <div
+                  className={
+                    quiet ? "sm:col-span-2 lg:col-span-4" : "col-span-2"
+                  }
+                >
+                  <dt className={quiet ? opsLabel : "text-xs text-soft"}>
+                    Justificativa anterior
+                  </dt>
+                  <dd
+                    className={cn(
+                      "text-medium",
+                      // A justificativa é fala do consultor: em itálico e entre
+                      // aspas ela se separa do dado do sistema à volta.
+                      quiet && "italic before:content-['“'] after:content-['”']",
+                    )}
+                  >
+                    {item.comment}
+                  </dd>
                 </div>
               ) : null}
             </dl>

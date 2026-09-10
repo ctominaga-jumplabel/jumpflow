@@ -18,7 +18,13 @@ import {
 } from "@jumpflow/character-nathalia";
 import { cn } from "@/lib/utils";
 import { ActionButton } from "@/components/ui/ActionButton";
-import { SectionPanel } from "@/components/ui/SectionPanel";
+import {
+  SectionPanel,
+  type SectionPanelVariant,
+} from "@/components/ui/SectionPanel";
+import { SectionLabel } from "@/components/ui/SectionLabel";
+import { DayStatusBanner } from "./DayStatusBanner";
+import { StatTile } from "@/components/ui/StatTile";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { FeedbackBanner, useFeedback } from "@/components/ui/Feedback";
@@ -86,7 +92,7 @@ import {
   creatableActivityOrder,
   type ActivityType,
 } from "@/lib/timesheet/types";
-import { focusRingInput } from "@/lib/styles";
+import { focusRingInput, opsLabel, opsNum } from "@/lib/styles";
 import { Modal } from "@/components/ui/Modal";
 import { TimeEntryRow } from "./TimeEntryRow";
 import { TimeEntryStatusBadge } from "./TimeEntryStatusBadge";
@@ -271,6 +277,22 @@ export interface TimesheetWeekViewProps {
    * Null/ausente = o usuário lança para si mesmo.
    */
   onBehalfOf?: { id: string; name: string } | null;
+  /**
+   * Tratamento visual. `brutal` (padrão) é a grade clássica em `/app/horas`;
+   * `quiet` é a direção Operational Minimal servida em `/app/horas/nova`.
+   *
+   * Só a moldura muda. Filtros, travas de alocação/faturamento, feriados,
+   * ausências, o formulário de lançamento e todas as server actions são os
+   * mesmos objetos nos dois modos — a validação compara visual, não produto.
+   */
+  presentation?: SectionPanelVariant;
+  /**
+   * Hoje em ISO `yyyy-mm-dd`, resolvido no servidor. Alimenta o destaque da
+   * coluna do dia e o `DayStatusBanner` da direção quiet. Server-side de
+   * propósito: `new Date()` no cliente divergiria do HTML do servidor (fuso e
+   * virada de dia) exatamente na tela onde a data é o dado.
+   */
+  todayIso?: string;
 }
 
 export interface TimesheetDefaultOption extends TimeEntryFormProject {
@@ -461,11 +483,13 @@ function PeriodOverview({
   period,
   currentWeekStart,
   onSelectWeek,
+  variant = "brutal",
 }: {
   period: TimesheetPeriodOverview;
   currentWeekStart: string;
   /** Navigate to (and open) the week starting on the given Monday. */
   onSelectWeek: (mondayIso: string) => void;
+  variant?: SectionPanelVariant;
 }) {
   const kind = periodKind(period.days.length);
 
@@ -475,6 +499,7 @@ function PeriodOverview({
     const weeks = groupPeriodWeeks(period, currentWeekStart);
     return (
       <SectionPanel
+        variant={variant}
         title="Resumo do período"
         description={`${period.startDate} a ${period.endDate} · Semanas do período`}
       >
@@ -525,6 +550,7 @@ function PeriodOverview({
 
   return (
     <SectionPanel
+      variant={variant}
       title="Resumo do período"
       description={`${period.startDate} a ${period.endDate} · Semana`}
     >
@@ -609,6 +635,8 @@ function defaultFormValue(
  */
 export function TimesheetWeekView(props: TimesheetWeekViewProps) {
   const isDemo = props.mode === "demo";
+  const presentation = props.presentation ?? "brutal";
+  const quiet = presentation === "quiet";
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
@@ -1347,28 +1375,89 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
         </div>
       ) : null}
 
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex items-center gap-3">
-          <span className="grid size-10 shrink-0 place-items-center rounded-md border-2 border-on-accent bg-marker text-on-accent shadow-[2px_2px_0_0_var(--color-ink)]">
-            <CalendarDays aria-hidden="true" className="size-5" />
-          </span>
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-base font-semibold text-strong">
+      {quiet ? (
+        // Direção quiet: o bloco de ícone com sombra dura sai, o rótulo da
+        // seção sobe para texto e os dois números que o consultor confere
+        // (feito na semana / distância da meta) ganham escala à direita. É o
+        // mesmo `total` da tela clássica — nenhum cálculo novo.
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div className="min-w-0 space-y-2">
+            <SectionLabel>Semana atual</SectionLabel>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={cn("text-sm text-medium", opsNum)}>
                 {week.label}
-              </h2>
+              </span>
               <TimeEntryStatusBadge status={week.status} />
             </div>
-            <p className="text-xs text-soft">
-              {formatHours(total)} de {formatHours(WEEKLY_TARGET)} previstas
-            </p>
+          </div>
+          <div className="flex shrink-0 items-end gap-8">
+            <StatTile
+              label="Horas na semana"
+              value={formatHours(total)}
+              hint={`meta ${formatHours(WEEKLY_TARGET)}`}
+              tone={total >= WEEKLY_TARGET ? "success" : "neutral"}
+            />
+            <StatTile
+              label="Saldo da semana"
+              value={`${total - WEEKLY_TARGET >= 0 ? "+" : "−"}${formatHours(
+                Math.abs(total - WEEKLY_TARGET),
+              )}`}
+              hint={
+                total === WEEKLY_TARGET
+                  ? "na meta"
+                  : total > WEEKLY_TARGET
+                    ? "acima da meta"
+                    : "a lançar"
+              }
+              tone={
+                total === WEEKLY_TARGET
+                  ? "success"
+                  : total > WEEKLY_TARGET
+                    ? "warning"
+                    : "neutral"
+              }
+            />
           </div>
         </div>
+      ) : (
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-center gap-3">
+            <span className="grid size-10 shrink-0 place-items-center rounded-md border-2 border-on-accent bg-marker text-on-accent shadow-[2px_2px_0_0_var(--color-ink)]">
+              <CalendarDays aria-hidden="true" className="size-5" />
+            </span>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-semibold text-strong">
+                  {week.label}
+                </h2>
+                <TimeEntryStatusBadge status={week.status} />
+              </div>
+              <p className="text-xs text-soft">
+                {formatHours(total)} de {formatHours(WEEKLY_TARGET)} previstas
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
+      {quiet ? (
+        <DayStatusBanner
+          week={week}
+          todayIso={props.todayIso}
+          holidayName={
+            props.todayIso
+              ? resolveGlobalHoliday(holidays, props.todayIso)
+              : undefined
+          }
+        />
+      ) : null}
+
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div id="horas-periodo" className="flex flex-wrap items-center gap-2">
           <ActionButton
             variant="secondary"
             size="sm"
+            tactile={!quiet}
             aria-label="Semana anterior"
             onClick={() => navigate(-1)}
           >
@@ -1377,6 +1466,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
           <ActionButton
             variant="secondary"
             size="sm"
+            tactile={!quiet}
             aria-label="Próxima semana"
             onClick={() => navigate(1)}
           >
@@ -1385,6 +1475,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
           <ActionButton
             variant="secondary"
             size="sm"
+            tactile={!quiet}
             icon={CopyPlus}
             disabled={isPending}
             onClick={openCopyModal}
@@ -1395,6 +1486,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
             <ActionButton
               variant="secondary"
               size="sm"
+              tactile={!quiet}
               icon={CalendarCheck}
               disabled={isPending || defaultOptions.length === 0}
               onClick={openDefault}
@@ -1405,7 +1497,8 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
           <ActionButton
             id="horas-novo"
             variant="primary"
-            size="sm"
+            size={quiet ? "md" : "sm"}
+            tactile={!quiet}
             icon={Plus}
             disabled={isPending}
             onClick={openNew}
@@ -1459,12 +1552,24 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
         period={periodOverview}
         currentWeekStart={week.startDate}
         onSelectWeek={goToWeek}
+        variant={presentation}
       />
+
+      {quiet ? (
+        <SectionLabel
+          aside={`${week.startDate.slice(8)}/${week.startDate.slice(5, 7)} a ${week.endDate.slice(8)}/${week.endDate.slice(5, 7)}`}
+        >
+          Lançamentos da semana
+        </SectionLabel>
+      ) : null}
 
       <SectionPanel
         id="horas-grade"
-        title="Lançamentos da semana"
-        description="Cada lançamento salvo entra em aprovação automaticamente."
+        variant={presentation}
+        title={quiet ? undefined : "Lançamentos da semana"}
+        description={
+          quiet ? undefined : "Cada lançamento salvo entra em aprovação automaticamente."
+        }
       >
         {week.rows.length === 0 ? (
           <div className="px-5 py-10">
@@ -1484,13 +1589,13 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
                 <tr className="border-b border-border">
                   <th
                     scope="col"
-                    className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-soft"
+                    className={cn("px-4 py-3 text-left", quiet ? opsLabel : "text-xs font-semibold uppercase tracking-wide text-soft")}
                   >
                     Projeto
                   </th>
                   <th
                     scope="col"
-                    className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-soft"
+                    className={cn("px-4 py-3 text-left", quiet ? opsLabel : "text-xs font-semibold uppercase tracking-wide text-soft")}
                   >
                     Atividade
                   </th>
@@ -1520,10 +1625,17 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
                               : undefined
                         }
                         className={cn(
-                          "px-2 py-3 text-center text-xs font-semibold uppercase tracking-wide text-soft",
+                          quiet ? "px-2 py-3 text-center" : "px-2 py-3 text-center text-xs font-semibold uppercase tracking-wide text-soft",
+                          quiet && opsLabel,
                           day.weekend && "bg-surface-muted/40",
                           globalHoliday && !offLabel && "bg-warning-soft/60",
                           offLabel && "bg-info-soft/60",
+                          // Coluna de hoje: na direção quiet o dia corrente é
+                          // marcado no cabeçalho, que é o que ancora a leitura
+                          // da grade sem precisar contar colunas.
+                          quiet &&
+                            day.date === props.todayIso &&
+                            "bg-brand-soft/70 text-brand-dark",
                         )}
                       >
                         {day.label}
@@ -1541,13 +1653,13 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
                   })}
                   <th
                     scope="col"
-                    className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-soft"
+                    className={cn("px-4 py-3 text-right", quiet ? opsLabel : "text-xs font-semibold uppercase tracking-wide text-soft")}
                   >
                     Total
                   </th>
                   <th
                     scope="col"
-                    className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-soft"
+                    className={cn("px-4 py-3 text-left", quiet ? opsLabel : "text-xs font-semibold uppercase tracking-wide text-soft")}
                   >
                     Status
                   </th>
@@ -1579,19 +1691,32 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
                 })}
               </tbody>
               <tfoot>
-                <tr className="border-t-2 border-ink bg-surface-muted/40 font-semibold text-strong">
+                <tr
+                  className={cn(
+                    "bg-surface-muted/40 font-semibold text-strong",
+                    quiet ? "border-t border-border" : "border-t-2 border-ink",
+                  )}
+                >
                   <td className="px-4 py-3" colSpan={2}>
                     Total da semana
                   </td>
                   {week.days.map((day, dayIndex) => (
                     <td
                       key={day.date}
-                      className="px-2 py-3 text-center tabular-nums"
+                      className={cn(
+                        "px-2 py-3 text-center",
+                        quiet ? opsNum : "tabular-nums",
+                      )}
                     >
                       {dayTotal(week, dayIndex) || "–"}
                     </td>
                   ))}
-                  <td className="px-4 py-3 text-right tabular-nums">
+                  <td
+                    className={cn(
+                      "px-4 py-3 text-right",
+                      quiet ? opsNum : "tabular-nums",
+                    )}
+                  >
                     {formatHours(total)}
                   </td>
                   <td className="px-4 py-3" />
