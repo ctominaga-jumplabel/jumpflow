@@ -253,7 +253,7 @@ export function AutoApprovalView({
         <p className="px-5 py-4 text-sm text-medium">
           As regras de aprovação automática são configuradas por projeto (aba
           Aprovação no cadastro do projeto). A automação também roda por
-          agendamento (Vercel Cron); use este botão para um disparo manual.
+          agendamento; use este botão para um disparo manual.
         </p>
       </SectionPanel>
 

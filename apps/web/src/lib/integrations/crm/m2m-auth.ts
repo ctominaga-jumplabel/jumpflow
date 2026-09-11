@@ -19,7 +19,7 @@ import { createRemoteJWKSet, jwtVerify } from "jose";
  * Environment variables:
  * - `CRM_M2M_SHARED_SECRET`     PRIMARY. Shared Bearer secret the CRM sends.
  *                               Works in ALL environments, including production.
- *                               Same value set here (Vercel) and in the CRM.
+ *                               Same value set here (Railway) and in the CRM.
  *                               Generate with `openssl rand -base64 48`.
  * - `CRM_M2M_ISSUER`            (Entra alt.) OIDC issuer to validate `iss`.
  *                               Falls back to `AUTH_MICROSOFT_ENTRA_ID_ISSUER`,

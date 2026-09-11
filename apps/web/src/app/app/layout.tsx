@@ -104,7 +104,7 @@ export default async function AppLayout({
   }
 
   // Nathal.IA master switch. Read server-side so it can be flipped at runtime
-  // (Vercel env) with no rebuild. Default OFF: the assistant does not exist —
+  // (Railway service variables) with no rebuild. Default OFF: the assistant does not exist —
   // no mount, no client bundle, no signal computation — until NATHALIA_ENABLED
   // is set to "true". Keeps the whole feature dark in prod until intentionally
   // turned on.

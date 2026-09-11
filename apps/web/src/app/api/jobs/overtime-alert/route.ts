@@ -61,5 +61,5 @@ export async function POST(request: Request) {
   }
 }
 
-// Vercel Cron triggers with a GET (no body) → previous-month default.
+// Agendadores disparam com um GET (no body) → previous-month default.
 export const GET = POST;

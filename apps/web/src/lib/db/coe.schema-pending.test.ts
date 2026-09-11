@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 /**
- * O build da Vercel roda `db:generate && build` — ele NÃO aplica migrations.
+ * O build do Railway roda `db:generate && build` — ele NÃO aplica migrations.
  * Então o código do COE pode chegar em produção antes do schema. Estes testes
  * fixam as duas metades do contrato: tabela ausente degrada com aviso honesto,
  * e QUALQUER outro erro de banco continua subindo (um incidente não pode virar

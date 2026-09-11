@@ -2,7 +2,7 @@
 
 ## 1. Decisao Arquitetural Inicial
 
-A plataforma sera iniciada como uma aplicacao fullstack em Next.js, publicada na Vercel, com PostgreSQL no Supabase e Prisma como ORM.
+A plataforma sera iniciada como uma aplicacao fullstack em Next.js, publicada no Railway (ADR17), com PostgreSQL no Supabase e Prisma como ORM.
 
 Essa decisao privilegia:
 
@@ -56,7 +56,7 @@ Decisao provisoria:
 
 ### Deploy
 
-- Vercel para frontend e backend serverless do MVP.
+- Railway para frontend e backend do MVP (ADR17; antes Vercel).
 - GitHub como origem do deploy.
 - Render futuro para API separada, workers e PostgreSQL.
 
@@ -274,7 +274,7 @@ Responsavel por:
 
 - ADR00: Nome inicial do produto sera JumpFlow, mantido facil de alterar por configuracao.
 - ADR01: MVP sera fullstack Next.js.
-- ADR02: Deploy inicial sera Vercel.
+- ADR02: Deploy inicial sera Vercel. **SUBSTITUIDO pelo ADR17** (hospedagem consolidada no Railway).
 - ADR03: Banco inicial sera Supabase Postgres.
 - ADR04: ORM sera Prisma.
 - ADR05: Docker nao sera requisito local no MVP.
@@ -287,5 +287,6 @@ Responsavel por:
 - ADR12: `EmailTransport` abstrato; transporte `console` no MVP, provider real por env. Sem acoplar a provider de email do Supabase.
 - ADR13: Provider de email real via `EMAIL_PROVIDER=resend` chamando `https://api.resend.com/emails` por `fetch` nativo, sem adicionar SDK npm. `console` permanece default e fallback (sem provider configurado ou em erro de config). Motivacao: o contrato `EmailTransport` ja isola o chamador (ADR12); `fetch` evita peso de dependencia no bundle serverless, reduz superficie de atualizacao/CVE e mantem o transporte portavel para Render. Alternativa (SDK `resend`) foi descartada por trazer ganho marginal (apenas tipos/retry) frente ao custo de acoplamento e build. Consequencia: retry/timeout/erros HTTP ficam por nossa conta no transport; tipagem da resposta e manual. Sem qualquer acoplamento a Supabase (HTTP externo puro).
 - ADR14: A idempotencia do relatorio permanece POR PERIODO (`referenceKey = "<start>_<end>"`), preservando `AutomationEmailLog @@unique(type, referenceKey)` (ADR09), e NAO por periodo+destinatarios. Motivacao: o relatorio e um artefato unico do periodo enviado a uma lista; a unidade de "ja processado" e o periodo, nao cada caixa. Trade-off: alterar a lista de destinatarios apos um envio `SENT` nao reenvia automaticamente para os novos enderecos no mesmo periodo. Mitigacao: reenvio e operacao manual/explicita; mudancas de lista valem do proximo periodo. Consequencia: contrato `EmailMessage.to` evolui para `string[]`, mas a chave de idempotencia segue independente da lista.
-- ADR15: Jobs agendados no MVP usam `crons` no `vercel.json`, autenticados pelo `Authorization: Bearer $CRON_SECRET` injetado pela Vercel (validado por `isCronAuthorized`, comparacao em tempo constante). Agenda: `auto-approval` em `*/10 * * * *` (requer plano Pro; em Hobby usar frequencia diaria/horaria) e `missing-timesheets` em `0 12 * * 1` (seg 09:00 BRT). Motivacao: zero infra adicional, reuso dos Route Handlers `/api/jobs/*` (ADR08). Trade-off: limites de duracao/frequencia do serverless e possivel sobreposicao sob runs longos — coberta pelo status-guard transacional (ADR09). O relatorio por projeto usa query agregada unica e `maxDuration=60` na route para nao estourar timeout. Caminho futuro worker/fila permanece (ADR08/secao 6).
+- ADR15 (agendamento SUBSTITUIDO pelo ADR17; o contrato dos Route Handlers e do `CRON_SECRET` continua valendo): Jobs agendados no MVP usavam `crons` no `vercel.json`, autenticados pelo `Authorization: Bearer $CRON_SECRET` injetado pela Vercel (validado por `isCronAuthorized`, comparacao em tempo constante). Agenda: `auto-approval` em `*/10 * * * *` (requer plano Pro; em Hobby usar frequencia diaria/horaria) e `missing-timesheets` em `0 12 * * 1` (seg 09:00 BRT). Motivacao: zero infra adicional, reuso dos Route Handlers `/api/jobs/*` (ADR08). Trade-off: limites de duracao/frequencia do serverless e possivel sobreposicao sob runs longos — coberta pelo status-guard transacional (ADR09). O relatorio por projeto usa query agregada unica e `maxDuration=60` na route para nao estourar timeout. Caminho futuro worker/fila permanece (ADR08/secao 6).
 - ADR16: A expansao financeira/fiscal/HR da Fase 2 e aditiva ao schema MVP. `MonthlyClosing` permanece para compatibilidade, enquanto `RevenueClosing`, `FiscalDocument`, `ConsultantPayment*`, `ProjectSaleRate`, entidades de compensacao e `IntegrationEvent` preparam os fluxos completos. Motivacao: evitar big bang de migracao e permitir telas/servicos evoluirem por dominio. Consequencia: fases seguintes devem escolher explicitamente a fonte de verdade de cada fluxo e migrar gradualmente relatorios antigos para as novas entidades.
+- ADR17: Hospedagem consolidada no **Railway**, SUBSTITUINDO ADR02 (deploy inicial na Vercel) e a parte de agendamento do ADR15. `vercel.json` foi removido do repositorio; `railway.json` e a unica config de deploy. Motivacao: `flow.jump.tec.br` ja era servido pelo Railway (`server: railway-hikari`) enquanto a Vercel apenas rebuildava em paralelo — duas plataformas para um unico alvo servido, com env duplicado e divergente (variavel ausente na Vercel nao afeta producao, o que mascara erro de configuracao). Consequencia CRITICA: os `crons` viviam SO no `vercel.json` e nao tem equivalente no Railway — os tres jobs agendados (`auto-approval` 10:00, `holiday-alert` 11:00, `missing-timesheets` seg 12:00 UTC) ficam SEM agendador ate serem recriados; ver `docs/aprovacao-automatica.md`. O disparo manual pela tela de Aprovacao Automatica segue funcionando, e os Route Handlers `/api/jobs/*` e o guard `CRON_SECRET` (ADR15) permanecem inalterados — muda apenas QUEM os chama. Nenhum codigo lia `VERCEL_*`, entao a remocao nao tem impacto funcional alem do agendamento.
