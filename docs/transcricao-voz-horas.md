@@ -31,7 +31,7 @@ Precisa das **duas pontas** (cliente + servidor):
 | `NEXT_PUBLIC_TRANSCRIPTION` | cliente | `true` (mostra o microfone) |
 | `TRANSCRIPTION_PROVIDER` | servidor | `gemini` |
 | `GOOGLE_API_KEY` (ou `GEMINI_API_KEY`) | servidor | chave do Google AI Studio |
-| `GEMINI_TRANSCRIPTION_MODEL` | servidor (opcional) | default `gemini-2.0-flash` |
+| `GEMINI_TRANSCRIPTION_MODEL` | servidor (opcional) | default `gemini-3.8-flash` — nome de modelo é alvo móvel; `gemini-2.0-flash` foi descontinuado e passou a devolver 404 |
 
 Sem `NEXT_PUBLIC_TRANSCRIPTION=true` o microfone **some** (flag off). Com o
 microfone visível mas sem provedor/credencial no servidor, a transcrição
