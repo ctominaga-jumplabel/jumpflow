@@ -1,5 +1,11 @@
 # Prompt - Rodada 4.3: Fluxo Direto de Horas e Tela de Aprovacao Automatica
 
+> **ARQUIVO HISTORICO.** Este prompt registra o que foi pedido na epoca; nao e
+> instrucao valida hoje. As mencoes a Vercel abaixo ficaram desatualizadas: a
+> hospedagem foi consolidada no **Railway** (ADR17, `docs/arquitetura.md`), a
+> conta Vercel esta bloqueada e `npx vercel deploy` nao funciona mais. O deploy
+> atual dispara no push para a `main`.
+
 Planejamento gerado em 2026-06-11 apos a identificacao de dois ajustes de
 produto:
 

@@ -221,11 +221,11 @@ Proposta inicial:
 
 #### MVP
 
-- Aplicacao Next.js publicada na Vercel.
+- Aplicacao Next.js publicada no Railway.
 - Banco PostgreSQL no Supabase.
 - Prisma como camada de acesso ao banco.
 - Desenvolvimento local sem Docker.
-- Variaveis de ambiente gerenciadas pela Vercel.
+- Variaveis de ambiente gerenciadas pelo Railway.
 - Deploy automatico a partir do GitHub.
 
 Essa escolha favorece velocidade, baixo custo inicial e menor peso na maquina local.
@@ -234,7 +234,7 @@ Essa escolha favorece velocidade, baixo custo inicial e menor peso na maquina lo
 
 - Migrar banco para PostgreSQL no Render.
 - Avaliar migracao da API para Render, caso seja necessario ter processos persistentes, jobs, workers, filas ou APIs mais longas.
-- Manter frontend na Vercel enquanto fizer sentido.
+- Manter frontend no Railway enquanto fizer sentido.
 - Separar backend apenas quando houver ganho claro de controle, escala ou manutencao.
 
 #### Cuidados para Facilitar a Migracao
@@ -289,9 +289,9 @@ Recomendacao inicial: Microsoft Entra ID se houver ambiente corporativo Microsof
 
 #### Infraestrutura
 
-- Vercel para deploy inicial da aplicacao Next.js.
+- Railway para deploy da aplicacao Next.js (ADR17; antes Vercel).
 - Supabase para banco PostgreSQL inicial.
-- GitHub Actions ou Vercel Git Integration para CI/CD inicial.
+- GitHub Actions ou a integracao Git do Railway para CI/CD.
 - Render como destino futuro para backend/API e PostgreSQL.
 - Docker nao sera requisito para desenvolvimento local no MVP.
 
@@ -452,7 +452,7 @@ Responsavel por:
 
 Responsavel por:
 
-- Vercel;
+- Railway;
 - Render;
 - pipelines;
 - ambientes;
@@ -469,7 +469,7 @@ Podemos criar skills especificas para acelerar trabalho recorrente:
 - `jump-backend`: padroes NestJS, Prisma, testes e regras de dominio.
 - `jump-frontend`: padroes React/Next, telas, componentes e UX.
 - `jump-qa`: planos de teste, Playwright e cenarios criticos.
-- `jump-devops`: Vercel, Render, CI/CD, ambientes e deploy.
+- `jump-devops`: Railway, Render, CI/CD, ambientes e deploy.
 - `jump-data-bi`: metricas, dashboards e relatorios.
 
 Essas skills podem registrar padroes da propria Jump e evitar que cada nova conversa recomece do zero.
@@ -506,7 +506,7 @@ Essas skills podem registrar padroes da propria Jump e evitar que cada nova conv
 ### DevOps
 
 - GitHub Actions ou Azure DevOps Pipelines.
-- Vercel.
+- Railway.
 - Render.
 - Supabase no MVP.
 - Sentry.
@@ -604,7 +604,7 @@ Pontos de atencao nos concorrentes:
 
 - Nome inicial da plataforma: JumpFlow.
 - O nome deve permanecer facil de alterar por configuracao.
-- Deploy inicial na Vercel.
+- Deploy no Railway.
 - Banco inicial no Supabase Postgres.
 - Migracao futura planejada para Render + PostgreSQL.
 - Docker nao sera requisito local para o MVP.

@@ -35,7 +35,7 @@ Use para:
 - modularizacao;
 - ADRs;
 - trade-offs;
-- migracao Vercel/Supabase para Render/Postgres.
+- migracao Railway/Supabase para Render/Postgres.
 
 Arquivos principais:
 
@@ -437,7 +437,7 @@ Arquivos principais:
 
 Use para:
 
-- Vercel;
+- Railway;
 - Supabase;
 - Render;
 - variaveis de ambiente;

@@ -213,8 +213,8 @@ status `SENT`). As pendentes viram **um** `NotificationFragment` → `dispatchNo
 > FEED_POST_REPLIED:{commentId}` (uma notificação por resposta).
 
 **Evolução futura (digest por janela):** para realmente agrupar reações de pessoas diferentes num
-só e-mail, a reação enfileiraria um fragmento pendente (nova tabela/estado) e um **cron** (plano
-Vercel Pro permite +crons) consolidaria por destinatário/janela antes de enviar. Foi avaliado e
+só e-mail, a reação enfileiraria um fragmento pendente (nova tabela/estado) e um **job agendado**
+consolidaria por destinatário/janela antes de enviar. Foi avaliado e
 deixado de fora desta fatia por ser desproporcional (fila persistida + job) para uma feature
 social — registrado aqui como próximo passo se o volume justificar.
 
@@ -228,6 +228,8 @@ agregação de múltiplas reações num digest, reação a comentário, fail-ope
 ## 7. Gate de deploy
 
 A migration `20260622120000_notification_engine` **ainda não foi aplicada** (esta máquina não tem
-`DATABASE_URL`). Rodar `npm run db:deploy` na base antes de mergear na `main` — o build da Vercel
-não roda migrate. O schema foi validado (`prisma validate` OK) e o código passa em lint, typecheck
-e testes.
+`DATABASE_URL`). Desde o ADR17 o **Railway aplica as migrations sozinho**: o `startCommand` é
+`npm run db:deploy && npm run start`, então `prisma migrate deploy` roda antes de o app servir
+tráfego. Aplicar manualmente antes do merge deixou de ser obrigatório; continua sendo o caminho
+quando se quer separar a janela do schema da janela do código. O schema foi validado
+(`prisma validate` OK) e o código passa em lint, typecheck e testes.

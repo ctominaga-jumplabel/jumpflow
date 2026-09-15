@@ -14,7 +14,7 @@ Escopo desta versao: Fase 0 - auditoria inicial e plano. Nenhum codigo de produt
 - Auth atual: Microsoft Entra ID preparado via Auth.js, dev mode local explicito e convites/credenciais locais para desenvolvimento. Regras de negocio permanecem desacopladas do provedor.
 - RBAC centralizado em `apps/web/src/lib/auth`, com guards de rota e roles principais: ADMIN, CONSULTANT, PROJECT_MANAGER, AREA_MANAGER, FINANCE, PEOPLE e SALES.
 - Persistencia Prisma ja cobre usuarios, roles, convites, consultores, clientes, projetos, alocacoes, horas, aprovacoes, skills, sugestoes de skill, certificados, despesas, anexos, automacoes, relatorios e auditoria.
-- Automacoes existentes: aprovacao automatica de horas, relatorio de consultores sem lancamento, Vercel cron e transporte de email console/Resend.
+- Automacoes existentes: aprovacao automatica de horas, relatorio de consultores sem lancamento, jobs agendados via HTTP (`/api/jobs/*`, sem agendador configurado desde o ADR17) e transporte de email console/Resend.
 - UI atual possui shell operacional, dashboard, launcher, horas, aprovacoes, despesas, relatorios, financeiro, consultores, projetos, skills e certificados.
 
 ### Estado funcional
@@ -54,7 +54,7 @@ Decisao da Fase 0: nao sobrescrever essas alteracoes. Esta fase adiciona apenas 
 - `jump-design-system`: Playful Ops, tokens, consistencia visual e Motion.
 - `jump-visual-identity`: direcao criativa quando houver mudanca visual ampla.
 - `jump-qa-engineer`: estrategia e cenarios de teste.
-- `jump-devops`: Vercel, Supabase, Render, env vars e observabilidade.
+- `jump-devops`: Railway, Supabase, Render, env vars e observabilidade.
 - `jump-code-reviewer`: revisao final de mudancas relevantes.
 - `jump-legacy-portal-analyst`: comparacao com portal antigo.
 - `jump-operational-launcher-agent`: launcher, atalhos e badges.

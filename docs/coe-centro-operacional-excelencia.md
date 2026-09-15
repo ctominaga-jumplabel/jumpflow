@@ -255,9 +255,13 @@ fazem.
 
 ### 7.1 Código em produção antes da migration
 
-O `buildCommand` da Vercel é `npm run db:generate && npm run build` — ele **não
-aplica migrations**. Logo o código pode chegar em produção antes do schema, e as
-tabelas do COE ainda não existirem.
+O `buildCommand` do Railway é `npm run db:generate && npm run build` — ele **não
+aplica migrations**. Quem aplica é o `startCommand`
+(`npm run db:deploy && npm run start`), que roda `prisma migrate deploy` antes de o
+app servir tráfego. Na prática o container que serve já tem o schema; se a migration
+falhar, o start falha (restart `ON_FAILURE`, 3 tentativas) em vez de servir código
+sem as tabelas do COE. O degrade abaixo continua valendo como rede de segurança para
+bases que ficaram para trás por outro caminho.
 
 Nesse estado as leituras degradam: `isCoeSchemaPending` reconhece **apenas**
 P2021 (tabela inexistente) e P2022 (coluna inexistente), devolve o estado vazio e

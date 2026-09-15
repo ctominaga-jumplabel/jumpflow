@@ -63,7 +63,7 @@ datasource db {
 ```
 
 - **DATABASE_URL** — usada pela aplicacao em runtime. No Supabase, prefira a
-  conexao **POOLED** (PgBouncer, porta `6543`), ideal para serverless/Vercel.
+  conexao **POOLED** (PgBouncer, porta `6543`), que suporta bem muitas conexoes curtas.
 - **DIRECT_URL** — usada pelo **Prisma Migrate** (DDL, shadow database). Deve
   ser a conexao **DIRETA** (porta `5432`).
 
@@ -90,7 +90,7 @@ ativo e a persistencia/RBAC/auditoria ficam inertes (ver secao 7).
    - **Transaction pooler** (6543) -> `DATABASE_URL` (acrescente
      `?pgbouncer=true`).
    - **Direct connection** (5432) -> `DIRECT_URL`.
-3. Cole ambas no `.env` (local) e nas variaveis de ambiente da Vercel.
+3. Cole ambas no `.env` (local) e nas variaveis do servico no Railway.
 4. Mantenha as regras de negocio no codigo; nao use RLS/funcoes do Supabase como
    fonte de regra (preserva a migracao para Render).
 
@@ -103,7 +103,8 @@ A primeira migration ja esta versionada em
 ### Aplicar em um banco novo
 
 ```bash
-# Aplica todas as migrations versionadas (CI/produacao/Vercel)
+# Aplica todas as migrations versionadas (CI/producao; o Railway ja roda isto
+# no `startCommand` a cada deploy)
 npm run db:deploy
 
 # OU, em desenvolvimento, criar/aplicar e regenerar o client:

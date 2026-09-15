@@ -24,7 +24,7 @@ Para toda historia relevante:
 Leia CLAUDE.md e os documentos fonte em docs/.
 Use os agentes do projeto quando fizer sentido.
 Implemente a historia [ID] do backlog MVP.
-Mantenha a solucao alinhada com Next.js, Prisma, Supabase Postgres e Vercel.
+Mantenha a solucao alinhada com Next.js, Prisma, Supabase Postgres e Railway.
 Antes de finalizar, rode validacoes possiveis e use jump-code-reviewer para revisar riscos.
 ```
 
@@ -45,7 +45,7 @@ Use o agente jump-data-modeler para propor alteracoes de schema Prisma necessari
 ### Arquitetura
 
 ```text
-Use o agente jump-architect para revisar impacto tecnico da historia [ID] e confirmar que a solucao continua migravel de Supabase/Vercel para Render/Postgres.
+Use o agente jump-architect para revisar impacto tecnico da historia [ID] e confirmar que a solucao continua migravel de Supabase/Railway para Render/Postgres.
 ```
 
 ### Implementacao

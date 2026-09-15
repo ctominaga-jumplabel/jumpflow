@@ -36,7 +36,7 @@ Use este processo em toda rodada:
 | Automacoes | `jump-workflow-automation` | Jobs, emails, SLA, calendario, notificacoes e idempotencia. |
 | Implementacao | `jump-fullstack-engineer`, `jump-frontend-ux` | Server Actions, Prisma, telas e UX. |
 | Qualidade | `jump-qa-engineer`, `jump-code-reviewer` | Testes, riscos, RBAC, auditoria e regressao. |
-| Deploy | `jump-devops` | Vercel, Supabase, migrations, env vars e release. |
+| Deploy | `jump-devops` | Railway, Supabase, migrations, env vars e release. |
 
 ## Sequencia Recomendada
 

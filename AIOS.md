@@ -232,7 +232,7 @@ PROJETO:        JumpFlow - plataforma operacional/financeira da Jump para
 STACK:          Next.js 16 (App Router, proxy.ts), React 19, TypeScript estrito,
                 Tailwind v4, motion/react, Prisma + PostgreSQL (Supabase),
                 Auth.js / NextAuth v5 + Microsoft Entra ID, Zod, Vitest.
-                Monorepo npm workspaces. Deploy Vercel; futuro Render+Postgres.
+                Monorepo npm workspaces. Deploy Railway; futuro Render+Postgres.
 
 ARQUITETURA:    Monorepo apps/web (Next) + packages (database, shared, ui).
                 Server Actions + Route Handlers; Prisma como camada de dados.
