@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { LauncherView } from "@/components/launcher/LauncherView";
 import { getCurrentUser } from "@/lib/auth/current-user";
-import { feedHomePath } from "@/lib/auth/redirects";
+import { feedHomePath, homePathFor } from "@/lib/auth/redirects";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import {
   financialSectors,
@@ -28,16 +28,19 @@ export const metadata: Metadata = { title: "Início" };
 export default async function AppIndex() {
   const user = await getCurrentUser();
 
-  // Tela inicial (`/app`) por papel (correções de navegação, 2026-07-27):
+  // Tela inicial (`/app`) por papel:
   //  - ADMIN → grade de atalhos operacional (isAdminLauncher, tem precedência);
   //  - Financeiro-exclusivo (só FINANCE) → home de 3 cards (setores);
-  //  - todos os demais (AREA_MANAGER, PM, SALES, PEOPLE, CONSULTANT e combos que
-  //    não sejam Admin nem Financeiro-exclusivo) → Feed (ou fallback Horas).
+  //  - Consultor puro → Novo Lançamento de Horas (a ação que ele vem fazer);
+  //  - Gestor de Área → Aprovações;
+  //  - demais perfis (PM, SALES, PEOPLE e combos) → Feed (ou fallback Horas).
   // `redirect()` lança internamente, então o redirect fica antes de qualquer
   // render/carga de badges. Como isExclusivelyFinance exige TODOS os papéis ==
   // FINANCE, um ADMIN+FINANCE cai na grade (Admin) sem conflito de precedência.
+  // A decisão por papel vive em `homePathFor` (pura e testável); aqui só ficam
+  // os dois perfis que RENDERIZAM uma home própria nesta rota.
   if (user && !isAdminLauncher(user) && !isExclusivelyFinance(user)) {
-    redirect(feedHomePath());
+    redirect(homePathFor(user.roles) ?? feedHomePath());
   }
 
   const firstName = user?.name.split(" ")[0] ?? "";

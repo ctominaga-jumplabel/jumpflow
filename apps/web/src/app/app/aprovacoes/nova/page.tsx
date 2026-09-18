@@ -8,7 +8,10 @@ interface AprovacoesNovaPageProps {
 }
 
 /**
- * Aprovações — tratamento Operational Minimal, em validação.
+ * Aprovações — ALIAS histórico da direção Operational Minimal.
+ *
+ * Essa direção virou o default e agora é servida em `/app/aprovacoes`; esta
+ * rota continua resolvendo apenas para não quebrar links e favoritos.
  *
  * Mesma tela de `/app/aprovacoes` (mesmo componente, mesmos dados, mesmas
  * server actions), servida com `presentation="quiet"`. O gate de rota é o

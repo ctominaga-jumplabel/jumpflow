@@ -8,12 +8,13 @@ interface AprovacoesPageProps {
 }
 
 /**
- * Aprovações — tratamento clássico (Playful Ops). A tela vive em `./screen`,
- * compartilhada com `/app/aprovacoes/nova`, para que a validação lado a lado
- * compare visual e não comportamento.
+ * Aprovações — rota principal, servindo a direção "Nova" (Operational Minimal),
+ * que passou a ser o DEFAULT. A tela vive em `./screen`, compartilhada com
+ * `/app/aprovacoes/classica` e com o alias `/app/aprovacoes/nova`, para que a
+ * validação lado a lado compare visual e não comportamento.
  */
 export default async function AprovacoesPage({
   searchParams,
 }: AprovacoesPageProps) {
-  return <AprovacoesScreen searchParams={searchParams} presentation="brutal" />;
+  return <AprovacoesScreen searchParams={searchParams} presentation="quiet" />;
 }

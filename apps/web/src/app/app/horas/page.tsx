@@ -8,10 +8,11 @@ interface HorasPageProps {
 }
 
 /**
- * Horas — tratamento clássico (Playful Ops). A tela vive em `./screen`,
- * compartilhada com `/app/horas/nova`, para que a validação lado a lado compare
- * visual e não comportamento.
+ * Horas — rota principal, servindo a direção "Nova" (Operational Minimal), que
+ * passou a ser o DEFAULT. A tela vive em `./screen`, compartilhada com
+ * `/app/horas/classica` e com o alias `/app/horas/nova`, para que a validação
+ * lado a lado compare visual e não comportamento.
  */
 export default async function HorasPage({ searchParams }: HorasPageProps) {
-  return <HorasScreen searchParams={searchParams} presentation="brutal" />;
+  return <HorasScreen searchParams={searchParams} presentation="quiet" />;
 }

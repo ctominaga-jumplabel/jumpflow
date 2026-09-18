@@ -48,11 +48,13 @@ import {
   deleteTimeEntryInputSchema,
   saveTimesheetDefaultInputSchema,
   setEntryBillableSchema,
+  batchTimeEntryInputSchema,
   timeEntryInputSchema,
   updateTimeEntryInputSchema,
   weekActionInputSchema,
   weeklyTimeEntryInputSchema,
   type ApplyTimesheetDefaultInput,
+  type BatchTimeEntryInput,
   type CopyPreviousWeekInput,
   type DecideHoursInput,
   type DeleteTimeEntryInput,
@@ -79,6 +81,7 @@ import {
 import {
   addDays,
   parseIsoDateUtc,
+  startOfUtcDay,
   toIsoDate,
   weekStartOf,
 } from "@/lib/timesheet/week";
@@ -899,6 +902,343 @@ export async function createWeeklyTimeEntries(
     revalidatePath(HORAS_PATH);
     revalidatePath(APROVACOES_PATH);
     return { ok: true, data: result };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/**
+ * Resultado agregado do lançamento em lote. Cada contador explica por que um
+ * (consultor, dia) NÃO virou lançamento — o gestor precisa enxergar o que ficou
+ * de fora sem ter de conferir a grade de cada consultor.
+ */
+export interface CreateBatchTimeEntriesResult {
+  created: number;
+  skippedExisting: number;
+  skippedOutOfAllocation: number;
+  skippedTimeOff: number;
+  skippedClosedPeriod: number;
+  skippedBillingLocked: number;
+  /**
+   * Rótulos dos consultores cujo lote falhou INTEIRO (consultor inativo/
+   * inexistente, ou erro inesperado na transação dele). Rótulo, não id: a
+   * mensagem vai direto para o gestor na tela.
+   */
+  failedConsultants: string[];
+}
+
+/**
+ * Lançamento EM LOTE (gestores): um intervalo livre De→Até, para VÁRIOS
+ * consultores de uma vez, opcionalmente incluindo finais de semana.
+ *
+ * Autorização: só ADMIN/AREA_MANAGER (canActOnBehalf). O consultor puro NÃO
+ * alcança esta action — ele continua com o lançamento diário e o semanal, que
+ * são limitados à semana visível. Essa é a fronteira do "limite semanal": ela
+ * vive no servidor, não na UI.
+ *
+ * Tolerância a falhas: o lote NÃO é tudo-ou-nada entre consultores. Cada
+ * consultor grava na SUA transação, então um consultor com a semana fechada ou
+ * sem alocação não derruba o lote dos demais — o retorno diz o que ficou de
+ * fora. Dentro de um consultor, o dia bloqueado (ausência confirmada,
+ * competência faturada, período fechado) é PULADO e contado, no mesmo espírito
+ * de `copyPreviousWeek`.
+ */
+export async function createBatchTimeEntries(
+  input: BatchTimeEntryInput,
+): Promise<ActionResult<CreateBatchTimeEntriesResult>> {
+  try {
+    ensureDatabase();
+    const user = await requireUser();
+    if (!canActOnBehalf(user)) {
+      throw new ActionError(
+        "FORBIDDEN",
+        "Apenas Gestor de Área ou Admin podem lançar horas em lote.",
+      );
+    }
+    const parsed = parseInput(batchTimeEntryInputSchema, input);
+
+    const project = await prisma.project.findUnique({
+      where: { id: parsed.projectId },
+    });
+    if (!project) {
+      throw new ActionError("NOT_FOUND", "Projeto não encontrado.");
+    }
+    if (project.status === "CLOSED") {
+      throw new ActionError(
+        "PROJECT_CLOSED",
+        "Projeto encerrado não recebe lançamentos.",
+      );
+    }
+
+    const dbUser = await requireDbUser(user);
+    const description = parsed.description.trim();
+    const clock = clockToData(parsed);
+    // Mesmo enforcement do lançamento unitário: o gestor que marca NÃO faturável
+    // precisa de justificativa, aplicada a todas as linhas do lote.
+    const billableDecision = resolveBillableDecision(
+      user,
+      parsed.activityType,
+      parsed.billable,
+      parsed.nonBillableReason,
+    );
+    const billable = billableDecision.billable;
+    const overtimeHours = overtimeHoursFor(
+      project.standardHoursPerDay,
+      parsed.activityType,
+      clock.hours,
+    );
+    const overtimeMultiplier = resolveOvertimeMultiplier(
+      project.overtimeMultiplier,
+    );
+    const regularHours = Math.round((clock.hours - overtimeHours) * 100) / 100;
+
+    // Datas do intervalo, já sem fim de semana quando a flag está desligada.
+    const rangeStart = startOfUtcDay(parseIsoDateUtc(parsed.startDate)!);
+    const rangeEnd = startOfUtcDay(parseIsoDateUtc(parsed.endDate)!);
+    const dates: Date[] = [];
+    for (
+      let cursor = rangeStart;
+      cursor.getTime() <= rangeEnd.getTime();
+      cursor = addDays(cursor, 1)
+    ) {
+      const weekday = utcIsoWeekday(cursor);
+      if (!parsed.includeWeekends && (weekday === 6 || weekday === 7)) continue;
+      dates.push(cursor);
+    }
+
+    const totals: CreateBatchTimeEntriesResult = {
+      created: 0,
+      skippedExisting: 0,
+      skippedOutOfAllocation: 0,
+      skippedTimeOff: 0,
+      skippedClosedPeriod: 0,
+      skippedBillingLocked: 0,
+      failedConsultants: [],
+    };
+    if (dates.length === 0) {
+      return { ok: true, data: totals };
+    }
+
+    // Competências já faturadas do projeto: uma consulta para o lote inteiro
+    // (sem N+1 por dia/consultor); cada dia só consulta o Set.
+    const lockedCompetences = new Set(
+      await listBillingLockedCompetenceKeys(prisma, [project.id]),
+    );
+
+    const consultantIds = [...new Set(parsed.consultantIds)];
+    for (const consultantId of consultantIds) {
+      const consultant = await findActiveConsultantById(consultantId);
+      if (!consultant) {
+        totals.failedConsultants.push(`${consultantId} (inativo ou inexistente)`);
+        continue;
+      }
+      try {
+        const counts = await prisma.$transaction(async (tx) => {
+          const local = {
+            created: 0,
+            skippedExisting: 0,
+            skippedOutOfAllocation: 0,
+            skippedTimeOff: 0,
+            skippedClosedPeriod: 0,
+            skippedBillingLocked: 0,
+          };
+          // Tudo que o intervalo precisa saber sobre este consultor é lido UMA
+          // vez e resolvido em memória por dia. Consultar alocação/ausência por
+          // dia custaria milhares de idas ao banco dentro da transação (50
+          // consultores x 92 dias) e estouraria o tempo limite dela.
+          const [existing, allocations, timeOff, periods] = await Promise.all([
+            tx.timeEntry.findMany({
+              where: {
+                consultantId: consultant.id,
+                projectId: project.id,
+                activityType: parsed.activityType,
+                date: { gte: rangeStart, lte: rangeEnd },
+              },
+              select: { date: true },
+            }),
+            tx.allocation.findMany({
+              where: {
+                consultantId: consultant.id,
+                projectId: project.id,
+                status: "ACTIVE",
+                startDate: { lte: rangeEnd },
+                OR: [{ endDate: null }, { endDate: { gte: rangeStart } }],
+              },
+              select: { id: true, startDate: true, endDate: true },
+            }),
+            parsed.activityType === "WORKDAY"
+              ? tx.consultantTimeOff.findMany({
+                  where: {
+                    consultantId: consultant.id,
+                    status: "CONFIRMED",
+                    startDate: { lte: rangeEnd },
+                    endDate: { gte: rangeStart },
+                  },
+                  select: { startDate: true, endDate: true },
+                })
+              : Promise.resolve([]),
+            tx.timesheetPeriod.findMany({
+              where: {
+                consultantId: consultant.id,
+                startDate: { lte: rangeEnd },
+                endDate: { gte: rangeStart },
+              },
+              select: { id: true, startDate: true, status: true },
+            }),
+          ]);
+          const existingDays = new Set(
+            existing.map((entry) => entry.date.getTime()),
+          );
+          // Períodos semanais já materializados, por segunda-feira. As semanas
+          // ainda inexistentes são criadas sob demanda (upsertOpenPeriod).
+          const periodByWeek = new Map<number, { id: string } | "CLOSED">();
+          for (const period of periods) {
+            periodByWeek.set(
+              period.startDate.getTime(),
+              period.status === "CLOSED" ? "CLOSED" : { id: period.id },
+            );
+          }
+          const submittedAt = new Date();
+
+          for (const date of dates) {
+            if (existingDays.has(date.getTime())) {
+              local.skippedExisting += 1;
+              continue;
+            }
+            if (
+              lockedCompetences.has(entryCompetenceKey(project.id, toIsoDate(date)))
+            ) {
+              local.skippedBillingLocked += 1;
+              continue;
+            }
+            const allocation = allocations.find((item) =>
+              allocationCoversDate(item, date),
+            );
+            if (!allocation) {
+              local.skippedOutOfAllocation += 1;
+              continue;
+            }
+            // Ausência confirmada: pula o dia (em lote não faz sentido abortar).
+            // `timeOff` já vem vazio quando a atividade não é WORKDAY.
+            const covered = timeOff.some(
+              (off) =>
+                off.startDate.getTime() <= date.getTime() &&
+                off.endDate.getTime() >= date.getTime(),
+            );
+            if (covered) {
+              local.skippedTimeOff += 1;
+              continue;
+            }
+            const weekStart = weekStartOf(date);
+            const weekKey = weekStart.getTime();
+            let period = periodByWeek.get(weekKey);
+            if (period === undefined) {
+              period = await upsertOpenPeriod(tx, consultant.id, weekStart);
+              periodByWeek.set(weekKey, period);
+            }
+            if (period === "CLOSED") {
+              local.skippedClosedPeriod += 1;
+              continue;
+            }
+
+            const created = await tx.timeEntry.create({
+              data: {
+                periodId: period.id,
+                consultantId: consultant.id,
+                projectId: project.id,
+                allocationId: allocation.id,
+                date,
+                ...clock,
+                hours: regularHours,
+                overtimeHours: 0,
+                activityType: parsed.activityType,
+                description,
+                billable,
+                nonBillableReason: billableDecision.nonBillableReason,
+                multiplier: parsed.multiplier,
+                status: "SUBMITTED",
+                submittedAt,
+              },
+            });
+            existingDays.add(date.getTime());
+            local.created += 1;
+            if (parsed.activityType === "WORKDAY") {
+              await syncOvertimeSibling(tx, {
+                consultantId: consultant.id,
+                projectId: project.id,
+                allocationId: allocation.id,
+                periodId: period.id,
+                date,
+                overtimeHours,
+                overtimeMultiplier,
+                billable,
+                nonBillableReason: billableDecision.nonBillableReason,
+                submittedAt,
+                dbUserId: dbUser.id,
+              });
+            }
+            await tx.auditEvent.create({
+              data: buildAuditEventData({
+                actorUserId: dbUser.id,
+                entityType: "TimeEntry",
+                entityId: created.id,
+                action: "TIME_ENTRY_BATCH_CREATED",
+                after: {
+                  entryId: created.id,
+                  hours: Number(created.hours),
+                  date: toIsoDate(created.date),
+                  onBehalfOfConsultantId: consultant.id,
+                },
+              }),
+            });
+            if (billableDecision.managerMarkedNonBillable) {
+              await tx.auditEvent.create({
+                data: buildAuditEventData({
+                  actorUserId: dbUser.id,
+                  entityType: "TimeEntry",
+                  entityId: created.id,
+                  action: "TIME_ENTRY_MARKED_NON_BILLABLE",
+                  after: {
+                    entryId: created.id,
+                    reason: billableDecision.nonBillableReason,
+                  },
+                }),
+              });
+            }
+          }
+
+          if (local.created > 0) {
+            for (const period of periodByWeek.values()) {
+              if (period !== "CLOSED") {
+                await recomputePeriodStatus(tx, period.id);
+              }
+            }
+          }
+          return local;
+        }, {
+          // Um lote deliberado do gestor pode criar centenas de linhas (com a
+          // linha-irmã de Hora Extra e a auditoria de cada uma). O orçamento
+          // padrão de transação interativa do Prisma (5s) é curto demais aqui.
+          maxWait: 15_000,
+          timeout: 60_000,
+        });
+
+        totals.created += counts.created;
+        totals.skippedExisting += counts.skippedExisting;
+        totals.skippedOutOfAllocation += counts.skippedOutOfAllocation;
+        totals.skippedTimeOff += counts.skippedTimeOff;
+        totals.skippedClosedPeriod += counts.skippedClosedPeriod;
+        totals.skippedBillingLocked += counts.skippedBillingLocked;
+      } catch (error) {
+        // Um consultor que falha inteiro não derruba o lote dos demais.
+        console.error("[horas] batch failed for consultant", consultantId, error);
+        totals.failedConsultants.push(consultant.name);
+      }
+    }
+
+    revalidatePath(HORAS_PATH);
+    revalidatePath(APROVACOES_PATH);
+    return { ok: true, data: totals };
   } catch (error) {
     return toFailure(error);
   }

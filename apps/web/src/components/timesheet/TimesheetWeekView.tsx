@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useMemo, useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   CalendarDays,
   ChevronLeft,
@@ -113,6 +113,9 @@ import {
 } from "./ClockFields";
 
 const WEEKLY_TARGET = 40;
+/** Tela cheia de Novo Lançamento de Horas (substitui o modal da grade). */
+const NEW_ENTRY_HREF = "/app/horas/lancamento";
+
 const WEEKDAY_OPTIONS = [
   { value: 1, label: "Seg" },
   { value: 2, label: "Ter" },
@@ -604,6 +607,10 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
   const presentation = props.presentation ?? "brutal";
   const quiet = presentation === "quiet";
   const router = useRouter();
+  // A grade é servida por MAIS DE UMA rota (`/app/horas`, `/app/horas/nova` e
+  // `/app/horas/classica`). Navegar entre semanas com o caminho fixo jogaria o
+  // usuário para outro tratamento visual no meio do fluxo — navegue na rota atual.
+  const pathname = usePathname() ?? "/app/horas";
   const [isPending, startTransition] = useTransition();
 
   const [localWeeks, setLocalWeeks] = useState<TimesheetWeek[]>(() =>
@@ -711,7 +718,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
     const start = parseIsoDateUtc(week.startDate);
     if (!start) return;
     const target = toIsoDate(addDays(start, delta * 7));
-    router.push(`/app/horas?semana=${target}`);
+    router.push(`${pathname}?semana=${target}`);
   }
 
   /** Open the week starting on the given Monday (from the period week list). */
@@ -728,7 +735,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
       setIndex(found);
       return;
     }
-    router.push(`/app/horas?semana=${target}`);
+    router.push(`${pathname}?semana=${target}`);
   }
 
   function dayIndexOf(date: string): number {
@@ -760,7 +767,21 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
     />
   ) : null;
 
+  /**
+   * "Novo lançamento" deixou de ser um modal sobre a grade: abre a TELA CHEIA
+   * em `/app/horas/lancamento`, que é também a home do Consultor.
+   *
+   * Duas exceções mantêm o formulário aqui, porque a tela cheia não cobre esses
+   * contextos: o modo DEMO (sem banco, a tela cheia não tem o que gravar) e o
+   * modo "em nome de" (a grade está mostrando o consultor-alvo escolhido no
+   * seletor; a tela cheia trataria isso como lote). Editar uma linha existente
+   * continua sempre no formulário da própria grade.
+   */
   function openNew() {
+    if (!isDemo && !onBehalfId) {
+      router.push(`${NEW_ENTRY_HREF}?semana=${week.startDate}`);
+      return;
+    }
     setEditingRow(null);
     setEditInitial(null);
     setEditAttachment(null);

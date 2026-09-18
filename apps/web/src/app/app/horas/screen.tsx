@@ -25,8 +25,14 @@ import {
   type HoursReportFilter,
 } from "@/lib/reports/schemas";
 
-export const CLASSIC_HREF = "/app/horas";
-export const QUIET_HREF = "/app/horas/nova";
+/**
+ * Rotas do andaime de validação visual. A direção "Nova" (Operational Minimal)
+ * virou o DEFAULT: ela é servida em `/app/horas`, e a clássica migrou para
+ * `/app/horas/classica`. `/app/horas/nova` continua resolvendo (alias) para não
+ * quebrar links e favoritos.
+ */
+export const CLASSIC_HREF = "/app/horas/classica";
+export const QUIET_HREF = "/app/horas";
 
 type RawParams = Record<string, string | string[] | undefined>;
 

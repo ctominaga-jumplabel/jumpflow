@@ -155,6 +155,63 @@ export const weeklyTimeEntryInputSchema = refineClock(
 
 export type WeeklyTimeEntryInput = z.input<typeof weeklyTimeEntryInputSchema>;
 
+/**
+ * Lançamento EM LOTE (gestores). Diferente do semanal, o período é livre —
+ * `startDate`..`endDate` — e pode cobrir VÁRIOS consultores de uma vez. Só
+ * Gestor de Área/Admin chegam nesta action (a autorização é reforçada no
+ * servidor); o consultor puro continua limitado à semana visível.
+ *
+ * `includeWeekends` desligado (default) é a regra de negócio comum: sábado e
+ * domingo ficam de fora a menos que o gestor peça explicitamente.
+ */
+export const BATCH_MAX_CONSULTANTS = 50;
+/** Teto de dias do intervalo De→Até (sanidade: ~3 meses por lote). */
+export const BATCH_MAX_RANGE_DAYS = 92;
+
+export const batchTimeEntryInputSchema = refineClock(
+  z.object({
+    projectId: idSchema,
+    consultantIds: z
+      .array(idSchema)
+      .min(1, "Selecione ao menos um consultor.")
+      .max(
+        BATCH_MAX_CONSULTANTS,
+        `Selecione no máximo ${BATCH_MAX_CONSULTANTS} consultores por lote.`,
+      ),
+    activityType: z.enum(ACTIVITY_TYPES),
+    startDate: isoDateSchema,
+    endDate: isoDateSchema,
+    includeWeekends: z.boolean().default(false),
+    ...clockFields,
+    description: descriptionSchema,
+    billable: z.boolean(),
+    nonBillableReason: nonBillableReasonSchema,
+    multiplier: multiplierSchema,
+  }),
+).superRefine((value, ctx) => {
+  const start = parseIsoDateUtc(value.startDate);
+  const end = parseIsoDateUtc(value.endDate);
+  if (!start || !end) return;
+  if (end.getTime() < start.getTime()) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["endDate"],
+      message: 'A data "Até" não pode ser anterior à data "De".',
+    });
+    return;
+  }
+  const days = Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1;
+  if (days > BATCH_MAX_RANGE_DAYS) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["endDate"],
+      message: `O período do lote deve ter no máximo ${BATCH_MAX_RANGE_DAYS} dias.`,
+    });
+  }
+});
+
+export type BatchTimeEntryInput = z.input<typeof batchTimeEntryInputSchema>;
+
 export const updateTimeEntryInputSchema = refineClock(
   z.object({
     id: idSchema,
