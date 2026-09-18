@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  BATCH_MAX_CONSULTANTS,
+  BATCH_MAX_RANGE_DAYS,
+  batchTimeEntryInputSchema,
   COMMENT_REQUIRED_MESSAGE,
   decideHoursSchema,
   timeEntryInputSchema,
@@ -217,5 +220,108 @@ describe("decideHoursSchema", () => {
         comment: "Sem descrição da atividade.",
       }).success,
     ).toBe(true);
+  });
+});
+
+const validBatch = {
+  projectId: "seed-project-portal",
+  consultantIds: ["seed-consultant-ana", "seed-consultant-bruno"],
+  activityType: "WORKDAY" as const,
+  startDate: "2026-06-01",
+  endDate: "2026-06-30",
+  startTime: "09:00",
+  breakStart: "12:00",
+  breakEnd: "13:00",
+  endTime: "18:00",
+  description: "Sustentação do portal",
+  billable: true,
+};
+
+describe("batchTimeEntryInputSchema (lançamento em lote do gestor)", () => {
+  it("accepts a valid range over several consultants", () => {
+    const result = batchTimeEntryInputSchema.safeParse(validBatch);
+    expect(result.success).toBe(true);
+    // A flag de fim de semana é DESLIGADA por padrão: sábado e domingo só
+    // entram quando o gestor pede explicitamente.
+    if (result.success) expect(result.data.includeWeekends).toBe(false);
+  });
+
+  it("keeps an explicit includeWeekends", () => {
+    const result = batchTimeEntryInputSchema.safeParse({
+      ...validBatch,
+      includeWeekends: true,
+    });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.includeWeekends).toBe(true);
+  });
+
+  it("accepts a single-day range (De = Até)", () => {
+    expect(
+      batchTimeEntryInputSchema.safeParse({
+        ...validBatch,
+        startDate: "2026-06-10",
+        endDate: "2026-06-10",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("rejects an inverted range (Até antes de De)", () => {
+    const result = batchTimeEntryInputSchema.safeParse({
+      ...validBatch,
+      startDate: "2026-06-30",
+      endDate: "2026-06-01",
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.path).toEqual(["endDate"]);
+    }
+  });
+
+  it("rejects a range longer than the cap", () => {
+    // 2026-01-01 + BATCH_MAX_RANGE_DAYS dias = um dia além do teto.
+    const end = new Date(
+      Date.UTC(2026, 0, 1) + BATCH_MAX_RANGE_DAYS * 86_400_000,
+    )
+      .toISOString()
+      .slice(0, 10);
+    const result = batchTimeEntryInputSchema.safeParse({
+      ...validBatch,
+      startDate: "2026-01-01",
+      endDate: end,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("requires at least one consultant and caps the selection", () => {
+    expect(
+      batchTimeEntryInputSchema.safeParse({ ...validBatch, consultantIds: [] })
+        .success,
+    ).toBe(false);
+    expect(
+      batchTimeEntryInputSchema.safeParse({
+        ...validBatch,
+        consultantIds: Array.from(
+          { length: BATCH_MAX_CONSULTANTS + 1 },
+          (_, index) => `consultant-${index}`,
+        ),
+      }).success,
+    ).toBe(false);
+  });
+
+  it("still validates the clock (Saída antes da Início)", () => {
+    expect(
+      batchTimeEntryInputSchema.safeParse({
+        ...validBatch,
+        startTime: "18:00",
+        endTime: "09:00",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("requires a description", () => {
+    expect(
+      batchTimeEntryInputSchema.safeParse({ ...validBatch, description: "  " })
+        .success,
+    ).toBe(false);
   });
 });

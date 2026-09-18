@@ -10,8 +10,14 @@ import { hasRole } from "@/lib/auth/route-permissions";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { approvalItems, type ApprovalItem } from "@/lib/mock-data/approvals";
 
-export const CLASSIC_HREF = "/app/aprovacoes";
-export const QUIET_HREF = "/app/aprovacoes/nova";
+/**
+ * Rotas do andaime de validação visual. A direção "Nova" (Operational Minimal)
+ * virou o DEFAULT: ela é servida em `/app/aprovacoes`, e a clássica migrou para
+ * `/app/aprovacoes/classica`. `/app/aprovacoes/nova` continua resolvendo
+ * (alias) para não quebrar links e favoritos.
+ */
+export const CLASSIC_HREF = "/app/aprovacoes/classica";
+export const QUIET_HREF = "/app/aprovacoes";
 
 interface AprovacoesScreenProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>;

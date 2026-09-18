@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_APP_PATH,
+  feedHomePath,
+  homePathFor,
   landingPathFor,
   safeAppPath,
 } from "@/lib/auth/redirects";
@@ -35,30 +37,49 @@ describe("safeAppPath", () => {
   });
 });
 
-describe("landingPathFor (EP-M09 — Feed como home do Consultor)", () => {
+describe("landingPathFor / homePathFor (tela inicial por perfil)", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
   });
 
-  it("lands a CONSULTANT on the Feed when the flag is ON", () => {
-    vi.stubEnv("NEXT_PUBLIC_FEATURE_FEED", "true");
-    expect(landingPathFor(["CONSULTANT"])).toBe("/app/feed");
+  it("lands a pure CONSULTANT on the full-screen new time entry", () => {
+    expect(landingPathFor(["CONSULTANT"])).toBe("/app/horas/lancamento");
+    expect(homePathFor(["CONSULTANT"])).toBe("/app/horas/lancamento");
   });
 
-  it("falls back to Horas when the Feed flag is OFF", () => {
-    vi.stubEnv("NEXT_PUBLIC_FEATURE_FEED", "");
-    expect(landingPathFor(["CONSULTANT"])).toBe("/app/horas");
+  it("lands an AREA_MANAGER on Aprovações", () => {
+    expect(landingPathFor(["AREA_MANAGER"])).toBe("/app/aprovacoes");
+    // Um Gestor de Área que também é consultor NÃO é consultor puro: a home de
+    // gestão vence, porque é o trabalho recorrente do papel.
+    expect(landingPathFor(["CONSULTANT", "AREA_MANAGER"])).toBe(
+      "/app/aprovacoes",
+    );
   });
 
   it("keeps other roles on the launcher /app", () => {
-    vi.stubEnv("NEXT_PUBLIC_FEATURE_FEED", "true");
     expect(landingPathFor(["ADMIN"])).toBe("/app");
     expect(landingPathFor(["PROJECT_MANAGER"])).toBe("/app");
-    // A user that also carries a management role is NOT treated as consultant-only.
-    expect(landingPathFor(["CONSULTANT", "AREA_MANAGER"])).toBe("/app");
+    expect(homePathFor(["PROJECT_MANAGER"])).toBeNull();
   });
 
   it("defaults to the launcher for a user without roles", () => {
     expect(landingPathFor([])).toBe("/app");
+    expect(homePathFor([])).toBeNull();
+  });
+});
+
+describe("feedHomePath (mural interno com fallback honesto)", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("uses the Feed when the flag is ON", () => {
+    vi.stubEnv("NEXT_PUBLIC_FEATURE_FEED", "true");
+    expect(feedHomePath()).toBe("/app/feed");
+  });
+
+  it("falls back to Horas when the Feed flag is OFF", () => {
+    vi.stubEnv("NEXT_PUBLIC_FEATURE_FEED", "");
+    expect(feedHomePath()).toBe("/app/horas");
   });
 });
