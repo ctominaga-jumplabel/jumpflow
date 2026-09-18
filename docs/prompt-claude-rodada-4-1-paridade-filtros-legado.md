@@ -1,5 +1,11 @@
 # Prompt - Rodada 4.1: Paridade de Filtros do Portal Antigo
 
+> **ARQUIVO HISTORICO.** Este prompt registra o que foi pedido na epoca; nao e
+> instrucao valida hoje. As mencoes a Vercel abaixo ficaram desatualizadas: a
+> hospedagem foi consolidada no **Railway** (ADR17, `docs/arquitetura.md`), a
+> conta Vercel esta bloqueada e `npx vercel deploy` nao funciona mais. O deploy
+> atual dispara no push para a `main`.
+
 Planejamento gerado em 2026-06-11 apos a Rodada 4
 (`feat: add operational reports and exports`). Esta rodada deve aproximar os
 relatorios do JumpFlow das opcoes de filtro do portal antigo, sem comprometer

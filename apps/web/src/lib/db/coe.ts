@@ -50,7 +50,7 @@ import { buildCoeCompositionMock, buildCoeMembersMock } from "./coe.mock";
 /**
  * A migration do COE ainda nao foi aplicada neste banco.
  *
- * Existe porque o build da Vercel roda `db:generate && build` — ele NAO aplica
+ * Existe porque o build do Railway roda `db:generate && build` — ele NAO aplica
  * migrations. Entao o codigo pode chegar em producao antes do schema, e as
  * tabelas do COE simplesmente nao existem ainda. Sem este tratamento a tela
  * quebrava com 500; com ele o modulo aparece vazio e DIZ o que falta.

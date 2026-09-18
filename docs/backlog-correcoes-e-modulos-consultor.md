@@ -455,7 +455,7 @@ As seguintes funcionalidades foram identificadas no portal antigo e ainda nao es
 ## 7. Decisoes Pendentes
 
 - Despesas entram como modulo separado ou dentro de um hub `Apontamentos`?
-- Upload de comprovantes sera armazenado em Supabase Storage, Vercel Blob ou outro servico?
+- Upload de comprovantes sera armazenado em Supabase Storage, S3/R2 ou outro servico?
 - Aprovacao de despesas sera feita por gestor de projeto, gestor de conta, financeiro ou fluxo combinado?
 - Status de pagamento sera controlado dentro do JumpFlow ou integrado a outro sistema financeiro?
 - O menu lateral continua sempre visivel no desktop ou vira secundario apos criarmos o launcher?

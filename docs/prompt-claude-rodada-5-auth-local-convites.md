@@ -1,5 +1,11 @@
 # Prompt - Rodada 5: Login/Senha, Convites e Grupos de Acesso
 
+> **ARQUIVO HISTORICO.** Este prompt registra o que foi pedido na epoca; nao e
+> instrucao valida hoje. As mencoes a Vercel abaixo ficaram desatualizadas: a
+> hospedagem foi consolidada no **Railway** (ADR17, `docs/arquitetura.md`), a
+> conta Vercel esta bloqueada e `npx vercel deploy` nao funciona mais. O deploy
+> atual dispara no push para a `main`.
+
 Planejamento gerado em 2026-06-11. Como ainda nao ha acesso/configuracao do
 Microsoft Entra ID, a proxima etapa de go-live deve criar uma autenticacao
 operacional propria com login/senha, convites e grupos/papeis de acesso,

@@ -4,7 +4,7 @@ import * as holidayAlert from "@/app/api/jobs/holiday-alert/route";
 import * as missingTimesheets from "@/app/api/jobs/missing-timesheets/route";
 
 /**
- * Vercel Cron triggers scheduled paths with a GET request (it cannot send a
+ * Agendadores disparam os paths com um GET request (it cannot send a
  * method or body). Both job routes must therefore expose a GET handler, or the
  * scheduled run hits 405 and the automation silently never runs in production.
  * These assertions lock that contract.
@@ -40,7 +40,7 @@ describe("cron job route auth guard", () => {
     });
   }
 
-  it("holiday-alert returns 401 without a valid CRON_SECRET (GET, as Vercel Cron sends)", async () => {
+  it("holiday-alert returns 401 without a valid CRON_SECRET (GET, como o agendador envia)", async () => {
     vi.stubEnv("CRON_SECRET", "s3cret");
     const res = await holidayAlert.GET(reqGet());
     expect(res.status).toBe(401);

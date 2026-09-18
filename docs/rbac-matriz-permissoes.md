@@ -133,7 +133,8 @@ por `roleId` já suporta. Integração com **Entra ID** (mapear app roles/groups
 
 ## Deploy
 
-Esta máquina não roda `db:deploy` (rede restrita ao banco). Antes de mergear na
-`main` (auto-deploy Vercel não roda migrate): aplicar
-`npm run -w @jumpflow/database db:deploy` e depois `db:seed` a partir de um
+Esta máquina não roda `db:deploy` (rede restrita ao banco). Desde o ADR17 o deploy
+no Railway aplica as migrations sozinho (`startCommand` = `npm run db:deploy && npm run start`),
+então o merge na `main` não deixa mais o schema para trás. O `db:seed`, esse sim,
+continua manual: rodar `npm run -w @jumpflow/database db:seed` a partir de um
 ambiente com acesso ao banco. Ver memória `deploy-migrations-gate`.

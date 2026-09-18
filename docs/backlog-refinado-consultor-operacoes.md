@@ -36,7 +36,7 @@ Referencias:
 - Dados mockados centralizados.
 - Automacao de aprovacao de horas.
 - Relatorio de consultores sem lancamento.
-- Jobs Vercel.
+- Jobs agendados via HTTP (`/api/jobs/*`).
 - Email provider console/Resend preparado.
 - Testes, typecheck, lint e build configurados.
 
@@ -381,7 +381,7 @@ Aceite:
 - `jump-frontend-ux`: fluxos, formularios, tabelas e responsividade.
 - `jump-design-system`: Playful Ops, consistencia visual e acessibilidade.
 - `jump-qa-engineer`: testes unitarios, integracao e smoke.
-- `jump-devops`: Vercel, env vars, jobs e deploy.
+- `jump-devops`: Railway, env vars, jobs e deploy.
 - `jump-code-reviewer`: revisao final.
 
 ### Novos Agentes Sugeridos
@@ -530,7 +530,7 @@ Entrega:
 - Uploads devem validar tipo e tamanho.
 - Testes devem cobrir regras criticas.
 - `npm run typecheck`, `npm run test`, `npm run lint` e `npm run build` devem passar.
-- Deploy na Vercel deve ser validado apos merges relevantes.
+- Deploy no Railway deve ser validado apos merges relevantes.
 
 ## 9. Decisoes Pendentes
 
@@ -554,12 +554,12 @@ Motivos:
 - Comprovantes de despesas sao documentos privados, entao controle fino de acesso e mais importante que distribuicao publica.
 - A migracao futura para outro storage continua possivel se gravarmos no banco apenas metadados e uma `storageKey`, nao uma dependencia espalhada pela UI.
 
-Alternativa: **Vercel Blob**.
+Alternativa: **S3/R2** ou outro object storage.
 
 Quando faria sentido:
 
-- Se quisermos manter tudo muito proximo do deploy Vercel.
-- Se o upload direto do browser para Blob simplificar a operacao.
+- Se quisermos storage desacoplado do banco, independente do Supabase.
+- Se o upload direto do browser para o bucket simplificar a operacao.
 - Se os arquivos nao exigirem regras complexas de acesso por usuario/role.
 
 - Usar Supabase Storage para comprovantes e documentos privados.

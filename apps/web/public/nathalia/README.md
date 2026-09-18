@@ -23,7 +23,7 @@ node scripts/nathalia/sync_runtime_model.mjs
 Ele copia `packages/character-nathalia/assets/models/master_preview.glb` para
 `apps/web/public/nathalia/master_preview.glb`.
 
-> Em ambientes de build remotos (Vercel) o `.glb` precisa estar presente para o
+> Em ambientes de build remotos (Railway) o `.glb` precisa estar presente para o
 > 3D funcionar. Como o flag `NEXT_PUBLIC_ENABLE_NATHALIA_3D` é `false` por padrão,
 > a ausência do arquivo **não quebra** o app: o avatar 2D/CSS é usado. Para
 > ativar 3D em produção, garanta o asset no build (sync no prebuild, commit via

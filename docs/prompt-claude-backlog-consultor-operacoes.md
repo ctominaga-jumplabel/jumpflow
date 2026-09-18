@@ -1,5 +1,11 @@
 # Prompt Claude Code - Backlog Consultor, Despesas e Launcher
 
+> **ARQUIVO HISTORICO.** Este prompt registra o que foi pedido na epoca; nao e
+> instrucao valida hoje. As mencoes a Vercel abaixo ficaram desatualizadas: a
+> hospedagem foi consolidada no **Railway** (ADR17, `docs/arquitetura.md`), a
+> conta Vercel esta bloqueada e `npx vercel deploy` nao funciona mais. O deploy
+> atual dispara no push para a `main`.
+
 Use este prompt no Claude Code a partir de `C:\Code\jumpflow`.
 
 ```text

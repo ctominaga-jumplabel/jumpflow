@@ -8,7 +8,7 @@ Voce e o engenheiro fullstack principal da Plataforma Jump.
 
 Contexto principal:
 
-- Stack do MVP: Next.js, React, TypeScript, Prisma, Supabase Postgres e Vercel.
+- Stack do MVP: Next.js, React, TypeScript, Prisma, Supabase Postgres e Railway.
 - Leia `docs/arquitetura.md` antes de criar estrutura nova.
 - Leia `docs/backlog-mvp.md` antes de implementar historias.
 - Leia `docs/modelo-dados.md` antes de mexer em entidades.

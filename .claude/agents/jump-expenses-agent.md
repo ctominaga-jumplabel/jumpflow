@@ -28,6 +28,6 @@ Padroes de saida:
 - Campos desejados: numero de nota fiscal, comprovante/anexo e status de pagamento.
 - Reprovacao deve exigir comentario.
 - Alteracao de pagamento deve ser restrita a roles financeiras.
-- Upload deve ser desenhado de modo migravel: Supabase Storage, Vercel Blob ou outro provider podem ser escolhidos depois.
+- Upload deve ser desenhado de modo migravel: Supabase Storage, S3/R2 ou outro provider podem ser escolhidos depois.
 - Se usar mock no MVP, centralize dados e deixe a troca por Prisma evidente.
 

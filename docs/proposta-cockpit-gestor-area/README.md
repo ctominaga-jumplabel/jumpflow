@@ -237,7 +237,7 @@ de arquivo podem correr em paralelo; escritores no mesmo módulo são serializad
 - **Agentes:** `jump-code-reviewer`.
 
 ### Fase 7 — Deploy (gate humano)
-- `db:deploy` da migration + `vercel --prod` são **manuais** pelo usuário (regra do projeto).
+- `db:deploy` da migration + o deploy são **manuais** pelo usuário (regra do projeto). Desde o ADR17 o deploy é do Railway, disparado pelo push na `main`, e ele já roda `db:deploy` no start.
 - **Agentes:** `jump-devops` (apenas instruções/checagem; não publica).
 
 ## 10. Análise de suficiência dos agentes
@@ -260,7 +260,7 @@ de arquivo podem correr em paralelo; escritores no mesmo módulo são serializad
 | Deploy/ambiente (gate humano) | `jump-devops` | ✅ (não publica sozinho) |
 
 Sem lacuna funcional. Os únicos gates **não automatizáveis** são aplicar migration em
-produção e o deploy Vercel — ambos manuais por decisão do projeto.
+produção e o deploy — ambos manuais por decisão do projeto.
 
 ## 12. Status de implementação (2026-07-28)
 

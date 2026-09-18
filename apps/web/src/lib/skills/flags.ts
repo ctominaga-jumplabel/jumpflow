@@ -4,7 +4,7 @@
  * `SKILLS_CV_AI_IMPORT_ENABLED` é o interruptor MESTRE da leitura de currículo
  * por IA (upload de PDF → extração assistida → proposta para confirmação). É uma
  * env comum (não `NEXT_PUBLIC_`), lida no servidor a cada request, de modo que
- * pode ser ligada/desligada no host (ex.: env do projeto na Vercel) SEM rebuild.
+ * pode ser ligada/desligada no host (ex.: variaveis do servico no Railway) SEM rebuild.
  *
  * Default OFF: só a string exata "true" liga. Qualquer outra coisa (ausente,
  * "false", "0", "") mantém a leitura por IA desligada. Além do flag, a extração

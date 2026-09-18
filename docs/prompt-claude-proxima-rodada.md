@@ -1,5 +1,11 @@
 # Prompt - Proxima Rodada (Rodada 2: Persistencia de Horas)
 
+> **ARQUIVO HISTORICO.** Este prompt registra o que foi pedido na epoca; nao e
+> instrucao valida hoje. As mencoes a Vercel abaixo ficaram desatualizadas: a
+> hospedagem foi consolidada no **Railway** (ADR17, `docs/arquitetura.md`), a
+> conta Vercel esta bloqueada e `npx vercel deploy` nao funciona mais. O deploy
+> atual dispara no push para a `main`.
+
 Planejamento gerado em 2026-06-10 apos a entrega da Rodada 1 em producao
 (commits `d343425` e `3c91073`). Decisao do `jump-product-owner`: executar a
 **Rodada 2 - Persistencia de Horas** antes de Despesas (Rodada 3) ou de uma

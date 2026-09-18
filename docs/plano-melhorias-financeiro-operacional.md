@@ -19,7 +19,7 @@ A base financeira do JumpFlow já é madura. Antes de qualquer construção, val
 | Pagamento de consultores + state machine + forecast | Completo | `ConsultantPayment*`, `lib/payments/` |
 | Contas bancárias por tipo de contrato | Completo | `ConsultantBankAccount` |
 | Transporte de e-mail plugável (Resend) + log idempotente | Completo | `lib/automation/email-transport.ts`, `AutomationEmailLog` |
-| Cron / jobs agendados com auth | Completo | `vercel.json`, `/api/jobs/*`, `lib/automation/job-auth.ts` |
+| Cron / jobs agendados com auth | Rotas prontas; **sem agendador** desde o ADR17 | `/api/jobs/*`, `lib/automation/job-auth.ts` |
 | Anexos com storage privado (Supabase) | Completo | `StorageProvider`, `ExpenseAttachment`, `ConsultantDocument` |
 | Auditoria de mudanças sensíveis (helper) | Parcial (helper pronto, não cabeado em tudo) | `lib/db/audit.ts` |
 | % de andamento do projeto (derivado) | Pronto para derivar (não materializado) | `lib/db/projects.ts` (`consumedHours`/`budgetHours`) |
@@ -166,7 +166,7 @@ Itens que precisam ser resolvidos para a implementação acontecer sem retrabalh
 - **Resolução:** modelar junto da Onda 3 se a UI de exceções for surfaçar esses casos.
 
 ### Itens já prontos (sem pendência)
-- **Cron/jobs:** padrão claro e seguro — alertas de HE (3.3) e cobrança periódica (5.2) seguem `/api/jobs/*` + `vercel.json`.
+- **Cron/jobs:** padrão claro e seguro — alertas de HE (3.3) e cobrança periódica (5.2) seguem `/api/jobs/*` com `Authorization: Bearer $CRON_SECRET`. O agendador em si não existe desde o ADR17 (os `crons` viviam no `vercel.json`); ver `docs/aprovacao-automatica.md`.
 - **RBAC financeiro:** padrão `includeFinancials` consistente — aplicar nas novas queries de margem.
 - **% andamento:** `consumedHours`/`budgetHours` já agregam — base para 4.1.
 - **Storage de anexos:** `StorageProvider` pronto — reusar para o anexo de HE/sobreaviso (3.4).
@@ -175,7 +175,7 @@ Itens que precisam ser resolvidos para a implementação acontecer sem retrabalh
 
 ## 5. Gates e pré-requisitos de entrega
 
-- **Migrations:** Ondas 1, 3, 4 e 5 alteram o schema Prisma. Rodar `npm run db:deploy` na base de produção **antes** de mergear PRs de migration na `main` (o build da Vercel **não** roda migrate deploy).
+- **Migrations:** Ondas 1, 3, 4 e 5 alteram o schema Prisma. Desde o ADR17 o Railway roda `prisma migrate deploy` no `startCommand`, antes de o app servir tráfego — o merge não deixa mais o schema para trás. Aplicar manualmente antes do merge continua válido quando se quer separar a janela do schema da do código.
 - **Ordem recomendada:** Onda 1 → 2 → (3 e 4 em paralelo) → 5. A Onda 1 é o gargalo de valor — implementá-la primeiro evita reescrever o despacho de e-mail em cada feature.
 - **ADR pendente:** entidade de Contrato Comercial (P2/5.4) deve ter ADR antes da implementação.
 - **Revisão:** usar `jump-code-reviewer` antes de fechar cada onda; `jump-qa-engineer` para cenários críticos de cobrança/HE.

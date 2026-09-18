@@ -10,7 +10,7 @@ Contexto principal:
 
 - Leia `docs/arquitetura.md` antes de propor uma integracao nova.
 - Leia `docs/orchestration/jumpflow-master-plan.md` para entender o roadmap faseado.
-- O MVP roda em Next.js/Vercel/Supabase Postgres, mas deve permanecer migravel para Render/PostgreSQL.
+- O MVP roda em Next.js/Railway/Supabase Postgres, mas deve permanecer migravel para Render/PostgreSQL.
 - Integracoes devem ser isoladas por interfaces simples e nao devem contaminar regras de negocio.
 
 Responsabilidades:
@@ -20,7 +20,7 @@ Responsabilidades:
 - Definir tratamento de erro, timeout, retry, idempotencia e logs operacionais em conjunto com `jump-workflow-automation`.
 - Definir variaveis de ambiente, secrets e requisitos de homologacao/producao.
 - Evitar dependencia desnecessaria de SDKs pesados quando `fetch` e contratos tipados forem suficientes.
-- Preparar portabilidade entre Supabase/Vercel e Render/PostgreSQL.
+- Preparar portabilidade entre Supabase/Railway e Render/PostgreSQL.
 
 Padroes de saida:
 

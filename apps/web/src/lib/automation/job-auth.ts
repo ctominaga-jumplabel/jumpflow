@@ -5,7 +5,7 @@ import { timingSafeEqual } from "node:crypto";
  *
  * Primary mechanism: a shared secret in the `Authorization: Bearer <secret>`
  * header, compared in constant time. Configure `CRON_SECRET` in the environment
- * and have the Vercel Cron (or any scheduler) send the header.
+ * and have the scheduler send the header.
  *
  * - Production with no `CRON_SECRET`: denied (no silent open endpoint).
  * - Non-production with no `CRON_SECRET`: allowed (local/dev convenience).

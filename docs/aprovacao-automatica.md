@@ -125,28 +125,46 @@ curl -X POST https://<host>/api/jobs/missing-timesheets \
   -d '{"periodStart":"2026-06-01","periodEnd":"2026-06-08"}'
 ```
 
-### Vercel Cron
+### Agendamento (SEM agendador ativo — ação pendente)
 
-O bloco `crons` **já está no `vercel.json` do repositório** com a agenda real:
+> **ATENÇÃO.** A agenda vivia no bloco `crons` do `vercel.json`. Com a
+> consolidação no Railway (ADR17) esse arquivo foi removido e **o Railway não
+> tem equivalente configurado**: hoje nenhum dos jobs roda sozinho. O disparo
+> manual pela tela de Aprovação Automática continua funcionando.
 
-```json
-{
-  "crons": [
-    { "path": "/api/jobs/auto-approval", "schedule": "*/10 * * * *" },
-    { "path": "/api/jobs/missing-timesheets", "schedule": "0 12 * * 1" }
-  ]
-}
+A agenda que estava em produção, preservada aqui para ser recriada tal e qual:
+
+| Job | Cron (UTC) | Equivalente BRT |
+| --- | --- | --- |
+| `/api/jobs/auto-approval` | `0 10 * * *` | diário, 07:00 |
+| `/api/jobs/holiday-alert` | `0 11 * * *` | diário, 08:00 |
+| `/api/jobs/missing-timesheets` | `0 12 * * 1` | segunda, 09:00 |
+
+Nada disso depende da plataforma: as rotas aceitam **GET e POST** e exigem
+`Authorization: Bearer $CRON_SECRET` (`isCronAuthorized`, comparação em tempo
+constante). Qualquer agendador que faça uma requisição HTTP autenticada serve.
+
+Como recriar no Railway — um serviço com *Cron Schedule* por job, apontando para
+o mesmo repo, com o comando abaixo (o `CRON_SECRET` já está nas variáveis do
+serviço `@jumpflow/web`; replicar no serviço de cron):
+
+```bash
+curl -fsS -X POST https://flow.jump.tec.br/api/jobs/auto-approval \
+  -H "Authorization: Bearer $CRON_SECRET"
 ```
 
-- `auto-approval`: a cada 10 min (`*/10 * * * *`) — **requer plano Vercel Pro**;
-  em Hobby use frequência diária/horária.
-- `missing-timesheets`: segunda 12:00 UTC = **09:00 BRT** (`0 12 * * 1`).
+O Railway roda o serviço até a conclusão a cada disparo, então um comando
+`curl` que sai com código 0 basta. O `-f` faz o job falhar visivelmente se a
+rota responder erro, em vez de sair 0 silenciosamente.
 
-O Vercel Cron envia `Authorization: Bearer $CRON_SECRET` automaticamente quando
-`CRON_SECRET` está nas env vars do projeto. O agendador dispara o path por
-**GET** (sem corpo), então cada rota exporta um handler `GET` (alias do `POST`)
-além do `POST` manual — sem `GET`, o run agendado retornaria 405. No `GET` o
-relatório usa o default de semana anterior; o `POST` aceita período via corpo.
+Alternativa, se preferir não criar serviços: qualquer cron externo (GitHub
+Actions `schedule`, cron-job.org, um agendador já existente) com a mesma
+requisição. O contrato das rotas não muda.
+
+O agendador dispara por **GET** (sem corpo) na maioria das plataformas, então
+cada rota exporta um handler `GET` (alias do `POST`) além do `POST` manual —
+sem `GET`, o run agendado retornaria 405. No `GET` o relatório usa o default de
+semana anterior; o `POST` aceita período via corpo.
 
 A route do relatório (`/api/jobs/missing-timesheets`) declara `maxDuration = 60`
 porque agrega alocações/lançamentos por projeto numa única query; isso evita

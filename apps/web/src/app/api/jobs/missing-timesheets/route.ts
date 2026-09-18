@@ -64,6 +64,6 @@ export async function POST(request: Request) {
   }
 }
 
-// Vercel Cron triggers the endpoint with a GET (no body), so it uses the
+// Agendadores disparam o endpoint com um GET (no body), so it uses the
 // previous-week default. The same CRON_SECRET Bearer guard applies.
 export const GET = POST;

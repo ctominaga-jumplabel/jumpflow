@@ -53,5 +53,5 @@ export async function POST(request: Request) {
   }
 }
 
-// Vercel Cron triggers with a GET (no body) → default 7-day window.
+// Agendadores disparam com um GET (no body) → default 7-day window.
 export const GET = POST;

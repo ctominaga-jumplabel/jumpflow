@@ -26,7 +26,7 @@ MSAL nem token provider: **o segredo é a credencial**.
    ```
 
 2. **Configurar o segredo nos dois lados** com o **mesmo valor**:
-   - No JumpFlow (Vercel → Environment Variables): `CRM_M2M_SHARED_SECRET`.
+   - No JumpFlow (Railway → serviço → Variables): `CRM_M2M_SHARED_SECRET`.
    - No CRM (env de saída da integração): a variável equivalente que o CRM usa
      para montar o header `Authorization`.
 
