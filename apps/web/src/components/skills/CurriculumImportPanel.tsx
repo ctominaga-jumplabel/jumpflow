@@ -39,6 +39,22 @@ interface ExpDraft {
   description: string;
   location: string;
 }
+interface CertDraft {
+  include: boolean;
+  name: string;
+  issuer: string;
+  issuedAt: string;
+  expiresAt: string;
+  credentialId: string;
+  credentialUrl: string;
+}
+interface CaseDraft {
+  include: boolean;
+  title: string;
+  summary: string;
+  outcome: string;
+  evidence: string;
+}
 interface SkillDraft {
   include: boolean;
   name: string;
@@ -63,10 +79,14 @@ function readFileAsBase64(file: File): Promise<string> {
 }
 
 /**
- * Upload de currículo (.pdf) → leitura assistida por IA → PROPOSTA editável.
- * Nada é gravado até o consultor confirmar em "Aplicar selecionados". Skills de
- * catálogo entram como "Aguardando validação"; skills fora do catálogo viram
- * sugestões pendentes de curadoria. Nunca cria skill validada automaticamente.
+ * Upload de currículo (.pdf) → leitura assistida por IA → PROPOSTA editável de
+ * bio, experiências, skills, certificados e cases.
+ *
+ * Nada é gravado até o consultor confirmar em "Aplicar selecionados", e nada
+ * nasce validado: skills de catálogo entram como "Aguardando validação"; skills
+ * fora do catálogo viram sugestões pendentes de curadoria; certificados entram
+ * PENDING; cases entram como candidatos (DRAFT_INSIGHT) — um currículo nunca
+ * estabelece consentimento do cliente para uso comercial.
  *
  * Quando a leitura por IA está indisponível (flag desligada ou sem provider), o
  * painel some — o consultor preenche o currículo manualmente nas outras seções.
@@ -88,6 +108,8 @@ export function CurriculumImportPanel({
   const [bio, setBio] = useState<BioDraft | null>(null);
   const [exps, setExps] = useState<ExpDraft[]>([]);
   const [skls, setSkls] = useState<SkillDraft[]>([]);
+  const [certs, setCerts] = useState<CertDraft[]>([]);
+  const [cases, setCases] = useState<CaseDraft[]>([]);
   const [hasProposal, setHasProposal] = useState(false);
 
   if (!enabled) return null;
@@ -151,6 +173,28 @@ export function CurriculumImportPanel({
             catalogSkillId: skill.catalogSkillId,
           })),
         );
+        setCerts(
+          p.certificates.map((cert) => ({
+            // Sem data de emissao o certificado nao pode ser gravado
+            // (Certificate.issuedAt e obrigatorio) — entra desmarcado.
+            include: Boolean(cert.issuedAt),
+            name: cert.name,
+            issuer: cert.issuer,
+            issuedAt: cert.issuedAt ?? "",
+            expiresAt: cert.expiresAt ?? "",
+            credentialId: cert.credentialId ?? "",
+            credentialUrl: cert.credentialUrl ?? "",
+          })),
+        );
+        setCases(
+          p.cases.map((item) => ({
+            include: true,
+            title: item.title,
+            summary: item.summary ?? "",
+            outcome: item.outcome ?? "",
+            evidence: item.evidence ?? "",
+          })),
+        );
         setHasProposal(true);
         setMessage(
           "Revise a proposta abaixo. Nada é gravado até você aplicar.",
@@ -167,6 +211,10 @@ export function CurriculumImportPanel({
         (exp) => exp.include && exp.startDate && exp.company && exp.role,
       );
       const includedSkills = skls.filter((skill) => skill.include && skill.name);
+      const includedCerts = certs.filter(
+        (cert) => cert.include && cert.name && cert.issuer && cert.issuedAt,
+      );
+      const includedCases = cases.filter((item) => item.include && item.title);
       const result = await applyCurriculumImport({
         headline: bio?.include ? bio.headline || undefined : undefined,
         summary: bio?.include ? bio.summary || undefined : undefined,
@@ -185,12 +233,32 @@ export function CurriculumImportPanel({
           evidence: skill.evidence || undefined,
           catalogSkillId: skill.catalogSkillId ?? undefined,
         })),
+        certificates: includedCerts.map((cert) => ({
+          name: cert.name,
+          issuer: cert.issuer,
+          issuedAt: cert.issuedAt,
+          expiresAt: cert.expiresAt || undefined,
+          credentialId: cert.credentialId || undefined,
+          credentialUrl: cert.credentialUrl || undefined,
+        })),
+        cases: includedCases.map((item) => ({
+          title: item.title,
+          summary: item.summary || undefined,
+          outcome: item.outcome || undefined,
+          evidence: item.evidence || undefined,
+        })),
       });
       if (result.ok) {
-        const { appliedSkills, pendingCatalog, experiences, bio: bioApplied } =
-          result.data;
+        const {
+          appliedSkills,
+          pendingCatalog,
+          experiences,
+          certificates,
+          cases: casesApplied,
+          bio: bioApplied,
+        } = result.data;
         setMessage(
-          `Aplicado: ${appliedSkills} skill(s) aguardando validação, ${pendingCatalog} para curadoria, ${experiences} experiência(s)${
+          `Aplicado: ${appliedSkills} skill(s) aguardando validação, ${pendingCatalog} para curadoria, ${experiences} experiência(s), ${certificates} certificado(s), ${casesApplied} case(s)${
             bioApplied ? ", bio atualizada" : ""
           }.`,
         );
@@ -198,6 +266,8 @@ export function CurriculumImportPanel({
         setBio(null);
         setExps([]);
         setSkls([]);
+        setCerts([]);
+        setCases([]);
         setFileName(null);
         setContentBase64(null);
         if (inputRef.current) inputRef.current.value = "";
@@ -216,8 +286,9 @@ export function CurriculumImportPanel({
       </div>
       <p className="text-xs text-soft">
         Envie seu currículo em PDF. A IA lê o arquivo e monta uma PROPOSTA de
-        bio, experiências e skills para você revisar e confirmar. Nada é gravado
-        automaticamente, e nenhuma skill é validada sem revisão humana.
+        bio, experiências, skills, certificados e cases para você revisar e
+        confirmar. Nada é gravado automaticamente, e nada é validado sem revisão
+        humana.
       </p>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -448,6 +519,231 @@ export function CurriculumImportPanel({
                       <p className="mt-1 text-xs text-warning">
                         Informe a data de início para incluir esta experiência.
                       </p>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* Certificados */}
+          <div className="rounded-md border border-border bg-surface p-3">
+            <div className="text-sm font-semibold text-strong">
+              Certificados propostos ({certs.length})
+            </div>
+            {certs.length === 0 ? (
+              <p className="mt-1 text-xs text-soft">
+                Nenhum certificado identificado.
+              </p>
+            ) : (
+              <ul className="mt-2 space-y-2">
+                {certs.map((cert, index) => (
+                  <li
+                    key={`${cert.name}-${index}`}
+                    className="rounded-md border border-border bg-surface-muted/40 p-2"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <label className="flex items-center gap-2 text-sm font-medium text-strong">
+                        <input
+                          type="checkbox"
+                          checked={cert.include}
+                          disabled={!cert.issuedAt}
+                          onChange={(event) =>
+                            setCerts((current) =>
+                              current.map((item, i) =>
+                                i === index
+                                  ? { ...item, include: event.target.checked }
+                                  : item,
+                              ),
+                            )
+                          }
+                        />
+                        {cert.name}
+                      </label>
+                      <StatusBadge tone="warning">
+                        Aguardando validação
+                      </StatusBadge>
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <input
+                        aria-label={`Emissor de ${cert.name}`}
+                        value={cert.issuer}
+                        placeholder="Emissor"
+                        maxLength={160}
+                        onChange={(event) =>
+                          setCerts((current) =>
+                            current.map((item, i) =>
+                              i === index
+                                ? { ...item, issuer: event.target.value }
+                                : item,
+                            ),
+                          )
+                        }
+                        className="h-8 w-48 rounded-md border border-border bg-surface px-2 text-xs text-strong"
+                      />
+                      <label className="text-xs text-medium">
+                        Emissão
+                        <input
+                          type="date"
+                          aria-label={`Emissão de ${cert.name}`}
+                          value={cert.issuedAt}
+                          onChange={(event) =>
+                            setCerts((current) =>
+                              current.map((item, i) =>
+                                i === index
+                                  ? { ...item, issuedAt: event.target.value }
+                                  : item,
+                              ),
+                            )
+                          }
+                          className="ml-1 h-8 rounded-md border border-border bg-surface px-2 text-xs text-strong"
+                        />
+                      </label>
+                      <label className="text-xs text-medium">
+                        Validade
+                        <input
+                          type="date"
+                          aria-label={`Validade de ${cert.name}`}
+                          value={cert.expiresAt}
+                          onChange={(event) =>
+                            setCerts((current) =>
+                              current.map((item, i) =>
+                                i === index
+                                  ? { ...item, expiresAt: event.target.value }
+                                  : item,
+                              ),
+                            )
+                          }
+                          className="ml-1 h-8 rounded-md border border-border bg-surface px-2 text-xs text-strong"
+                        />
+                      </label>
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <input
+                        aria-label={`Código da credencial de ${cert.name}`}
+                        value={cert.credentialId}
+                        placeholder="Código da credencial"
+                        maxLength={120}
+                        onChange={(event) =>
+                          setCerts((current) =>
+                            current.map((item, i) =>
+                              i === index
+                                ? { ...item, credentialId: event.target.value }
+                                : item,
+                            ),
+                          )
+                        }
+                        className="h-8 w-48 rounded-md border border-border bg-surface px-2 text-xs text-medium"
+                      />
+                      <input
+                        aria-label={`Link da credencial de ${cert.name}`}
+                        value={cert.credentialUrl}
+                        placeholder="https://..."
+                        maxLength={500}
+                        onChange={(event) =>
+                          setCerts((current) =>
+                            current.map((item, i) =>
+                              i === index
+                                ? { ...item, credentialUrl: event.target.value }
+                                : item,
+                            ),
+                          )
+                        }
+                        className="h-8 w-64 rounded-md border border-border bg-surface px-2 text-xs text-medium"
+                      />
+                    </div>
+                    {!cert.issuedAt ? (
+                      <p className="mt-1 text-xs text-warning">
+                        Informe a data de emissão para incluir este certificado.
+                      </p>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* Cases */}
+          <div className="rounded-md border border-border bg-surface p-3">
+            <div className="text-sm font-semibold text-strong">
+              Cases propostos ({cases.length})
+            </div>
+            <p className="mt-1 text-xs text-soft">
+              Cases entram como candidatos para curadoria. Um currículo não
+              estabelece consentimento do cliente para uso comercial.
+            </p>
+            {cases.length === 0 ? (
+              <p className="mt-1 text-xs text-soft">Nenhum case identificado.</p>
+            ) : (
+              <ul className="mt-2 space-y-2">
+                {cases.map((item, index) => (
+                  <li
+                    key={`${item.title}-${index}`}
+                    className="rounded-md border border-border bg-surface-muted/40 p-2"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <label className="flex items-center gap-2 text-sm font-medium text-strong">
+                        <input
+                          type="checkbox"
+                          checked={item.include}
+                          onChange={(event) =>
+                            setCases((current) =>
+                              current.map((row, i) =>
+                                i === index
+                                  ? { ...row, include: event.target.checked }
+                                  : row,
+                              ),
+                            )
+                          }
+                        />
+                        {item.title}
+                      </label>
+                      <StatusBadge tone="warning">
+                        Candidato (curadoria)
+                      </StatusBadge>
+                    </div>
+                    <textarea
+                      aria-label={`Resumo do case ${item.title}`}
+                      value={item.summary}
+                      maxLength={1000}
+                      rows={2}
+                      placeholder="Resumo da entrega"
+                      onChange={(event) =>
+                        setCases((current) =>
+                          current.map((row, i) =>
+                            i === index
+                              ? { ...row, summary: event.target.value }
+                              : row,
+                          ),
+                        )
+                      }
+                      className={cn(
+                        "mt-2 w-full rounded-md border border-border bg-surface px-2 py-2 text-xs text-strong",
+                        focusRingInput,
+                      )}
+                    />
+                    <textarea
+                      aria-label={`Resultado do case ${item.title}`}
+                      value={item.outcome}
+                      maxLength={600}
+                      rows={2}
+                      placeholder="Resultado alcançado"
+                      onChange={(event) =>
+                        setCases((current) =>
+                          current.map((row, i) =>
+                            i === index
+                              ? { ...row, outcome: event.target.value }
+                              : row,
+                          ),
+                        )
+                      }
+                      className={cn(
+                        "mt-2 w-full rounded-md border border-border bg-surface px-2 py-2 text-xs text-strong",
+                        focusRingInput,
+                      )}
+                    />
+                    {item.evidence ? (
+                      <p className="mt-1 text-xs text-soft">{item.evidence}</p>
                     ) : null}
                   </li>
                 ))}

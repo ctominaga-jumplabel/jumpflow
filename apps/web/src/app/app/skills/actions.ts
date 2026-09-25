@@ -13,7 +13,7 @@ import {
   generateSkillSuggestionsFromActivities,
   type SuggestedSkillLevel,
 } from "@/lib/skills/suggestions";
-import { AI_MODELS } from "@/lib/ai/provider";
+import { getConfiguredAiModel } from "@/lib/ai/provider";
 import { recordAiUsage } from "@/lib/ai/log";
 import { isCurriculumAiImportEnabled } from "@/lib/skills/flags";
 import { extractCurriculumProposal } from "@/lib/skills/curriculum-import";
@@ -102,6 +102,25 @@ const isoDateStrict = z
   .trim()
   .regex(/^\d{4}-\d{2}-\d{2}$/, "Data invalida.");
 
+// URL de credencial: so http(s). Vazio/invalido/esquema perigoso vira null, para
+// nunca gravarmos um `javascript:`/`data:` que a tela renderiza como link.
+const httpUrlOrNull = z
+  .string()
+  .trim()
+  .max(500)
+  .optional()
+  .transform((value) => {
+    if (!value) return null;
+    try {
+      const parsed = new URL(value);
+      return parsed.protocol === "http:" || parsed.protocol === "https:"
+        ? value
+        : null;
+    } catch {
+      return null;
+    }
+  });
+
 // Proposta editada que o consultor CONFIRMA. Nada aqui é gerado pela IA: são os
 // campos já revisados por um humano. Skills de catálogo viram ConsultantSkill
 // PENDING; skills fora do catálogo viram SkillSuggestion pendente de curadoria.
@@ -147,6 +166,35 @@ const applyImportSchema = z.object({
       }),
     )
     .max(25)
+    .default([]),
+  // Certificados confirmados. `issuedAt` e OBRIGATORIO aqui (Certificate.issuedAt
+  // nao aceita null no schema): itens sem data ficam de fora na UI ate o
+  // consultor informar. Entram sempre como PENDING — a validacao e humana.
+  certificates: z
+    .array(
+      z.object({
+        name: z.string().trim().min(1).max(200),
+        issuer: z.string().trim().min(1).max(160),
+        issuedAt: isoDateStrict,
+        expiresAt: isoDateStrict.optional().nullable(),
+        credentialId: optionalNullText(120),
+        credentialUrl: httpUrlOrNull,
+      }),
+    )
+    .max(30)
+    .default([]),
+  // Cases confirmados. Nascem como candidatos (DRAFT_INSIGHT/PENDING) para a
+  // curadoria — um curriculo NUNCA estabelece consentimento do cliente.
+  cases: z
+    .array(
+      z.object({
+        title: z.string().trim().min(1).max(200),
+        summary: optionalNullText(1000),
+        outcome: optionalNullText(600),
+        evidence: optionalNullText(400),
+      }),
+    )
+    .max(20)
     .default([]),
 });
 
@@ -195,6 +243,16 @@ function toFailure(error: unknown): ActionResult<never> {
       ok: false,
       error: "INVALID_INPUT",
       message: "Ja existe uma sugestao com esse nome nesta semana.",
+    };
+  }
+  // Payload fora do schema e erro do CHAMADOR, nao falha do servidor: sem este
+  // ramo, um campo invalido (ex.: data de emissao incompleta num certificado)
+  // virava "Erro inesperado" e ainda poluia o log de erro.
+  if (error instanceof z.ZodError) {
+    return {
+      ok: false,
+      error: "INVALID_INPUT",
+      message: error.issues[0]?.message ?? "Dados invalidos.",
     };
   }
   console.error("[skills] unexpected action error", error);
@@ -994,11 +1052,29 @@ export interface ProposedExperienceView {
   location: string | null;
 }
 
+export interface ProposedCertificateView {
+  name: string;
+  issuer: string;
+  issuedAt: string | null;
+  expiresAt: string | null;
+  credentialId: string | null;
+  credentialUrl: string | null;
+}
+
+export interface ProposedCaseView {
+  title: string;
+  summary: string | null;
+  outcome: string | null;
+  evidence: string | null;
+}
+
 export interface CurriculumProposalView {
   headline: string | null;
   summary: string | null;
   skills: ProposedSkillView[];
   experiences: ProposedExperienceView[];
+  certificates: ProposedCertificateView[];
+  cases: ProposedCaseView[];
 }
 
 /**
@@ -1040,7 +1116,7 @@ export async function extractCurriculumFromPdf(
     if (!proposal) {
       await recordAiUsage({
         feature: "CURRICULUM_EXTRACTION",
-        model: AI_MODELS.SONNET,
+        model: getConfiguredAiModel(),
         entityType: "Consultant",
         entityId: consultant.id,
         status: "FAILED",
@@ -1079,7 +1155,7 @@ export async function extractCurriculumFromPdf(
 
     await recordAiUsage({
       feature: "CURRICULUM_EXTRACTION",
-      model: AI_MODELS.SONNET,
+      model: getConfiguredAiModel(),
       entityType: "Consultant",
       entityId: consultant.id,
       status: "SUCCESS",
@@ -1094,6 +1170,8 @@ export async function extractCurriculumFromPdf(
         after: {
           skills: skills.length,
           experiences: proposal.experiences.length,
+          certificates: proposal.certificates.length,
+          cases: proposal.cases.length,
           hasBio: Boolean(proposal.headline || proposal.summary),
         },
       }),
@@ -1106,6 +1184,8 @@ export async function extractCurriculumFromPdf(
         summary: proposal.summary,
         skills,
         experiences: proposal.experiences,
+        certificates: proposal.certificates,
+        cases: proposal.cases,
       },
     };
   } catch (error) {
@@ -1126,6 +1206,8 @@ export async function applyCurriculumImport(
     appliedSkills: number;
     pendingCatalog: number;
     experiences: number;
+    certificates: number;
+    cases: number;
     bio: boolean;
   }>
 > {
@@ -1141,6 +1223,8 @@ export async function applyCurriculumImport(
     let appliedSkills = 0;
     let pendingCatalog = 0;
     let experiencesCreated = 0;
+    let certificatesCreated = 0;
+    let casesCreated = 0;
     let bioApplied = false;
 
     await prisma.$transaction(async (tx) => {
@@ -1170,6 +1254,62 @@ export async function applyCurriculumImport(
           },
         });
         experiencesCreated += 1;
+      }
+
+      for (const certificate of parsed.certificates) {
+        // Idempotencia: o mesmo certificado (nome + emissor) nao duplica quando
+        // o consultor reimporta o curriculo. Comparacao case-insensitive.
+        const already = await tx.certificate.findFirst({
+          where: {
+            consultantId: consultant.id,
+            name: { equals: certificate.name, mode: "insensitive" },
+            issuer: { equals: certificate.issuer, mode: "insensitive" },
+          },
+          select: { id: true },
+        });
+        if (already) continue;
+        await tx.certificate.create({
+          data: {
+            consultantId: consultant.id,
+            name: certificate.name,
+            issuer: certificate.issuer,
+            issuedAt: new Date(`${certificate.issuedAt}T00:00:00.000Z`),
+            expiresAt: certificate.expiresAt
+              ? new Date(`${certificate.expiresAt}T00:00:00.000Z`)
+              : null,
+            credentialId: certificate.credentialId,
+            credentialUrl: certificate.credentialUrl,
+            // Curriculo NAO valida credencial: quem valida e People/gestao.
+            status: "PENDING",
+          },
+        });
+        certificatesCreated += 1;
+      }
+
+      for (const caseItem of parsed.cases) {
+        const already = await tx.case.findFirst({
+          where: {
+            consultantId: consultant.id,
+            title: { equals: caseItem.title, mode: "insensitive" },
+          },
+          select: { id: true },
+        });
+        if (already) continue;
+        await tx.case.create({
+          data: {
+            consultantId: consultant.id,
+            title: caseItem.title,
+            summary: caseItem.summary,
+            outcome: caseItem.outcome,
+            sourceQuote: caseItem.evidence,
+            // Origem IA + sem checkpoint = veio de curriculo. Entra como
+            // candidato: o consentimento do cliente nunca e inferido do CV.
+            aiGenerated: true,
+            stage: "DRAFT_INSIGHT",
+            status: "PENDING",
+          },
+        });
+        casesCreated += 1;
       }
 
       for (const skill of parsed.skills) {
@@ -1255,6 +1395,8 @@ export async function applyCurriculumImport(
             appliedSkills,
             pendingCatalog,
             experiences: experiencesCreated,
+            certificates: certificatesCreated,
+            cases: casesCreated,
             bio: bioApplied,
           },
         }),
@@ -1268,9 +1410,213 @@ export async function applyCurriculumImport(
         appliedSkills,
         pendingCatalog,
         experiences: experiencesCreated,
+        certificates: certificatesCreated,
+        cases: casesCreated,
         bio: bioApplied,
       },
     };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Certificados e Cases do PROPRIO consultor (escopo de dono)
+// ---------------------------------------------------------------------------
+//
+// Sem estas leituras, o que a importacao de curriculo grava ficaria invisivel:
+// `buildConsultantCurriculum` so projeta certificados VALIDATED, e Case hoje so
+// e lido por `sourceCheckpointId` (lib/db/checkpoint-insights.ts). Aqui o dono
+// enxerga os proprios registros COM o status de curadoria, e pode remover o que
+// ainda esta PENDING — nunca o que ja foi decidido por People/gestao.
+
+export interface MyCertificateView {
+  id: string;
+  name: string;
+  issuer: string;
+  /** YYYY-MM-DD. */
+  issuedAt: string;
+  expiresAt: string | null;
+  credentialId: string | null;
+  credentialUrl: string | null;
+  status: "PENDING" | "VALIDATED" | "REJECTED";
+}
+
+export interface MyCaseView {
+  id: string;
+  title: string;
+  summary: string | null;
+  outcome: string | null;
+  sourceQuote: string | null;
+  aiGenerated: boolean;
+  stage: "DRAFT_INSIGHT" | "APPROVED" | "PUBLISHABLE";
+  status: "PENDING" | "ACCEPTED" | "DISMISSED";
+}
+
+function isoDay(value: Date): string {
+  return value.toISOString().slice(0, 10);
+}
+
+/** Certificados do consultor logado, em qualquer status de validacao. */
+export async function loadMyCertificates(): Promise<
+  ActionResult<MyCertificateView[]>
+> {
+  try {
+    ensureDatabase();
+    const { consultant } = await requireConsultant();
+    const rows = await prisma.certificate.findMany({
+      where: { consultantId: consultant.id },
+      select: {
+        id: true,
+        name: true,
+        issuer: true,
+        issuedAt: true,
+        expiresAt: true,
+        credentialId: true,
+        credentialUrl: true,
+        status: true,
+      },
+      orderBy: [{ issuedAt: "desc" }, { name: "asc" }],
+    });
+    return {
+      ok: true,
+      data: rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        issuer: row.issuer,
+        issuedAt: isoDay(row.issuedAt),
+        expiresAt: row.expiresAt ? isoDay(row.expiresAt) : null,
+        credentialId: row.credentialId,
+        credentialUrl: row.credentialUrl,
+        status: row.status,
+      })),
+    };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/** Cases atribuidos ao consultor logado, em qualquer estagio de curadoria. */
+export async function loadMyCases(): Promise<ActionResult<MyCaseView[]>> {
+  try {
+    ensureDatabase();
+    const { consultant } = await requireConsultant();
+    const rows = await prisma.case.findMany({
+      where: { consultantId: consultant.id },
+      select: {
+        id: true,
+        title: true,
+        summary: true,
+        outcome: true,
+        sourceQuote: true,
+        aiGenerated: true,
+        stage: true,
+        status: true,
+      },
+      orderBy: [{ status: "asc" }, { createdAt: "desc" }],
+    });
+    return { ok: true, data: rows };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/**
+ * Remove um certificado PROPRIO que ainda esta PENDING. Um certificado ja
+ * VALIDATED/REJECTED e decisao de People/gestao — o dono nao apaga.
+ */
+export async function deleteMyCertificate(
+  input: { id: string },
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    const { id } = z.object({ id: idSchema }).parse(input);
+    const { user, consultant } = await requireConsultant();
+    const dbUser = await resolveDbUser(user);
+
+    const row = await prisma.certificate.findUnique({
+      where: { id },
+      select: { id: true, consultantId: true, status: true, name: true },
+    });
+    // Fora do escopo do dono responde como inexistente (nao revela a linha).
+    if (!row || row.consultantId !== consultant.id) {
+      throw new ActionError("NOT_FOUND", "Certificado nao encontrado.");
+    }
+    if (row.status !== "PENDING") {
+      throw new ActionError(
+        "FORBIDDEN",
+        "Certificado ja validado. Fale com o time de Pessoas para altera-lo.",
+      );
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.certificate.delete({ where: { id } });
+      await tx.auditEvent.create({
+        data: buildAuditEventData({
+          actorUserId: dbUser?.id ?? null,
+          entityType: "Certificate",
+          entityId: id,
+          action: "CONSULTANT_CERTIFICATE_SELF_DELETED",
+          before: { name: row.name, status: row.status },
+        }),
+      });
+    });
+
+    revalidatePath(SKILLS_PATH);
+    return { ok: true, data: { id } };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/**
+ * Remove um case PROPRIO que ainda e candidato (PENDING + DRAFT_INSIGHT). Case
+ * ja aceito/aprovado pertence a curadoria — o dono nao apaga.
+ */
+export async function deleteMyCase(
+  input: { id: string },
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    ensureDatabase();
+    const { id } = z.object({ id: idSchema }).parse(input);
+    const { user, consultant } = await requireConsultant();
+    const dbUser = await resolveDbUser(user);
+
+    const row = await prisma.case.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        consultantId: true,
+        status: true,
+        stage: true,
+        title: true,
+      },
+    });
+    if (!row || row.consultantId !== consultant.id) {
+      throw new ActionError("NOT_FOUND", "Case nao encontrado.");
+    }
+    if (row.status !== "PENDING" || row.stage !== "DRAFT_INSIGHT") {
+      throw new ActionError(
+        "FORBIDDEN",
+        "Case ja em curadoria. Fale com o seu gestor para altera-lo.",
+      );
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.case.delete({ where: { id } });
+      await tx.auditEvent.create({
+        data: buildAuditEventData({
+          actorUserId: dbUser?.id ?? null,
+          entityType: "Case",
+          entityId: id,
+          action: "CONSULTANT_CASE_SELF_DELETED",
+          before: { title: row.title, status: row.status, stage: row.stage },
+        }),
+      });
+    });
+
+    revalidatePath(SKILLS_PATH);
+    return { ok: true, data: { id } };
   } catch (error) {
     return toFailure(error);
   }
