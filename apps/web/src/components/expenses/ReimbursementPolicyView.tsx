@@ -23,6 +23,7 @@ import { expenseCategoryLabel, type ExpenseCategory } from "@/lib/expenses/types
 import { MILEAGE_CATEGORY } from "@/lib/expenses/schemas";
 import type { ExpenseTypeAdminView } from "@/lib/db/expense-types";
 import type { ReimbursementPolicyRuleView } from "@/lib/db/reimbursement-policy";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 const labelClass = "mb-1 block text-xs font-semibold text-medium";
 const inputClass = cn(
@@ -470,7 +471,7 @@ export function ReimbursementPolicyView({
             <label htmlFor="policy-category" className={labelClass}>
               Escopo
             </label>
-            <select
+            <SearchableSelect
               id="policy-category"
               value={form.category}
               onChange={(e) =>
@@ -490,7 +491,7 @@ export function ReimbursementPolicyView({
                   {t.active ? "" : " (inativo)"}
                 </option>
               ))}
-            </select>
+            </SearchableSelect>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div>

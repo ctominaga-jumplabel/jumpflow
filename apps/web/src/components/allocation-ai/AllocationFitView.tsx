@@ -18,6 +18,7 @@ import type {
 } from "@/lib/allocation-ai/types";
 import type { AllocationFitResultBundle } from "@/lib/db/allocation-ai";
 import { CandidateCard } from "./CandidateCard";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 const availabilityTone: Record<AvailabilityState, StatusTone> = {
   FREE: "success",
@@ -110,7 +111,7 @@ export function AllocationFitView({
               <span className="text-xs font-semibold uppercase tracking-wide text-soft">
                 Projeto
               </span>
-              <select
+              <SearchableSelect
                 value={projectId}
                 onChange={(e) => setProjectId(e.target.value)}
                 className="h-10 rounded-md border-2 border-ink bg-surface px-3 text-sm text-strong"
@@ -121,7 +122,7 @@ export function AllocationFitView({
                     {p.name} · {p.clientName}
                   </option>
                 ))}
-              </select>
+              </SearchableSelect>
             </label>
             <div className="grid grid-cols-2 gap-4">
               <label className="flex flex-col gap-1.5">

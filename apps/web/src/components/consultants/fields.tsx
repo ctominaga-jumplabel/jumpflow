@@ -2,6 +2,7 @@
 
 import { focusRingInput } from "@/lib/styles";
 import { cn } from "@/lib/utils";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 /** Estilo padrao de input/select do cadastro de consultor. */
 export function consultantFieldClass() {
@@ -56,7 +57,7 @@ export function SelectField({
   return (
     <label className="space-y-1 text-sm font-medium text-medium">
       {label}
-      <select
+      <SearchableSelect
         value={value}
         onChange={(event) => onChange(event.target.value)}
         className={consultantFieldClass()}
@@ -67,7 +68,7 @@ export function SelectField({
             {optionLabel}
           </option>
         ))}
-      </select>
+      </SearchableSelect>
     </label>
   );
 }

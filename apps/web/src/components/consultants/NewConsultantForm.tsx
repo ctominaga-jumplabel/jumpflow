@@ -26,6 +26,7 @@ import {
   contractTypeLabels,
   seniorityLabels,
 } from "@/lib/consultants/labels";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 interface FormState {
   name: string;
@@ -231,7 +232,7 @@ export function NewConsultantForm({
             />
           </Field>
           <Field label="Senioridade" required>
-            <select
+            <SearchableSelect
               className={fieldClass()}
               value={form.seniority}
               onChange={(e) =>
@@ -243,10 +244,10 @@ export function NewConsultantForm({
                   {seniorityLabels[value]}
                 </option>
               ))}
-            </select>
+            </SearchableSelect>
           </Field>
           <Field label="Situação">
-            <select
+            <SearchableSelect
               className={fieldClass()}
               value={form.status}
               onChange={(e) =>
@@ -258,10 +259,10 @@ export function NewConsultantForm({
                   {consultantStatusLabels[value]}
                 </option>
               ))}
-            </select>
+            </SearchableSelect>
           </Field>
           <Field label="Tipo de contratação">
-            <select
+            <SearchableSelect
               className={fieldClass()}
               value={form.contractType}
               onChange={(e) =>
@@ -274,7 +275,7 @@ export function NewConsultantForm({
                   {contractTypeLabels[value]}
                 </option>
               ))}
-            </select>
+            </SearchableSelect>
           </Field>
         </div>
       </FormSection>

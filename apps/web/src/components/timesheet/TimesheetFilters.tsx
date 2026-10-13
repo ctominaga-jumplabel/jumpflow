@@ -23,6 +23,7 @@ import {
   type TimesheetSortField,
 } from "@/lib/timesheet/filters";
 import type { TimeEntryFormProject } from "./TimeEntryForm";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 const projectStatusLabels: Record<string, string> = {
   PROPOSAL: "Proposta",
@@ -259,7 +260,7 @@ export function TimesheetFilters({
           <label className={labelClass} htmlFor="hf-status">
             Status
           </label>
-          <select
+          <SearchableSelect
             id="hf-status"
             name="status"
             className={fieldClass}
@@ -271,14 +272,14 @@ export function TimesheetFilters({
                 {timeEntryStatusLabels[s]}
               </option>
             ))}
-          </select>
+          </SearchableSelect>
         </div>
 
         <div>
           <label className={labelClass} htmlFor="hf-client">
             Cliente
           </label>
-          <select
+          <SearchableSelect
             id="hf-client"
             name="clientId"
             className={fieldClass}
@@ -291,14 +292,14 @@ export function TimesheetFilters({
                 {c.name}
               </option>
             ))}
-          </select>
+          </SearchableSelect>
         </div>
 
         <div>
           <label className={labelClass} htmlFor="hf-project">
             Projeto
           </label>
-          <select
+          <SearchableSelect
             id="hf-project"
             name="projectId"
             className={fieldClass}
@@ -311,14 +312,14 @@ export function TimesheetFilters({
                 {p.name} · {p.clientName}
               </option>
             ))}
-          </select>
+          </SearchableSelect>
         </div>
 
         <div>
           <label className={labelClass} htmlFor="hf-project-status">
             Status do projeto
           </label>
-          <select
+          <SearchableSelect
             id="hf-project-status"
             name="projectStatus"
             className={fieldClass}
@@ -330,14 +331,14 @@ export function TimesheetFilters({
                 {label}
               </option>
             ))}
-          </select>
+          </SearchableSelect>
         </div>
 
         <div>
           <label className={labelClass} htmlFor="hf-activity">
             Atividade
           </label>
-          <select
+          <SearchableSelect
             id="hf-activity"
             name="activity"
             className={fieldClass}
@@ -349,7 +350,7 @@ export function TimesheetFilters({
                 {activityLabels[a]}
               </option>
             ))}
-          </select>
+          </SearchableSelect>
         </div>
 
         <div>
@@ -408,7 +409,7 @@ export function TimesheetFilters({
             <label className={labelClass} htmlFor="hf-billable">
               Cobrança
             </label>
-            <select
+            <SearchableSelect
               id="hf-billable"
               name="billable"
               className={fieldClass}
@@ -423,14 +424,14 @@ export function TimesheetFilters({
               <option value="">Todas</option>
               <option value="true">Faturável</option>
               <option value="false">Não faturável</option>
-            </select>
+            </SearchableSelect>
           </div>
 
           <div>
             <label className={labelClass} htmlFor="hf-sort">
               Ordenar por
             </label>
-            <select
+            <SearchableSelect
               id="hf-sort"
               name="sort"
               className={fieldClass}
@@ -441,14 +442,14 @@ export function TimesheetFilters({
                   {sortLabels[s]}
                 </option>
               ))}
-            </select>
+            </SearchableSelect>
           </div>
 
           <div>
             <label className={labelClass} htmlFor="hf-direction">
               Direção
             </label>
-            <select
+            <SearchableSelect
               id="hf-direction"
               name="direction"
               className={fieldClass}
@@ -456,7 +457,7 @@ export function TimesheetFilters({
             >
               <option value="asc">Crescente</option>
               <option value="desc">Decrescente</option>
-            </select>
+            </SearchableSelect>
           </div>
         </div>
       </details>

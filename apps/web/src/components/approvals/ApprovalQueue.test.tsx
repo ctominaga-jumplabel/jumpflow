@@ -125,7 +125,7 @@ describe("ApprovalQueue", () => {
 
   it("filters approvals by project", () => {
     renderQueue();
-    fireEvent.change(screen.getByLabelText("Projeto"), {
+    fireEvent.change(screen.getByLabelText("Projeto", { selector: "select" }), {
       target: { value: "Atlas" },
     });
     expect(screen.getByText("3 pendentes")).toBeInTheDocument();
@@ -187,11 +187,11 @@ describe("ApprovalQueue", () => {
     // to just the hours one — exactly what the closing deep-link wants.
     expect(screen.getByText("1 pendentes")).toBeInTheDocument();
     // The Projeto/Consultor selects reflect the seeded values.
-    expect((screen.getByLabelText("Projeto") as HTMLSelectElement).value).toBe(
+    expect((screen.getByLabelText("Projeto", { selector: "select" }) as HTMLSelectElement).value).toBe(
       "Atlas",
     );
     expect(
-      (screen.getByLabelText("Consultor") as HTMLSelectElement).value,
+      (screen.getByLabelText("Consultor", { selector: "select" }) as HTMLSelectElement).value,
     ).toBe("Carlos Nunes");
     // The matching item is decidable inline: its Aprovar button is enabled.
     expect(
@@ -225,10 +225,10 @@ describe("ApprovalQueue", () => {
       />,
     );
     // Status falls back to ALL: every Atlas item (pending + decided) is in scope.
-    expect((screen.getByLabelText("Status") as HTMLSelectElement).value).toBe(
+    expect((screen.getByLabelText("Status", { selector: "select" }) as HTMLSelectElement).value).toBe(
       "ALL",
     );
-    expect((screen.getByLabelText("Projeto") as HTMLSelectElement).value).toBe(
+    expect((screen.getByLabelText("Projeto", { selector: "select" }) as HTMLSelectElement).value).toBe(
       "Atlas",
     );
   });

@@ -74,6 +74,7 @@ import { ConsultantCurriculumSection } from "./ConsultantCurriculumSection";
 import { ConsultantDocumentsSection } from "./ConsultantDocumentsSection";
 import { ConsultantProfileSections } from "./ConsultantProfileSections";
 import { ConsultantProjectRatesSection } from "./ConsultantProjectRatesSection";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 /** Modos de precificacao PJ (so relevantes quando contractType === "PJ"). */
 const PJ_RATE_MODES: { value: "HOURLY" | "FIXED"; label: string }[] = [
@@ -341,7 +342,7 @@ export function ConsultantDirectory({
             <label className="sr-only" htmlFor="consultant-skill-filter">
               Filtrar por skill
             </label>
-            <select
+            <SearchableSelect
               id="consultant-skill-filter"
               value={skillId}
               onChange={(e) => setSkillId(e.target.value)}
@@ -356,7 +357,7 @@ export function ConsultantDirectory({
                   {s.name}
                 </option>
               ))}
-            </select>
+            </SearchableSelect>
           </>
         }
         actions={
@@ -690,7 +691,7 @@ function ConsultantDetailModal({
                 />
                 <label className="space-y-1 text-sm font-medium text-medium">
                   Tipo de contratacao
-                  <select
+                  <SearchableSelect
                     aria-label="Tipo de contratacao"
                     value={currentIdentity.contractType ?? ""}
                     onChange={(event) =>
@@ -709,7 +710,7 @@ function ConsultantDetailModal({
                         {contractTypeLabels[type]}
                       </option>
                     ))}
-                  </select>
+                  </SearchableSelect>
                 </label>
               </div>
               <ActionButton
@@ -831,7 +832,7 @@ function ConsultantDetailModal({
                 htmlFor="compensation-contract-type"
               >
                 Tipo de contrato
-                <select
+                <SearchableSelect
                   id="compensation-contract-type"
                   aria-label="Tipo de contrato da remuneração"
                   disabled={!perms.compensation.edit}
@@ -853,7 +854,7 @@ function ConsultantDetailModal({
                       {contractTypeLabels[type]}
                     </option>
                   ))}
-                </select>
+                </SearchableSelect>
                 <span className="block text-xs font-normal text-soft">
                   Define os campos exigidos: PJ usa valor/hora ou fixo mensal;
                   CLT FLEX exige valores CLT e PJ.
@@ -1411,7 +1412,7 @@ function AdHocPaymentsSection({
           <div className="grid gap-3 md:grid-cols-2">
             <label className="space-y-1 text-sm font-medium text-medium">
               Projeto
-              <select
+              <SearchableSelect
                 aria-label="Projeto da remuneracao pontual"
                 value={draft.projectId}
                 onChange={(event) =>
@@ -1425,7 +1426,7 @@ function AdHocPaymentsSection({
                     {project.name} ({project.clientName})
                   </option>
                 ))}
-              </select>
+              </SearchableSelect>
             </label>
             <NumberInput
               label="Valor (R$)"
@@ -1446,7 +1447,7 @@ function AdHocPaymentsSection({
             </label>
             <label className="space-y-1 text-sm font-medium text-medium">
               Natureza
-              <select
+              <SearchableSelect
                 aria-label="Natureza"
                 value={draft.kind}
                 onChange={(event) =>
@@ -1462,11 +1463,11 @@ function AdHocPaymentsSection({
                     {ADHOC_KIND_LABELS[kind]}
                   </option>
                 ))}
-              </select>
+              </SearchableSelect>
             </label>
             <label className="space-y-1 text-sm font-medium text-medium">
               Status
-              <select
+              <SearchableSelect
                 aria-label="Status"
                 value={draft.status}
                 onChange={(event) =>
@@ -1482,7 +1483,7 @@ function AdHocPaymentsSection({
                     {ADHOC_STATUS_LABELS[status]}
                   </option>
                 ))}
-              </select>
+              </SearchableSelect>
             </label>
             <label className="space-y-1 text-sm font-medium text-medium md:col-span-2">
               Motivo

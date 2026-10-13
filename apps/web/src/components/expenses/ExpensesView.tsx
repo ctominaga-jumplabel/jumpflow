@@ -45,6 +45,7 @@ import {
   type ExpenseFormValue,
   type ExpenseSubmitMode,
 } from "./ExpenseForm";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 const STATUS_FILTERS: (ExpenseStatus | "ALL")[] = [
   "ALL",
@@ -658,7 +659,7 @@ export function ExpensesView(props: ExpensesViewProps) {
               >
                 Projeto
               </label>
-              <select
+              <SearchableSelect
                 id="filter-project"
                 value={projectId}
                 onChange={(e) => setProjectId(e.target.value)}
@@ -673,7 +674,7 @@ export function ExpensesView(props: ExpensesViewProps) {
                     {p.name}
                   </option>
                 ))}
-              </select>
+              </SearchableSelect>
             </div>
             <div>
               <label

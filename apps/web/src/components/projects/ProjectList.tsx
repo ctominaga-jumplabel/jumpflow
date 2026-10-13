@@ -27,6 +27,7 @@ import {
 } from "@/lib/format";
 import { FolderKanban } from "lucide-react";
 import { ProjectStatusBadge } from "./ProjectStatusBadge";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 const STATUS_FILTERS: (ProjectStatus | "ALL")[] = [
   "ALL",
@@ -178,7 +179,7 @@ export function ProjectList({
             <label className="sr-only" htmlFor="project-client-filter">
               Filtrar por cliente
             </label>
-            <select
+            <SearchableSelect
               id="project-client-filter"
               value={clientId}
               onChange={(e) => setClientId(e.target.value)}
@@ -193,7 +194,7 @@ export function ProjectList({
                   {c.name}
                 </option>
               ))}
-            </select>
+            </SearchableSelect>
           </>
         }
         actions={

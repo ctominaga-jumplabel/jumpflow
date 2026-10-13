@@ -33,6 +33,7 @@ import {
   billingConfigToForm,
   formToBillingConfigItem,
 } from "@/components/projects/shared/billing-form";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 type Mode = "demo" | "db";
 
@@ -394,7 +395,7 @@ function BillingTypeEditor({
       <div className="flex flex-wrap items-end gap-3">
         <label className="flex-1 space-y-1 text-sm font-medium text-medium">
           Modelo de cobrança do projeto
-          <select
+          <SearchableSelect
             value={billingTypeId}
             onChange={(event) => setBillingTypeId(event.target.value)}
             className={fieldClass()}
@@ -405,7 +406,7 @@ function BillingTypeEditor({
                 {type.name}
               </option>
             ))}
-          </select>
+          </SearchableSelect>
         </label>
         <ActionButton
           size="sm"

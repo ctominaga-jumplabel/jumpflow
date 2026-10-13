@@ -18,6 +18,7 @@ import {
   type HoursSortField,
 } from "@/lib/reports/schemas";
 import type { ReportFilterOptions } from "@/lib/db/reports";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 const stageLabels: Record<(typeof EXPENSE_STAGES)[number], string> = {
   GESTOR: "Gestor",
@@ -143,7 +144,7 @@ export function ReportFilters({ tab, options, values }: ReportFiltersProps) {
               <label className={labelClass} htmlFor="f-period">
                 Período
               </label>
-              <select
+              <SearchableSelect
                 id="f-period"
                 name="period"
                 defaultValue={v("period")}
@@ -155,7 +156,7 @@ export function ReportFilters({ tab, options, values }: ReportFiltersProps) {
                   {periodLabels["mes-anterior"]}
                 </option>
                 <option value="ano-atual">{periodLabels["ano-atual"]}</option>
-              </select>
+              </SearchableSelect>
             </div>
           ) : null}
 
@@ -188,7 +189,7 @@ export function ReportFilters({ tab, options, values }: ReportFiltersProps) {
             <label className={labelClass} htmlFor="f-client">
               Cliente
             </label>
-            <select
+            <SearchableSelect
               id="f-client"
               name="clientId"
               defaultValue={v("clientId")}
@@ -200,13 +201,13 @@ export function ReportFilters({ tab, options, values }: ReportFiltersProps) {
                   {c.name}
                 </option>
               ))}
-            </select>
+            </SearchableSelect>
           </div>
           <div>
             <label className={labelClass} htmlFor="f-project">
               Projeto
             </label>
-            <select
+            <SearchableSelect
               id="f-project"
               name="projectId"
               defaultValue={v("projectId")}
@@ -218,7 +219,7 @@ export function ReportFilters({ tab, options, values }: ReportFiltersProps) {
                   {p.name}
                 </option>
               ))}
-            </select>
+            </SearchableSelect>
           </div>
 
           {options.consultants.length > 1 ? (
@@ -226,7 +227,7 @@ export function ReportFilters({ tab, options, values }: ReportFiltersProps) {
               <label className={labelClass} htmlFor="f-consultant">
                 Consultor
               </label>
-              <select
+              <SearchableSelect
                 id="f-consultant"
                 name="consultantId"
                 defaultValue={v("consultantId")}
@@ -238,7 +239,7 @@ export function ReportFilters({ tab, options, values }: ReportFiltersProps) {
                     {c.name}
                   </option>
                 ))}
-              </select>
+              </SearchableSelect>
             </div>
           ) : null}
 
@@ -248,7 +249,7 @@ export function ReportFilters({ tab, options, values }: ReportFiltersProps) {
                 <label className={labelClass} htmlFor="f-status">
                   Status
                 </label>
-                <select
+                <SearchableSelect
                   id="f-status"
                   name="status"
                   defaultValue={v("status")}
@@ -260,13 +261,13 @@ export function ReportFilters({ tab, options, values }: ReportFiltersProps) {
                       {timeEntryStatusLabels[s]}
                     </option>
                   ))}
-                </select>
+                </SearchableSelect>
               </div>
               <div>
                 <label className={labelClass} htmlFor="f-activity">
                   Atividade
                 </label>
-                <select
+                <SearchableSelect
                   id="f-activity"
                   name="activityType"
                   defaultValue={v("activityType")}
@@ -278,7 +279,7 @@ export function ReportFilters({ tab, options, values }: ReportFiltersProps) {
                       {activityLabels[a]}
                     </option>
                   ))}
-                </select>
+                </SearchableSelect>
               </div>
             </>
           ) : null}
@@ -289,7 +290,7 @@ export function ReportFilters({ tab, options, values }: ReportFiltersProps) {
                 <label className={labelClass} htmlFor="f-exp-status">
                   Status
                 </label>
-                <select
+                <SearchableSelect
                   id="f-exp-status"
                   name="status"
                   defaultValue={v("status")}
@@ -301,13 +302,13 @@ export function ReportFilters({ tab, options, values }: ReportFiltersProps) {
                       {expenseStatusLabels[s]}
                     </option>
                   ))}
-                </select>
+                </SearchableSelect>
               </div>
               <div>
                 <label className={labelClass} htmlFor="f-stage">
                   Etapa
                 </label>
-                <select
+                <SearchableSelect
                   id="f-stage"
                   name="stage"
                   defaultValue={v("stage")}
@@ -319,7 +320,7 @@ export function ReportFilters({ tab, options, values }: ReportFiltersProps) {
                       {stageLabels[s]}
                     </option>
                   ))}
-                </select>
+                </SearchableSelect>
               </div>
             </>
           ) : null}
@@ -349,7 +350,7 @@ export function ReportFilters({ tab, options, values }: ReportFiltersProps) {
               <label className={labelClass} htmlFor="f-client-status">
                 Status do cliente
               </label>
-              <select
+              <SearchableSelect
                 id="f-client-status"
                 name="clientStatus"
                 defaultValue={v("clientStatus")}
@@ -361,13 +362,13 @@ export function ReportFilters({ tab, options, values }: ReportFiltersProps) {
                     {label}
                   </option>
                 ))}
-              </select>
+              </SearchableSelect>
             </div>
             <div>
               <label className={labelClass} htmlFor="f-project-status">
                 Status do projeto
               </label>
-              <select
+              <SearchableSelect
                 id="f-project-status"
                 name="projectStatus"
                 defaultValue={v("projectStatus")}
@@ -379,13 +380,13 @@ export function ReportFilters({ tab, options, values }: ReportFiltersProps) {
                     {label}
                   </option>
                 ))}
-              </select>
+              </SearchableSelect>
             </div>
             <div>
               <label className={labelClass} htmlFor="f-consultant-status">
                 Status do consultor
               </label>
-              <select
+              <SearchableSelect
                 id="f-consultant-status"
                 name="consultantStatus"
                 defaultValue={v("consultantStatus")}
@@ -399,7 +400,7 @@ export function ReportFilters({ tab, options, values }: ReportFiltersProps) {
                     </option>
                   ),
                 )}
-              </select>
+              </SearchableSelect>
             </div>
 
             {tab === "horas" ? (
@@ -407,7 +408,7 @@ export function ReportFilters({ tab, options, values }: ReportFiltersProps) {
                 <label className={labelClass} htmlFor="f-billable">
                   Faturável
                 </label>
-                <select
+                <SearchableSelect
                   id="f-billable"
                   name="billable"
                   defaultValue={v("billable")}
@@ -416,7 +417,7 @@ export function ReportFilters({ tab, options, values }: ReportFiltersProps) {
                   <option value="">Todas</option>
                   <option value="true">Sim</option>
                   <option value="false">Não</option>
-                </select>
+                </SearchableSelect>
               </div>
             ) : null}
 
@@ -426,7 +427,7 @@ export function ReportFilters({ tab, options, values }: ReportFiltersProps) {
                   <label className={labelClass} htmlFor="f-sort">
                     Ordenar por
                   </label>
-                  <select
+                  <SearchableSelect
                     id="f-sort"
                     name="sort"
                     defaultValue={v("sort")}
@@ -443,13 +444,13 @@ export function ReportFilters({ tab, options, values }: ReportFiltersProps) {
                             {expensesSortLabels[s]}
                           </option>
                         ))}
-                  </select>
+                  </SearchableSelect>
                 </div>
                 <div>
                   <label className={labelClass} htmlFor="f-direction">
                     Direção
                   </label>
-                  <select
+                  <SearchableSelect
                     id="f-direction"
                     name="direction"
                     defaultValue={v("direction")}
@@ -457,13 +458,13 @@ export function ReportFilters({ tab, options, values }: ReportFiltersProps) {
                   >
                     <option value="asc">Crescente</option>
                     <option value="desc">Decrescente</option>
-                  </select>
+                  </SearchableSelect>
                 </div>
                 <div>
                   <label className={labelClass} htmlFor="f-page-size">
                     Itens por página
                   </label>
-                  <select
+                  <SearchableSelect
                     id="f-page-size"
                     name="pageSize"
                     defaultValue={v("pageSize")}
@@ -474,7 +475,7 @@ export function ReportFilters({ tab, options, values }: ReportFiltersProps) {
                         {n}
                       </option>
                     ))}
-                  </select>
+                  </SearchableSelect>
                 </div>
               </>
             ) : null}

@@ -14,6 +14,7 @@ import {
   type AvailabilityMap,
   type AvailabilityState,
 } from "@/lib/availability/types";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 /** Tom de cor por estado (alinhado ao design system; sem libs externas). */
 const stateTone: Record<AvailabilityState, string> = {
@@ -121,7 +122,7 @@ export function AvailabilityHeatmap({ map, isMock }: AvailabilityHeatmapProps) {
             <label className="sr-only" htmlFor="availability-area">
               Filtrar por área
             </label>
-            <select
+            <SearchableSelect
               id="availability-area"
               value={area}
               onChange={(e) => setArea(e.target.value)}
@@ -133,11 +134,11 @@ export function AvailabilityHeatmap({ map, isMock }: AvailabilityHeatmapProps) {
                   {a}
                 </option>
               ))}
-            </select>
+            </SearchableSelect>
             <label className="sr-only" htmlFor="availability-seniority">
               Filtrar por senioridade
             </label>
-            <select
+            <SearchableSelect
               id="availability-seniority"
               value={seniority}
               onChange={(e) => setSeniority(e.target.value)}
@@ -149,7 +150,7 @@ export function AvailabilityHeatmap({ map, isMock }: AvailabilityHeatmapProps) {
                   {s}
                 </option>
               ))}
-            </select>
+            </SearchableSelect>
             <span className="mx-1 h-5 w-px bg-border" aria-hidden="true" />
             <FilterChip
               label="Todos"

@@ -6,6 +6,7 @@ import type { ReceivableInput } from "@/lib/projects/schemas";
 import type { ReceivableStatus } from "@/lib/projects/types";
 import { cn } from "@/lib/utils";
 import { DateField, NumberField, fieldClass } from "./fields";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 export const receivableStatusLabels: Record<ReceivableStatus, string> = {
   FORECAST: "Previsto",
@@ -74,7 +75,7 @@ export function ReceivableModal({
         </label>
         <label className="space-y-1 text-sm font-medium text-medium">
           Situação
-          <select
+          <SearchableSelect
             value={value.status}
             onChange={(event) =>
               onChange({
@@ -91,7 +92,7 @@ export function ReceivableModal({
                 </option>
               ),
             )}
-          </select>
+          </SearchableSelect>
         </label>
         <label className="space-y-1 text-sm font-medium text-medium md:col-span-2">
           Nota

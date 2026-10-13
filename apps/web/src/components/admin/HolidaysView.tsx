@@ -13,6 +13,7 @@ import {
 import type { HolidayScopeKey, HolidayView } from "@/lib/db/holidays";
 import { cn } from "@/lib/utils";
 import { focusRingInput } from "@/lib/styles";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 const SCOPE_LABELS: Record<HolidayScopeKey, string> = {
   NATIONAL: "Nacional",
@@ -89,7 +90,7 @@ export function HolidaysView({
       <div className="flex flex-wrap items-end justify-between gap-3">
         <label className="flex flex-col gap-1 text-xs text-soft">
           Ano
-          <select
+          <SearchableSelect
             className={inputCls}
             value={selectedYear ?? ""}
             onChange={(e) => handleYearChange(e.target.value)}
@@ -100,7 +101,7 @@ export function HolidaysView({
                 {y}
               </option>
             ))}
-          </select>
+          </SearchableSelect>
         </label>
         {canManage && (
           <ActionButton
@@ -356,7 +357,7 @@ function HolidayFormModal({
           </label>
           <label className="flex flex-col gap-1 text-xs text-soft">
             Abrangência
-            <select
+            <SearchableSelect
               className={inputCls}
               value={scope}
               onChange={(e) => setScope(e.target.value as HolidayScopeKey)}
@@ -366,7 +367,7 @@ function HolidayFormModal({
                   {SCOPE_LABELS[s]}
                 </option>
               ))}
-            </select>
+            </SearchableSelect>
           </label>
         </div>
 

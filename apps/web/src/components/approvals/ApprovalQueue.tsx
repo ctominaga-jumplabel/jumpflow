@@ -50,6 +50,7 @@ import {
   type ApprovalStatus,
 } from "@/lib/mock-data/approvals";
 import { ApprovalStatusBadge } from "./ApprovalStatusBadge";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 type Tab = "PENDING" | "HISTORY";
 /** Bulk actions: the two decisions plus REOPEN (decided -> pending again). */
@@ -864,7 +865,7 @@ export function ApprovalQueue({
                 <label htmlFor="approval-status" className="mb-1 block text-xs font-semibold text-medium">
                   Status
                 </label>
-                <select
+                <SearchableSelect
                   id="approval-status"
                   value={filters.status}
                   onChange={(event) =>
@@ -883,13 +884,13 @@ export function ApprovalQueue({
                       {option.label}
                     </option>
                   ))}
-                </select>
+                </SearchableSelect>
               </div>
               <div>
                 <label htmlFor="approval-client" className="mb-1 block text-xs font-semibold text-medium">
                   Cliente
                 </label>
-                <select
+                <SearchableSelect
                   id="approval-client"
                   value={filters.client}
                   onChange={(event) =>
@@ -906,13 +907,13 @@ export function ApprovalQueue({
                       {client}
                     </option>
                   ))}
-                </select>
+                </SearchableSelect>
               </div>
               <div>
                 <label htmlFor="approval-project" className="mb-1 block text-xs font-semibold text-medium">
                   Projeto
                 </label>
-                <select
+                <SearchableSelect
                   id="approval-project"
                   value={filters.project}
                   onChange={(event) =>
@@ -929,13 +930,13 @@ export function ApprovalQueue({
                       {project}
                     </option>
                   ))}
-                </select>
+                </SearchableSelect>
               </div>
               <div>
                 <label htmlFor="approval-consultant" className="mb-1 block text-xs font-semibold text-medium">
                   Consultor
                 </label>
-                <select
+                <SearchableSelect
                   id="approval-consultant"
                   value={filters.consultant}
                   onChange={(event) =>
@@ -952,13 +953,13 @@ export function ApprovalQueue({
                       {consultant}
                     </option>
                   ))}
-                </select>
+                </SearchableSelect>
               </div>
               <div className="sm:col-span-2 lg:col-span-4">
                 <label htmlFor="approval-activity" className="mb-1 block text-xs font-semibold text-medium">
                   Atividade
                 </label>
-                <select
+                <SearchableSelect
                   id="approval-activity"
                   value={filters.activity}
                   onChange={(event) =>
@@ -975,7 +976,7 @@ export function ApprovalQueue({
                       {activity}
                     </option>
                   ))}
-                </select>
+                </SearchableSelect>
               </div>
               <div className="flex items-end gap-2">
                 <ActionButton

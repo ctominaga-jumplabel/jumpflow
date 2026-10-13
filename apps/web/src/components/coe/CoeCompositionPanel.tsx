@@ -36,6 +36,7 @@ import type {
   AllocationSkillOption,
 } from "@/lib/allocation-ai/types";
 import { saveCoeSquad } from "@/app/app/coe/actions";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 export interface CoeCompositionPanelProps {
   bundle: CoeCompositionBundle;
@@ -187,7 +188,7 @@ export function CoeCompositionPanel({
               <span className="text-xs font-semibold uppercase tracking-wide text-soft">
                 Projeto
               </span>
-              <select
+              <SearchableSelect
                 value={projectId}
                 onChange={(e) => setProjectId(e.target.value)}
                 className={fieldClass}
@@ -198,13 +199,13 @@ export function CoeCompositionPanel({
                     {p.name} · {p.clientName}
                   </option>
                 ))}
-              </select>
+              </SearchableSelect>
             </label>
             <label className="flex flex-col gap-1.5">
               <span className="text-xs font-semibold uppercase tracking-wide text-soft">
                 Universo de candidatos
               </span>
-              <select
+              <SearchableSelect
                 value={scope}
                 onChange={(e) => setScope(e.target.value as CoeScope)}
                 className={fieldClass}
@@ -214,7 +215,7 @@ export function CoeCompositionPanel({
                     {coeScopeLabels[value]}
                   </option>
                 ))}
-              </select>
+              </SearchableSelect>
             </label>
           </div>
 

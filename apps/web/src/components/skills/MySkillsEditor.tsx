@@ -18,6 +18,7 @@ import {
   type CatalogSkillOption,
   type MySkillRow,
 } from "@/app/app/skills/actions";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 function fieldClass() {
   return cn(
@@ -217,7 +218,7 @@ export function MySkillsEditor() {
                 <div className="mt-3 flex flex-wrap items-end gap-2">
                   <label className="text-xs font-medium text-medium">
                     Nível
-                    <select
+                    <SearchableSelect
                       aria-label={`Nível de ${skill.name}`}
                       value={draft.level}
                       onChange={(event) =>
@@ -236,7 +237,7 @@ export function MySkillsEditor() {
                           {skillLevelLabels[level]}
                         </option>
                       ))}
-                    </select>
+                    </SearchableSelect>
                   </label>
                   <label className="text-xs font-medium text-medium">
                     Anos de experiência
@@ -298,7 +299,7 @@ export function MySkillsEditor() {
           <div className="mt-2 flex flex-wrap items-end gap-2">
             <label className="text-xs font-medium text-medium">
               Skill
-              <select
+              <SearchableSelect
                 aria-label="Skill do catálogo"
                 value={newSkillId}
                 onChange={(event) => setNewSkillId(event.target.value)}
@@ -311,11 +312,11 @@ export function MySkillsEditor() {
                     {option.category ? ` — ${option.category}` : ""}
                   </option>
                 ))}
-              </select>
+              </SearchableSelect>
             </label>
             <label className="text-xs font-medium text-medium">
               Nível
-              <select
+              <SearchableSelect
                 aria-label="Nível da nova skill"
                 value={newLevel}
                 onChange={(event) =>
@@ -328,7 +329,7 @@ export function MySkillsEditor() {
                     {skillLevelLabels[level]}
                   </option>
                 ))}
-              </select>
+              </SearchableSelect>
             </label>
             <label className="text-xs font-medium text-medium">
               Anos

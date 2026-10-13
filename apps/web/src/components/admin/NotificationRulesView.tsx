@@ -16,6 +16,7 @@ import type {
   NotificationRuleView,
   NotificationScopeKey,
 } from "@/lib/db/notification-rules";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 const EVENT_LABELS: Record<NotificationEventKey, string> = {
   HOURS_RELEASED: "Liberação de horas",
@@ -101,7 +102,7 @@ export function NotificationRulesView({
         <div className="flex flex-wrap items-end gap-3">
           <label className="flex flex-col gap-1 text-xs text-soft">
             Evento
-            <select
+            <SearchableSelect
               className={inputCls}
               value={event}
               onChange={(e) => setEvent(e.target.value as NotificationEventKey)}
@@ -111,11 +112,11 @@ export function NotificationRulesView({
                   {EVENT_LABELS[ev]}
                 </option>
               ))}
-            </select>
+            </SearchableSelect>
           </label>
           <label className="flex flex-col gap-1 text-xs text-soft">
             Escopo
-            <select
+            <SearchableSelect
               className={inputCls}
               value={scope}
               onChange={(e) => setScope(e.target.value as NotificationScopeKey)}
@@ -125,12 +126,12 @@ export function NotificationRulesView({
                   {s === "GLOBAL" ? "Global" : "Projeto"}
                 </option>
               ))}
-            </select>
+            </SearchableSelect>
           </label>
           {scope === "PROJECT" && (
             <label className="flex flex-col gap-1 text-xs text-soft">
               Projeto
-              <select
+              <SearchableSelect
                 className={inputCls}
                 value={scopeId}
                 onChange={(e) => setScopeId(e.target.value)}
@@ -141,12 +142,12 @@ export function NotificationRulesView({
                     {p.name}
                   </option>
                 ))}
-              </select>
+              </SearchableSelect>
             </label>
           )}
           <label className="flex flex-col gap-1 text-xs text-soft">
             Canal
-            <select
+            <SearchableSelect
               className={inputCls}
               value={channel}
               onChange={(e) =>
@@ -158,7 +159,7 @@ export function NotificationRulesView({
                   {c === "EMAIL" ? "E-mail" : "Teams"}
                 </option>
               ))}
-            </select>
+            </SearchableSelect>
           </label>
           <label className="flex items-center gap-2 py-1.5 text-sm text-ink">
             <input
@@ -287,7 +288,7 @@ function RuleCard({
 
       {/* Add recipient */}
       <div className="flex flex-wrap items-end gap-2 border-t border-surface-muted pt-3">
-        <select
+        <SearchableSelect
           className={inputCls}
           value={type}
           onChange={(e) =>
@@ -301,10 +302,10 @@ function RuleCard({
               </option>
             ),
           )}
-        </select>
+        </SearchableSelect>
         {needsAddress &&
           (type === "ROLE" ? (
-            <select
+            <SearchableSelect
               className={inputCls}
               value={address}
               onChange={(e) => setAddress(e.target.value)}
@@ -315,7 +316,7 @@ function RuleCard({
                   {r}
                 </option>
               ))}
-            </select>
+            </SearchableSelect>
           ) : (
             <input
               className={inputCls}
@@ -324,7 +325,7 @@ function RuleCard({
               onChange={(e) => setAddress(e.target.value)}
             />
           ))}
-        <select
+        <SearchableSelect
           className={inputCls}
           value={recChannel}
           onChange={(e) =>
@@ -336,7 +337,7 @@ function RuleCard({
               {c === "EMAIL" ? "E-mail" : "Teams"}
             </option>
           ))}
-        </select>
+        </SearchableSelect>
         <input
           className={inputCls}
           placeholder="Nome (opcional)"

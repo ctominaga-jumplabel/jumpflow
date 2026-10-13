@@ -22,6 +22,7 @@ import {
   languageLevelLabels,
 } from "@/lib/consultants/labels";
 import type { ConsultantProfile } from "@/lib/db/consultants";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 export interface ConsultantCompetenciasSectionProps {
   consultantId: string;
@@ -152,7 +153,7 @@ function LanguagesBlock({
         </label>
         <label className="space-y-1 text-sm font-medium text-medium">
           Nivel
-          <select
+          <SearchableSelect
             value={level}
             onChange={(event) => setLevel(event.target.value as LanguageLevel)}
             className={fieldClass()}
@@ -162,7 +163,7 @@ function LanguagesBlock({
                 {languageLevelLabels[value]}
               </option>
             ))}
-          </select>
+          </SearchableSelect>
         </label>
         <ActionButton
           size="sm"
@@ -295,7 +296,7 @@ function EducationBlock({
         </label>
         <label className="space-y-1 text-sm font-medium text-medium">
           Grau
-          <select
+          <SearchableSelect
             value={degree}
             onChange={(event) => setDegree(event.target.value as EducationDegree)}
             className={fieldClass()}
@@ -305,7 +306,7 @@ function EducationBlock({
                 {educationDegreeLabels[value]}
               </option>
             ))}
-          </select>
+          </SearchableSelect>
         </label>
         <div className="flex items-end gap-2">
           <label className="space-y-1 text-sm font-medium text-medium">

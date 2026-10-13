@@ -16,6 +16,7 @@ import {
   deleteOnCallEntry,
   getOnCallApprovalUrl,
 } from "@/app/app/sobreaviso/actions";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 const toneByStatus: Record<OnCallStatus, StatusTone> = {
   PENDING: "warning",
@@ -267,14 +268,14 @@ export function SobreavisoView({
             </label>
             <label className="flex flex-col gap-1 text-xs text-soft">
               Projeto (opcional)
-              <select className={inputCls} value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+              <SearchableSelect className={inputCls} value={projectId} onChange={(e) => setProjectId(e.target.value)}>
                 <option value="">—</option>
                 {projects.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}
                   </option>
                 ))}
-              </select>
+              </SearchableSelect>
             </label>
             <label className="flex flex-1 flex-col gap-1 text-xs text-soft">
               Observação

@@ -30,6 +30,7 @@ import {
   setProjectAutoApprovalActive,
 } from "@/app/app/projetos/actions";
 import { runAutoApprovalNow } from "@/app/app/automacoes/aprovacao-automatica/actions";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 const thClass =
   "px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-soft";
@@ -369,7 +370,7 @@ export function AutoApprovalView({
           <div className="space-y-4 px-5 py-4">
             <label className="block max-w-md space-y-1 text-sm font-medium text-medium">
               Projeto
-              <select
+              <SearchableSelect
                 aria-label="Selecionar projeto"
                 value={selectedProjectId}
                 onChange={(event) => setSelectedProjectId(event.target.value)}
@@ -383,7 +384,7 @@ export function AutoApprovalView({
                     {p.name} · {p.clientName}
                   </option>
                 ))}
-              </select>
+              </SearchableSelect>
             </label>
             {selectedProject ? (
               <AutoApprovalConfigPanel

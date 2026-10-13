@@ -44,6 +44,7 @@ import {
   type ClockFieldsValue,
 } from "./ClockFields";
 import { ActivityVoiceButton } from "./ActivityVoiceButton";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 /**
  * Fator de remuneração sugerido para Sobreaviso (ON_CALL). O consultor é pago
@@ -561,7 +562,7 @@ export function TimeEntryForm({
               <label htmlFor="entry-project" className={labelClass}>
                 Projeto
               </label>
-              <select
+              <SearchableSelect
                 id="entry-project"
                 value={value.projectId}
                 onChange={(e) =>
@@ -580,7 +581,7 @@ export function TimeEntryForm({
                     {p.name} · {p.clientName}
                   </option>
                 ))}
-              </select>
+              </SearchableSelect>
               {showErrors && errors.projectId ? (
                 <p className="mt-1 text-xs text-danger">Selecione um projeto.</p>
               ) : null}
@@ -623,7 +624,7 @@ export function TimeEntryForm({
               <label htmlFor="entry-activity" className={labelClass}>
                 Atividade
               </label>
-              <select
+              <SearchableSelect
                 id="entry-activity"
                 value={value.activity}
                 onChange={(e) => {
@@ -667,13 +668,13 @@ export function TimeEntryForm({
                     {activityLabels[activity]}
                   </option>
                 ))}
-              </select>
+              </SearchableSelect>
             </div>
             <div>
               <label htmlFor="entry-day" className={labelClass}>
                 Dia
               </label>
-              <select
+              <SearchableSelect
                 id="entry-day"
                 value={value.date}
                 onChange={(e) => setValue((v) => ({ ...v, date: e.target.value }))}
@@ -692,7 +693,7 @@ export function TimeEntryForm({
                     </option>
                   );
                 })}
-              </select>
+              </SearchableSelect>
             </div>
           </div>
 

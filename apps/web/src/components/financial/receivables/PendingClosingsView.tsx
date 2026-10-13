@@ -20,6 +20,7 @@ import type {
   PendingClosingRow,
   PendingClosingStatus,
 } from "@/lib/financial/receivables-journey-core";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 /** Horas decimais efetivas → "HH:MM" (ex.: 2.5 → "02:30"). */
 function toHHMM(hours: number): string {
@@ -326,7 +327,7 @@ export function PendingClosingsView({
             >
               Mês
             </label>
-            <select
+            <SearchableSelect
               id="pc-month"
               name={monthParam}
               defaultValue={String(month)}
@@ -340,7 +341,7 @@ export function PendingClosingsView({
                   {name}
                 </option>
               ))}
-            </select>
+            </SearchableSelect>
           </div>
           <div>
             <label
@@ -349,7 +350,7 @@ export function PendingClosingsView({
             >
               Ano
             </label>
-            <select
+            <SearchableSelect
               id="pc-year"
               name={yearParam}
               defaultValue={String(year)}
@@ -363,7 +364,7 @@ export function PendingClosingsView({
                   {y}
                 </option>
               ))}
-            </select>
+            </SearchableSelect>
           </div>
           <ActionButton type="submit" variant="primary" size="sm">
             Aplicar
@@ -378,7 +379,7 @@ export function PendingClosingsView({
           >
             Status
           </label>
-          <select
+          <SearchableSelect
             id="pc-status"
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
@@ -392,7 +393,7 @@ export function PendingClosingsView({
                 {opt.label}
               </option>
             ))}
-          </select>
+          </SearchableSelect>
         </div>
 
         <div className="shrink-0 rounded-md border border-border bg-surface-muted px-4 py-2 text-center">

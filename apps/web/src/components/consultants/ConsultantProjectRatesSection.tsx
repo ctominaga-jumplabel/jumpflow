@@ -13,6 +13,7 @@ import {
   type ConsultantProjectRateView,
 } from "@/app/app/consultores/actions";
 import type { ProjectRateInput } from "@/lib/consultants/schemas";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 const brlFormatter = new Intl.NumberFormat("pt-BR", {
   style: "currency",
@@ -191,7 +192,7 @@ export function ConsultantProjectRatesSection({
           <div className="grid gap-3 md:grid-cols-2">
             <label className="space-y-1 text-sm font-medium text-medium">
               Projeto
-              <select
+              <SearchableSelect
                 aria-label="Projeto do valor/hora"
                 value={draft.projectId}
                 onChange={(event) =>
@@ -205,7 +206,7 @@ export function ConsultantProjectRatesSection({
                     {project.name} ({project.clientName})
                   </option>
                 ))}
-              </select>
+              </SearchableSelect>
             </label>
             <label className="space-y-1 text-sm font-medium text-medium">
               Valor/hora (R$)

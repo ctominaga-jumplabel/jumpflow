@@ -19,6 +19,7 @@ import {
   type DashConsultant,
   type SeniorityDto,
 } from "@/components/talent-dashboard/types";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 export interface ConsultoresViewProps {
   consultants: DashConsultant[];
@@ -207,7 +208,7 @@ export function ConsultoresView({
                 <span className="text-xs font-semibold text-medium">
                   Status
                 </span>
-                <select
+                <SearchableSelect
                   value={status}
                   onChange={(e) =>
                     setStatus(e.target.value as "" | ConsultantStatusDto)
@@ -218,13 +219,13 @@ export function ConsultoresView({
                   <option value="ACTIVE">{STATUS_LABEL.ACTIVE}</option>
                   <option value="ON_LEAVE">{STATUS_LABEL.ON_LEAVE}</option>
                   <option value="INACTIVE">{STATUS_LABEL.INACTIVE}</option>
-                </select>
+                </SearchableSelect>
               </label>
               <label className="flex items-center gap-1.5">
                 <span className="text-xs font-semibold text-medium">
                   Contratação
                 </span>
-                <select
+                <SearchableSelect
                   value={contract}
                   onChange={(e) =>
                     setContract(e.target.value as "" | ContractTypeDto)
@@ -237,13 +238,13 @@ export function ConsultoresView({
                       {CONTRACT_LABEL[c]}
                     </option>
                   ))}
-                </select>
+                </SearchableSelect>
               </label>
               <label className="flex items-center gap-1.5">
                 <span className="text-xs font-semibold text-medium">
                   Senioridade
                 </span>
-                <select
+                <SearchableSelect
                   value={seniority}
                   onChange={(e) =>
                     setSeniority(e.target.value as "" | SeniorityDto)
@@ -256,14 +257,14 @@ export function ConsultoresView({
                       {SENIORITY_LABEL[s]}
                     </option>
                   ))}
-                </select>
+                </SearchableSelect>
               </label>
             </>
           }
           actions={
             <label className="flex items-center gap-1.5">
               <span className="text-xs font-semibold text-medium">Ordenar</span>
-              <select
+              <SearchableSelect
                 value={sort}
                 onChange={(e) => setSort(e.target.value as SortKey)}
                 className={cn(fieldClass, "w-auto")}
@@ -271,7 +272,7 @@ export function ConsultoresView({
                 <option value="name">Nome</option>
                 <option value="skills">Nº de skills</option>
                 <option value="certs">Nº de certificados</option>
-              </select>
+              </SearchableSelect>
             </label>
           }
         />

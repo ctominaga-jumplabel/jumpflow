@@ -14,6 +14,7 @@ import {
   type HoursSortField,
 } from "@/lib/reports/schemas";
 import type { OperationFilterOptions } from "@/lib/operations/closing";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 const clientStatusLabels: Record<string, string> = {
   ACTIVE: "Ativo",
@@ -114,7 +115,7 @@ export function OperationClosingFilters({
             <label className={labelClass} htmlFor="f-period">
               Período
             </label>
-            <select
+            <SearchableSelect
               id="f-period"
               name="period"
               defaultValue={v("period")}
@@ -124,7 +125,7 @@ export function OperationClosingFilters({
               <option value="mes-atual">Mês atual</option>
               <option value="mes-anterior">Mês anterior</option>
               <option value="ano-atual">Ano atual</option>
-            </select>
+            </SearchableSelect>
           </div>
           <div>
             <label className={labelClass} htmlFor="f-from">
@@ -155,7 +156,7 @@ export function OperationClosingFilters({
             <label className={labelClass} htmlFor="f-client">
               Cliente
             </label>
-            <select
+            <SearchableSelect
               id="f-client"
               name="clientId"
               defaultValue={v("clientId")}
@@ -167,13 +168,13 @@ export function OperationClosingFilters({
                   {c.name}
                 </option>
               ))}
-            </select>
+            </SearchableSelect>
           </div>
           <div>
             <label className={labelClass} htmlFor="f-project">
               Projeto
             </label>
-            <select
+            <SearchableSelect
               id="f-project"
               name="projectId"
               defaultValue={v("projectId")}
@@ -185,13 +186,13 @@ export function OperationClosingFilters({
                   {p.name}
                 </option>
               ))}
-            </select>
+            </SearchableSelect>
           </div>
           <div>
             <label className={labelClass} htmlFor="f-consultant">
               Consultor
             </label>
-            <select
+            <SearchableSelect
               id="f-consultant"
               name="consultantId"
               defaultValue={v("consultantId")}
@@ -203,14 +204,14 @@ export function OperationClosingFilters({
                   {c.name}
                 </option>
               ))}
-            </select>
+            </SearchableSelect>
           </div>
 
           <div>
             <label className={labelClass} htmlFor="f-status">
               Status
             </label>
-            <select
+            <SearchableSelect
               id="f-status"
               name="status"
               defaultValue={v("status")}
@@ -222,13 +223,13 @@ export function OperationClosingFilters({
                   {timeEntryStatusLabels[s]}
                 </option>
               ))}
-            </select>
+            </SearchableSelect>
           </div>
           <div>
             <label className={labelClass} htmlFor="f-activity">
               Atividade
             </label>
-            <select
+            <SearchableSelect
               id="f-activity"
               name="activityType"
               defaultValue={v("activityType")}
@@ -240,7 +241,7 @@ export function OperationClosingFilters({
                   {activityLabels[a]}
                 </option>
               ))}
-            </select>
+            </SearchableSelect>
           </div>
         </div>
 
@@ -271,7 +272,7 @@ export function OperationClosingFilters({
               <label className={labelClass} htmlFor="f-client-status">
                 Status do cliente
               </label>
-              <select
+              <SearchableSelect
                 id="f-client-status"
                 name="clientStatus"
                 defaultValue={v("clientStatus")}
@@ -283,13 +284,13 @@ export function OperationClosingFilters({
                     {label}
                   </option>
                 ))}
-              </select>
+              </SearchableSelect>
             </div>
             <div>
               <label className={labelClass} htmlFor="f-project-status">
                 Status do projeto
               </label>
-              <select
+              <SearchableSelect
                 id="f-project-status"
                 name="projectStatus"
                 defaultValue={v("projectStatus")}
@@ -301,13 +302,13 @@ export function OperationClosingFilters({
                     {label}
                   </option>
                 ))}
-              </select>
+              </SearchableSelect>
             </div>
             <div>
               <label className={labelClass} htmlFor="f-consultant-status">
                 Status do consultor
               </label>
-              <select
+              <SearchableSelect
                 id="f-consultant-status"
                 name="consultantStatus"
                 defaultValue={v("consultantStatus")}
@@ -319,13 +320,13 @@ export function OperationClosingFilters({
                     {label}
                   </option>
                 ))}
-              </select>
+              </SearchableSelect>
             </div>
             <div>
               <label className={labelClass} htmlFor="f-billable">
                 Faturável
               </label>
-              <select
+              <SearchableSelect
                 id="f-billable"
                 name="billable"
                 defaultValue={v("billable")}
@@ -334,13 +335,13 @@ export function OperationClosingFilters({
                 <option value="">Todas</option>
                 <option value="true">Sim</option>
                 <option value="false">Não</option>
-              </select>
+              </SearchableSelect>
             </div>
             <div>
               <label className={labelClass} htmlFor="f-sort">
                 Ordenar por
               </label>
-              <select
+              <SearchableSelect
                 id="f-sort"
                 name="sort"
                 defaultValue={v("sort")}
@@ -351,13 +352,13 @@ export function OperationClosingFilters({
                     {hoursSortLabels[s]}
                   </option>
                 ))}
-              </select>
+              </SearchableSelect>
             </div>
             <div>
               <label className={labelClass} htmlFor="f-direction">
                 Direção
               </label>
-              <select
+              <SearchableSelect
                 id="f-direction"
                 name="direction"
                 defaultValue={v("direction")}
@@ -365,13 +366,13 @@ export function OperationClosingFilters({
               >
                 <option value="asc">Crescente</option>
                 <option value="desc">Decrescente</option>
-              </select>
+              </SearchableSelect>
             </div>
             <div>
               <label className={labelClass} htmlFor="f-page-size">
                 Itens por página
               </label>
-              <select
+              <SearchableSelect
                 id="f-page-size"
                 name="pageSize"
                 defaultValue={v("pageSize")}
@@ -382,7 +383,7 @@ export function OperationClosingFilters({
                     {n}
                   </option>
                 ))}
-              </select>
+              </SearchableSelect>
             </div>
           </div>
         </details>

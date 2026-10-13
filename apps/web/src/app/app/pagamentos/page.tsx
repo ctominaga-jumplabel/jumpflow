@@ -11,6 +11,7 @@ import {
   type ConsultantPaymentView,
   type PaymentForecastView,
 } from "@/lib/payments/types";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 export const metadata: Metadata = { title: "Pagamentos" };
 
@@ -146,7 +147,7 @@ export default async function PagamentosPage({
         </label>
         <label className="text-sm font-medium text-medium">
           Consultor
-          <select
+          <SearchableSelect
             name="consultantId"
             defaultValue={consultantId ?? ""}
             className="mt-1 h-10 w-48 rounded-md border border-border bg-surface px-3 text-sm text-strong"
@@ -157,11 +158,11 @@ export default async function PagamentosPage({
                 {consultant.name}
               </option>
             ))}
-          </select>
+          </SearchableSelect>
         </label>
         <label className="text-sm font-medium text-medium">
           Status
-          <select
+          <SearchableSelect
             name="status"
             defaultValue={status ?? ""}
             className="mt-1 h-10 w-48 rounded-md border border-border bg-surface px-3 text-sm text-strong"
@@ -172,11 +173,11 @@ export default async function PagamentosPage({
                 {consultantPaymentStatusLabels[value]}
               </option>
             ))}
-          </select>
+          </SearchableSelect>
         </label>
         <label className="text-sm font-medium text-medium">
           Contratacao
-          <select
+          <SearchableSelect
             name="contractType"
             defaultValue={contractType ?? ""}
             className="mt-1 h-10 w-40 rounded-md border border-border bg-surface px-3 text-sm text-strong"
@@ -187,7 +188,7 @@ export default async function PagamentosPage({
                 {CONTRACT_TYPE_LABELS[value]}
               </option>
             ))}
-          </select>
+          </SearchableSelect>
         </label>
         <button className="h-10 rounded-md bg-surface px-4 text-sm font-semibold text-strong shadow-[2px_2px_0_0_var(--color-ink)]">
           Filtrar

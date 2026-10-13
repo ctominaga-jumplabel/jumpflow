@@ -21,6 +21,7 @@ import type { EvaluationListItem } from "@/lib/db/evaluations";
 import { CycleManager } from "./CycleManager";
 import { ResponseModal } from "./ResponseModal";
 import { ResultPanel } from "./ResultPanel";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 type Tab = "results" | "inbox" | "cycles";
 
@@ -166,7 +167,7 @@ export function EvaluationsView({
             {availableResults.length > 1 ? (
               <label className="flex flex-wrap items-center gap-2 text-sm font-medium text-medium">
                 Avaliação
-                <select
+                <SearchableSelect
                   value={activeResultId ?? ""}
                   onChange={(e) => setSelectedResultId(e.target.value)}
                   className="h-9 rounded-md border border-border bg-surface px-3 text-sm"
@@ -176,7 +177,7 @@ export function EvaluationsView({
                       {e.subjectConsultantName} · {e.cycleName}
                     </option>
                   ))}
-                </select>
+                </SearchableSelect>
               </label>
             ) : null}
             {activeResult ? (

@@ -101,6 +101,7 @@ import {
   ReceivableModal,
   receivableStatusLabels,
 } from "./shared/ReceivableModal";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 type Mode = "demo" | "db";
 type DetailTab =
@@ -957,7 +958,7 @@ export function ProjectsView({
             <label className="sr-only" htmlFor="project-client-filter">
               Filtrar por cliente
             </label>
-            <select
+            <SearchableSelect
               id="project-client-filter"
               value={clientId}
               onChange={(event) => setClientId(event.target.value)}
@@ -972,7 +973,7 @@ export function ProjectsView({
                   {client.name}
                 </option>
               ))}
-            </select>
+            </SearchableSelect>
           </>
         }
         actions={
@@ -1102,7 +1103,7 @@ function ProjectModal({
       <form className="grid gap-4 md:grid-cols-2">
         <label className="space-y-1 text-sm font-medium text-medium">
           Cliente
-          <select
+          <SearchableSelect
             value={value.clientId}
             onChange={(event) => onChange({ ...value, clientId: event.target.value })}
             className={fieldClass()}
@@ -1113,7 +1114,7 @@ function ProjectModal({
                 {client.name}
               </option>
             ))}
-          </select>
+          </SearchableSelect>
         </label>
         <label className="space-y-1 text-sm font-medium text-medium">
           Nome
@@ -1125,7 +1126,7 @@ function ProjectModal({
         </label>
         <label className="space-y-1 text-sm font-medium text-medium">
           Status
-          <select
+          <SearchableSelect
             value={value.status}
             onChange={(event) =>
               onChange({ ...value, status: event.target.value as ProjectStatus })
@@ -1147,11 +1148,11 @@ function ProjectModal({
                 </option>
               ),
             )}
-          </select>
+          </SearchableSelect>
         </label>
         <label className="space-y-1 text-sm font-medium text-medium">
           Gestor
-          <select
+          <SearchableSelect
             value={value.managerUserId ?? ""}
             onChange={(event) =>
               onChange({ ...value, managerUserId: event.target.value })
@@ -1164,7 +1165,7 @@ function ProjectModal({
                 {manager.name}
               </option>
             ))}
-          </select>
+          </SearchableSelect>
         </label>
         <DateField
           label="Inicio"
@@ -1625,7 +1626,7 @@ function ProjectDetailModal({
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="flex flex-col gap-1 text-sm font-medium text-medium">
                 Tipo de pagamento
-                <select
+                <SearchableSelect
                   value={project.paymentType ?? ""}
                   disabled={!canManageSaleRates}
                   onChange={(event) =>
@@ -1652,11 +1653,11 @@ function ProjectDetailModal({
                       {paymentTypeLabels[item]}
                     </option>
                   ))}
-                </select>
+                </SearchableSelect>
               </label>
               <label className="flex flex-col gap-1 text-sm font-medium text-medium">
                 Tipo de projeto
-                <select
+                <SearchableSelect
                   value={project.opportunityType ?? ""}
                   disabled={!canManageSaleRates}
                   onChange={(event) =>
@@ -1677,7 +1678,7 @@ function ProjectDetailModal({
                       {opportunityTypeLabels[item]}
                     </option>
                   ))}
-                </select>
+                </SearchableSelect>
                 <span className="text-xs font-normal text-soft">
                   Vem do CRM na integração; pode ser sobrescrito manualmente.
                 </span>
@@ -2076,7 +2077,7 @@ function AllocationSkillModal({
       <form className="grid gap-4 md:grid-cols-2">
         <label className="space-y-1 text-sm font-medium text-medium">
           Skill
-          <select
+          <SearchableSelect
             value={skillId}
             onChange={(event) => setSkillId(event.target.value)}
             className={fieldClass()}
@@ -2087,11 +2088,11 @@ function AllocationSkillModal({
                 {skill.category ? `${skill.category} - ${skill.name}` : skill.name}
               </option>
             ))}
-          </select>
+          </SearchableSelect>
         </label>
         <label className="space-y-1 text-sm font-medium text-medium">
           Nivel
-          <select
+          <SearchableSelect
             value={level}
             onChange={(event) => setLevel(event.target.value as SkillLevel | "")}
             className={fieldClass()}
@@ -2104,7 +2105,7 @@ function AllocationSkillModal({
                 {skillLevelLabels[item]}
               </option>
             ))}
-          </select>
+          </SearchableSelect>
         </label>
         <label className="space-y-1 text-sm font-medium text-medium md:col-span-2">
           Nota
@@ -2156,7 +2157,7 @@ function AllocationModal({
       <form className="grid gap-4 md:grid-cols-2">
         <label className="space-y-1 text-sm font-medium text-medium">
           Consultor
-          <select
+          <SearchableSelect
             value={value.consultantId}
             disabled={isEditing}
             onChange={(event) =>
@@ -2170,7 +2171,7 @@ function AllocationModal({
                 {consultant.name}
               </option>
             ))}
-          </select>
+          </SearchableSelect>
         </label>
         <label className="space-y-1 text-sm font-medium text-medium">
           Skill ou papel
@@ -2189,7 +2190,7 @@ function AllocationModal({
         />
         <label className="space-y-1 text-sm font-medium text-medium">
           Status
-          <select
+          <SearchableSelect
             value={value.status}
             onChange={(event) =>
               onChange({
@@ -2204,7 +2205,7 @@ function AllocationModal({
             <option value="ENDED">Encerrado</option>
             <option value="CANCELLED">Cancelado</option>
             <option value="INACTIVE">Inativo</option>
-          </select>
+          </SearchableSelect>
         </label>
         <DateField
           label="Inicio"

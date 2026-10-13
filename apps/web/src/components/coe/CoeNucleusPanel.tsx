@@ -20,6 +20,7 @@ import {
   setCoeMemberActive,
   updateCoeMember,
 } from "@/app/app/coe/actions";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 export interface CoeNucleusPanelProps {
   members: CoeMemberView[];
@@ -353,7 +354,7 @@ export function CoeNucleusPanel({
                 <span className="text-xs font-semibold uppercase tracking-wide text-soft">
                   Consultor
                 </span>
-                <select
+                <SearchableSelect
                   value={newConsultantId}
                   onChange={(e) => setNewConsultantId(e.target.value)}
                   className={fieldClass}
@@ -365,7 +366,7 @@ export function CoeNucleusPanel({
                       {c.previouslyMember ? " (já esteve no núcleo)" : ""}
                     </option>
                   ))}
-                </select>
+                </SearchableSelect>
               </label>
               <label className="flex flex-col gap-1.5">
                 <span className="text-xs font-semibold uppercase tracking-wide text-soft">

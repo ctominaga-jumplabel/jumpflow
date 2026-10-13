@@ -6,6 +6,7 @@ import { ActionButton } from "@/components/ui/ActionButton";
 import { ConsultantCurriculumView } from "@/components/consultants/ConsultantCurriculumView";
 import { MySkillsEditor } from "@/components/skills/MySkillsEditor";
 import { CurriculumImportPanel } from "@/components/skills/CurriculumImportPanel";
+import { MyCurriculumRecords } from "@/components/skills/MyCurriculumRecords";
 import {
   ConsultantExperienceEditor,
   type ExperienceDraft,
@@ -252,6 +253,11 @@ export function MyCurriculumTab({
 
       {/* Minhas skills — autosserviço (declaração própria, entra como PENDING). */}
       <MySkillsEditor key={skillsRefreshKey} />
+
+      {/* Certificados e cases próprios COM status de curadoria. Ficam fora do
+          currículo consolidado enquanto não validados, então precisam de uma
+          visão própria — senão o import por IA gravaria no escuro. */}
+      <MyCurriculumRecords key={`records-${skillsRefreshKey}`} onMessage={setMessage} />
 
       <ConsultantCurriculumView cv={cv} />
     </section>

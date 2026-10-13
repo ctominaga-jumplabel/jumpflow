@@ -16,6 +16,7 @@ import {
 } from "@/lib/styles";
 import { cn } from "@/lib/utils";
 import type { CoeSlotAssignment } from "@/lib/coe/types";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 export interface CoeSlotCardProps {
   assignment: CoeSlotAssignment;
@@ -223,7 +224,7 @@ export function CoeSlotCard({
               <span className="text-xs font-semibold uppercase tracking-wide text-soft">
                 Trocar quem ocupa esta frente
               </span>
-              <select
+              <SearchableSelect
                 value=""
                 onChange={(e) => {
                   if (e.target.value) onSwap(slot.key, e.target.value);
@@ -240,7 +241,7 @@ export function CoeSlotCard({
                     {c.fit.skillsRequired} skills
                   </option>
                 ))}
-              </select>
+              </SearchableSelect>
             </label>
             <div className="flex items-center gap-2">
               <span className="text-xs text-soft">

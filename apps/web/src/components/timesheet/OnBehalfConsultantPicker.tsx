@@ -6,6 +6,7 @@ import { SectionPanel } from "@/components/ui/SectionPanel";
 import { focusRingInput } from "@/lib/styles";
 import { cn } from "@/lib/utils";
 import type { OnBehalfPickerData } from "@/lib/db/on-behalf";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 export interface OnBehalfConsultantPickerProps {
   /** Consultores + projetos + grafo de alocação para a cascata client-side. */
@@ -94,7 +95,7 @@ export function OnBehalfConsultantPicker({
           >
             Projeto (filtra consultores)
           </label>
-          <select
+          <SearchableSelect
             id="on-behalf-project"
             value={projectFilter}
             disabled={isPending}
@@ -111,7 +112,7 @@ export function OnBehalfConsultantPicker({
                 {project.name}
               </option>
             ))}
-          </select>
+          </SearchableSelect>
         </div>
 
         <div className="min-w-64">
@@ -121,7 +122,7 @@ export function OnBehalfConsultantPicker({
           >
             Consultor
           </label>
-          <select
+          <SearchableSelect
             id="on-behalf-consultant"
             value={selectedId ?? ""}
             disabled={isPending}
@@ -138,7 +139,7 @@ export function OnBehalfConsultantPicker({
                 {consultant.name}
               </option>
             ))}
-          </select>
+          </SearchableSelect>
         </div>
 
         {projectFilter ? (
