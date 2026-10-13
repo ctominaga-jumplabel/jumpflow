@@ -111,6 +111,7 @@ import {
   emptyClock,
   type ClockFieldsValue,
 } from "./ClockFields";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 const WEEKLY_TARGET = 40;
 /** Tela cheia de Novo Lançamento de Horas (substitui o modal da grade). */
@@ -1840,7 +1841,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
             <label htmlFor="default-allocation" className="mb-1 block text-xs font-semibold text-medium">
               Alocação
             </label>
-            <select
+            <SearchableSelect
               id="default-allocation"
               value={defaultValue.allocationId}
               onChange={(event) => handleDefaultAllocationChange(event.target.value)}
@@ -1851,14 +1852,14 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
                   {option.name} · {option.clientName}
                 </option>
               ))}
-            </select>
+            </SearchableSelect>
           </div>
 
           <div>
             <label htmlFor="default-activity" className="mb-1 block text-xs font-semibold text-medium">
               Atividade
             </label>
-            <select
+            <SearchableSelect
               id="default-activity"
               value={defaultValue.activityType}
               onChange={(event) =>
@@ -1874,7 +1875,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
                   {activityLabels[activity]}
                 </option>
               ))}
-            </select>
+            </SearchableSelect>
           </div>
 
           <fieldset>

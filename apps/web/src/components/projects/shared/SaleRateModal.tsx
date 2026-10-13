@@ -6,6 +6,7 @@ import type { SaleRateInput } from "@/lib/projects/schemas";
 import type { ProjectConsultantOption } from "@/lib/projects/types";
 import { cn } from "@/lib/utils";
 import { DateField, NumberField, fieldClass } from "./fields";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 /**
  * Valor de venda (ProjectSaleRate) por escopo e vigência. Compartilhado pelo
@@ -48,7 +49,7 @@ export function SaleRateModal({
       <form className="grid gap-4 md:grid-cols-2">
         <label className="space-y-1 text-sm font-medium text-medium">
           Escopo
-          <select
+          <SearchableSelect
             value={
               value.allocationId
                 ? `allocation:${value.allocationId}`
@@ -77,7 +78,7 @@ export function SaleRateModal({
                 {allocation.label}
               </option>
             ))}
-          </select>
+          </SearchableSelect>
         </label>
         <NumberField
           label="Valor hora"

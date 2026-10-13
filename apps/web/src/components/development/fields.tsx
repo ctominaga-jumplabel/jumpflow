@@ -2,6 +2,7 @@
 
 import { focusRingInput } from "@/lib/styles";
 import { cn } from "@/lib/utils";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 /** Standard input/select sizing + focus ring for PDI forms. */
 export function fieldClass() {
@@ -66,7 +67,7 @@ export function EnumSelect<T extends string>({
   return (
     <label className="space-y-1 text-sm font-medium text-medium">
       {label}
-      <select
+      <SearchableSelect
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value as T | "")}
@@ -80,7 +81,7 @@ export function EnumSelect<T extends string>({
             {optionLabel}
           </option>
         ))}
-      </select>
+      </SearchableSelect>
       {hint ? <span className="text-xs font-normal text-soft">{hint}</span> : null}
     </label>
   );

@@ -21,6 +21,7 @@ import {
   evaluateExpensePolicy,
   type PolicyRuleData,
 } from "@/lib/expenses/reimbursement-policy";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 /** Código do tipo nativo de Reembolso Quilometragem (espelha o schema). */
 const MILEAGE_CATEGORY = "MILEAGE_REIMBURSEMENT";
@@ -867,7 +868,7 @@ export function ExpenseForm({
           <label htmlFor="expense-project" className={labelClass}>
             Projeto
           </label>
-          <select
+          <SearchableSelect
             id="expense-project"
             value={projectId}
             onChange={(e) => setProjectId(e.target.value)}
@@ -880,7 +881,7 @@ export function ExpenseForm({
                 {p.name} · {p.clientName}
               </option>
             ))}
-          </select>
+          </SearchableSelect>
           {showErrors && headerErrors.projectId ? (
             <p className="mt-1 text-xs text-danger">Selecione um projeto.</p>
           ) : null}
@@ -980,7 +981,7 @@ export function ExpenseForm({
               <label htmlFor="expense-category" className={labelClass}>
                 Tipo de lançamento
               </label>
-              <select
+              <SearchableSelect
                 id="expense-category"
                 value={category}
                 onChange={(e) =>
@@ -1001,7 +1002,7 @@ export function ExpenseForm({
                     {t.label}
                   </option>
                 ))}
-              </select>
+              </SearchableSelect>
             </div>
             {editIsMileage ? (
               <div className="sm:col-span-3">
@@ -1117,7 +1118,7 @@ export function ExpenseForm({
                     <label htmlFor={`${it.key}-category`} className={labelClass}>
                       Tipo de lançamento
                     </label>
-                    <select
+                    <SearchableSelect
                       id={`${it.key}-category`}
                       value={it.category}
                       onChange={(e) =>
@@ -1134,7 +1135,7 @@ export function ExpenseForm({
                           {t.label}
                         </option>
                       ))}
-                    </select>
+                    </SearchableSelect>
                   </div>
                   {it.category === MILEAGE_CATEGORY ? (
                     <div className="sm:col-span-3">

@@ -56,7 +56,7 @@ describe("TimeEntryForm — Fator de remuneração (multiplier)", () => {
 
   it("mostra o campo ao selecionar Sobreaviso e sugere o fator fracionário", () => {
     setup();
-    fireEvent.change(screen.getByLabelText("Atividade"), {
+    fireEvent.change(screen.getByLabelText("Atividade", { selector: "select" }), {
       target: { value: "ON_CALL" },
     });
     const field = screen.getByLabelText(MULTIPLIER_LABEL) as HTMLInputElement;
@@ -71,10 +71,10 @@ describe("TimeEntryForm — Fator de remuneração (multiplier)", () => {
 
   it("submete o multiplier escolhido para um lançamento ON_CALL", () => {
     const { onSubmit } = setup();
-    fireEvent.change(screen.getByLabelText("Projeto"), {
+    fireEvent.change(screen.getByLabelText("Projeto", { selector: "select" }), {
       target: { value: "p1" },
     });
-    fireEvent.change(screen.getByLabelText("Atividade"), {
+    fireEvent.change(screen.getByLabelText("Atividade", { selector: "select" }), {
       target: { value: "ON_CALL" },
     });
     fireEvent.change(screen.getByLabelText(MULTIPLIER_LABEL), {
@@ -95,10 +95,10 @@ describe("TimeEntryForm — Fator de remuneração (multiplier)", () => {
 
   it("bloqueia o submit com fator zero (valor sem remuneração)", () => {
     const { onSubmit } = setup();
-    fireEvent.change(screen.getByLabelText("Projeto"), {
+    fireEvent.change(screen.getByLabelText("Projeto", { selector: "select" }), {
       target: { value: "p1" },
     });
-    fireEvent.change(screen.getByLabelText("Atividade"), {
+    fireEvent.change(screen.getByLabelText("Atividade", { selector: "select" }), {
       target: { value: "ON_CALL" },
     });
     fireEvent.change(screen.getByLabelText(MULTIPLIER_LABEL), {
@@ -113,7 +113,7 @@ describe("TimeEntryForm — Fator de remuneração (multiplier)", () => {
 
   it("submete multiplier 1.00 para atividade normal", () => {
     const { onSubmit } = setup();
-    fireEvent.change(screen.getByLabelText("Projeto"), {
+    fireEvent.change(screen.getByLabelText("Projeto", { selector: "select" }), {
       target: { value: "p1" },
     });
     fireEvent.change(screen.getByLabelText("Descrição"), {
@@ -146,7 +146,7 @@ describe("TimeEntryForm — Faturável removido do apontamento", () => {
         onSubmit={onSubmit}
       />,
     );
-    fireEvent.change(screen.getByLabelText("Projeto"), {
+    fireEvent.change(screen.getByLabelText("Projeto", { selector: "select" }), {
       target: { value: "p1" },
     });
     fireEvent.change(screen.getByLabelText("Descrição"), {
@@ -199,7 +199,7 @@ describe("TimeEntryForm — anexo opcional (melhoria #2)", () => {
         attachmentsAvailable
       />,
     );
-    fireEvent.change(screen.getByLabelText("Projeto"), {
+    fireEvent.change(screen.getByLabelText("Projeto", { selector: "select" }), {
       target: { value: "p1" },
     });
     fireEvent.change(screen.getByLabelText("Descrição"), {
@@ -269,7 +269,7 @@ describe("TimeEntryForm — conflito com ausência confirmada (Onda D)", () => {
         onSubmit={onSubmit}
       />,
     );
-    fireEvent.change(screen.getByLabelText("Projeto"), {
+    fireEvent.change(screen.getByLabelText("Projeto", { selector: "select" }), {
       target: { value: "p1" },
     });
     fireEvent.change(screen.getByLabelText("Descrição"), {
@@ -295,10 +295,10 @@ describe("TimeEntryForm — conflito com ausência confirmada (Onda D)", () => {
         onSubmit={onSubmit}
       />,
     );
-    fireEvent.change(screen.getByLabelText("Projeto"), {
+    fireEvent.change(screen.getByLabelText("Projeto", { selector: "select" }), {
       target: { value: "p1" },
     });
-    fireEvent.change(screen.getByLabelText("Atividade"), {
+    fireEvent.change(screen.getByLabelText("Atividade", { selector: "select" }), {
       target: { value: "VACATION" },
     });
     fireEvent.change(screen.getByLabelText("Descrição"), {
@@ -330,7 +330,7 @@ describe("TimeEntryForm — conflito com ausência confirmada (Onda D)", () => {
         onSubmit={onSubmit}
       />,
     );
-    fireEvent.change(screen.getByLabelText("Projeto"), {
+    fireEvent.change(screen.getByLabelText("Projeto", { selector: "select" }), {
       target: { value: "p1" },
     });
     fireEvent.change(screen.getByLabelText("Descrição"), {

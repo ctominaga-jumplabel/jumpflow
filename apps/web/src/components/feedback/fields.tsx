@@ -2,6 +2,7 @@
 
 import { focusRingInput } from "@/lib/styles";
 import { cn } from "@/lib/utils";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 /** Standard select sizing + focus ring for feedback forms. */
 function controlClass() {
@@ -27,7 +28,7 @@ export function EnumSelect<T extends string>({
   return (
     <label className="space-y-1 text-sm font-medium text-medium">
       {label}
-      <select
+      <SearchableSelect
         value={value}
         onChange={(event) => onChange(event.target.value as T)}
         className={controlClass()}
@@ -37,7 +38,7 @@ export function EnumSelect<T extends string>({
             {optionLabel}
           </option>
         ))}
-      </select>
+      </SearchableSelect>
       {hint ? <span className="text-xs font-normal text-soft">{hint}</span> : null}
     </label>
   );
@@ -61,7 +62,7 @@ export function OptionSelect({
   return (
     <label className="space-y-1 text-sm font-medium text-medium">
       {label}
-      <select
+      <SearchableSelect
         value={value}
         onChange={(event) => onChange(event.target.value)}
         className={controlClass()}
@@ -72,7 +73,7 @@ export function OptionSelect({
             {option.name}
           </option>
         ))}
-      </select>
+      </SearchableSelect>
       {hint ? <span className="text-xs font-normal text-soft">{hint}</span> : null}
     </label>
   );

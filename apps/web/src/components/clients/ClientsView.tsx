@@ -42,6 +42,7 @@ import { formatCurrencyPrecise, MASKED_VALUE } from "@/lib/format";
 import { focusRingInput } from "@/lib/styles";
 import { cn } from "@/lib/utils";
 import { ClientStatusBadge } from "./ClientStatusBadge";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 type Mode = "demo" | "db";
 type Tab = "CLIENTS" | "BILLING_TYPES";
@@ -857,7 +858,7 @@ function ClientModal({
         />
         <label className="space-y-1 text-sm font-medium text-medium">
           Status
-          <select
+          <SearchableSelect
             value={value.status}
             onChange={(event) =>
               onChange({ ...value, status: event.target.value as ClientInput["status"] })
@@ -866,11 +867,11 @@ function ClientModal({
           >
             <option value="ACTIVE">Ativo</option>
             <option value="INACTIVE">Inativo</option>
-          </select>
+          </SearchableSelect>
         </label>
         <label className="space-y-1 text-sm font-medium text-medium">
           Tipo de cobrança
-          <select
+          <SearchableSelect
             value={value.billingTypeId ?? ""}
             disabled={!canViewFinancials}
             onChange={(event) =>
@@ -886,11 +887,11 @@ function ClientModal({
                   {item.name}
                 </option>
               ))}
-          </select>
+          </SearchableSelect>
         </label>
         <label className="space-y-1 text-sm font-medium text-medium">
           Arredondamento
-          <select
+          <SearchableSelect
             value={value.roundingRule}
             disabled={!canViewFinancials}
             onChange={(event) =>
@@ -906,7 +907,7 @@ function ClientModal({
                 {label}
               </option>
             ))}
-          </select>
+          </SearchableSelect>
         </label>
         <NumberField
           label="Valor hora padrao"
@@ -946,7 +947,7 @@ function ClientModal({
         />
         <label className="space-y-1 text-sm font-medium text-medium">
           Tipo de nota
-          <select
+          <SearchableSelect
             value={value.invoiceKind}
             disabled={!canViewFinancials}
             onChange={(event) =>
@@ -959,7 +960,7 @@ function ClientModal({
           >
             <option value="SERVICE">Servico</option>
             <option value="PRODUCT">Produto</option>
-          </select>
+          </SearchableSelect>
         </label>
         <label className="space-y-1 text-sm font-medium text-medium">
           Municipio
@@ -1142,7 +1143,7 @@ function BillingTypeModal({
         </label>
         <label className="space-y-1 text-sm font-medium text-medium">
           Modelo de cálculo
-          <select
+          <SearchableSelect
             value={value.chargeType}
             onChange={(event) =>
               onChange({
@@ -1157,7 +1158,7 @@ function BillingTypeModal({
                 {label}
               </option>
             ))}
-          </select>
+          </SearchableSelect>
           <span className="text-xs font-normal text-soft">
             Define o comportamento do motor de faturamento.
           </span>
@@ -1184,7 +1185,7 @@ function BillingTypeModal({
         </label>
         <label className="space-y-1 text-sm font-medium text-medium">
           Arredondamento
-          <select
+          <SearchableSelect
             value={value.roundingRule}
             onChange={(event) =>
               onChange({
@@ -1199,7 +1200,7 @@ function BillingTypeModal({
                 {label}
               </option>
             ))}
-          </select>
+          </SearchableSelect>
         </label>
         <label className="flex items-center gap-2 text-sm font-medium text-medium">
           <input

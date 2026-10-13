@@ -58,7 +58,7 @@ describe("ReportFilters — reflects the query string (hours tab)", () => {
       />,
     );
 
-    expect((screen.getByLabelText("Período") as HTMLSelectElement).value).toBe(
+    expect((screen.getByLabelText("Período", { selector: "select" }) as HTMLSelectElement).value).toBe(
       "mes-atual",
     );
     expect((screen.getByLabelText("De") as HTMLInputElement).value).toBe(
@@ -67,44 +67,44 @@ describe("ReportFilters — reflects the query string (hours tab)", () => {
     expect((screen.getByLabelText("Até") as HTMLInputElement).value).toBe(
       "2026-06-30",
     );
-    expect((screen.getByLabelText("Cliente") as HTMLSelectElement).value).toBe(
+    expect((screen.getByLabelText("Cliente", { selector: "select" }) as HTMLSelectElement).value).toBe(
       "client-b",
     );
-    expect((screen.getByLabelText("Projeto") as HTMLSelectElement).value).toBe(
+    expect((screen.getByLabelText("Projeto", { selector: "select" }) as HTMLSelectElement).value).toBe(
       "proj-b",
     );
     expect(
-      (screen.getByLabelText("Consultor") as HTMLSelectElement).value,
+      (screen.getByLabelText("Consultor", { selector: "select" }) as HTMLSelectElement).value,
     ).toBe("cons-b");
-    expect((screen.getByLabelText("Status") as HTMLSelectElement).value).toBe(
+    expect((screen.getByLabelText("Status", { selector: "select" }) as HTMLSelectElement).value).toBe(
       "APPROVED",
     );
     expect(
-      (screen.getByLabelText("Atividade") as HTMLSelectElement).value,
+      (screen.getByLabelText("Atividade", { selector: "select" }) as HTMLSelectElement).value,
     ).toBe("ON_CALL");
 
     // Advanced fields.
     expect(
-      (screen.getByLabelText("Status do cliente") as HTMLSelectElement).value,
+      (screen.getByLabelText("Status do cliente", { selector: "select" }) as HTMLSelectElement).value,
     ).toBe("INACTIVE");
     expect(
-      (screen.getByLabelText("Status do projeto") as HTMLSelectElement).value,
+      (screen.getByLabelText("Status do projeto", { selector: "select" }) as HTMLSelectElement).value,
     ).toBe("PAUSED");
     expect(
-      (screen.getByLabelText("Status do consultor") as HTMLSelectElement)
+      (screen.getByLabelText("Status do consultor", { selector: "select" }) as HTMLSelectElement)
         .value,
     ).toBe("ON_LEAVE");
     expect(
-      (screen.getByLabelText("Faturável") as HTMLSelectElement).value,
+      (screen.getByLabelText("Faturável", { selector: "select" }) as HTMLSelectElement).value,
     ).toBe("false");
     expect(
-      (screen.getByLabelText("Ordenar por") as HTMLSelectElement).value,
+      (screen.getByLabelText("Ordenar por", { selector: "select" }) as HTMLSelectElement).value,
     ).toBe("hours");
-    expect((screen.getByLabelText("Direção") as HTMLSelectElement).value).toBe(
+    expect((screen.getByLabelText("Direção", { selector: "select" }) as HTMLSelectElement).value).toBe(
       "desc",
     );
     expect(
-      (screen.getByLabelText("Itens por página") as HTMLSelectElement).value,
+      (screen.getByLabelText("Itens por página", { selector: "select" }) as HTMLSelectElement).value,
     ).toBe("100");
   });
 
@@ -190,19 +190,19 @@ describe("ReportFilters — tab-specific fields", () => {
         values={{ sort: "amount", stage: "FINANCEIRO" }}
       />,
     );
-    const sort = screen.getByLabelText("Ordenar por") as HTMLSelectElement;
+    const sort = screen.getByLabelText("Ordenar por", { selector: "select" }) as HTMLSelectElement;
     expect(sort.value).toBe("amount");
     const optionTexts = within(sort)
-      .getAllByRole("option")
+      .getAllByRole("option", { hidden: true })
       .map((o) => (o as HTMLOptionElement).value);
     expect(optionTexts).toContain("amount");
     expect(optionTexts).not.toContain("hours");
 
-    expect((screen.getByLabelText("Etapa") as HTMLSelectElement).value).toBe(
+    expect((screen.getByLabelText("Etapa", { selector: "select" }) as HTMLSelectElement).value).toBe(
       "FINANCEIRO",
     );
     // The expenses tab has no "Faturável" field.
-    expect(screen.queryByLabelText("Faturável")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Faturável", { selector: "select" })).not.toBeInTheDocument();
   });
 
   it("renders the consolidated month field and hides sort/pagination/period", () => {
@@ -216,10 +216,10 @@ describe("ReportFilters — tab-specific fields", () => {
     expect(
       (screen.getByLabelText("Mês (aaaa-mm)") as HTMLInputElement).value,
     ).toBe("2026-06");
-    expect(screen.queryByLabelText("Período")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Ordenar por")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Período", { selector: "select" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Ordenar por", { selector: "select" })).not.toBeInTheDocument();
     expect(
-      screen.queryByLabelText("Itens por página"),
+      screen.queryByLabelText("Itens por página", { selector: "select" }),
     ).not.toBeInTheDocument();
   });
 
@@ -231,6 +231,6 @@ describe("ReportFilters — tab-specific fields", () => {
         values={{}}
       />,
     );
-    expect(screen.queryByLabelText("Consultor")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Consultor", { selector: "select" })).not.toBeInTheDocument();
   });
 });

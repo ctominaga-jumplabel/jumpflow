@@ -20,6 +20,7 @@ import { genderLabels, maritalStatusLabels } from "@/lib/consultants/labels";
 import type { ConsultantProfile } from "@/lib/db/consultants";
 import { ConsultantCltSection } from "./ConsultantCltSection";
 import { ConsultantPjSection } from "./ConsultantPjSection";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 const ACCEPT_IMG = ".jpg,.jpeg,.png,.webp";
 
@@ -438,7 +439,7 @@ function SelectField({
   return (
     <label className="space-y-1 text-sm font-medium text-medium">
       {label}
-      <select
+      <SearchableSelect
         value={value}
         onChange={(event) => onChange(event.target.value)}
         className={fieldClass()}
@@ -449,7 +450,7 @@ function SelectField({
             {optionLabel}
           </option>
         ))}
-      </select>
+      </SearchableSelect>
     </label>
   );
 }

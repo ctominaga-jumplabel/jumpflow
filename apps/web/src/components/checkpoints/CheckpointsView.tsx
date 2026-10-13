@@ -18,6 +18,7 @@ import {
 import type { CheckpointFlags } from "@/lib/checkpoint/flags";
 import { CheckpointCard } from "./CheckpointCard";
 import { CheckpointComposer } from "./CheckpointComposer";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 type TypeFilter = "ALL" | CheckpointType;
 
@@ -108,7 +109,7 @@ export function CheckpointsView({
       {subjectOptions.length > 1 ? (
         <label className="flex flex-wrap items-center gap-2 text-sm font-medium text-medium">
           Consultor
-          <select
+          <SearchableSelect
             value={subjectFilter}
             onChange={(event) => setSubjectFilter(event.target.value)}
             className="h-9 rounded-md border border-border bg-surface px-3 text-sm"
@@ -119,7 +120,7 @@ export function CheckpointsView({
                 {option.name}
               </option>
             ))}
-          </select>
+          </SearchableSelect>
         </label>
       ) : null}
 

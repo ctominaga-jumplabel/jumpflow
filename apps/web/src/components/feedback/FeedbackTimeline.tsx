@@ -19,6 +19,7 @@ import {
   updateFeedback,
 } from "@/app/app/feedback/actions";
 import { TextArea } from "./fields";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 function formatDate(iso: string): string {
   return new Intl.DateTimeFormat("pt-BR", {
@@ -193,7 +194,7 @@ export function FeedbackTimeline({ items, notify }: FeedbackTimelineProps) {
             />
             <label className="space-y-1 text-sm font-medium text-medium">
               Visibilidade
-              <select
+              <SearchableSelect
                 value={draft.visibility}
                 onChange={(event) =>
                   setDraft((d) =>
@@ -209,7 +210,7 @@ export function FeedbackTimeline({ items, notify }: FeedbackTimelineProps) {
               >
                 <option value="PRIVATE">{feedbackVisibilityLabels.PRIVATE}</option>
                 <option value="SHARED">{feedbackVisibilityLabels.SHARED}</option>
-              </select>
+              </SearchableSelect>
               <span className="text-xs font-normal text-soft">
                 Compartilhado fica visível ao consultor; privado fica restrito a
                 autor, PEOPLE e gestor responsável.

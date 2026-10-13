@@ -26,6 +26,7 @@ import {
   type CertExpiryDto,
   type DashConsultant,
 } from "@/components/talent-dashboard/types";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 export interface CertificacoesViewProps {
   certCatalog: CertCatalogRow[];
@@ -380,7 +381,7 @@ export function CertificacoesView({
             }}
             filters={
               <>
-                <select
+                <SearchableSelect
                   value={issuerFilter}
                   onChange={(e) => setIssuerFilter(e.target.value)}
                   aria-label="Filtrar por emissor"
@@ -395,7 +396,7 @@ export function CertificacoesView({
                       {i}
                     </option>
                   ))}
-                </select>
+                </SearchableSelect>
                 <FilterChip
                   label="Todas"
                   active={expiryFilter === "ALL"}

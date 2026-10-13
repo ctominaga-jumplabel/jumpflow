@@ -33,6 +33,7 @@ import {
   type DashSkill,
   type SkillLevelDto,
 } from "@/components/talent-dashboard/types";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 export interface BancoInativosViewProps {
   consultants: DashConsultant[];
@@ -238,7 +239,7 @@ export function BancoInativosView({
             <>
               <label className="flex items-center gap-1.5">
                 <span className="text-xs font-semibold text-medium">Skill</span>
-                <select
+                <SearchableSelect
                   value={skill}
                   onChange={(e) => setSkill(e.target.value)}
                   className={cn(fieldClass, "w-auto")}
@@ -249,13 +250,13 @@ export function BancoInativosView({
                       {s}
                     </option>
                   ))}
-                </select>
+                </SearchableSelect>
               </label>
               <label className="flex items-center gap-1.5">
                 <span className="text-xs font-semibold text-medium">
                   Contratação anterior
                 </span>
-                <select
+                <SearchableSelect
                   value={contract}
                   onChange={(e) =>
                     setContract(e.target.value as "" | ContractTypeDto)
@@ -268,7 +269,7 @@ export function BancoInativosView({
                       {CONTRACT_LABEL[c]}
                     </option>
                   ))}
-                </select>
+                </SearchableSelect>
               </label>
             </>
           }
@@ -278,7 +279,7 @@ export function BancoInativosView({
                 <span className="text-xs font-semibold text-medium">
                   Ordenar
                 </span>
-                <select
+                <SearchableSelect
                   value={sort}
                   onChange={(e) => setSort(e.target.value as SortKey)}
                   className={cn(fieldClass, "w-auto")}
@@ -286,7 +287,7 @@ export function BancoInativosView({
                   <option value="recent">Certificado mais recente</option>
                   <option value="name">Nome</option>
                   <option value="certs">Nº de certificados vigentes</option>
-                </select>
+                </SearchableSelect>
               </label>
               {hasFilter ? (
                 <button

@@ -37,6 +37,7 @@ import {
   type TimeEntryFormProject,
   type TimeEntryFormValue,
 } from "./TimeEntryForm";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 /** Abas da tela: lançamento individual (semana visível) × lançamento em lote. */
 type Tab = "individual" | "lote";
@@ -471,7 +472,7 @@ export function NewTimeEntryScreen({
                 <label htmlFor="batch-project" className={labelClass}>
                   Projeto
                 </label>
-                <select
+                <SearchableSelect
                   id="batch-project"
                   value={batchProjectId}
                   disabled={isPending}
@@ -484,7 +485,7 @@ export function NewTimeEntryScreen({
                       {project.name}
                     </option>
                   ))}
-                </select>
+                </SearchableSelect>
                 {batchConsultantIds.length > 0 ? (
                   <p className="mt-1 text-xs text-soft">
                     Mostrando {availableProjects.length} projeto(s) com alocação
@@ -498,7 +499,7 @@ export function NewTimeEntryScreen({
                 <label htmlFor="batch-activity" className={labelClass}>
                   Atividade
                 </label>
-                <select
+                <SearchableSelect
                   id="batch-activity"
                   value={batchActivity}
                   disabled={isPending}
@@ -512,7 +513,7 @@ export function NewTimeEntryScreen({
                       {activityLabels[activity]}
                     </option>
                   ))}
-                </select>
+                </SearchableSelect>
               </div>
             </div>
 

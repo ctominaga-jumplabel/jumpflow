@@ -32,6 +32,7 @@ import { ProjectStatusBadge, projectStatusLabels } from "@/components/projects/P
 import { ProjectContextCard } from "@/components/projects/shared/ProjectContextCard";
 import { NumberField, fieldClass } from "@/components/projects/shared/fields";
 import { SaleRateModal } from "@/components/projects/shared/SaleRateModal";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 type Mode = "demo" | "db";
 
@@ -497,7 +498,7 @@ function PricingModal({
           <form className="grid gap-4 md:grid-cols-2">
             <label className="space-y-1 text-sm font-medium text-medium">
               Tipo de cobrança
-              <select
+              <SearchableSelect
                 value={billingTypeId}
                 onChange={(event) => setBillingTypeId(event.target.value)}
                 className={fieldClass()}
@@ -508,7 +509,7 @@ function PricingModal({
                     {type.name}
                   </option>
                 ))}
-              </select>
+              </SearchableSelect>
             </label>
             <NumberField
               label="Budget de horas"

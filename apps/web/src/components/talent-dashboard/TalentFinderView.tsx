@@ -27,6 +27,7 @@ import {
   type SkillLevelDto,
   type SkillTypeDto,
 } from "@/components/talent-dashboard/types";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 export interface TalentFinderViewProps {
   consultants: DashConsultant[];
@@ -310,7 +311,7 @@ export function TalentFinderView({
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <label className="min-w-0">
             <span className="text-xs font-semibold text-medium">Skill</span>
-            <select
+            <SearchableSelect
               value={skill}
               onChange={(e) => setSkill(e.target.value)}
               className={cn(fieldClass, "mt-1")}
@@ -321,14 +322,14 @@ export function TalentFinderView({
                   {s}
                 </option>
               ))}
-            </select>
+            </SearchableSelect>
           </label>
 
           <label className="min-w-0">
             <span className="text-xs font-semibold text-medium">
               Nível mínimo
             </span>
-            <select
+            <SearchableSelect
               value={minLevel}
               onChange={(e) =>
                 setMinLevel(e.target.value as "" | SkillLevelDto)
@@ -341,14 +342,14 @@ export function TalentFinderView({
                   {LEVEL_LABEL[l]}
                 </option>
               ))}
-            </select>
+            </SearchableSelect>
           </label>
 
           <label className="min-w-0">
             <span className="text-xs font-semibold text-medium">
               Tipo de skill
             </span>
-            <select
+            <SearchableSelect
               value={skillType}
               onChange={(e) =>
                 setSkillType(e.target.value as "" | SkillTypeDto)
@@ -358,12 +359,12 @@ export function TalentFinderView({
               <option value="">Técnica e comportamental</option>
               <option value="TECHNICAL">Técnica</option>
               <option value="BEHAVIORAL">Comportamental</option>
-            </select>
+            </SearchableSelect>
           </label>
 
           <label className="min-w-0">
             <span className="text-xs font-semibold text-medium">Categoria</span>
-            <select
+            <SearchableSelect
               value={category}
               onChange={(e) => setCategory(e.target.value)}
               className={cn(fieldClass, "mt-1")}
@@ -374,14 +375,14 @@ export function TalentFinderView({
                   {c}
                 </option>
               ))}
-            </select>
+            </SearchableSelect>
           </label>
 
           <label className="min-w-0">
             <span className="text-xs font-semibold text-medium">
               Emissor do certificado
             </span>
-            <select
+            <SearchableSelect
               value={issuer}
               onChange={(e) => setIssuer(e.target.value)}
               className={cn(fieldClass, "mt-1")}
@@ -392,14 +393,14 @@ export function TalentFinderView({
                   {i}
                 </option>
               ))}
-            </select>
+            </SearchableSelect>
           </label>
 
           <label className="min-w-0">
             <span className="text-xs font-semibold text-medium">
               Vigência do certificado
             </span>
-            <select
+            <SearchableSelect
               value={certValidity}
               onChange={(e) => setCertValidity(e.target.value as CertValidity)}
               className={cn(fieldClass, "mt-1")}
@@ -407,14 +408,14 @@ export function TalentFinderView({
               <option value="all">Todas</option>
               <option value="valid">Vigentes</option>
               <option value="expired">Vencidas</option>
-            </select>
+            </SearchableSelect>
           </label>
 
           <label className="min-w-0">
             <span className="text-xs font-semibold text-medium">
               Senioridade
             </span>
-            <select
+            <SearchableSelect
               value={seniority}
               onChange={(e) =>
                 setSeniority(e.target.value as "" | SeniorityDto)
@@ -427,7 +428,7 @@ export function TalentFinderView({
                   {SENIORITY_LABEL[s]}
                 </option>
               ))}
-            </select>
+            </SearchableSelect>
           </label>
 
           <div className="grid grid-cols-2 gap-3">
@@ -435,7 +436,7 @@ export function TalentFinderView({
               <span className="text-xs font-semibold text-medium">
                 Contratação
               </span>
-              <select
+              <SearchableSelect
                 value={contract}
                 onChange={(e) =>
                   setContract(e.target.value as "" | ContractTypeDto)
@@ -448,12 +449,12 @@ export function TalentFinderView({
                     {CONTRACT_LABEL[c]}
                   </option>
                 ))}
-              </select>
+              </SearchableSelect>
             </label>
 
             <label className="min-w-0">
               <span className="text-xs font-semibold text-medium">Status</span>
-              <select
+              <SearchableSelect
                 value={status}
                 onChange={(e) =>
                   setStatus(e.target.value as "" | ConsultantStatusDto)
@@ -464,7 +465,7 @@ export function TalentFinderView({
                 <option value="ACTIVE">{STATUS_LABEL.ACTIVE}</option>
                 <option value="ON_LEAVE">{STATUS_LABEL.ON_LEAVE}</option>
                 <option value="INACTIVE">{STATUS_LABEL.INACTIVE}</option>
-              </select>
+              </SearchableSelect>
             </label>
           </div>
         </div>

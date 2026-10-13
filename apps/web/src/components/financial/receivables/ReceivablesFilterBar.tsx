@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { focusRing, focusRingInput } from "@/lib/styles";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 export interface ReceivablesFilterOption {
   id: string;
@@ -126,7 +127,7 @@ export function ReceivablesFilterBar({
 
       <label className="min-w-0">
         <span className="text-xs font-semibold text-medium">Cliente</span>
-        <select
+        <SearchableSelect
           name="clientId"
           value={clientId}
           onChange={(e) => setClientId(e.target.value)}
@@ -138,7 +139,7 @@ export function ReceivablesFilterBar({
               {c.name}
             </option>
           ))}
-        </select>
+        </SearchableSelect>
       </label>
 
       <div ref={comboRef} className="relative min-w-0">
@@ -220,7 +221,7 @@ export function ReceivablesFilterBar({
 
       <label className="min-w-0">
         <span className="text-xs font-semibold text-medium">Colaborador</span>
-        <select
+        <SearchableSelect
           name="consultantId"
           defaultValue={values.consultantId ?? ""}
           className={cn(fieldClass, "mt-1")}
@@ -231,12 +232,12 @@ export function ReceivablesFilterBar({
               {c.name}
             </option>
           ))}
-        </select>
+        </SearchableSelect>
       </label>
 
       <label className="min-w-0">
         <span className="text-xs font-semibold text-medium">Faturar</span>
-        <select
+        <SearchableSelect
           name="billable"
           defaultValue={values.billable ?? ""}
           className={cn(fieldClass, "mt-1")}
@@ -244,7 +245,7 @@ export function ReceivablesFilterBar({
           <option value="">Todos</option>
           <option value="true">Sim</option>
           <option value="false">Não</option>
-        </select>
+        </SearchableSelect>
       </label>
 
       <div className="flex items-end sm:col-span-2 lg:col-span-1">

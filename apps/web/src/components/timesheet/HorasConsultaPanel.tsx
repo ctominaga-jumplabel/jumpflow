@@ -12,6 +12,7 @@ import { timeEntryStatusLabels } from "@/lib/timesheet/types";
 import { pageSizeOptionsWith } from "@/lib/reports/schemas";
 import type { ReportFilterOptions } from "@/lib/db/reports";
 import type { HoursReport } from "@/lib/reports/types";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 const fieldClass = cn(
   "h-9 w-full rounded-md border border-border bg-surface px-3 text-sm text-strong",
@@ -275,7 +276,7 @@ export function HorasConsultaPanel({
               <label className={labelClass} htmlFor="hc-client">
                 Cliente
               </label>
-              <select
+              <SearchableSelect
                 id="hc-client"
                 name="clientId"
                 value={sel.clientId}
@@ -290,14 +291,14 @@ export function HorasConsultaPanel({
                     {c.name}
                   </option>
                 ))}
-              </select>
+              </SearchableSelect>
             </div>
 
             <div>
               <label className={labelClass} htmlFor="hc-consultant">
                 Consultor
               </label>
-              <select
+              <SearchableSelect
                 id="hc-consultant"
                 name="consultantId"
                 value={sel.consultantId}
@@ -312,14 +313,14 @@ export function HorasConsultaPanel({
                     {c.name}
                   </option>
                 ))}
-              </select>
+              </SearchableSelect>
             </div>
 
             <div>
               <label className={labelClass} htmlFor="hc-project">
                 Projeto
               </label>
-              <select
+              <SearchableSelect
                 id="hc-project"
                 name="projectId"
                 value={sel.projectId}
@@ -334,14 +335,14 @@ export function HorasConsultaPanel({
                     {p.name}
                   </option>
                 ))}
-              </select>
+              </SearchableSelect>
             </div>
 
             <div>
               <label className={labelClass} htmlFor="hc-status">
                 Status
               </label>
-              <select
+              <SearchableSelect
                 id="hc-status"
                 name="status"
                 defaultValue={v("status")}
@@ -353,14 +354,14 @@ export function HorasConsultaPanel({
                     {timeEntryStatusLabels[s]}
                   </option>
                 ))}
-              </select>
+              </SearchableSelect>
             </div>
 
             <div>
               <label className={labelClass} htmlFor="hc-page-size">
                 Itens por página
               </label>
-              <select
+              <SearchableSelect
                 id="hc-page-size"
                 name="pageSize"
                 defaultValue={v("pageSize")}
@@ -371,7 +372,7 @@ export function HorasConsultaPanel({
                     {n}
                   </option>
                 ))}
-              </select>
+              </SearchableSelect>
             </div>
           </div>
 

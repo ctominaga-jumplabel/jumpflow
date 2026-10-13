@@ -83,7 +83,7 @@ describe("ProjectsView", () => {
     renderDemo();
     fireEvent.click(screen.getByRole("button", { name: /Novo projeto/ }));
     const dialog = screen.getByRole("dialog");
-    fireEvent.change(within(dialog).getByLabelText("Cliente"), {
+    fireEvent.change(within(dialog).getByLabelText("Cliente", { selector: "select" }), {
       target: { value: "cli-nova" },
     });
     fireEvent.change(within(dialog).getByLabelText("Nome"), {
@@ -131,10 +131,10 @@ describe("ProjectsView", () => {
     );
     const dialogs = screen.getAllByRole("dialog");
     const skillDialog = dialogs[dialogs.length - 1];
-    fireEvent.change(within(skillDialog).getByLabelText("Skill"), {
+    fireEvent.change(within(skillDialog).getByLabelText("Skill", { selector: "select" }), {
       target: { value: "skill-react" },
     });
-    fireEvent.change(within(skillDialog).getByLabelText("Nivel"), {
+    fireEvent.change(within(skillDialog).getByLabelText("Nivel", { selector: "select" }), {
       target: { value: "ADVANCED" },
     });
     fireEvent.click(within(skillDialog).getByRole("button", { name: "Salvar" }));

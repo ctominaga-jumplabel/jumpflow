@@ -30,6 +30,7 @@ import type {
   RoleView,
 } from "@/lib/db/permissions";
 import { saveRolePermissions } from "@/app/app/admin/permissoes/actions";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 interface Grant {
   view: boolean;
@@ -250,7 +251,7 @@ export function PermissionMatrixView({
                 aria-hidden="true"
                 className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-soft"
               />
-              <select
+              <SearchableSelect
                 value={roleId}
                 onChange={(e) => setRoleId(e.target.value)}
                 className={cn(
@@ -265,7 +266,7 @@ export function PermissionMatrixView({
                     {r.active ? "" : " — inativo"}
                   </option>
                 ))}
-              </select>
+              </SearchableSelect>
               <ChevronDown
                 aria-hidden="true"
                 className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-soft"

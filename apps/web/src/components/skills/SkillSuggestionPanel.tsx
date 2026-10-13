@@ -19,6 +19,7 @@ import {
   skillLevelOrder,
   type SkillLevel,
 } from "@/lib/mock-data/skills";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 export interface SkillSuggestionItem {
   id: string;
@@ -233,7 +234,7 @@ export function SkillSuggestionPanel({
                   ) : null}
 
                   <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <select
+                    <SearchableSelect
                       aria-label={`Nivel de ${item.suggestedName}`}
                       value={levels[item.id] ?? item.suggestedLevel}
                       onChange={(event) =>
@@ -251,7 +252,7 @@ export function SkillSuggestionPanel({
                           {skillLevelLabels[level]}
                         </option>
                       ))}
-                    </select>
+                    </SearchableSelect>
                     <ActionButton
                       variant="secondary"
                       size="sm"

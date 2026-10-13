@@ -15,6 +15,7 @@ import {
   applyCurriculumImport,
   extractCurriculumFromPdf,
 } from "@/app/app/skills/actions";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 const MAX_BYTES = 6 * 1024 * 1024;
 
@@ -396,7 +397,7 @@ export function CurriculumImportPanel({
                       </StatusBadge>
                     </div>
                     <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <select
+                      <SearchableSelect
                         aria-label={`Nível de ${skill.name}`}
                         value={skill.level}
                         onChange={(event) =>
@@ -418,7 +419,7 @@ export function CurriculumImportPanel({
                             {skillLevelLabels[level]}
                           </option>
                         ))}
-                      </select>
+                      </SearchableSelect>
                       <input
                         aria-label={`Categoria de ${skill.name}`}
                         value={skill.category}

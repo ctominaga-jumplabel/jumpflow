@@ -44,6 +44,7 @@ import {
 import { getTimeEntryAttachmentUrl } from "@/app/app/horas/actions";
 import { CockpitCalendarGrid } from "./CockpitCalendarGrid";
 import { CockpitProjectCalendarGrid } from "./CockpitProjectCalendarGrid";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 const MONTH_LABELS = [
   "Janeiro",
@@ -564,7 +565,7 @@ function CompetenceSelector({ month, year }: { month: number; year: number }) {
           >
             Mês
           </label>
-          <select
+          <SearchableSelect
             id="cockpit-mes"
             value={String(m)}
             onChange={(e) => setM(Number(e.target.value))}
@@ -578,7 +579,7 @@ function CompetenceSelector({ month, year }: { month: number; year: number }) {
                 {label}
               </option>
             ))}
-          </select>
+          </SearchableSelect>
         </div>
         <div>
           <label
@@ -587,7 +588,7 @@ function CompetenceSelector({ month, year }: { month: number; year: number }) {
           >
             Ano
           </label>
-          <select
+          <SearchableSelect
             id="cockpit-ano"
             value={String(y)}
             onChange={(e) => setY(Number(e.target.value))}
@@ -601,7 +602,7 @@ function CompetenceSelector({ month, year }: { month: number; year: number }) {
                 {yy}
               </option>
             ))}
-          </select>
+          </SearchableSelect>
         </div>
         <ActionButton variant="primary" size="sm" onClick={apply}>
           Aplicar

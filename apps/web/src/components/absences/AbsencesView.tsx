@@ -25,6 +25,7 @@ import {
 } from "@/lib/timesheet/time-off";
 import { cn } from "@/lib/utils";
 import { focusRingInput } from "@/lib/styles";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 const KIND_OPTIONS: { value: TimeOffKind; label: string; hint: string }[] = [
   { value: "VACATION", label: "Férias", hint: "Debita o saldo de férias." },
@@ -370,7 +371,7 @@ function RequestModal({
           <label htmlFor="timeoff-kind" className={labelCls}>
             Tipo
           </label>
-          <select
+          <SearchableSelect
             id="timeoff-kind"
             className={inputCls}
             value={kind}
@@ -381,7 +382,7 @@ function RequestModal({
                 {k.label}
               </option>
             ))}
-          </select>
+          </SearchableSelect>
           {hint ? <p className="mt-1 text-xs text-soft">{hint}</p> : null}
         </div>
 

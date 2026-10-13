@@ -28,6 +28,7 @@ import {
   type SkillStatus,
 } from "@/lib/competencies/types";
 import { EnumSelect, TextField } from "./fields";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 interface ProfileDraft {
   id?: string;
@@ -268,7 +269,7 @@ export function CompetencyProfilesManager({
                         </div>
                         <div className="flex items-center gap-2">
                           {canManage ? (
-                            <select
+                            <SearchableSelect
                               value={item.requiredLevel}
                               disabled={pending}
                               onChange={(event) =>
@@ -290,7 +291,7 @@ export function CompetencyProfilesManager({
                                   {label}
                                 </option>
                               ))}
-                            </select>
+                            </SearchableSelect>
                           ) : (
                             <StatusBadge tone="info">
                               {skillLevelLabels[item.requiredLevel]}
@@ -319,7 +320,7 @@ export function CompetencyProfilesManager({
                     <div className="mt-4 flex flex-wrap items-end gap-3 rounded-md border border-border bg-surface-muted/40 p-3">
                       <label className="space-y-1 text-xs font-medium text-medium">
                         Skill
-                        <select
+                        <SearchableSelect
                           value={itemSkillId}
                           onChange={(event) => setItemSkillId(event.target.value)}
                           className="h-9 w-56 rounded-md border border-border bg-surface px-2 text-sm"
@@ -333,11 +334,11 @@ export function CompetencyProfilesManager({
                               </option>
                             ))
                           )}
-                        </select>
+                        </SearchableSelect>
                       </label>
                       <label className="space-y-1 text-xs font-medium text-medium">
                         Nível requerido
-                        <select
+                        <SearchableSelect
                           value={itemLevel}
                           onChange={(event) =>
                             setItemLevel(event.target.value as SkillLevel)
@@ -354,7 +355,7 @@ export function CompetencyProfilesManager({
                               {label}
                             </option>
                           ))}
-                        </select>
+                        </SearchableSelect>
                       </label>
                       <ActionButton
                         size="sm"

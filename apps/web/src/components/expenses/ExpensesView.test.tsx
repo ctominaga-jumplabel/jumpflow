@@ -62,7 +62,7 @@ describe("ExpensesView (demo mode)", () => {
     fireEvent.click(screen.getByRole("button", { name: /Nova despesa/ }));
 
     const dialog = screen.getByRole("dialog");
-    fireEvent.change(within(dialog).getByLabelText("Projeto"), {
+    fireEvent.change(within(dialog).getByLabelText("Projeto", { selector: "select" }), {
       target: { value: "prj-atlas" },
     });
     fireEvent.change(within(dialog).getByLabelText("Descrição"), {
@@ -72,7 +72,7 @@ describe("ExpensesView (demo mode)", () => {
     fireEvent.change(within(dialog).getByLabelText("Valor (R$)"), {
       target: { value: "150" },
     });
-    fireEvent.change(within(dialog).getByLabelText("Tipo de lançamento"), {
+    fireEvent.change(within(dialog).getByLabelText("Tipo de lançamento", { selector: "select" }), {
       target: { value: "RIDE_SHARE" },
     });
     fireEvent.click(
@@ -101,7 +101,7 @@ describe("ExpensesView (demo mode)", () => {
     renderDemo();
     fireEvent.click(screen.getByRole("button", { name: /Nova despesa/ }));
     const dialog = screen.getByRole("dialog");
-    fireEvent.change(within(dialog).getByLabelText("Projeto"), {
+    fireEvent.change(within(dialog).getByLabelText("Projeto", { selector: "select" }), {
       target: { value: "prj-atlas" },
     });
     fireEvent.change(within(dialog).getByLabelText("Descrição"), {
@@ -110,7 +110,7 @@ describe("ExpensesView (demo mode)", () => {
     fireEvent.change(within(dialog).getByLabelText("Valor (R$)"), {
       target: { value: "150" },
     });
-    fireEvent.change(within(dialog).getByLabelText("Tipo de lançamento"), {
+    fireEvent.change(within(dialog).getByLabelText("Tipo de lançamento", { selector: "select" }), {
       target: { value: "RIDE_SHARE" },
     });
     fireEvent.click(

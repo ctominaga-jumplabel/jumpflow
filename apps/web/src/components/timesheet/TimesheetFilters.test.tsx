@@ -66,20 +66,20 @@ describe("TimesheetFilters (db mode) — query string reflection", () => {
       direction: "desc",
     });
 
-    expect((screen.getByLabelText("Status") as HTMLSelectElement).value).toBe(
+    expect((screen.getByLabelText("Status", { selector: "select" }) as HTMLSelectElement).value).toBe(
       "APPROVED",
     );
-    expect((screen.getByLabelText("Projeto") as HTMLSelectElement).value).toBe(
+    expect((screen.getByLabelText("Projeto", { selector: "select" }) as HTMLSelectElement).value).toBe(
       "proj-orion",
     );
     expect(
-      (screen.getByLabelText("Status do projeto") as HTMLSelectElement).value,
+      (screen.getByLabelText("Status do projeto", { selector: "select" }) as HTMLSelectElement).value,
     ).toBe("PAUSED");
     expect(
-      (screen.getByLabelText("Atividade") as HTMLSelectElement).value,
+      (screen.getByLabelText("Atividade", { selector: "select" }) as HTMLSelectElement).value,
     ).toBe("ON_CALL");
     expect(
-      (screen.getByLabelText("Cobrança") as HTMLSelectElement).value,
+      (screen.getByLabelText("Cobrança", { selector: "select" }) as HTMLSelectElement).value,
     ).toBe("false");
     expect(
       (screen.getByLabelText("Início do período") as HTMLInputElement).value,
@@ -88,36 +88,36 @@ describe("TimesheetFilters (db mode) — query string reflection", () => {
       (screen.getByLabelText("Fim do período") as HTMLInputElement).value,
     ).toBe("2026-06-30");
     expect(
-      (screen.getByLabelText("Ordenar por") as HTMLSelectElement).value,
+      (screen.getByLabelText("Ordenar por", { selector: "select" }) as HTMLSelectElement).value,
     ).toBe("status");
-    expect((screen.getByLabelText("Direção") as HTMLSelectElement).value).toBe(
+    expect((screen.getByLabelText("Direção", { selector: "select" }) as HTMLSelectElement).value).toBe(
       "desc",
     );
   });
 
   it("leaves fields at their empty default when no filter is set", () => {
     renderDb({});
-    expect((screen.getByLabelText("Status") as HTMLSelectElement).value).toBe(
+    expect((screen.getByLabelText("Status", { selector: "select" }) as HTMLSelectElement).value).toBe(
       "",
     );
-    expect((screen.getByLabelText("Atividade") as HTMLSelectElement).value).toBe(
+    expect((screen.getByLabelText("Atividade", { selector: "select" }) as HTMLSelectElement).value).toBe(
       "",
     );
     expect(
-      (screen.getByLabelText("Cobrança") as HTMLSelectElement).value,
+      (screen.getByLabelText("Cobrança", { selector: "select" }) as HTMLSelectElement).value,
     ).toBe("");
   });
 
   it("reflects billable=true as the Faturável option", () => {
     renderDb({ billable: true });
     expect(
-      (screen.getByLabelText("Cobrança") as HTMLSelectElement).value,
+      (screen.getByLabelText("Cobrança", { selector: "select" }) as HTMLSelectElement).value,
     ).toBe("true");
   });
 
   it("lists the distinct clients of the project scope and reflects the value", () => {
     renderDb({ clientId: "cli-banco" });
-    const select = screen.getByLabelText("Cliente") as HTMLSelectElement;
+    const select = screen.getByLabelText("Cliente", { selector: "select" }) as HTMLSelectElement;
     expect(select.value).toBe("cli-banco");
     const options = Array.from(select.options).map((o) => o.textContent);
     // "Todos" + the two distinct clients, sorted pt-BR.
