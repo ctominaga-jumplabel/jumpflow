@@ -42,6 +42,7 @@ import {
   removeTimeEntryAttachment,
   saveTimesheetDefault as saveTimesheetDefaultAction,
   updateTimeEntry,
+  type CreateTimeEntryResult,
 } from "@/app/app/horas/actions";
 import { requestEntryReopen } from "@/app/app/horas/reopen-request-actions";
 import type { TimesheetPeriodOverview } from "@/lib/db/timesheet";
@@ -52,6 +53,7 @@ import {
 } from "@/lib/mock-data/timesheet";
 import {
   cloneWeek,
+  DAILY_TARGET_HOURS,
   dayTotal,
   deriveWeekStatus,
   isRowCopyable,
@@ -98,6 +100,7 @@ import { Modal } from "@/components/ui/Modal";
 import { TimeEntryRow } from "./TimeEntryRow";
 import { TimeEntryStatusBadge } from "./TimeEntryStatusBadge";
 import { TimesheetFilters } from "./TimesheetFilters";
+import { CompleteDayPrompt, remainderClock } from "./CompleteDayPrompt";
 import {
   TimeEntryForm,
   type TimeEntryAttachmentIntent,
@@ -627,6 +630,14 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
   // Anexo persistido do lançamento sendo editado (melhoria #2), passado ao form.
   const [editAttachment, setEditAttachment] =
     useState<TimeEntryAttachmentMeta | null>(null);
+  // Consultor de projeto único abaixo da meta diária: alerta "compor o restante"
+  // e, no "Sim", o prefill do novo lançamento no mesmo dia.
+  const [completeDay, setCompleteDay] = useState<{
+    hours: number;
+    value: TimeEntryFormValue;
+  } | null>(null);
+  const [newPrefill, setNewPrefill] =
+    useState<Partial<TimeEntryFormValue> | null>(null);
   const [defaultValue, setDefaultValue] = useState<TimesheetDefaultFormValue>(() =>
     defaultFormValue(props.defaultOptions ?? []),
   );
@@ -739,6 +750,23 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
     router.push(`${pathname}?semana=${target}`);
   }
 
+  /** "Sim" do alerta de dia incompleto: novo lançamento no mesmo dia. */
+  function composeRemainder() {
+    if (!completeDay) return;
+    const { value, hours } = completeDay;
+    setEditingRow(null);
+    setEditInitial(null);
+    setEditAttachment(null);
+    setNewPrefill({
+      projectId: value.projectId,
+      activity: value.activity,
+      date: value.date,
+      clock: remainderClock(value.clock.endTime, DAILY_TARGET_HOURS - hours),
+    });
+    setCompleteDay(null);
+    setFormOpen(true);
+  }
+
   function dayIndexOf(date: string): number {
     return week.days.findIndex((d) => d.date === date);
   }
@@ -759,6 +787,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
       holidays={holidays}
       timeOff={timeOff}
       initial={editInitial}
+      prefill={newPrefill}
       onSubmit={handleSubmitEntry}
       onDelete={!isDemo && editingRow ? handleDeleteEntry : undefined}
       busy={isPending}
@@ -779,6 +808,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
    * continua sempre no formulário da própria grade.
    */
   function openNew() {
+    setNewPrefill(null);
     if (!isDemo && !onBehalfId) {
       router.push(`${NEW_ENTRY_HREF}?semana=${week.startDate}`);
       return;
@@ -964,9 +994,12 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
   }
 
   function openEdit(row: TimeEntryRowData) {
+    // O dia editado é o do primeiro LANÇAMENTO da linha (por id): um
+    // lançamento com 0h (todo o relógio virou Hora Extra) também é editável.
+    const byEntry = row.entryIds?.findIndex((id) => id != null) ?? -1;
     const dayIndex = Math.max(
       0,
-      row.hours.findIndex((h) => h > 0),
+      byEntry >= 0 ? byEntry : row.hours.findIndex((h) => h > 0),
     );
     const storedClock = row.clock?.[dayIndex] ?? null;
     setEditingRow(row);
@@ -1136,6 +1169,16 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
               ? "Lançamento corrigido e reenviado para aprovação."
               : "Lançamento enviado para aprovação.",
           );
+          // Só lançamentos NOVOS trazem o total do dia (createTimeEntry).
+          const created = existingId
+            ? null
+            : (result.data as CreateTimeEntryResult);
+          if (
+            created?.singleProject &&
+            created.dayHours < DAILY_TARGET_HOURS
+          ) {
+            setCompleteDay({ hours: created.dayHours, value });
+          }
           // Nathal.IA celebrates + speaks (recorded) when hours go to approval.
           if (isNathaliaActive()) {
             celebrateNathalia("Horas enviadas! 🎉");
@@ -1786,6 +1829,7 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
         holidays={holidays}
         timeOff={timeOff}
         initial={editInitial}
+        prefill={newPrefill}
         onSubmit={handleSubmitEntry}
         onDelete={!isDemo && editingRow ? handleDeleteEntry : undefined}
         busy={isPending}
@@ -1794,6 +1838,12 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
         initialAttachment={editAttachment}
       />
       )}
+
+      <CompleteDayPrompt
+        hours={completeDay?.hours ?? null}
+        onCompose={composeRemainder}
+        onDismiss={() => setCompleteDay(null)}
+      />
 
       <Modal
         open={defaultOpen}

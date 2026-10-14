@@ -260,7 +260,7 @@ export async function getWeekForConsultant(
         // da grade. O arquivo nunca é servido aqui — só por URL assinada.
         attachment: { select: { fileName: true } },
       },
-      orderBy: { date: "asc" },
+      orderBy: [{ date: "asc" }, { startTime: "asc" }],
     }),
   ]);
 
@@ -270,9 +270,25 @@ export async function getWeekForConsultant(
     // projeto/atividade/status mas com fatores diferentes (ex.: 0.33 e 0.50)
     // são linhas distintas — colapsá-los exibiria um único fator e corromperia
     // o "Equivalente" mostrado na grade.
-    const key = `${entry.projectId}|${entry.activityType}|${entry.status}|${Number(
+    const baseKey = `${entry.projectId}|${entry.activityType}|${entry.status}|${Number(
       entry.multiplier,
     )}`;
+    const dayIndex = Math.round(
+      (entry.date.getTime() - start.getTime()) / 86_400_000,
+    );
+    if (dayIndex < 0 || dayIndex > 6) continue;
+    // A mesma chave pode ter VÁRIOS lançamentos no mesmo dia em horários
+    // diferentes. Cada célula da grade é um lançamento (editável por id), então
+    // o 2º lançamento do dia vai para uma linha-irmã (`#2`, `#3`...) em vez de
+    // sobrescrever a célula. Entradas chegam ordenadas por data e horário.
+    let key = baseKey;
+    for (
+      let n = 2;
+      rowsByKey.get(key)?.entryIds?.[dayIndex] != null;
+      n += 1
+    ) {
+      key = `${baseKey}#${n}`;
+    }
     let row = rowsByKey.get(key);
     if (!row) {
       row = {
@@ -291,10 +307,6 @@ export async function getWeekForConsultant(
       };
       rowsByKey.set(key, row);
     }
-    const dayIndex = Math.round(
-      (entry.date.getTime() - start.getTime()) / 86_400_000,
-    );
-    if (dayIndex < 0 || dayIndex > 6) continue;
     row.hours[dayIndex] = Number(entry.hours);
     if (row.entryIds) row.entryIds[dayIndex] = entry.id;
     if (row.attachments) {

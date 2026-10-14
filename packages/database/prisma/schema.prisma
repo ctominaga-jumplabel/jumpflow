@@ -986,6 +986,10 @@ model Consultant {
   /// tabelas-fonte. Nunca contem dados financeiros.
   curriculumHeadline  String?
   curriculumSummary   String?
+  /// Permite lancar horas em MAIS de um projeto no mesmo dia. Desligado (padrao)
+  /// = consultor de projeto unico: o servidor recusa um segundo projeto no dia e
+  /// o lancamento abaixo de 8h sugere compor o restante com outro lancamento.
+  allowMultipleProjects Boolean @default(false)
   allocations         Allocation[]
   periods             TimesheetPeriod[]
   timeEntries         TimeEntry[]

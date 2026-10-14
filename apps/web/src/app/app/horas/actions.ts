@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma, Prisma } from "@jumpflow/database";
+import { clockRangesOverlap } from "@jumpflow/shared";
 import { z, type ZodType } from "zod";
 import { isDevAuthEnabled } from "@/lib/auth/dev";
 import { requireRole, requireUser } from "@/lib/auth/guards";
@@ -65,7 +66,10 @@ import {
   type WeekActionInput,
   type WeeklyTimeEntryInput,
 } from "@/lib/timesheet/schemas";
-import type { ActionResult } from "@/lib/timesheet/types";
+import {
+  activityRequiresAttachment,
+  type ActionResult,
+} from "@/lib/timesheet/types";
 import { ActionError } from "@/lib/timesheet/action-error";
 import {
   assertCompetenceBillingOpen,
@@ -248,6 +252,242 @@ async function syncOvertimeSibling(
       },
     }),
   });
+}
+
+/** Statuses de um lançamento que ainda podem ser recalculados/alterados. */
+const EDITABLE_ENTRY_STATUSES: readonly string[] = ["DRAFT", "REJECTED", "SUBMITTED"];
+
+/** Horas do relógio de um lançamento; legado sem horário usa `hours`. */
+function clockedHoursOf(entry: {
+  startTime: string | null;
+  endTime: string | null;
+  breakStart: string | null;
+  breakEnd: string | null;
+  hours: unknown;
+}): number {
+  if (!entry.startTime || !entry.endTime) return Number(entry.hours);
+  try {
+    return computeHoursFromClock({
+      startTime: entry.startTime,
+      endTime: entry.endTime,
+      breakStart: entry.breakStart,
+      breakEnd: entry.breakEnd,
+    });
+  } catch {
+    // Relógio legado inválido: as horas persistidas são a melhor fonte.
+    return Number(entry.hours);
+  }
+}
+
+/**
+ * Recalcula a Hora Extra do DIA (consultor + projeto + data) a partir de TODOS
+ * os Dias Úteis do dia — com vários lançamentos em horários diferentes, o
+ * excedente é sobre o total do dia, não sobre cada lançamento isolado.
+ *
+ * Linhas aprovadas/fechadas mantêm suas horas e consomem o padrão primeiro; as
+ * editáveis recebem o saldo do padrão em ordem cronológica (startTime) e o
+ * restante vira Hora Extra na linha-irmã OVERTIME (syncOvertimeSibling).
+ *
+ * Alocação, período e faturável da Hora Extra vêm do lançamento `sourceEntryId`
+ * (o que acabou de ser salvo) ou, sem ele, do primeiro Dia Útil que ficou no
+ * dia; os `params` são só o fallback.
+ */
+async function recomputeDayOvertime(
+  tx: Db,
+  params: {
+    consultantId: string;
+    projectId: string;
+    date: Date;
+    standardHoursPerDay: unknown;
+    overtimeMultiplier: number;
+    allocationId: string | null;
+    periodId: string;
+    billable: boolean;
+    nonBillableReason: string | null;
+    submittedAt: Date;
+    dbUserId: string | null;
+    sourceEntryId?: string;
+  },
+): Promise<void> {
+  const std =
+    params.standardHoursPerDay == null ? null : Number(params.standardHoursPerDay);
+  const hasStandard = std != null && !Number.isNaN(std) && std > 0;
+  const workdays = await tx.timeEntry.findMany({
+    where: {
+      consultantId: params.consultantId,
+      projectId: params.projectId,
+      date: params.date,
+      activityType: "WORKDAY",
+    },
+    orderBy: [{ startTime: "asc" }, { createdAt: "asc" }],
+  });
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  let budget = hasStandard ? std : Number.POSITIVE_INFINITY;
+  let overtime = 0;
+  const locked = workdays.filter((e) => !EDITABLE_ENTRY_STATUSES.includes(e.status));
+  const editable = workdays.filter((e) => EDITABLE_ENTRY_STATUSES.includes(e.status));
+  for (const e of locked) {
+    const regular = Number(e.hours);
+    budget -= regular;
+    overtime += Math.max(0, clockedHoursOf(e) - regular);
+  }
+  // 1ª passada: distribui o padrão entre os Dias Úteis editáveis (cronológico).
+  const plan = editable.map((e) => {
+    const clocked = clockedHoursOf(e);
+    const regular = round2(Math.min(clocked, Math.max(0, budget)));
+    budget -= regular;
+    overtime += clocked - regular;
+    return { entry: e, regular };
+  });
+  const overtimeHours = hasStandard ? round2(overtime) : 0;
+  // Hora Extra do dia já aprovada/fechada não é mexida automaticamente: um
+  // excedente NOVO sobre ela ficaria sem registro. Recusa em vez de perder.
+  const overtimeRow = await tx.timeEntry.findFirst({
+    where: {
+      consultantId: params.consultantId,
+      projectId: params.projectId,
+      date: params.date,
+      activityType: OVERTIME_ACTIVITY,
+    },
+    select: { status: true, hours: true },
+  });
+  if (
+    overtimeRow &&
+    !EDITABLE_ENTRY_STATUSES.includes(overtimeRow.status) &&
+    overtimeHours > Number(overtimeRow.hours) + 0.001
+  ) {
+    throw new ActionError(
+      "NOT_EDITABLE",
+      `A Hora Extra de ${toIsoDate(params.date)} já foi aprovada. Peça a reabertura dela para lançar mais horas acima do padrão do projeto neste dia.`,
+    );
+  }
+  // 2ª passada: grava as horas redistribuídas.
+  for (const { entry: e, regular } of plan) {
+    if (regular === Number(e.hours)) continue;
+    await tx.timeEntry.update({ where: { id: e.id }, data: { hours: regular } });
+    // Outro lançamento do dia teve as horas redistribuídas: fica auditado.
+    if (e.id !== params.sourceEntryId) {
+      await tx.auditEvent.create({
+        data: buildAuditEventData({
+          actorUserId: params.dbUserId,
+          entityType: "TimeEntry",
+          entityId: e.id,
+          action: "TIME_ENTRY_DAY_HOURS_REBALANCED",
+          before: { hours: Number(e.hours) },
+          after: { entryId: e.id, hours: regular },
+        }),
+      });
+    }
+  }
+  const source =
+    workdays.find((e) => e.id === params.sourceEntryId) ?? workdays[0] ?? null;
+  await syncOvertimeSibling(tx, {
+    consultantId: params.consultantId,
+    projectId: params.projectId,
+    allocationId: source ? source.allocationId : params.allocationId,
+    periodId: source ? source.periodId : params.periodId,
+    date: params.date,
+    overtimeHours,
+    overtimeMultiplier: params.overtimeMultiplier,
+    billable: source ? source.billable : params.billable,
+    nonBillableReason: source ? source.nonBillableReason : params.nonBillableReason,
+    submittedAt: params.submittedAt,
+    dbUserId: params.dbUserId,
+  });
+}
+
+/**
+ * Lançamentos com a MESMA chave (consultor + projeto + atividade + dia) só
+ * convivem em horários diferentes. Devolve os que se sobrepõem ao intervalo
+ * informado (sem horário = dia inteiro, então sempre sobrepõe).
+ */
+async function findOverlappingSameKey(
+  db: Db,
+  params: {
+    consultantId: string;
+    projectId: string;
+    activityType: string;
+    date: Date;
+    startTime: string;
+    endTime: string;
+    excludeId?: string;
+  },
+) {
+  const sameKey = await db.timeEntry.findMany({
+    where: {
+      consultantId: params.consultantId,
+      projectId: params.projectId,
+      activityType: params.activityType,
+      date: params.date,
+      ...(params.excludeId ? { id: { not: params.excludeId } } : {}),
+    },
+  });
+  return sameKey.filter((e) => clockRangesOverlap(e, params));
+}
+
+/** Mensagem de conflito de horário para a mesma chave de lançamento. */
+function overlapMessage(entry: { startTime: string | null; endTime: string | null }) {
+  const range =
+    entry.startTime && entry.endTime ? ` (${entry.startTime}–${entry.endTime})` : "";
+  return `Já existe um lançamento neste projeto, atividade e dia em horário sobreposto${range}. Use um horário diferente ou edite o lançamento existente.`;
+}
+
+/**
+ * Consultor de PROJETO ÚNICO (flag `allowMultipleProjects` desligada): recusa
+ * lançar num projeto quando o dia já tem horas em OUTRO projeto. Gestão habilita
+ * a flag na tela de Consultores para quem atua em vários projetos.
+ */
+async function findOtherProjectEntry(
+  db: Db,
+  consultantId: string,
+  projectId: string,
+  dates: Date[],
+) {
+  if (dates.length === 0) return null;
+  const consultant = await db.consultant.findUnique({
+    where: { id: consultantId },
+    select: { allowMultipleProjects: true },
+  });
+  if (!consultant || consultant.allowMultipleProjects) return null;
+  return db.timeEntry.findFirst({
+    where: {
+      consultantId,
+      date: { in: dates },
+      projectId: { not: projectId },
+      // Reprovado não conta: o consultor corrige lançando no projeto certo.
+      status: { not: "REJECTED" },
+    },
+    select: { date: true, project: { select: { name: true } } },
+    orderBy: { date: "asc" },
+  });
+}
+
+async function assertSingleProjectDays(
+  db: Db,
+  consultantId: string,
+  projectId: string,
+  dates: Date[],
+): Promise<void> {
+  const other = await findOtherProjectEntry(db, consultantId, projectId, dates);
+  if (other) {
+    throw new ActionError(
+      "SINGLE_PROJECT_ONLY",
+      `Já há horas no projeto ${other.project.name} em ${toIsoDate(other.date)}. Este consultor só pode lançar em um projeto por dia — peça à gestão para habilitar "Lança em múltiplos projetos" no cadastro.`,
+    );
+  }
+}
+
+/**
+ * Total de horas do consultor no dia (todos os projetos/atividades, exceto
+ * Sobreaviso, que não é jornada). Alimenta o alerta "Você lançou XX horas" para
+ * consultores de projeto único.
+ */
+async function dayLoggedHours(db: Db, consultantId: string, date: Date) {
+  const agg = await db.timeEntry.aggregate({
+    where: { consultantId, date, activityType: { not: "ON_CALL" } },
+    _sum: { hours: true },
+  });
+  return Math.round(Number(agg._sum.hours ?? 0) * 100) / 100;
 }
 
 /**
@@ -513,9 +753,17 @@ async function assertNoConfirmedTimeOff(
   }
 }
 
+export interface CreateTimeEntryResult {
+  id: string;
+  /** Total de horas do consultor no dia após o save (sem Sobreaviso). */
+  dayHours: number;
+  /** Consultor de projeto único (flag `allowMultipleProjects` desligada). */
+  singleProject: boolean;
+}
+
 export async function createTimeEntry(
   input: TimeEntryInput,
-): Promise<ActionResult<{ id: string }>> {
+): Promise<ActionResult<CreateTimeEntryResult>> {
   try {
     ensureDatabase();
     const user = await requireUser();
@@ -555,6 +803,8 @@ export async function createTimeEntry(
     // Trava A: competência com faturamento liberado (RevenueClosing CLOSED/
     // INVOICED) não aceita lançamento.
     await assertCompetenceBillingOpen(prisma, project.id, date);
+    // Consultor de projeto único: um segundo projeto no mesmo dia é recusado.
+    await assertSingleProjectDays(prisma, consultant.id, project.id, [date]);
 
     // Resolve the REAL db user BEFORE the transaction (the audit FK cannot use
     // the synthetic dev session id).
@@ -562,18 +812,13 @@ export async function createTimeEntry(
 
     const description = parsed.description.trim();
     const clock = clockToData(parsed);
-    // Hora extra: excedente sobre o padrão de horas/dia do projeto (WORKDAY).
-    // O Dia Útil fica com o padrão (regularHours) e o excedente vira uma LINHA
-    // PRÓPRIA (activityType OVERTIME) via syncOvertimeSibling.
-    const overtimeHours = overtimeHoursFor(
-      project.standardHoursPerDay,
-      parsed.activityType,
-      clock.hours,
-    );
+    // Hora extra: o Dia Útil é salvo com as horas do relógio e, em seguida,
+    // recomputeDayOvertime divide o TOTAL do dia (todos os Dias Úteis do
+    // projeto) entre o padrão de horas/dia e a linha própria de Hora Extra.
     const overtimeMultiplier = resolveOvertimeMultiplier(
       project.overtimeMultiplier,
     );
-    const regularHours = Math.round((clock.hours - overtimeHours) * 100) / 100;
+    const regularHours = clock.hours;
     // Enforcement de campo financeiro por papel + P9: consultor puro não dita
     // billable; gestor que marca NÃO faturável precisa de justificativa.
     const billableDecision = resolveBillableDecision(
@@ -589,24 +834,27 @@ export async function createTimeEntry(
       // status = SUBMITTED + submittedAt = now (the auto-approval engine acts
       // on SUBMITTED entries with submittedAt set).
       const now = new Date();
-      const existing = await tx.timeEntry.findFirst({
-        where: {
-          consultantId: consultant.id,
-          projectId: project.id,
-          activityType: parsed.activityType,
-          date,
-        },
+      // Mesma chave (projeto + atividade + dia) é permitida em HORÁRIOS
+      // DIFERENTES. Só um lançamento sobreposto conflita.
+      const overlapping = await findOverlappingSameKey(tx, {
+        consultantId: consultant.id,
+        projectId: project.id,
+        activityType: parsed.activityType,
+        date,
+        startTime: clock.startTime,
+        endTime: clock.endTime,
       });
+      const existing = overlapping[0] ?? null;
       let merged = false;
       let saved;
       if (existing) {
-        if (existing.status !== "DRAFT" && existing.status !== "REJECTED") {
-          // SUBMITTED/APPROVED/CLOSED: a second entry with the same key would
-          // be flagged as duplicate by the auto-approval engine.
-          throw new ActionError(
-            "DUPLICATE_ENTRY",
-            "Já existe um lançamento enviado ou aprovado para este projeto, atividade e dia.",
-          );
+        if (
+          overlapping.length > 1 ||
+          (existing.status !== "DRAFT" && existing.status !== "REJECTED")
+        ) {
+          // SUBMITTED/APPROVED/CLOSED: a second overlapping entry with the same
+          // key would be flagged as duplicate by the auto-approval engine.
+          throw new ActionError("DUPLICATE_ENTRY", overlapMessage(existing));
         }
         // Merge semantics (same as the demo grid): editing the cell replaces
         // hours and resubmits the entry for approval.
@@ -648,21 +896,22 @@ export async function createTimeEntry(
           },
         });
       }
-      // Hora Extra vira linha própria (só WORKDAY): materializa/atualiza/remove
-      // a linha-irmã OVERTIME com o excedente e o fator de hora extra.
+      // Hora Extra vira linha própria (só WORKDAY): recalcula o excedente do
+      // DIA e materializa/atualiza/remove a linha-irmã OVERTIME.
       if (parsed.activityType === "WORKDAY") {
-        await syncOvertimeSibling(tx, {
+        await recomputeDayOvertime(tx, {
           consultantId: consultant.id,
           projectId: project.id,
+          date,
+          standardHoursPerDay: project.standardHoursPerDay,
+          overtimeMultiplier,
           allocationId: allocation.id,
           periodId: period.id,
-          date,
-          overtimeHours,
-          overtimeMultiplier,
           billable,
           nonBillableReason: billableDecision.nonBillableReason,
           submittedAt: now,
           dbUserId: dbUser.id,
+          sourceEntryId: saved.id,
         });
       }
       await recomputePeriodStatus(tx, period.id);
@@ -698,10 +947,25 @@ export async function createTimeEntry(
       return saved;
     });
 
+    const [dayHours, consultantFlags] = await Promise.all([
+      dayLoggedHours(prisma, consultant.id, date),
+      prisma.consultant.findUnique({
+        where: { id: consultant.id },
+        select: { allowMultipleProjects: true },
+      }),
+    ]);
+
     // The entry now sits in the approval queue, so refresh both routes.
     revalidatePath(HORAS_PATH);
     revalidatePath(APROVACOES_PATH);
-    return { ok: true, data: { id: entry.id } };
+    return {
+      ok: true,
+      data: {
+        id: entry.id,
+        dayHours,
+        singleProject: !(consultantFlags?.allowMultipleProjects ?? false),
+      },
+    };
   } catch (error) {
     return toFailure(error);
   }
@@ -742,6 +1006,15 @@ export async function createWeeklyTimeEntries(
 
     const dbUser = await requireDbUser(user);
     const weekdays = [...new Set(parsed.weekdays)].sort((a, b) => a - b);
+    // Consultor de projeto único: nenhum dia gerado pode ter outro projeto.
+    await assertSingleProjectDays(
+      prisma,
+      consultant.id,
+      project.id,
+      Array.from({ length: 7 }, (_, index) => addDays(weekStart, index)).filter(
+        (date) => weekdays.includes(utcIsoWeekday(date)),
+      ),
+    );
     const description = parsed.description.trim();
     const clock = clockToData(parsed);
     // Enforcement de campo financeiro por papel + P9: gestor que marca NÃO
@@ -1324,23 +1597,32 @@ export async function updateTimeEntry(
         entry.projectId,
         newDate,
       );
-      const duplicate = await prisma.timeEntry.findFirst({
-        where: {
-          consultantId: consultant.id,
-          projectId: entry.projectId,
-          activityType: entry.activityType,
-          date: newDate,
-          id: { not: entry.id },
-        },
-      });
-      if (duplicate) {
-        throw new ActionError(
-          "DUPLICATE_ENTRY",
-          "Já existe um lançamento para este projeto, atividade e dia.",
-        );
-      }
+      // Consultor de projeto único: a nova data não pode ter outro projeto.
+      await assertSingleProjectDays(
+        prisma,
+        consultant.id,
+        entry.projectId,
+        [newDate],
+      );
       date = newDate;
       allocationId = allocation.id;
+    }
+
+    // Mesma chave (projeto + atividade + dia) só convive em horários
+    // diferentes: o novo horário (e a eventual nova data) não pode se sobrepor
+    // a outro lançamento da mesma chave.
+    const clock = clockToData(parsed);
+    const overlapping = await findOverlappingSameKey(prisma, {
+      consultantId: consultant.id,
+      projectId: entry.projectId,
+      activityType: entry.activityType,
+      date,
+      startTime: clock.startTime,
+      endTime: clock.endTime,
+      excludeId: entry.id,
+    });
+    if (overlapping.length > 0) {
+      throw new ActionError("DUPLICATE_ENTRY", overlapMessage(overlapping[0]));
     }
 
     // Guarda de ausência: WORKDAY (atividade não muda no edit) em data coberta
@@ -1380,19 +1662,12 @@ export async function updateTimeEntry(
       // (Rodada 4.3): status = SUBMITTED + new submittedAt. The new submittedAt
       // also resets the auto-approval delay for an already-submitted entry.
       const now = new Date();
-      const clock = clockToData(parsed);
-      // Hora extra: recalcula o excedente sobre o padrão do projeto (a atividade
-      // não muda no edit, então usa a do lançamento). O Dia Útil fica com o
-      // padrão e o excedente vive na linha-irmã OVERTIME.
-      const overtimeHours = overtimeHoursFor(
-        entry.project?.standardHoursPerDay,
-        entry.activityType,
-        clock.hours,
-      );
+      // Hora extra: o lançamento é salvo com as horas do relógio e o excedente
+      // do DIA é recalculado (recomputeDayOvertime) sobre todos os Dias Úteis.
       const overtimeMultiplier = resolveOvertimeMultiplier(
         entry.project?.overtimeMultiplier,
       );
-      const regularHours = Math.round((clock.hours - overtimeHours) * 100) / 100;
+      const regularHours = clock.hours;
       await tx.timeEntry.update({
         where: { id: entry.id },
         data: {
@@ -1409,40 +1684,29 @@ export async function updateTimeEntry(
           submittedAt: now,
         },
       });
-      // Se a data mudou, a Hora Extra da data ANTIGA fica órfã: remove-a antes de
-      // sincronizar na data nova (só WORKDAY tem Hora Extra).
-      if (
-        entry.activityType === "WORKDAY" &&
-        date.getTime() !== entry.date.getTime()
-      ) {
-        await syncOvertimeSibling(tx, {
-          consultantId: consultant.id,
-          projectId: entry.projectId,
-          allocationId,
-          periodId: entry.periodId,
-          date: entry.date,
-          overtimeHours: 0,
-          overtimeMultiplier,
-          billable: billableDecision.billable,
-          nonBillableReason: billableDecision.nonBillableReason,
-          submittedAt: now,
-          dbUserId: dbUser.id,
-        });
-      }
+      // Hora Extra do dia (só WORKDAY). Se a data mudou, a data ANTIGA também
+      // é recalculada: os Dias Úteis que ficaram lá redistribuem o padrão.
       if (entry.activityType === "WORKDAY") {
-        await syncOvertimeSibling(tx, {
-          consultantId: consultant.id,
-          projectId: entry.projectId,
-          allocationId,
-          periodId: entry.periodId,
-          date,
-          overtimeHours,
-          overtimeMultiplier,
-          billable: billableDecision.billable,
-          nonBillableReason: billableDecision.nonBillableReason,
-          submittedAt: now,
-          dbUserId: dbUser.id,
-        });
+        const dates =
+          date.getTime() !== entry.date.getTime() ? [entry.date, date] : [date];
+        for (const day of dates) {
+          await recomputeDayOvertime(tx, {
+            consultantId: consultant.id,
+            projectId: entry.projectId,
+            date: day,
+            standardHoursPerDay: entry.project?.standardHoursPerDay,
+            overtimeMultiplier,
+            allocationId,
+            periodId: entry.periodId,
+            billable: billableDecision.billable,
+            nonBillableReason: billableDecision.nonBillableReason,
+            submittedAt: now,
+            dbUserId: dbUser.id,
+            // Só a data de DESTINO tem o lançamento editado; a antiga usa os
+            // Dias Úteis que ficaram lá.
+            sourceEntryId: day === date ? entry.id : undefined,
+          });
+        }
       }
       await recomputePeriodStatus(tx, entry.periodId);
       await tx.auditEvent.create({
@@ -1523,7 +1787,12 @@ export async function deleteTimeEntry(
 
     const entry = await prisma.timeEntry.findUnique({
       where: { id: parsed.id },
-      include: { period: true },
+      include: {
+        period: true,
+        project: {
+          select: { standardHoursPerDay: true, overtimeMultiplier: true },
+        },
+      },
     });
     if (!entry) {
       throw new ActionError("NOT_FOUND", "Lançamento não encontrado.");
@@ -1555,20 +1824,29 @@ export async function deleteTimeEntry(
     // Trava A: excluir horas de uma competência já liberada para o Financeiro
     // divergiria o faturado do lançado — bloqueado até o Financeiro reabrir.
     await assertCompetenceBillingOpen(prisma, entry.projectId, entry.date);
+    const dbUser =
+      entry.activityType === "WORKDAY" ? await requireDbUser(user) : null;
 
     await prisma.$transaction(async (tx) => {
       await tx.timeEntry.delete({ where: { id: entry.id } });
-      // Excluir o Dia Útil remove também a Hora Extra derivada dele (só linhas
-      // ainda editáveis; uma Hora Extra já aprovada/fechada é preservada).
+      // Excluir um Dia Útil recalcula a Hora Extra do dia com os Dias Úteis que
+      // restaram (sem nenhum, a linha editável de Hora Extra é removida; uma
+      // Hora Extra já aprovada/fechada é preservada).
       if (entry.activityType === "WORKDAY") {
-        await tx.timeEntry.deleteMany({
-          where: {
-            consultantId: entry.consultantId,
-            projectId: entry.projectId,
-            activityType: OVERTIME_ACTIVITY,
-            date: entry.date,
-            status: { in: ["DRAFT", "REJECTED", "SUBMITTED"] },
-          },
+        await recomputeDayOvertime(tx, {
+          consultantId: entry.consultantId,
+          projectId: entry.projectId,
+          date: entry.date,
+          standardHoursPerDay: entry.project.standardHoursPerDay,
+          overtimeMultiplier: resolveOvertimeMultiplier(
+            entry.project.overtimeMultiplier,
+          ),
+          allocationId: entry.allocationId,
+          periodId: entry.periodId,
+          billable: entry.billable,
+          nonBillableReason: entry.nonBillableReason,
+          submittedAt: new Date(),
+          dbUserId: dbUser?.id ?? null,
         });
       }
       await recomputePeriodStatus(tx, entry.periodId);
@@ -1770,6 +2048,13 @@ export async function applyTimesheetDefault(
         "Sobreaviso não pode ser aplicado como padrão semanal. Lance-o manualmente com o fator de remuneração.",
       );
     }
+    // Idem para um padrão legado de Licença: exige anexo por lançamento.
+    if (activityRequiresAttachment(allocation.timesheetDefault.activityType)) {
+      throw new ActionError(
+        "ATTACHMENT_REQUIRED",
+        "Licença exige anexo do comprovante e não pode ser aplicada como padrão semanal. Lance um dia por vez.",
+      );
+    }
 
     const result = await prisma.$transaction(async (tx) => {
       const period = await upsertOpenPeriod(tx, consultant.id, weekStart);
@@ -1813,6 +2098,10 @@ export async function applyTimesheetDefault(
         );
         // Trava A: um padrão semanal não materializa em competência liberada.
         await assertCompetenceBillingOpen(tx, allocation.projectId, date);
+        // Consultor de projeto único: o dia não pode ter outro projeto.
+        await assertSingleProjectDays(tx, consultant.id, allocation.projectId, [
+          date,
+        ]);
         const def = allocation.timesheetDefault!;
         // Hora extra: o padrão pode aplicar mais horas/dia que o padrão do
         // projeto; o Dia Útil fica no padrão e o excedente vira linha OVERTIME.
@@ -1968,13 +2257,23 @@ export async function copyPreviousWeek(
           consultantId: consultant.id,
           date: { gte: destStart, lte: destEnd },
         },
-        select: { projectId: true, activityType: true, date: true },
+        select: {
+          projectId: true,
+          activityType: true,
+          date: true,
+          startTime: true,
+          endTime: true,
+        },
       });
-      const taken = new Set(
-        destEntries.map(
-          (e) => `${e.projectId}|${e.activityType}|${e.date.getTime()}`,
-        ),
-      );
+      // Horários já ocupados por chave (projeto + atividade + dia): a mesma
+      // chave convive em horários diferentes, então só um destino SOBREPOSTO
+      // conta como "já existe".
+      type Range = { startTime: string | null; endTime: string | null };
+      const taken = new Map<string, Range[]>();
+      for (const e of destEntries) {
+        const k = `${e.projectId}|${e.activityType}|${e.date.getTime()}`;
+        taken.set(k, [...(taken.get(k) ?? []), e]);
+      }
 
       const counts: CopyWeekResult = {
         copied: 0,
@@ -1984,9 +2283,24 @@ export async function copyPreviousWeek(
       for (const entry of eligible) {
         const destDate = addDays(entry.date, 7);
         const key = `${entry.projectId}|${entry.activityType}|${destDate.getTime()}`;
-        // Idempotent: skip when the destination key exists in ANY status.
-        if (taken.has(key)) {
+        // Idempotent: skip when the destination key already has an
+        // overlapping time range in ANY status.
+        if ((taken.get(key) ?? []).some((r) => clockRangesOverlap(r, entry))) {
           counts.skippedExisting += 1;
+          continue;
+        }
+        // Consultor de projeto único: não copia para um dia que já tem OUTRO
+        // projeto (inclusive um copiado antes nesta mesma cópia).
+        if (
+          await findOtherProjectEntry(tx, consultant.id, entry.projectId, [destDate])
+        ) {
+          counts.skippedIneligible += 1;
+          continue;
+        }
+        // Atividade que exige anexo (Licença) não é copiada: o comprovante é
+        // do lançamento de origem e o novo ficaria sem anexo.
+        if (activityRequiresAttachment(entry.activityType)) {
+          counts.skippedIneligible += 1;
           continue;
         }
         if (entry.project.status === "CLOSED") {
@@ -2055,7 +2369,7 @@ export async function copyPreviousWeek(
             after: { entryId: created.id, hours: Number(entry.hours), copied: true },
           }),
         });
-        taken.add(key);
+        taken.set(key, [...(taken.get(key) ?? []), entry]);
         counts.copied += 1;
       }
       if (counts.copied > 0) await recomputePeriodStatus(tx, period.id);
@@ -2213,6 +2527,7 @@ export async function decideHours(
         project: { select: { managerUserId: true } },
         consultant: { select: { userId: true, email: true } },
         period: { select: { status: true } },
+        attachment: { select: { id: true } },
       },
     });
     if (entries.length === 0) {
@@ -2267,6 +2582,26 @@ export async function decideHours(
         throw new ActionError(
           "SELF_APPROVAL",
           "Você não pode decidir os próprios lançamentos de horas.",
+        );
+      }
+    }
+
+    // Atividade que exige anexo (Licença) só é aprovada com o comprovante. A
+    // Licença materializada por uma ausência aprovada (timeOffId) já foi
+    // validada no fluxo de Ausências e fica isenta.
+    // Sem storage configurado não há como anexar: não trava (mesma degradação
+    // do formulário).
+    if (parsed.decision === "APPROVED" && isStorageConfigured()) {
+      const missing = entries.find(
+        (entry) =>
+          activityRequiresAttachment(entry.activityType) &&
+          !entry.attachment &&
+          !entry.timeOffId,
+      );
+      if (missing) {
+        throw new ActionError(
+          "ATTACHMENT_REQUIRED",
+          `Licença de ${toIsoDate(missing.date)} sem anexo: peça ao consultor para anexar o comprovante antes de aprovar.`,
         );
       }
     }
@@ -2731,6 +3066,7 @@ export async function removeTimeEntryAttachment(
       select: {
         consultantId: true,
         status: true,
+        activityType: true,
         period: { select: { status: true } },
         attachment: { select: { storageKey: true } },
       },
@@ -2744,6 +3080,13 @@ export async function removeTimeEntryAttachment(
     }
     if (!entry.attachment) {
       throw new ActionError("NOT_FOUND", "Anexo não encontrado.");
+    }
+    // Licença exige anexo: pode ser SUBSTITUÍDO (novo upload), nunca removido.
+    if (activityRequiresAttachment(entry.activityType)) {
+      throw new ActionError(
+        "ATTACHMENT_REQUIRED",
+        "Licença exige anexo: envie outro arquivo para substituir, em vez de remover.",
+      );
     }
     if (entry.period.status === "CLOSED") {
       throw new ActionError(

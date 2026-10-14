@@ -15,7 +15,9 @@ import { ActionButton } from "@/components/ui/ActionButton";
 import { cn } from "@/lib/utils";
 import { focusRing, focusRingInput, quietPanel } from "@/lib/styles";
 import {
+  activityLabelOf,
   activityLabels,
+  activityRequiresAttachment,
   creatableActivityOrder,
   type ActivityType,
   type TimeEntryAttachmentMeta,
@@ -144,6 +146,12 @@ export interface TimeEntryFormProps {
   timeOff?: TimeOffLookup;
   /** Pre-filled values when editing an existing entry. */
   initial?: TimeEntryFormValue | null;
+  /**
+   * Valores sugeridos para um NOVO lançamento (não é edição: projeto e modo
+   * continuam editáveis). Cada objeto novo reinicia o formulário com eles —
+   * usado no "compor o restante das horas" após um dia abaixo de 8h.
+   */
+  prefill?: Partial<TimeEntryFormValue> | null;
   onSubmit: (
     value: TimeEntryFormValue,
     attachment?: TimeEntryAttachmentIntent,
@@ -236,6 +244,7 @@ export function TimeEntryForm({
   holidays = EMPTY_HOLIDAY_LOOKUP,
   timeOff = EMPTY_TIME_OFF_LOOKUP,
   initial,
+  prefill = null,
   onSubmit,
   onDelete,
   busy = false,
@@ -245,7 +254,7 @@ export function TimeEntryForm({
   inline = false,
 }: TimeEntryFormProps) {
   const [value, setValue] = useState<TimeEntryFormValue>(
-    initial ?? emptyValue(days),
+    initial ?? { ...emptyValue(days), ...prefill },
   );
   const [showErrors, setShowErrors] = useState(false);
   // Anexo opcional (melhoria #2): arquivo recém-escolhido (ainda não enviado),
@@ -265,11 +274,16 @@ export function TimeEntryForm({
   const [session, setSession] = useState<{
     open: boolean;
     initial: TimeEntryFormValue | null | undefined;
-  }>({ open, initial });
-  if (session.open !== open || session.initial !== initial) {
-    setSession({ open, initial });
+    prefill: Partial<TimeEntryFormValue> | null;
+  }>({ open, initial, prefill });
+  if (
+    session.open !== open ||
+    session.initial !== initial ||
+    session.prefill !== prefill
+  ) {
+    setSession({ open, initial, prefill });
     if (open) {
-      setValue(initial ?? emptyValue(days));
+      setValue(initial ?? { ...emptyValue(days), ...prefill });
       setShowErrors(false);
       setConfirmHoliday(false);
       setAttachFile(null);
@@ -287,6 +301,9 @@ export function TimeEntryForm({
       // O fator só é editável (e validado) para ON_CALL; demais atividades
       // mantêm 1.00 e o servidor revalida em qualquer caso.
       multiplier: value.activity === "ON_CALL" && !(value.multiplier > 0),
+      // Licença exige anexo, que é 1:1 com um lançamento: só no modo diário.
+      weeklyAttachmentActivity:
+        value.mode === "weekly" && activityRequiresAttachment(value.activity),
     }),
     [
       value.mode,
@@ -303,7 +320,8 @@ export function TimeEntryForm({
     errors.clock ||
     errors.weekdays ||
     errors.description ||
-    errors.multiplier;
+    errors.multiplier ||
+    errors.weeklyAttachmentActivity;
 
   // Equivalente remunerado (horas × fator), via a fonte única de cálculo. Usa 0
   // quando o relógio ainda não fecha um total válido.
@@ -335,6 +353,14 @@ export function TimeEntryForm({
   // não bloqueia). O servidor persiste overtimeHours de qualquer forma.
   const overtimeAttachmentMissing =
     hasOvertime && attachmentsAvailable && !hasAttachment;
+  // Licença: o anexo (atestado/comprovante) é OBRIGATÓRIO. Mesma degradação da
+  // hora extra: sem storage o campo não existe e o form não bloqueia.
+  const activityNeedsAttachment = activityRequiresAttachment(value.activity);
+  const activityAttachmentMissing =
+    activityNeedsAttachment &&
+    value.mode === "daily" &&
+    attachmentsAvailable &&
+    !hasAttachment;
 
   // Feriado do dia selecionado, PROJECT-AWARE (global OU vinculado ao projeto
   // escolhido). Derivado de props/estado — sem efeito, sem setState. Usado no
@@ -442,6 +468,14 @@ export function TimeEntryForm({
       setShowErrors(true);
       setAttachError(
         `Há ${overtimeHours} h de hora extra (acima de ${standardHoursPerDay} h/dia do projeto). Anexe o comprovante de aprovação do gestor para salvar.`,
+      );
+      return;
+    }
+    // Licença sem anexo: o comprovante é obrigatório. Bloqueia e aponta o campo.
+    if (activityAttachmentMissing) {
+      setShowErrors(true);
+      setAttachError(
+        `${activityLabelOf(value.activity)} exige anexo. Anexe o comprovante (ex.: atestado) para salvar.`,
       );
       return;
     }
@@ -615,6 +649,12 @@ export function TimeEntryForm({
                     </label>
                   ))}
                 </div>
+                {errors.weeklyAttachmentActivity ? (
+                  <p role="alert" className="mt-1 text-xs font-medium text-danger">
+                    {activityLabelOf(value.activity)} exige anexo: use o modo Diário
+                    (um dia por vez).
+                  </p>
+                ) : null}
               </fieldset>
             ) : null}
           </div>
@@ -900,9 +940,11 @@ export function TimeEntryForm({
                 <span className="mb-1 block text-xs font-semibold text-medium">
                   Anexo{" "}
                   <span className="font-normal text-soft">
-                    {hasOvertime
-                      ? "(obrigatório p/ hora extra · PDF, JPG, PNG ou WEBP, até 10 MB)"
-                      : "(opcional · PDF, JPG, PNG ou WEBP, até 10 MB)"}
+                    {activityNeedsAttachment
+                      ? `(obrigatório p/ ${activityLabelOf(value.activity).toLowerCase()} · PDF, JPG, PNG ou WEBP, até 10 MB)`
+                      : hasOvertime
+                        ? "(obrigatório p/ hora extra · PDF, JPG, PNG ou WEBP, até 10 MB)"
+                        : "(opcional · PDF, JPG, PNG ou WEBP, até 10 MB)"}
                   </span>
                 </span>
                 {attachFile ? (
@@ -944,17 +986,20 @@ export function TimeEntryForm({
                     >
                       Substituir
                     </label>
-                    <button
-                      type="button"
-                      onClick={markAttachmentForRemoval}
-                      aria-label="Remover anexo"
-                      className={cn(
-                        "grid size-7 shrink-0 place-items-center rounded-md text-medium transition-colors hover:bg-surface hover:text-strong",
-                        focusRing,
-                      )}
-                    >
-                      <X aria-hidden="true" className="size-4" />
-                    </button>
+                    {/* Licença exige anexo: pode substituir, não remover. */}
+                    {activityNeedsAttachment ? null : (
+                      <button
+                        type="button"
+                        onClick={markAttachmentForRemoval}
+                        aria-label="Remover anexo"
+                        className={cn(
+                          "grid size-7 shrink-0 place-items-center rounded-md text-medium transition-colors hover:bg-surface hover:text-strong",
+                          focusRing,
+                        )}
+                      >
+                        <X aria-hidden="true" className="size-4" />
+                      </button>
+                    )}
                   </div>
                 ) : (
                   <label
@@ -979,6 +1024,10 @@ export function TimeEntryForm({
                 {attachError ? (
                   <p role="alert" className="mt-1 text-xs font-medium text-danger">
                     {attachError}
+                  </p>
+                ) : showErrors && activityAttachmentMissing ? (
+                  <p role="alert" className="mt-1 text-xs font-medium text-danger">
+                    Anexo obrigatório para {activityLabelOf(value.activity).toLowerCase()}.
                   </p>
                 ) : null}
               </div>

@@ -244,6 +244,52 @@ describe("TimeEntryForm — anexo opcional (melhoria #2)", () => {
   });
 });
 
+describe("TimeEntryForm — Licença exige anexo", () => {
+  function renderWithStorage(onSubmit = vi.fn()) {
+    render(
+      <TimeEntryForm
+        open
+        onClose={() => {}}
+        projects={projects}
+        days={days}
+        onSubmit={onSubmit}
+        attachmentsAvailable
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Projeto", { selector: "select" }), {
+      target: { value: "p1" },
+    });
+    fireEvent.change(screen.getByLabelText("Atividade", { selector: "select" }), {
+      target: { value: "LEAVE" },
+    });
+    fireEvent.change(screen.getByLabelText("Descrição"), {
+      target: { value: "Licença médica" },
+    });
+    return { onSubmit };
+  }
+
+  it("bloqueia o submit de Licença sem anexo", () => {
+    const { onSubmit } = renderWithStorage();
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent(/Licença exige anexo/i);
+  });
+
+  it("salva Licença com anexo", () => {
+    const { onSubmit } = renderWithStorage();
+    const file = new File(["%PDF-1.4"], "atestado.pdf", {
+      type: "application/pdf",
+    });
+    const input = document.querySelector(
+      'input[type="file"]',
+    ) as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [file] } });
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0][1]).toMatchObject({ kind: "upload", file });
+  });
+});
+
 describe("TimeEntryForm — conflito com ausência confirmada (Onda D)", () => {
   // days[0] = 2026-06-08 (data default do form). Ausência CONFIRMED nesse dia.
   const timeOff = {

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ACTIVITY_TYPES } from "./types";
+import { ACTIVITY_TYPES, activityRequiresAttachment } from "./types";
 import { parseIsoDateUtc } from "./week";
 import { validateClockTimes } from "./time-clock";
 import { JUSTIFICATION_MAX_LENGTH } from "@/lib/shared/justification";
@@ -110,6 +110,18 @@ const nonBillableReasonSchema = z
   .max(JUSTIFICATION_MAX_LENGTH)
   .optional();
 
+/**
+ * Atividade de um lançamento que gera VÁRIOS registros (semanal, lote, padrão
+ * semanal). Atividades que exigem anexo (Licença) ficam de fora: o anexo é 1:1
+ * com um lançamento, então elas só entram pelo lançamento diário.
+ */
+const multiEntryActivitySchema = z
+  .enum(ACTIVITY_TYPES)
+  .refine((value) => !activityRequiresAttachment(value), {
+    message:
+      "Licença exige anexo do comprovante: lance um dia por vez (modo diário).",
+  });
+
 export const timeEntryInputSchema = refineClock(
   z.object({
     projectId: idSchema,
@@ -138,7 +150,7 @@ const weekdaySchema = z
 export const weeklyTimeEntryInputSchema = refineClock(
   z.object({
     projectId: idSchema,
-    activityType: z.enum(ACTIVITY_TYPES),
+    activityType: multiEntryActivitySchema,
     weekStart: isoDateSchema,
     ...clockFields,
     weekdays: z
@@ -178,7 +190,7 @@ export const batchTimeEntryInputSchema = refineClock(
         BATCH_MAX_CONSULTANTS,
         `Selecione no máximo ${BATCH_MAX_CONSULTANTS} consultores por lote.`,
       ),
-    activityType: z.enum(ACTIVITY_TYPES),
+    activityType: multiEntryActivitySchema,
     startDate: isoDateSchema,
     endDate: isoDateSchema,
     includeWeekends: z.boolean().default(false),
@@ -263,7 +275,7 @@ export type CopyPreviousWeekInput = z.infer<typeof copyPreviousWeekInputSchema>;
 export const saveTimesheetDefaultInputSchema = refineClock(
   z.object({
     allocationId: idSchema,
-    activityType: z.enum(ACTIVITY_TYPES),
+    activityType: multiEntryActivitySchema,
     ...clockFields,
     weekdays: z
       .array(weekdaySchema)

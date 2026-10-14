@@ -269,7 +269,9 @@ export function TimeEntryRow({
               value > 0 ? "text-strong" : "text-soft",
             )}
           >
-            {value > 0 ? (
+            {/* Um lançamento existente com 0h (todo o relógio virou Hora
+                Extra do dia) ainda aparece, para poder ser editado. */}
+            {value > 0 || row.entryIds?.[index] ? (
               dayBillingLocked ? (
                 <span className="inline-flex items-center justify-center gap-1 text-warning">
                   {value.toLocaleString("pt-BR")}

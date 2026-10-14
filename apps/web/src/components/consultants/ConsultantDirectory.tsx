@@ -474,6 +474,8 @@ function ConsultantDetailModal({
       contractType:
         (profile?.contractType as ConsultantIdentityInput["contractType"]) ??
         undefined,
+      // Sem perfil carregado, não envia: o servidor mantém o valor atual.
+      allowMultipleProjects: profile?.allowMultipleProjects,
     } satisfies ConsultantIdentityInput);
   // Hidrata a compensacao a partir da remuneracao vigente do perfil (a de maior
   // startsAt, exposta em `profile.compensation`). Traz o `id` e o `startsAt`
@@ -712,6 +714,28 @@ function ConsultantDetailModal({
                     ))}
                   </SearchableSelect>
                 </label>
+                {currentIdentity.allowMultipleProjects !== undefined ? (
+                  <label className="flex items-start gap-2 text-sm font-medium text-medium md:col-span-2">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      checked={currentIdentity.allowMultipleProjects}
+                      onChange={(event) =>
+                        setIdentity({
+                          ...currentIdentity,
+                          allowMultipleProjects: event.target.checked,
+                        })
+                      }
+                    />
+                    <span>
+                      Lança em múltiplos projetos
+                      <span className="block text-xs font-normal text-soft">
+                        Desligado: só um projeto por dia em Horas, e um dia abaixo
+                        de 8h sugere compor o restante com outro lançamento.
+                      </span>
+                    </span>
+                  </label>
+                ) : null}
               </div>
               <ActionButton
                 size="sm"

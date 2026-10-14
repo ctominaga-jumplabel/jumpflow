@@ -240,4 +240,24 @@ describe("findDuplicateEntryIds", () => {
     expect(ids.has("b")).toBe(true);
     expect(ids.has("c")).toBe(false);
   });
+
+  it("same project/activity/day in different time ranges is NOT a duplicate", () => {
+    const base = { consultantId: "c1", projectId: "p1", date: WEEKDAY, activityType: "WORKDAY" };
+    const ids = findDuplicateEntryIds([
+      { id: "a", ...base, startTime: "08:00", endTime: "12:00" },
+      { id: "b", ...base, startTime: "12:00", endTime: "14:00" },
+      { id: "c", ...base, startTime: "18:00", endTime: "20:00" },
+    ]);
+    expect(ids.size).toBe(0);
+  });
+
+  it("flags only the overlapping pair inside a key group", () => {
+    const base = { consultantId: "c1", projectId: "p1", date: WEEKDAY, activityType: "WORKDAY" };
+    const ids = findDuplicateEntryIds([
+      { id: "a", ...base, startTime: "08:00", endTime: "12:00" },
+      { id: "b", ...base, startTime: "11:00", endTime: "13:00" },
+      { id: "c", ...base, startTime: "18:00", endTime: "20:00" },
+    ]);
+    expect([...ids].sort()).toEqual(["a", "b"]);
+  });
 });

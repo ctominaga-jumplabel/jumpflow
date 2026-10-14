@@ -110,6 +110,11 @@ export const consultantIdentitySchema = z.object({
   area: optionalText(80),
   status: z.enum(CONSULTANT_STATUSES),
   contractType: optionalEnum(CONTRACT_TYPES),
+  /**
+   * Lança horas em mais de um projeto no mesmo dia. Opcional: ausente mantém o
+   * valor atual (cadastro novo = false, consultor de projeto único).
+   */
+  allowMultipleProjects: z.boolean().optional(),
 });
 
 /**

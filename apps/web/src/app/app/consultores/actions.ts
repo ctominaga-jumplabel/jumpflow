@@ -530,6 +530,9 @@ export async function saveConsultantIdentity(
       area: parsed.area,
       status: parsed.status,
       contractType: parsed.contractType,
+      ...(parsed.allowMultipleProjects === undefined
+        ? {}
+        : { allowMultipleProjects: parsed.allowMultipleProjects }),
     };
     const previous = parsed.id
       ? await prisma.consultant.findUnique({ where: { id: parsed.id } })

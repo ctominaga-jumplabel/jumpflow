@@ -16,11 +16,13 @@ interface ConsultantRec {
   userId: string | null;
   email: string;
   name: string;
+  allowMultipleProjects?: boolean;
 }
 interface ProjectRec {
   id: string;
   status: string;
   managerUserId: string | null;
+  standardHoursPerDay?: number | null;
 }
 interface AllocationRec {
   id: string;
@@ -53,6 +55,10 @@ interface EntryRec {
   nonBillableReason: string | null;
   status: string;
   submittedAt: Date | null;
+  startTime?: string | null;
+  endTime?: string | null;
+  breakStart?: string | null;
+  breakEnd?: string | null;
 }
 
 interface AttachmentRec {
@@ -112,18 +118,35 @@ const h = vi.hoisted(() => {
       }
     }
     if (where.consultantId && e.consultantId !== where.consultantId) return false;
-    if (where.projectId && e.projectId !== where.projectId) return false;
+    if (typeof where.projectId === "string") {
+      if (e.projectId !== where.projectId) return false;
+    } else if (where.projectId?.not && e.projectId === where.projectId.not) {
+      return false;
+    }
     if (where.periodId && e.periodId !== where.periodId) return false;
-    if (where.activityType && e.activityType !== where.activityType) return false;
+    if (typeof where.activityType === "string") {
+      if (e.activityType !== where.activityType) return false;
+    } else if (
+      where.activityType?.not &&
+      e.activityType === where.activityType.not
+    ) {
+      return false;
+    }
     if (where.status) {
       if (typeof where.status === "string") {
         if (e.status !== where.status) return false;
       } else if (where.status.in && !where.status.in.includes(e.status)) {
         return false;
+      } else if (where.status.not && e.status === where.status.not) {
+        return false;
       }
     }
     if (where.date instanceof Date) {
       if (e.date.getTime() !== where.date.getTime()) return false;
+    } else if (where.date?.in) {
+      if (!where.date.in.some((d: Date) => d.getTime() === e.date.getTime())) {
+        return false;
+      }
     } else if (where.date) {
       if (where.date.gte && e.date.getTime() < where.date.gte.getTime()) return false;
       if (where.date.lte && e.date.getTime() > where.date.lte.getTime()) return false;
@@ -178,11 +201,17 @@ const h = vi.hoisted(() => {
     consultant: {
       findUnique: async ({ where }: { where: Where }) => {
         const consultant =
-          where.userId !== undefined
-            ? store.consultants.find((c) => c.userId === where.userId)
-            : store.consultants.find((c) => c.email === where.email);
+          where.id !== undefined
+            ? store.consultants.find((c) => c.id === where.id)
+            : where.userId !== undefined
+              ? store.consultants.find((c) => c.userId === where.userId)
+              : store.consultants.find((c) => c.email === where.email);
         return consultant ? { ...consultant } : null;
       },
+    },
+    // Trava A (billing-lock): nenhum fechamento de faturamento no store.
+    revenueClosing: {
+      findMany: async () => [],
     },
     project: {
       findUnique: async ({ where }: { where: Where }) => {
@@ -310,10 +339,17 @@ const h = vi.hoisted(() => {
         const entry = store.entries.find((e) => e.id === where.id);
         return entry ? entryWithInclude(entry, include ?? select) : null;
       },
-      findFirst: async ({ where }: { where: Where }) => {
+      findFirst: async ({ where, select }: { where: Where; select?: Where }) => {
         const entry = store.entries.find((e) => matchEntry(e, where));
-        return entry ? { ...entry } : null;
+        return entry ? entryWithInclude(entry, select) : null;
       },
+      aggregate: async ({ where }: { where: Where }) => ({
+        _sum: {
+          hours: store.entries
+            .filter((e) => matchEntry(e, where))
+            .reduce((sum, e) => sum + Number(e.hours), 0),
+        },
+      }),
       findMany: async ({ where, include }: { where: Where; include?: Where }) =>
         store.entries
           .filter((e) => matchEntry(e, where))
@@ -334,6 +370,10 @@ const h = vi.hoisted(() => {
           nonBillableReason: data.nonBillableReason ?? null,
           status: data.status,
           submittedAt: data.submittedAt ?? null,
+          startTime: data.startTime ?? null,
+          endTime: data.endTime ?? null,
+          breakStart: data.breakStart ?? null,
+          breakEnd: data.breakEnd ?? null,
         };
         store.entries.push(entry);
         return { ...entry };
@@ -747,6 +787,182 @@ describe("createTimeEntry — persistence", () => {
     seedCurrentPeriod("CLOSED");
     const result = await createTimeEntry(baseInput);
     expect(result).toMatchObject({ ok: false, error: "PERIOD_CLOSED" });
+  });
+});
+
+describe("createTimeEntry — mesma atividade em horários diferentes", () => {
+  const morning = { startTime: "08:00", endTime: "12:00", breakStart: null, breakEnd: null };
+  const evening = { startTime: "18:00", endTime: "20:00", breakStart: null, breakEnd: null };
+
+  it("permite o mesmo projeto/atividade/dia num horário que não se sobrepõe", async () => {
+    seedCurrentPeriod("SUBMITTED");
+    seedEntry({ status: "SUBMITTED", submittedAt: new Date(), hours: 4, ...morning });
+    const result = await createTimeEntry({ ...baseInput, ...evening });
+    expect(result.ok).toBe(true);
+    const workdays = h.store.entries.filter((e) => e.activityType === "WORKDAY");
+    expect(workdays).toHaveLength(2);
+  });
+
+  it("recusa um horário sobreposto a um lançamento já enviado", async () => {
+    seedCurrentPeriod("SUBMITTED");
+    seedEntry({ status: "SUBMITTED", submittedAt: new Date(), hours: 4, ...morning });
+    const result = await createTimeEntry({
+      ...baseInput,
+      startTime: "11:00",
+      endTime: "13:00",
+      breakStart: null,
+      breakEnd: null,
+    });
+    expect(result).toMatchObject({ ok: false, error: "DUPLICATE_ENTRY" });
+  });
+
+  it("hora extra é calculada sobre o TOTAL do dia, não por lançamento", async () => {
+    h.store.projects[0].standardHoursPerDay = 8;
+    seedCurrentPeriod("SUBMITTED");
+    // 08:00–14:00 = 6h já lançadas; +18:00–21:00 = 3h → 9h no dia, 1h extra.
+    seedEntry({
+      status: "SUBMITTED",
+      submittedAt: new Date(),
+      hours: 6,
+      startTime: "08:00",
+      endTime: "14:00",
+    });
+    const result = await createTimeEntry({
+      ...baseInput,
+      startTime: "18:00",
+      endTime: "21:00",
+      breakStart: null,
+      breakEnd: null,
+    });
+    expect(result.ok).toBe(true);
+    const evening = h.store.entries.find((e) => e.startTime === "18:00");
+    expect(evening?.hours).toBe(2);
+    const overtime = h.store.entries.find((e) => e.activityType === "OVERTIME");
+    expect(overtime?.hours).toBe(1);
+  });
+});
+
+describe("Hora Extra do dia já aprovada", () => {
+  it("recusa um novo Dia Útil que geraria hora extra além da já aprovada", async () => {
+    h.store.projects[0].standardHoursPerDay = 8;
+    seedCurrentPeriod("APPROVED");
+    seedEntry({
+      status: "APPROVED",
+      hours: 8,
+      startTime: "08:00",
+      endTime: "18:00",
+    });
+    seedEntry({ activityType: "OVERTIME", status: "APPROVED", hours: 2 });
+    const result = await createTimeEntry({
+      ...baseInput,
+      startTime: "19:00",
+      endTime: "20:00",
+      breakStart: null,
+      breakEnd: null,
+    });
+    // (O mock de $transaction não faz rollback; no banco a criação é desfeita.)
+    expect(result).toMatchObject({ ok: false, error: "NOT_EDITABLE" });
+  });
+});
+
+describe("createTimeEntry — consultor de projeto único", () => {
+  beforeEach(() => {
+    h.store.allocations[1].status = "ACTIVE";
+  });
+
+  it("recusa um segundo projeto no mesmo dia quando a flag está desligada", async () => {
+    seedCurrentPeriod();
+    seedEntry({ projectId: "proj-1", hours: 4 });
+    const result = await createTimeEntry({ ...baseInput, projectId: "proj-other" });
+    expect(result).toMatchObject({ ok: false, error: "SINGLE_PROJECT_ONLY" });
+  });
+
+  it("recusa mover a data de um lançamento para um dia com outro projeto", async () => {
+    seedCurrentPeriod();
+    seedEntry({ projectId: "proj-1", hours: 4 });
+    const moved = seedEntry({
+      projectId: "proj-other",
+      allocationId: "alloc-planned",
+      date: new Date("2026-06-09T00:00:00.000Z"),
+      hours: 4,
+    });
+    const result = await updateTimeEntry({
+      id: moved.id,
+      ...clockFor(4),
+      description: "Mover",
+      billable: true,
+      date: "2026-06-10",
+    });
+    expect(result).toMatchObject({ ok: false, error: "SINGLE_PROJECT_ONLY" });
+  });
+
+  it("um lançamento REPROVADO em outro projeto não bloqueia o dia", async () => {
+    seedCurrentPeriod();
+    seedEntry({ projectId: "proj-1", hours: 4, status: "REJECTED" });
+    const result = await createTimeEntry({ ...baseInput, projectId: "proj-other" });
+    expect(result.ok).toBe(true);
+  });
+
+  it("permite vários projetos no dia quando a flag está ligada", async () => {
+    h.store.consultants[0].allowMultipleProjects = true;
+    seedCurrentPeriod();
+    seedEntry({ projectId: "proj-1", hours: 4 });
+    const result = await createTimeEntry({ ...baseInput, projectId: "proj-other" });
+    expect(result.ok).toBe(true);
+  });
+
+  it("devolve o total do dia e o modo projeto único para o alerta de < 8h", async () => {
+    const result = await createTimeEntry({ ...baseInput, ...clockFor(6) });
+    expect(result).toMatchObject({
+      ok: true,
+      data: { dayHours: 6, singleProject: true },
+    });
+  });
+});
+
+describe("Licença exige anexo", () => {
+  it("o lançamento semanal não aceita Licença (anexo é por lançamento)", async () => {
+    const result = await createWeeklyTimeEntries({
+      projectId: "proj-1",
+      activityType: "LEAVE",
+      weekStart: "2026-06-08",
+      ...clockFor(8),
+      weekdays: [1, 2],
+      description: "Licença médica",
+      billable: true,
+    });
+    expect(result).toMatchObject({ ok: false, error: "INVALID_INPUT" });
+    expect(h.store.entries).toHaveLength(0);
+  });
+
+  it("a aprovação manual recusa Licença sem anexo", async () => {
+    seedCurrentPeriod("SUBMITTED");
+    const entry = seedEntry({
+      consultantId: "con-2",
+      activityType: "LEAVE",
+      status: "SUBMITTED",
+      submittedAt: new Date(),
+    });
+    const result = await decideHours({
+      entryIds: [entry.id],
+      decision: "APPROVED",
+      comment: "",
+    });
+    expect(result).toMatchObject({ ok: false, error: "ATTACHMENT_REQUIRED" });
+    expect(entry.status).toBe("SUBMITTED");
+  });
+
+  it("o anexo da Licença não pode ser removido (só substituído)", async () => {
+    seedCurrentPeriod();
+    const entry = seedEntry({
+      activityType: "LEAVE",
+      status: "SUBMITTED",
+      submittedAt: new Date(),
+    });
+    await attachTimeEntryFile(attachForm(entry.id, okPdf()));
+    const result = await removeTimeEntryAttachment({ id: entry.id });
+    expect(result).toMatchObject({ ok: false, error: "ATTACHMENT_REQUIRED" });
+    expect(h.store.attachments).toHaveLength(1);
   });
 });
 

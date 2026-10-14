@@ -16,6 +16,10 @@ export type ErrorCode =
   | "PROJECT_CLOSED"
   | "NOT_EDITABLE"
   | "DUPLICATE_ENTRY"
+  // Consultor sem a flag "múltiplos projetos" tentou lançar num 2º projeto no dia.
+  | "SINGLE_PROJECT_ONLY"
+  // Atividade que exige anexo (ex.: Licença) sem o comprovante.
+  | "ATTACHMENT_REQUIRED"
   | "PERIOD_CLOSED"
   // Trava A (Cockpit do Gestor de Área): a competência (projeto + mês/ano) já
   // teve o faturamento liberado (RevenueClosing CLOSED/INVOICED) — lançamento e
