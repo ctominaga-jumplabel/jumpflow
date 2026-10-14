@@ -53,6 +53,25 @@ export function isSystemActivity(value: string): boolean {
 }
 
 /**
+ * Atividades cujo lançamento EXIGE anexo (comprovante). Licença precisa do
+ * atestado/documento que a justifica. O formulário bloqueia o save sem anexo, o
+ * modo semanal/lote não as aceita (o anexo é 1:1 com um lançamento), o anexo não
+ * pode ser removido e a aprovação (manual ou automática) exige o arquivo.
+ */
+export const ATTACHMENT_REQUIRED_ACTIVITIES: readonly ActivityType[] = ["LEAVE"];
+
+/** Whether an activity requires an attachment to be saved/approved. */
+export function activityRequiresAttachment(value: string): boolean {
+  return (ATTACHMENT_REQUIRED_ACTIVITIES as readonly string[]).includes(value);
+}
+
+/**
+ * Meta diária de horas usada no alerta de consultores de projeto único: abaixo
+ * dela, o consultor é convidado a compor o restante com outro lançamento.
+ */
+export const DAILY_TARGET_HOURS = 8;
+
+/**
  * Labels for legacy activity values that predate the 4.2 catalog. They are NOT
  * in `ACTIVITY_TYPES` (so the form/filters never offer them), but existing
  * entries keep rendering a readable label instead of a raw code.

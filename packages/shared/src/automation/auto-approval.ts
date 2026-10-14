@@ -75,7 +75,13 @@ export type AutoApprovalReason =
    * by the DB layer and injected via {@link withManualDecisionHistory}, because
    * the pure evaluator has no access to approval history.
    */
-  | "MANUAL_DECISION_HISTORY";
+  | "MANUAL_DECISION_HISTORY"
+  /**
+   * The activity requires an attachment (ex.: Licença) and the entry has none.
+   * Injected by the DB layer via {@link withMissingAttachment}; the pure
+   * evaluator has no access to attachments.
+   */
+  | "MISSING_ATTACHMENT";
 
 /** Canonical order so a reasons array is deterministic for equality tests. */
 const REASON_ORDER: AutoApprovalReason[] = [
@@ -88,6 +94,7 @@ const REASON_ORDER: AutoApprovalReason[] = [
   "DAILY_TOTAL_MISMATCH",
   "NO_RULE_MATCH",
   "MANUAL_DECISION_HISTORY",
+  "MISSING_ATTACHMENT",
 ];
 
 export interface AutoApprovalDecision {
@@ -270,6 +277,23 @@ export function withManualDecisionHistory(
   };
 }
 
+/**
+ * Force a decision to PENDING because the activity requires an attachment
+ * (ex.: Licença) that the entry does not have. Same merge semantics as
+ * {@link withManualDecisionHistory}.
+ */
+export function withMissingAttachment(
+  decision: AutoApprovalDecision,
+): AutoApprovalDecision {
+  const reasons = new Set<AutoApprovalReason>(decision.reasons);
+  reasons.add("MISSING_ATTACHMENT");
+  return {
+    ...decision,
+    outcome: "PENDING",
+    reasons: REASON_ORDER.filter((r) => reasons.has(r)),
+  };
+}
+
 /** Stable string key used to detect duplicate entries. */
 export interface DuplicateKeyParts {
   consultantId: string;
@@ -277,6 +301,36 @@ export interface DuplicateKeyParts {
   /** Work date; only the calendar day matters. */
   date: Date;
   activityType: string;
+  /** Clock range ("HH:mm"); null/absent for legacy entries without times. */
+  startTime?: string | null;
+  endTime?: string | null;
+}
+
+/** "HH:mm" → minutes since midnight, or null when absent/malformed. */
+function clockMinutes(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const match = /^(\d{2}):(\d{2})$/.exec(value);
+  if (!match) return null;
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+/**
+ * Whether two clock ranges overlap (half-open: 08:00–12:00 and 12:00–14:00 do
+ * NOT overlap). A range without valid times is treated as covering the whole
+ * day, so a legacy entry without clock still counts as a duplicate.
+ */
+export function clockRangesOverlap(
+  a: { startTime?: string | null; endTime?: string | null },
+  b: { startTime?: string | null; endTime?: string | null },
+): boolean {
+  const aStart = clockMinutes(a.startTime);
+  const aEnd = clockMinutes(a.endTime);
+  const bStart = clockMinutes(b.startTime);
+  const bEnd = clockMinutes(b.endTime);
+  if (aStart == null || aEnd == null || bStart == null || bEnd == null) {
+    return true;
+  }
+  return aStart < bEnd && bStart < aEnd;
 }
 
 export function duplicateKey(parts: DuplicateKeyParts): string {
@@ -285,23 +339,32 @@ export function duplicateKey(parts: DuplicateKeyParts): string {
 }
 
 /**
- * Return the set of entry ids that belong to a duplicate group (same
- * duplicateKey appearing more than once). All members of a group are flagged —
- * deduplication needs human judgement, so none is auto-approved.
+ * Return the set of entry ids that are duplicates: same duplicateKey AND
+ * overlapping clock ranges. Two entries on the same project/activity/day in
+ * DIFFERENT time ranges (ex.: 08:00–12:00 and 18:00–20:00) are legitimate.
+ * Both members of an overlapping pair are flagged — deduplication needs human
+ * judgement, so none is auto-approved.
  */
 export function findDuplicateEntryIds(
   entries: ReadonlyArray<{ id: string } & DuplicateKeyParts>,
 ): Set<string> {
-  const byKey = new Map<string, string[]>();
+  const byKey = new Map<string, Array<{ id: string } & DuplicateKeyParts>>();
   for (const e of entries) {
     const key = duplicateKey(e);
     const list = byKey.get(key);
-    if (list) list.push(e.id);
-    else byKey.set(key, [e.id]);
+    if (list) list.push(e);
+    else byKey.set(key, [e]);
   }
   const dups = new Set<string>();
-  for (const ids of byKey.values()) {
-    if (ids.length > 1) for (const id of ids) dups.add(id);
+  for (const group of byKey.values()) {
+    for (let i = 0; i < group.length; i++) {
+      for (let j = i + 1; j < group.length; j++) {
+        if (clockRangesOverlap(group[i], group[j])) {
+          dups.add(group[i].id);
+          dups.add(group[j].id);
+        }
+      }
+    }
   }
   return dups;
 }

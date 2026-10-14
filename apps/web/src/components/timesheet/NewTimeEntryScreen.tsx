@@ -18,7 +18,9 @@ import {
 import type { OnBehalfPickerData } from "@/lib/db/on-behalf";
 import {
   activityLabels,
+  activityRequiresAttachment,
   creatableActivityOrder,
+  DAILY_TARGET_HOURS,
   type ActivityType,
   type WeekDay,
 } from "@/lib/timesheet/types";
@@ -38,6 +40,7 @@ import {
   type TimeEntryFormValue,
 } from "./TimeEntryForm";
 import { SearchableSelect } from "@/components/ui/SearchableSelect";
+import { CompleteDayPrompt, remainderClock } from "./CompleteDayPrompt";
 
 /** Abas da tela: lançamento individual (semana visível) × lançamento em lote. */
 type Tab = "individual" | "lote";
@@ -110,6 +113,31 @@ export function NewTimeEntryScreen({
   const [tab, setTab] = useState<Tab>(personal ? "individual" : "lote");
 
   // ——— Lançamento individual (semana visível) ———————————————————————————
+
+  /**
+   * Consultor de projeto único abaixo da meta diária: o alerta guarda o total
+   * do dia e o lançamento salvo, para "Sim" abrir um novo já no mesmo dia.
+   */
+  const [completeDay, setCompleteDay] = useState<{
+    hours: number;
+    value: TimeEntryFormValue;
+  } | null>(null);
+  const [prefill, setPrefill] = useState<Partial<TimeEntryFormValue> | null>(
+    null,
+  );
+
+  function composeRemainder() {
+    if (!completeDay) return;
+    const { value, hours } = completeDay;
+    // Novo lançamento no mesmo dia/projeto, começando onde o anterior terminou.
+    setPrefill({
+      projectId: value.projectId,
+      activity: value.activity,
+      date: value.date,
+      clock: remainderClock(value.clock.endTime, DAILY_TARGET_HOURS - hours),
+    });
+    setCompleteDay(null);
+  }
 
   /**
    * Anexo opcional do lançamento: aplicado APÓS o save, com o id devolvido pela
@@ -214,6 +242,10 @@ export function NewTimeEntryScreen({
         return;
       }
       notify("success", "Lançamento enviado para aprovação.");
+      const { dayHours, singleProject } = result.data;
+      if (singleProject && dayHours < DAILY_TARGET_HOURS) {
+        setCompleteDay({ hours: dayHours, value });
+      }
     });
   }
 
@@ -451,10 +483,16 @@ export function NewTimeEntryScreen({
             days={personal.days}
             holidays={personal.holidays}
             timeOff={personal.timeOff}
+            prefill={prefill}
             onSubmit={handleSubmitEntry}
             busy={isPending}
             attachmentsAvailable={personal.attachmentsAvailable}
             transcriptionAvailable={personal.transcriptionAvailable}
+          />
+          <CompleteDayPrompt
+            hours={completeDay?.hours ?? null}
+            onCompose={composeRemainder}
+            onDismiss={() => setCompleteDay(null)}
           />
         </>
       ) : null}
@@ -508,11 +546,14 @@ export function NewTimeEntryScreen({
                   }
                   className={inputClass()}
                 >
-                  {creatableActivityOrder.map((activity) => (
-                    <option key={activity} value={activity}>
-                      {activityLabels[activity]}
-                    </option>
-                  ))}
+                  {/* Licença exige anexo por lançamento: fica fora do lote. */}
+                  {creatableActivityOrder
+                    .filter((activity) => !activityRequiresAttachment(activity))
+                    .map((activity) => (
+                      <option key={activity} value={activity}>
+                        {activityLabels[activity]}
+                      </option>
+                    ))}
                 </SearchableSelect>
               </div>
             </div>

@@ -6,6 +6,7 @@ import {
   findDuplicateEntryIds,
   hoursToMinutes,
   withManualDecisionHistory,
+  withMissingAttachment,
   type AutoApprovalDecision,
   type AutoApprovalRule,
 } from "@jumpflow/shared";
@@ -19,6 +20,8 @@ const OFF_RULE: AutoApprovalRule = {
   maxMinutes: 1439,
 };
 import { buildAuditEventData } from "@/lib/db/audit";
+import { isStorageConfigured } from "@/lib/storage/provider";
+import { activityRequiresAttachment } from "@/lib/timesheet/types";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { loadAutomationConfig } from "./config";
 
@@ -107,6 +110,8 @@ export async function collectAutoApprovalDecisions(
       hours: true,
       status: true,
       submittedAt: true,
+      attachment: { select: { id: true } },
+      timeOffId: true,
     },
   });
   if (submitted.length === 0) return { skipped: false, evaluations: [] };
@@ -133,6 +138,8 @@ export async function collectAutoApprovalDecisions(
       activityType: true,
       date: true,
       hours: true,
+      startTime: true,
+      endTime: true,
     },
   });
 
@@ -191,6 +198,7 @@ export async function collectAutoApprovalDecisions(
     select: { entityId: true },
   });
   const manualDecisionIds = new Set(manualApprovals.map((a) => a.entityId));
+  const attachmentsEnforced = isStorageConfigured();
 
   const evaluations: EvaluatedEntry[] = submitted.map((entry) => {
     const entryContext = {
@@ -231,9 +239,19 @@ export async function collectAutoApprovalDecisions(
 
     // A human already decided this entry once; force PENDING with a clear,
     // structured reason that surfaces in the admin read-only view.
-    const decision = manualDecisionIds.has(entry.id)
+    const withHistory = manualDecisionIds.has(entry.id)
       ? withManualDecisionHistory(baseDecision)
       : baseDecision;
+    // Atividade que exige anexo (ex.: Licença) sem anexo nunca é auto-aprovada
+    // (sem storage configurado não há como anexar, então não trava).
+    const decision =
+      attachmentsEnforced &&
+      activityRequiresAttachment(entry.activityType) &&
+      !entry.attachment &&
+      // Licença materializada por ausência aprovada já foi validada lá.
+      !entry.timeOffId
+        ? withMissingAttachment(withHistory)
+        : withHistory;
 
     return {
       id: entry.id,

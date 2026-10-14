@@ -27,6 +27,7 @@ export const reasonLabels: Record<AutoApprovalReason, string> = {
   DAILY_TOTAL_MISMATCH: "Total diário diferente do esperado",
   NO_RULE_MATCH: "Fora da regra de aprovação automática do projeto/consultor",
   MANUAL_DECISION_HISTORY: "Já teve decisão manual (aprovação reservada ao gestor)",
+  MISSING_ATTACHMENT: "Atividade exige anexo e o lançamento não tem",
 };
 
 /** Readable pt-BR label for a reason code (falls back to the raw code). */

@@ -33,6 +33,8 @@ export interface ConsultantProfile {
   seniority: string;
   status: string;
   contractType: string | null;
+  /** Lança horas em mais de um projeto no mesmo dia (flag de Horas). */
+  allowMultipleProjects: boolean;
   personal: {
     cpf: string | null;
     birthDate: string | null;
@@ -235,6 +237,7 @@ export async function getConsultantProfile(
     seniority: row.seniority,
     status: row.status,
     contractType: row.contractType,
+    allowMultipleProjects: row.allowMultipleProjects,
     personal: {
       cpf: row.personalInfo?.cpf ?? null,
       birthDate: toDateInput(row.personalInfo?.birthDate ?? null),
