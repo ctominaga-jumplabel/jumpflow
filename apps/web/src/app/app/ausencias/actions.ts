@@ -25,9 +25,9 @@ import {
 } from "@/lib/db/time-off";
 import {
   resolveTimeOffPaid,
-  timeOffKindLabel,
   type TimeOffKind,
 } from "@/lib/timesheet/time-off";
+import { activityLabelOf } from "@/lib/timesheet/types";
 import {
   cancelTimeOffSchema,
   decideTimeOffSchema,
@@ -286,7 +286,6 @@ export async function decideTimeOff(
       }
     }
 
-    const kindLabel = timeOffKindLabel(timeOff.kind as TimeOffKind);
     const now = new Date();
 
     // --- REPROVAÇÃO ---------------------------------------------------------
@@ -471,7 +470,8 @@ export async function decideTimeOff(
             hours: entry.hours,
             multiplier: new Prisma.Decimal(1),
             activityType: entry.activityType,
-            description: `Ausência: ${kindLabel}`,
+            // Rótulo da atividade efetiva (férias de PJ → Ausência Remunerada).
+            description: `Ausência: ${activityLabelOf(entry.activityType)}`,
             billable: entry.billable,
             status: "APPROVED",
           },

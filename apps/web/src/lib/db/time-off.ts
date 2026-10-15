@@ -5,6 +5,7 @@ import {
   computeWorkingDays,
   type AllocationForMaterialization,
   type MaterializationPlan,
+  type TimeOffContractType,
   type TimeOffKind,
   type TimeOffLookup,
   type TimeOffStatus,
@@ -112,6 +113,34 @@ export async function loadAllocationsForMaterialization(
 }
 
 /**
+ * Tipo de contratação do consultor numa data: a remuneração vigente na data
+ * (modalidade financeira por vigência) e, sem ela, o `contractType` do cadastro.
+ * `null` quando nenhum dos dois está preenchido.
+ */
+export async function resolveConsultantContractType(
+  db: Db,
+  consultantId: string,
+  onDate: Date,
+): Promise<TimeOffContractType | null> {
+  const day = startOfUtcDay(onDate);
+  const compensation = await db.consultantCompensation.findFirst({
+    where: {
+      consultantId,
+      startsAt: { lte: day },
+      OR: [{ endsAt: null }, { endsAt: { gte: day } }],
+    },
+    orderBy: { startsAt: "desc" },
+    select: { contractType: true },
+  });
+  if (compensation) return compensation.contractType;
+  const consultant = await db.consultant.findUnique({
+    where: { id: consultantId },
+    select: { contractType: true },
+  });
+  return consultant?.contractType ?? null;
+}
+
+/**
  * Plano de materialização para uma ausência já resolvida (dias úteis + kind).
  * Puro sobre os dados carregados; a persistência é feita pela action.
  */
@@ -125,14 +154,18 @@ export async function planTimeOffMaterialization(
     workingDates: string[];
   },
 ): Promise<MaterializationPlan> {
-  const allocations = await loadAllocationsForMaterialization(
-    db,
-    input.consultantId,
-    input.start,
-    input.end,
-  );
+  const [allocations, contractType] = await Promise.all([
+    loadAllocationsForMaterialization(
+      db,
+      input.consultantId,
+      input.start,
+      input.end,
+    ),
+    resolveConsultantContractType(db, input.consultantId, input.start),
+  ]);
   return buildMaterializationPlan({
     kind: input.kind,
+    contractType,
     workingDates: input.workingDates,
     allocations,
   });

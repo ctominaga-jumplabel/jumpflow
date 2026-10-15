@@ -34,6 +34,11 @@ describe("mapa kind → paid / activityType", () => {
     expect(resolveTimeOffActivityType("VACATION")).toBe("VACATION");
     expect(resolveTimeOffActivityType("LEAVE")).toBe("LEAVE");
     expect(resolveTimeOffActivityType("OTHER")).toBe("PAID_ABSENCE");
+    expect(resolveTimeOffActivityType("VACATION", "CLT")).toBe("VACATION");
+    expect(resolveTimeOffActivityType("VACATION", "CLT_FLEX")).toBe("VACATION");
+    expect(resolveTimeOffActivityType("VACATION", "PJ")).toBe("PAID_ABSENCE");
+    expect(resolveTimeOffActivityType("VACATION", null)).toBe("VACATION");
+    expect(resolveTimeOffActivityType("LEAVE", "PJ")).toBe("LEAVE");
     expect(ACTIVITY_TYPE_BY_KIND.OTHER).toBe("PAID_ABSENCE");
   });
 });
