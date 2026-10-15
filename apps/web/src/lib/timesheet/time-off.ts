@@ -57,8 +57,20 @@ export function resolveTimeOffPaid(kind: TimeOffKind): boolean {
   return PAID_BY_KIND[kind];
 }
 
-/** `activityType` do lançamento materializado, a partir do kind. */
-export function resolveTimeOffActivityType(kind: TimeOffKind): ActivityType {
+/** Espelha `ConsultantContractType` no schema (união local: módulo puro). */
+export type TimeOffContractType = "CLT" | "PJ" | "CLT_FLEX";
+
+/**
+ * `activityType` do lançamento materializado, a partir do kind e do tipo de
+ * contratação do consultor. Férias de PJ não são férias trabalhistas: viram
+ * "Ausência Remunerada" (PAID_ABSENCE). CLT e CLT Flex seguem como "Férias".
+ * Sem contrato conhecido, mantém o mapa por kind.
+ */
+export function resolveTimeOffActivityType(
+  kind: TimeOffKind,
+  contractType?: TimeOffContractType | null,
+): ActivityType {
+  if (kind === "VACATION" && contractType === "PJ") return "PAID_ABSENCE";
   return ACTIVITY_TYPE_BY_KIND[kind];
 }
 
@@ -194,18 +206,23 @@ function allocationCovers(
  *   alocação coberta de MAIOR percentual.
  * - Nenhuma alocação cobre a data: não gera nada nesse dia.
  * `billable` de CADA entry = `billDuringVacation` do projeto daquela alocação.
- * `activityType` = derivado do kind (VACATION/LEAVE/PAID_ABSENCE).
+ * `activityType` = derivado do kind e do contrato (férias de PJ viram
+ * PAID_ABSENCE; ver `resolveTimeOffActivityType`).
  *
  * Não filtra por `TimesheetDefault.weekdays`: a ausência cobre TODOS os dias
  * úteis do intervalo, não só os dias do padrão semanal do consultor.
  */
 export function buildMaterializationPlan(input: {
   kind: TimeOffKind;
+  contractType?: TimeOffContractType | null;
   workingDates: string[];
   allocations: AllocationForMaterialization[];
   fallbackHours?: number;
 }): MaterializationPlan {
-  const activityType = resolveTimeOffActivityType(input.kind);
+  const activityType = resolveTimeOffActivityType(
+    input.kind,
+    input.contractType,
+  );
   const fallbackHours = input.fallbackHours ?? FALLBACK_HOURS_PER_DAY;
   const entries: PlannedTimeOffEntry[] = [];
   let usedFallback = false;

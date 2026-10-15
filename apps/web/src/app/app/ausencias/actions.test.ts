@@ -63,6 +63,13 @@ const h = vi.hoisted(() => {
       userId: string | null;
       email: string;
       name: string;
+      contractType?: string | null;
+    }[],
+    compensations: [] as {
+      consultantId: string;
+      contractType: string;
+      startsAt: Date;
+      endsAt: Date | null;
     }[],
     projects: [] as { id: string; status: string; billDuringVacation: boolean }[],
     allocations: [] as AllocRec[],
@@ -144,10 +151,27 @@ const h = vi.hoisted(() => {
     },
     consultant: {
       findUnique: async ({ where }: { where: Where }) => {
-        const c = where.userId
-          ? store.consultants.find((x) => x.userId === where.userId)
-          : store.consultants.find((x) => x.email === where.email);
+        const c = where.id
+          ? store.consultants.find((x) => x.id === where.id)
+          : where.userId
+            ? store.consultants.find((x) => x.userId === where.userId)
+            : store.consultants.find((x) => x.email === where.email);
         return c ? { ...c } : null;
+      },
+    },
+    consultantCompensation: {
+      // where: { consultantId, startsAt:{lte}, OR:[{endsAt:null},{endsAt:{gte}}] }
+      findFirst: async ({ where }: { where: Where }) => {
+        const on = where.startsAt.lte.getTime();
+        const hit = store.compensations
+          .filter(
+            (c) =>
+              c.consultantId === where.consultantId &&
+              c.startsAt.getTime() <= on &&
+              (c.endsAt === null || c.endsAt.getTime() >= on),
+          )
+          .sort((a, b) => b.startsAt.getTime() - a.startsAt.getTime())[0];
+        return hit ? { contractType: hit.contractType } : null;
       },
     },
     holiday: {
@@ -502,6 +526,7 @@ function seedBase() {
   const s = h.store;
   s.users.length = 0;
   s.consultants.length = 0;
+  s.compensations.length = 0;
   s.projects.length = 0;
   s.allocations.length = 0;
   s.periods.length = 0;
@@ -678,6 +703,52 @@ describe("decideTimeOff — aprovação materializa + debita ledger", () => {
     expect(v.balanceDays).toBe(27);
     expect(v.takenDays).toBe(3);
     expect(h.store.timeOffs[0].status).toBe("CONFIRMED");
+  });
+
+  it("férias de CLT e CLT Flex lançam a atividade Férias", async () => {
+    for (const contractType of ["CLT", "CLT_FLEX"]) {
+      seedBase();
+      h.store.consultants[0].contractType = contractType;
+      const id = await requestAsConsultant("VACATION");
+      asPeople();
+      await decideTimeOff({ id, approve: true });
+      expect(h.store.entries).toHaveLength(3);
+      for (const e of h.store.entries) {
+        expect(e.activityType).toBe("VACATION");
+        expect(e.description).toBe("Ausência: Férias");
+      }
+    }
+  });
+
+  it("férias de PJ lançam Ausência Remunerada no projeto", async () => {
+    h.store.consultants[0].contractType = "PJ";
+    const id = await requestAsConsultant("VACATION");
+    asPeople();
+    const res = await decideTimeOff({ id, approve: true });
+    expect(res.ok).toBe(true);
+    expect(h.store.entries).toHaveLength(3);
+    for (const e of h.store.entries) {
+      expect(e.activityType).toBe("PAID_ABSENCE");
+      expect(e.projectId).toBe("p1");
+      expect(e.status).toBe("APPROVED");
+      expect(e.description).toBe("Ausência: Ausência Remunerada");
+    }
+  });
+
+  it("remuneração vigente na data prevalece sobre o contrato do cadastro", async () => {
+    h.store.consultants[0].contractType = "CLT";
+    h.store.compensations.push({
+      consultantId: "c1",
+      contractType: "PJ",
+      startsAt: utc("2026-01-01"),
+      endsAt: null,
+    });
+    const id = await requestAsConsultant("VACATION");
+    asPeople();
+    await decideTimeOff({ id, approve: true });
+    expect(h.store.entries.every((e) => e.activityType === "PAID_ABSENCE")).toBe(
+      true,
+    );
   });
 
   it("billable segue billDuringVacation=false do projeto", async () => {
