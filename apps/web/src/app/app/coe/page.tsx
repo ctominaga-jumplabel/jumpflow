@@ -42,8 +42,9 @@ function numberParam(
 /**
  * COE — Centro Operacional de Excelência.
  *
- * Curadoria de consultores estratégicos e composição de times para PARALELIZAR
- * frentes de um projeto. A composição é um read-model derivado (skills validadas
+ * Visão geral dos consultores de REFERÊNCIA da Jump (para projetos e para
+ * dúvidas internas), curadoria do núcleo e composição de times para
+ * PARALELIZAR frentes de um projeto. A composição é um read-model derivado (skills validadas
  * + disponibilidade + histórico), calculada sob demanda pela engine pura; o que
  * persiste é apenas o núcleo e a proposta salva.
  *
@@ -93,7 +94,7 @@ export default async function CoePage({ searchParams }: PageProps) {
       <PageHeader
         eyebrow="Talentos · Inteligência"
         title="COE — Centro Operacional de Excelência"
-        description="Núcleo de consultores estratégicos e composição de times para paralelizar frentes de um projeto. A sugestão distribui as pessoas pelas frentes sem repetir ninguém e mostra a cobertura de skills e a capacidade do conjunto — a alocação continua sendo decisão humana."
+        description="Os consultores de referência da Jump por área de excelência — para indicar em projetos e para recorrer em dúvidas internas. Abra um perfil para o detalhe ou monte um time na composição; a alocação continua sendo decisão humana."
       />
       <CoeView
         members={members}

@@ -6,6 +6,7 @@ import type {
   CoeAvailabilityRow,
   CoeCandidateInput,
   CoeCompositionBundle,
+  CoeContractType,
   CoeMemberView,
   CoeSlotInput,
 } from "@/lib/coe/types";
@@ -51,6 +52,8 @@ interface MockPerson {
   allocationPercent: number;
   pastAllocationsWithClient: number;
   hourlyCost: number;
+  contractType: CoeContractType;
+  currentProject: { projectName: string; clientName: string } | null;
 }
 
 const MOCK_PEOPLE: MockPerson[] = [
@@ -69,6 +72,8 @@ const MOCK_PEOPLE: MockPerson[] = [
     allocationPercent: 0,
     pastAllocationsWithClient: 2,
     hourlyCost: 120,
+    contractType: "CLT",
+    currentProject: null,
   },
   {
     id: "mock-coe-2",
@@ -85,6 +90,11 @@ const MOCK_PEOPLE: MockPerson[] = [
     allocationPercent: 50,
     pastAllocationsWithClient: 0,
     hourlyCost: 90,
+    contractType: "PJ",
+    currentProject: {
+      projectName: "Portal B2B",
+      clientName: "Cliente Exemplo",
+    },
   },
   {
     id: "mock-coe-3",
@@ -101,6 +111,8 @@ const MOCK_PEOPLE: MockPerson[] = [
     allocationPercent: 20,
     pastAllocationsWithClient: 3,
     hourlyCost: 160,
+    contractType: "CLT_FLEX",
+    currentProject: { projectName: "Data Lake", clientName: "Cliente Exemplo" },
   },
   {
     id: "mock-coe-4",
@@ -114,6 +126,8 @@ const MOCK_PEOPLE: MockPerson[] = [
     allocationPercent: 0,
     pastAllocationsWithClient: 0,
     hourlyCost: 60,
+    contractType: "PJ",
+    currentProject: null,
   },
 ];
 
@@ -129,10 +143,16 @@ export function buildCoeMembersMock(): CoeMemberView[] {
     id: `mock-member-${index + 1}`,
     consultantId: p.id,
     consultantName: p.name,
+    email: `${p.id}@exemplo.jumplabel.com.br`,
     seniority: p.seniority,
     area: p.area,
     jobTitle: p.jobTitle,
     status: "ACTIVE" as const,
+    contractType: p.contractType,
+    currentAllocations: p.currentProject
+      ? [{ ...p.currentProject, percent: p.allocationPercent }]
+      : [],
+    allocatedPercent: p.currentProject ? p.allocationPercent : 0,
     focusArea: p.focusArea,
     note: null,
     active: true,

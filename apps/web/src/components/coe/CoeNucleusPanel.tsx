@@ -9,7 +9,7 @@ import { FeedbackBanner, useFeedback } from "@/components/ui/Feedback";
 import { Modal } from "@/components/ui/Modal";
 import { SectionPanel } from "@/components/ui/SectionPanel";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { seniorityLabels } from "@/lib/consultants/labels";
+import { contractTypeLabels, seniorityLabels } from "@/lib/consultants/labels";
 import type { ConsultantSeniority } from "@/lib/consultants/schemas";
 import { skillLevelLabels } from "@/lib/competencies/types";
 import { focusRingInput } from "@/lib/styles";
@@ -150,7 +150,7 @@ export function CoeNucleusPanel({
 
       <SectionPanel
         title="Núcleo do COE"
-        description="Consultores estratégicos disponíveis para compor times e paralelizar frentes. A área de excelência é curada — não é derivada automaticamente das skills."
+        description="Consultores de referência: indicados para projetos e ponto de contato para dúvidas internas. A área de excelência é curada — não é derivada automaticamente das skills."
         action={
           canCurate ? (
             <ActionButton
@@ -204,6 +204,11 @@ export function CoeNucleusPanel({
                       {member.consultantName}
                     </span>
                     <StatusBadge tone="info">{member.focusArea}</StatusBadge>
+                    <StatusBadge tone="neutral">
+                      {member.contractType
+                        ? contractTypeLabels[member.contractType]
+                        : "Contratação não informada"}
+                    </StatusBadge>
                     {member.status === "ON_LEAVE" ? (
                       <StatusBadge tone="warning">Afastado</StatusBadge>
                     ) : null}
@@ -382,13 +387,14 @@ export function CoeNucleusPanel({
               </label>
               <label className="flex flex-col gap-1.5">
                 <span className="text-xs font-semibold uppercase tracking-wide text-soft">
-                  Observação (opcional)
+                  Pode ajudar com (opcional)
                 </span>
                 <textarea
                   value={newNote}
                   onChange={(e) => setNewNote(e.target.value)}
                   rows={3}
                   maxLength={500}
+                  placeholder="Ex.: modelagem de dados, pipelines no Databricks, dúvidas de governança"
                   className={cn(
                     "w-full rounded-md border-2 border-ink bg-surface px-3 py-2 text-sm text-strong",
                     focusRingInput,
@@ -439,7 +445,7 @@ export function CoeNucleusPanel({
           </label>
           <label className="flex flex-col gap-1.5">
             <span className="text-xs font-semibold uppercase tracking-wide text-soft">
-              Observação (opcional)
+              Pode ajudar com (opcional)
             </span>
             <textarea
               value={editNote}

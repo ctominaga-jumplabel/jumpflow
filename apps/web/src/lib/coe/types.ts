@@ -44,15 +44,40 @@ export const coeScopeLabels: Record<CoeScope, string> = {
 
 // ── Curadoria do núcleo ─────────────────────────────────────────────────────
 
-/** Um consultor do núcleo, como a tela de curadoria o exibe. */
+/** Tipo de contratação (espelha o enum Prisma `ConsultantContractType`). */
+export type CoeContractType = "CLT" | "PJ" | "CLT_FLEX";
+
+/**
+ * Uma alocação VIGENTE do consultor (ativa e dentro do período hoje). Serve para
+ * a visão geral dizer "onde a referência está agora" — sem valores financeiros.
+ */
+export interface CoeMemberAllocation {
+  projectName: string;
+  clientName: string;
+  percent: number;
+}
+
+/**
+ * Um consultor do núcleo — a REFERÊNCIA da Jump numa área de excelência. Serve
+ * tanto para compor times de projeto quanto como ponto de contato interno para
+ * dúvidas; por isso carrega e-mail, contratação e onde está alocado hoje.
+ */
 export interface CoeMemberView {
   id: string;
   consultantId: string;
   consultantName: string;
+  /** Contato para dúvidas internas. */
+  email: string;
   seniority: string;
   area: string | null;
   jobTitle: string | null;
   status: "ACTIVE" | "INACTIVE" | "ON_LEAVE";
+  /** null enquanto o cadastro não foi preenchido (backfill). */
+  contractType: CoeContractType | null;
+  /** Alocações vigentes hoje. */
+  currentAllocations: CoeMemberAllocation[];
+  /** Soma do % das alocações vigentes (pode passar de 100). */
+  allocatedPercent: number;
   focusArea: string;
   note: string | null;
   active: boolean;

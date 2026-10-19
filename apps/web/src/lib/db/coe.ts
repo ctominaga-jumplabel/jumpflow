@@ -154,6 +154,7 @@ export async function listCoeMembers(): Promise<CoeMemberView[]> {
 }
 
 async function readCoeMembers(): Promise<CoeMemberView[]> {
+  const today = new Date(`${toIsoDate(new Date())}T00:00:00.000Z`);
   const rows = await prisma.coeMember.findMany({
     select: {
       id: true,
@@ -166,10 +167,12 @@ async function readCoeMembers(): Promise<CoeMemberView[]> {
       consultant: {
         select: {
           name: true,
+          email: true,
           seniority: true,
           area: true,
           jobTitle: true,
           status: true,
+          contractType: true,
           skills: {
             where: { validationStatus: "VALIDATED" },
             select: {
@@ -177,30 +180,60 @@ async function readCoeMembers(): Promise<CoeMemberView[]> {
               skill: { select: { id: true, name: true } },
             },
           },
+          // Só o necessário para "onde está agora": projeto, cliente e %.
+          // Nenhum campo financeiro da alocação é lido aqui.
+          allocations: {
+            where: {
+              status: "ACTIVE",
+              startDate: { lte: today },
+              OR: [{ endDate: null }, { endDate: { gte: today } }],
+            },
+            select: {
+              allocationPercent: true,
+              project: {
+                select: { name: true, client: { select: { name: true } } },
+              },
+            },
+            orderBy: { allocationPercent: "desc" },
+          },
         },
       },
     },
     orderBy: [{ active: "desc" }, { consultant: { name: "asc" } }],
   });
-  return rows.map((r) => ({
-    id: r.id,
-    consultantId: r.consultantId,
-    consultantName: r.consultant.name,
-    seniority: r.consultant.seniority,
-    area: r.consultant.area,
-    jobTitle: r.consultant.jobTitle,
-    status: mapStatus(r.consultant.status),
-    focusArea: r.focusArea,
-    note: r.note,
-    active: r.active,
-    skills: r.consultant.skills.map((s) => ({
-      skillId: s.skill.id,
-      skillName: s.skill.name,
-      level: s.level as SkillLevel,
-    })),
-    addedByName: r.addedBy?.name ?? null,
-    createdAt: r.createdAt.toISOString(),
-  }));
+  return rows.map((r) => {
+    const currentAllocations = r.consultant.allocations.map((a) => ({
+      projectName: a.project.name,
+      clientName: a.project.client.name,
+      percent: a.allocationPercent,
+    }));
+    return {
+      id: r.id,
+      consultantId: r.consultantId,
+      consultantName: r.consultant.name,
+      email: r.consultant.email,
+      seniority: r.consultant.seniority,
+      area: r.consultant.area,
+      jobTitle: r.consultant.jobTitle,
+      status: mapStatus(r.consultant.status),
+      contractType: r.consultant.contractType,
+      currentAllocations,
+      allocatedPercent: currentAllocations.reduce(
+        (sum, a) => sum + a.percent,
+        0,
+      ),
+      focusArea: r.focusArea,
+      note: r.note,
+      active: r.active,
+      skills: r.consultant.skills.map((s) => ({
+        skillId: s.skill.id,
+        skillName: s.skill.name,
+        level: s.level as SkillLevel,
+      })),
+      addedByName: r.addedBy?.name ?? null,
+      createdAt: r.createdAt.toISOString(),
+    };
+  });
 }
 
 /**
