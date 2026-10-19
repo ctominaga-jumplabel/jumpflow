@@ -18,7 +18,7 @@ import {
 } from "@/lib/db/coe";
 
 export const metadata: Metadata = {
-  title: "COE — Centro Operacional de Excelência",
+  title: "Painel COE — Centro Operacional de Excelência",
 };
 
 interface PageProps {
@@ -93,7 +93,7 @@ export default async function CoePage({ searchParams }: PageProps) {
     <div className="space-y-6">
       <PageHeader
         eyebrow="Talentos · Inteligência"
-        title="COE — Centro Operacional de Excelência"
+        title="Painel COE — Centro Operacional de Excelência"
         description="Os consultores de referência da Jump por área de excelência — para indicar em projetos e para recorrer em dúvidas internas. Abra um perfil para o detalhe ou monte um time na composição; a alocação continua sendo decisão humana."
       />
       <CoeView

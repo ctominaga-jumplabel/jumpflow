@@ -293,7 +293,7 @@ const primaryNavigationRaw: NavItemDef[] = [
     // actions e o fator financeiro do ranking é gateado no servidor. A
     // composição é sugestão, não cria alocação. Discoverability, não a fronteira
     // de segurança.
-    label: "COE",
+    label: "Painel COE",
     href: "/app/coe",
     permissionCode: "COE",
     icon: Boxes,
