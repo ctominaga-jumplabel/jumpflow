@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { FilterChip } from "@/components/ui/FilterChip";
 import { CoeNucleusPanel } from "@/components/coe/CoeNucleusPanel";
+import { CoeOverviewPanel } from "@/components/coe/CoeOverviewPanel";
 import { CoeCompositionPanel } from "@/components/coe/CoeCompositionPanel";
 import { CoeSquadsPanel } from "@/components/coe/CoeSquadsPanel";
 import type { CoeCompositionQueryInput } from "@/lib/coe/schemas";
@@ -17,11 +18,14 @@ import type {
   CoeSquadView,
 } from "@/lib/coe/types";
 
-type Tab = "COMPOSITION" | "NUCLEUS" | "SQUADS";
+type Tab = "OVERVIEW" | "COMPOSITION" | "NUCLEUS" | "SQUADS";
+
+const TABS: Tab[] = ["OVERVIEW", "COMPOSITION", "SQUADS", "NUCLEUS"];
 
 const tabLabels: Record<Tab, string> = {
+  OVERVIEW: "Visão geral",
   COMPOSITION: "Composição de time",
-  NUCLEUS: "Núcleo",
+  NUCLEUS: "Curadoria",
   SQUADS: "Propostas salvas",
 };
 
@@ -40,9 +44,11 @@ export interface CoeViewProps {
 }
 
 /**
- * Casca do COE com as três superfícies da tela. A composição abre primeiro
- * porque é o trabalho do dia a dia; a curadoria do núcleo é o cadastro que a
- * alimenta e as propostas são o histórico.
+ * Casca do COE. Abre na VISÃO GERAL — as referências da Jump por área de
+ * excelência, para indicar alguém a um projeto ou saber a quem recorrer numa
+ * dúvida interna. A composição de time é o aprofundamento para um projeto
+ * específico; as propostas são o histórico e a curadoria é o cadastro que
+ * alimenta tudo.
  *
  * Os flags de permissão vêm resolvidos do servidor e só governam o que aparece —
  * a fronteira real está nas server actions, que checam papel a cada escrita.
@@ -58,10 +64,11 @@ export function CoeView({
   canCurate,
   canPropose,
 }: CoeViewProps) {
-  const [tab, setTab] = useState<Tab>("COMPOSITION");
+  const [tab, setTab] = useState<Tab>("OVERVIEW");
   const activeMembers = members.filter((m) => m.active);
 
   const tabCounts: Record<Tab, number | undefined> = {
+    OVERVIEW: undefined,
     COMPOSITION: bundle.composition.assignments.length || undefined,
     NUCLEUS: activeMembers.length || undefined,
     SQUADS: squads.length || undefined,
@@ -73,7 +80,7 @@ export function CoeView({
         aria-label="Seções do COE"
         className="flex flex-wrap items-center gap-2"
       >
-        {(["COMPOSITION", "NUCLEUS", "SQUADS"] as Tab[]).map((value) => (
+        {TABS.map((value) => (
           <FilterChip
             key={value}
             label={tabLabels[value]}
@@ -84,6 +91,12 @@ export function CoeView({
         ))}
       </nav>
 
+      {tab === "OVERVIEW" ? (
+        <CoeOverviewPanel
+          members={members}
+          onCompose={() => setTab("COMPOSITION")}
+        />
+      ) : null}
       {tab === "COMPOSITION" ? (
         <CoeCompositionPanel
           bundle={bundle}
