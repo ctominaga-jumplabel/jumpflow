@@ -136,16 +136,13 @@ export function CoeOverviewPanel({
     );
   });
 
-  const grouped = areas
-    .map(([area]) => ({
-      area,
-      people: visible.filter((m) => m.focusArea === area),
-    }))
-    .filter((g) => g.people.length > 0);
-
-  const contractSummary = CONTRACT_ORDER.filter((c) => contractCounts[c] > 0)
-    .map((c) => `${contractTypeLabels[c]} ${contractCounts[c]}`)
-    .join(" · ");
+  // Grade única, ordenada por área: com uma pessoa por área, seções separadas
+  // deixavam uma coluna só e o resto da largura vazio.
+  const sorted = [...visible].sort(
+    (a, b) =>
+      a.focusArea.localeCompare(b.focusArea, "pt-BR") ||
+      a.consultantName.localeCompare(b.consultantName, "pt-BR"),
+  );
 
   if (references.length === 0) {
     return (
@@ -182,12 +179,22 @@ export function CoeOverviewPanel({
           tone={freeNow > 0 ? "success" : "neutral"}
           hint="livres ou parcialmente livres"
         />
-        <StatTile
-          align="start"
-          label="Contratação"
-          value={contractSummary || "—"}
-          hint="CLT · CLT FLEX · PJ"
-        />
+        <div className="grid gap-0.5">
+          <span className={opsLabel}>Contratação</span>
+          <dl className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+            {CONTRACT_ORDER.map((c) => (
+              <div key={c} className="flex items-baseline gap-1.5">
+                <dt className="text-xs font-semibold text-soft">
+                  {contractTypeLabels[c]}
+                </dt>
+                <dd className="font-mono text-2xl font-semibold leading-tight tabular-nums tracking-tight text-strong">
+                  {contractCounts[c]}
+                </dd>
+              </div>
+            ))}
+          </dl>
+          <span className="text-xs text-soft">tipo de contratação</span>
+        </div>
       </div>
 
       <div className="space-y-3">
@@ -230,7 +237,7 @@ export function CoeOverviewPanel({
         </div>
       </div>
 
-      {grouped.length === 0 ? (
+      {sorted.length === 0 ? (
         <div className={cn(quietPanel, "px-5 py-6")}>
           <EmptyState
             icon={Star}
@@ -239,70 +246,57 @@ export function CoeOverviewPanel({
           />
         </div>
       ) : (
-        <div className="space-y-6">
-          {grouped.map((group) => (
-            <section
-              key={group.area}
-              aria-label={group.area}
-              className="space-y-2.5"
-            >
-              <h3 className={opsLabel}>
-                {group.area} · {group.people.length}
-              </h3>
-              <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {group.people.map((member) => {
-                  const availability = availabilityOf(member);
-                  return (
-                    <li key={member.id}>
-                      <button
-                        type="button"
-                        onClick={() => setSelected(member)}
-                        className={cn(
-                          quietPanel,
-                          "flex h-full w-full flex-col gap-3 p-4 text-left transition-colors hover:border-ink/40",
-                          focusRing,
-                        )}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-semibold text-strong">
-                              {member.consultantName}
-                            </p>
-                            <p className="truncate text-xs text-soft">
-                              {member.jobTitle ?? "Consultor"} ·{" "}
-                              {seniorityLabel(member.seniority)}
-                            </p>
-                          </div>
-                          <ContractTag value={member.contractType} />
-                        </div>
-                        <p className="line-clamp-1 text-xs text-medium">
-                          {member.skills.length > 0
-                            ? member.skills
-                                .slice(0, 3)
-                                .map((s) => s.skillName)
-                                .join(" · ")
-                            : "Sem skills validadas"}
-                        </p>
-                        <div className="mt-auto flex items-center justify-between gap-2">
-                          <StatusBadge pill tone={availability.tone}>
-                            {availability.label}
-                          </StatusBadge>
-                          <span className="inline-flex items-center gap-1 text-xs font-medium text-soft">
-                            Ver perfil
-                            <ArrowRight
-                              aria-hidden="true"
-                              className="h-3.5 w-3.5"
-                            />
-                          </span>
-                        </div>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            </section>
-          ))}
-        </div>
+        <ul className="grid grid-cols-[repeat(auto-fill,minmax(20rem,1fr))] gap-3">
+          {sorted.map((member) => {
+            const availability = availabilityOf(member);
+            return (
+              <li key={member.id}>
+                <button
+                  type="button"
+                  onClick={() => setSelected(member)}
+                  className={cn(
+                    quietPanel,
+                    "flex h-full w-full flex-col gap-3 p-4 text-left transition-colors hover:border-ink/40",
+                    focusRing,
+                  )}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className={cn(opsLabel, "mb-1 truncate")}>
+                        {member.focusArea}
+                      </p>
+                      <p className="truncate text-sm font-semibold text-strong">
+                        {member.consultantName}
+                      </p>
+                      <p className="truncate text-xs text-soft">
+                        {member.jobTitle ?? "Consultor"} ·{" "}
+                        {seniorityLabel(member.seniority)}
+                      </p>
+                    </div>
+                    <ContractTag value={member.contractType} />
+                  </div>
+                  <p className="line-clamp-1 text-xs text-medium">
+                    {member.skills.length > 0
+                      ? member.skills
+                          .slice(0, 3)
+                          .map((s) => s.skillName)
+                          .join(" · ")
+                      : "Sem skills validadas"}
+                  </p>
+                  <div className="mt-auto flex items-center justify-between gap-2">
+                    <StatusBadge pill tone={availability.tone}>
+                      {availability.label}
+                    </StatusBadge>
+                    <span className="inline-flex items-center gap-1 text-xs font-medium text-soft">
+                      Ver perfil
+                      <ArrowRight aria-hidden="true" className="h-3.5 w-3.5" />
+                    </span>
+                  </div>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
       )}
 
       <Modal
