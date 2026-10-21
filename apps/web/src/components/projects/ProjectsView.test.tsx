@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { ProjectItem } from "@/lib/projects/types";
-import { ProjectsView } from "./ProjectsView";
+import { ProjectsView, type ProjectDetailTab } from "./ProjectsView";
 
 vi.mock("@/app/app/projetos/actions", () => ({
   createProject: vi.fn(),
@@ -251,5 +251,86 @@ describe("ProjectsView", () => {
     );
     expect(screen.getByText("Christopher Tominaga")).toBeInTheDocument();
     expect(screen.queryByText("Ana Martins")).not.toBeInTheDocument();
+  });
+});
+
+describe("ProjectsView — subtelas do detalhe (matriz)", () => {
+  function renderWithTabs(
+    allowedDetailTabs: ProjectDetailTab[],
+    canEditBillingConfig = true,
+  ) {
+    return render(
+      <ProjectsView
+        mode="demo"
+        canManageProjects
+        canViewCommercials
+        canManageSaleRates
+        canEditBillingConfig={canEditBillingConfig}
+        canManageReceivables
+        allowedDetailTabs={allowedDetailTabs}
+      />,
+    );
+  }
+
+  function openAtlas() {
+    fireEvent.click(
+      screen.getByRole("button", { name: /Vínculos e valores de Atlas/ }),
+    );
+    return screen.getByRole("dialog");
+  }
+
+  it("concedidas: mostra todos os chips do detalhe (padrão inalterado)", () => {
+    renderDemo();
+    const detail = openAtlas();
+    for (const label of [
+      "Vínculos",
+      "Skills",
+      "Aprovação",
+      "Valores de venda",
+      "Recebimentos previstos",
+      "Cobrança",
+    ]) {
+      expect(within(detail).getByRole("button", { name: label })).toBeInTheDocument();
+    }
+  });
+
+  it("negadas: esconde os chips e abre na primeira aba liberada", () => {
+    renderWithTabs(["SKILLS", "BILLING"]);
+    const detail = openAtlas();
+    expect(
+      within(detail).queryByRole("button", { name: "Vínculos" }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(detail).queryByRole("button", { name: "Valores de venda" }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(detail).queryByRole("button", { name: "Recebimentos previstos" }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(detail).queryByRole("button", { name: "Aprovação" }),
+    ).not.toBeInTheDocument();
+    // Abre direto em Skills (primeira liberada), sem o botão "Novo vínculo".
+    expect(
+      within(detail).getByRole("button", { name: "Skills" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(
+      within(detail).queryByRole("button", { name: "Novo vínculo" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("Cobrança liberada na matriz ainda exige o papel financeiro", () => {
+    renderWithTabs(["ALLOCATIONS", "BILLING"], false);
+    const detail = openAtlas();
+    expect(
+      within(detail).queryByRole("button", { name: "Cobrança" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("nenhuma subtela liberada: o detalhe não é oferecido", () => {
+    renderWithTabs([]);
+    expect(
+      screen.queryByRole("button", { name: /Vínculos e valores de Atlas/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 });

@@ -20,6 +20,17 @@ export function invalidInputResponse(): Response {
   });
 }
 
+/**
+ * 403 when the permission matrix denies the report subtela this export serves
+ * (the screen hides the tab, so the endpoint must refuse too).
+ */
+export function forbiddenResponse(): Response {
+  return new Response("FORBIDDEN", {
+    status: 403,
+    headers: { "Content-Type": "text/plain; charset=utf-8" },
+  });
+}
+
 /** A `text/csv` attachment with no caching. */
 export function csvResponse(csv: string, filename: string): Response {
   return new Response(csv, {

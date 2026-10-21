@@ -92,6 +92,15 @@ vi.mock("@jumpflow/database", () => ({
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+// Matriz de permissões: libera tudo por padrão; cada teste nega códigos em
+// `perm.denied` para provar a recusa da subtela.
+const perm = vi.hoisted(() => ({ denied: new Set<string>() }));
+vi.mock("@/lib/auth/permissions", () => ({
+  can: vi.fn(async (code: string) => !perm.denied.has(code)),
+  canEach: vi.fn(async (codes: string[]) =>
+    Object.fromEntries(codes.map((code) => [code, !perm.denied.has(code)])),
+  ),
+}));
 
 vi.mock("@/lib/auth/guards", () => ({
   requireUser: vi.fn(async () => h.store.currentUser),
@@ -403,5 +412,37 @@ describe("deleteReceivable", () => {
     h.store.currentUser.roles = ["CONSULTANT"];
     await expect(deleteReceivable({ id })).rejects.toThrow(/NEXT_REDIRECT/);
     expect(h.store.receivables).toHaveLength(1);
+  });
+});
+
+describe("recebimentos — subtela Recebimentos previstos da matriz", () => {
+  afterEach(() => perm.denied.clear());
+
+  it("recusa criar/editar/remover com FORBIDDEN quando a matriz nega PROJETOS_RECEBIMENTOS", async () => {
+    perm.denied.add("PROJETOS_RECEBIMENTOS");
+    const created = await createReceivable({
+      projectId: "prj-1",
+      dueAt: "2026-08-10",
+      amount: 100,
+      label: "X",
+      status: "FORECAST",
+    });
+    expect(created.ok).toBe(false);
+    if (!created.ok) expect(created.error).toBe("FORBIDDEN");
+    const updated = await updateReceivable({
+      id: "rcv-x",
+      projectId: "prj-1",
+      dueAt: "2026-08-10",
+      amount: 100,
+      label: "X",
+      status: "RECEIVED",
+    });
+    expect(updated.ok).toBe(false);
+    if (!updated.ok) expect(updated.error).toBe("FORBIDDEN");
+    const removed = await deleteReceivable({ id: "rcv-x" });
+    expect(removed.ok).toBe(false);
+    if (!removed.ok) expect(removed.error).toBe("FORBIDDEN");
+    expect(h.store.receivables).toHaveLength(0);
+    expect(h.store.audits).toHaveLength(0);
   });
 });

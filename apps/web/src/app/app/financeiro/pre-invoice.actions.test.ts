@@ -108,6 +108,9 @@ vi.mock("@jumpflow/database", () => ({
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
+// Matriz de subtelas (actions da Apuração): concede tudo aqui.
+vi.mock("@/lib/auth/permissions", () => ({ can: vi.fn(async () => true) }));
+
 vi.mock("@/lib/auth/guards", () => ({
   requireUser: vi.fn(async () => h.store.currentUser),
   requireRole: vi.fn(async (roles: string | string[]) => {

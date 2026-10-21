@@ -5,7 +5,8 @@ import { OperationClosingFilters } from "@/components/operations/OperationClosin
 import { OperationClosingTable } from "@/components/operations/OperationClosingTable";
 import { OperationConsultantDetailTable } from "@/components/operations/OperationConsultantDetailTable";
 import { requirePermission } from "@/lib/auth/guards";
-import { can } from "@/lib/auth/permissions";
+import { SUBSCREEN_CODES } from "@/lib/auth/permission-codes";
+import { can, canEach } from "@/lib/auth/permissions";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { formatMonth } from "@/lib/format";
 import {
@@ -77,10 +78,21 @@ export default async function OperationClosingPage({ searchParams }: PageProps) 
   // the server actions (OPERATION_CLOSING_WRITE_ROLES via edit).
   await requirePermission("OPERACAO_FECHAMENTO", "view");
   const canManage = await can("OPERACAO_FECHAMENTO", "edit");
+  // The "Detalhamento por consultor" tab is a subtela of the matrix: hidden (and
+  // its data never loaded) unless the matrix grants view on its own code. The
+  // "Fechamento" tab is governed by the screen code checked above.
+  const detailCode = SUBSCREEN_CODES.operationalClosing.detail;
+  const allowed = await canEach([detailCode]);
+  const showDetail = allowed[detailCode];
 
   const params = await searchParams;
   const flat = flatten(params);
-  const tab = first(params.tab) ?? "fechamento";
+  const requestedTab = first(params.tab) ?? "fechamento";
+  // A denied tab falls back to the first allowed one (always "fechamento").
+  const tab =
+    requestedTab === "detalhamento" && !showDetail
+      ? "fechamento"
+      : requestedTab;
   const now = new Date();
 
   // Parse the shared filters with the SAME schema as the Relatórios "Horas" tab.
@@ -113,19 +125,23 @@ export default async function OperationClosingPage({ searchParams }: PageProps) 
       listOperationClosingDetail,
       getOperationFilterOptions,
     } = await import("@/lib/db/operation-closing");
-    [overview, detail, filterOptions] = await Promise.all([
-      listOperationClosings({
-        month,
-        year,
-        clientId: filter.clientId,
-        projectId: filter.projectId,
-        consultantId: filter.consultantId,
-        clientStatus: filter.clientStatus,
-        projectStatus: filter.projectStatus,
-      }),
-      listOperationClosingDetail(filter, now),
-      getOperationFilterOptions(),
-    ]);
+    const [overviewResult, detailResult, filterOptionsResult] =
+      await Promise.all([
+        listOperationClosings({
+          month,
+          year,
+          clientId: filter.clientId,
+          projectId: filter.projectId,
+          consultantId: filter.consultantId,
+          clientStatus: filter.clientStatus,
+          projectStatus: filter.projectStatus,
+        }),
+        showDetail ? listOperationClosingDetail(filter, now) : null,
+        getOperationFilterOptions(),
+      ]);
+    overview = overviewResult;
+    if (detailResult) detail = detailResult;
+    filterOptions = filterOptionsResult;
   }
 
   // Excel exports carry the current filters. Closing carries the resolved month
@@ -145,10 +161,12 @@ export default async function OperationClosingPage({ searchParams }: PageProps) 
         projectStatus: filter.projectStatus,
       },
     )}`;
-    detailExportHref = `/api/operacao/fechamento/detalhe/export?${queryWith(
-      flat,
-      { tab: undefined, page: undefined, pageSize: undefined },
-    )}`;
+    if (showDetail) {
+      detailExportHref = `/api/operacao/fechamento/detalhe/export?${queryWith(
+        flat,
+        { tab: undefined, page: undefined, pageSize: undefined },
+      )}`;
+    }
   }
 
   // Pagination hrefs for the detail tab preserve the full query string.
@@ -186,18 +204,22 @@ export default async function OperationClosingPage({ searchParams }: PageProps) 
               />
             ),
           },
-          {
-            id: "detalhamento",
-            label: "Detalhamento por consultor",
-            content: (
-              <OperationConsultantDetailTable
-                detail={detail}
-                exportHref={detailExportHref}
-                prevHref={prevHref}
-                nextHref={nextHref}
-              />
-            ),
-          },
+          ...(showDetail
+            ? [
+                {
+                  id: "detalhamento",
+                  label: "Detalhamento por consultor",
+                  content: (
+                    <OperationConsultantDetailTable
+                      detail={detail}
+                      exportHref={detailExportHref}
+                      prevHref={prevHref}
+                      nextHref={nextHref}
+                    />
+                  ),
+                },
+              ]
+            : []),
         ]}
       />
     </div>

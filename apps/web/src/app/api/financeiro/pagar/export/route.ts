@@ -1,11 +1,21 @@
 import { requireRole } from "@/lib/auth/guards";
 import { RECEIVABLES_ROLES } from "@/lib/auth/route-permissions";
+import { SUBSCREEN_CODES } from "@/lib/auth/permission-codes";
+import { can } from "@/lib/auth/permissions";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { buildWorkbook, defineSheet, xlsxResponse } from "@/lib/export/xlsx";
 import { financeExpensesXlsxColumns } from "@/lib/financial/financeiro-export";
 import { noDatabaseResponse } from "../../../relatorios/shared";
 
 export const dynamic = "force-dynamic";
+
+/** 403 quando a matriz nega a subtela que este export serve. */
+function forbiddenResponse(): Response {
+  return new Response("FORBIDDEN", {
+    status: 403,
+    headers: { "Content-Type": "text/plain; charset=utf-8" },
+  });
+}
 
 /**
  * `.xlsx` export of "Contas a Pagar" (Onda 6): finance-approved expenses awaiting
@@ -17,6 +27,10 @@ export const dynamic = "force-dynamic";
  */
 export async function GET() {
   const user = await requireRole(RECEIVABLES_ROLES);
+  // Subtela da matriz: sem `view` em Contas a Pagar, o export recusa (403).
+  if (!(await can(SUBSCREEN_CODES.finance.payables, "view"))) {
+    return forbiddenResponse();
+  }
   if (!isDatabaseConfigured()) return noDatabaseResponse();
 
   const { listFinanceExpenses } = await import("@/lib/db/expenses");

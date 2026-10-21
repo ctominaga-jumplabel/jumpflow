@@ -5,6 +5,8 @@ import { Prisma, prisma } from "@jumpflow/database";
 import type { ZodType } from "zod";
 import type { ActionResult, ErrorCode } from "@/lib/actions/result";
 import { requireRole, requireUser } from "@/lib/auth/guards";
+import { SUBSCREEN_CODES } from "@/lib/auth/permission-codes";
+import { can } from "@/lib/auth/permissions";
 import { hasRole } from "@/lib/auth/route-permissions";
 import type { RoleName } from "@/lib/auth/roles";
 import { recordAuditEvent } from "@/lib/db/audit";
@@ -37,6 +39,9 @@ import {
  * ou sair do núcleo e propor um time são decisões de alocação de pessoas, que a
  * arquitetura exige registrar. Nenhuma action cria Allocation — a alocação real
  * continua no módulo de Projetos, por decisão humana.
+ *
+ * Além do papel, cada action exige `view` na matriz na subtela que ela serve
+ * (curadoria, composição ou propostas salvas) — soma-se ao guard de papel.
  */
 
 const COE_PATH = "/app/coe";
@@ -55,6 +60,16 @@ function ensureDatabase(): void {
     throw new ActionError(
       "NO_DATABASE",
       "Banco de dados nao configurado para o COE.",
+    );
+  }
+}
+
+/** Recusa quando a matriz não libera a subtela do COE que a action serve. */
+async function ensureSubscreen(code: string): Promise<void> {
+  if (!(await can(code, "view"))) {
+    throw new ActionError(
+      "FORBIDDEN",
+      "Sem permissao para esta secao do COE.",
     );
   }
 }
@@ -156,6 +171,7 @@ export async function addCoeMember(
   try {
     ensureDatabase();
     await requireRole(COE_CURATE_ROLES);
+    await ensureSubscreen(SUBSCREEN_CODES.coe.curation);
     const parsed = parseInput(coeMemberAddSchema, input);
 
     const consultant = await prisma.consultant.findUnique({
@@ -226,6 +242,7 @@ export async function updateCoeMember(
   try {
     ensureDatabase();
     await requireRole(COE_CURATE_ROLES);
+    await ensureSubscreen(SUBSCREEN_CODES.coe.curation);
     const parsed = parseInput(coeMemberUpdateSchema, input);
 
     const previous = await prisma.coeMember.findUnique({
@@ -256,6 +273,7 @@ export async function setCoeMemberActive(
   try {
     ensureDatabase();
     await requireRole(COE_CURATE_ROLES);
+    await ensureSubscreen(SUBSCREEN_CODES.coe.curation);
     const parsed = parseInput(coeMemberSetActiveSchema, input);
 
     const previous = await prisma.coeMember.findUnique({
@@ -300,6 +318,7 @@ export async function saveCoeSquad(
   try {
     ensureDatabase();
     await requireRole(COE_SQUAD_WRITE_ROLES);
+    await ensureSubscreen(SUBSCREEN_CODES.coe.composition);
     const parsed = parseInput(coeSquadSaveSchema, input);
 
     // O projeto precisa existir E estar num status que ainda comporta staffing —
@@ -388,6 +407,7 @@ export async function setCoeSquadStatus(
   try {
     ensureDatabase();
     await requireRole(COE_SQUAD_WRITE_ROLES);
+    await ensureSubscreen(SUBSCREEN_CODES.coe.proposals);
     const parsed = parseInput(coeSquadSetStatusSchema, input);
 
     const previous = await prisma.coeSquad.findUnique({
@@ -423,6 +443,7 @@ export async function deleteCoeSquad(
   try {
     ensureDatabase();
     await requireRole(COE_SQUAD_WRITE_ROLES);
+    await ensureSubscreen(SUBSCREEN_CODES.coe.proposals);
     const parsed = parseInput(coeSquadDeleteSchema, input);
 
     const previous = await prisma.coeSquad.findUnique({

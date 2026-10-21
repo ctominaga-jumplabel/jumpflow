@@ -209,3 +209,34 @@ describe("ReportsView — CSV export link", () => {
     expect(exportLink()).toHaveAttribute("aria-disabled", "true");
   });
 });
+
+describe("ReportsView — allowed tabs (matrix subtelas)", () => {
+  it("shows every tab by default", () => {
+    renderHours({});
+    const nav = screen.getByRole("navigation", {
+      name: "Segmentos de relatório",
+    });
+    expect(nav.querySelectorAll("a")).toHaveLength(3);
+  });
+
+  it("leaves denied tabs out of the tab bar", () => {
+    render(
+      <ReportsView
+        mode="db"
+        tab="horas"
+        allowedTabs={["horas", "consolidado"]}
+        includeFinancials={false}
+        filterOptions={filterOptions}
+        rawParams={{}}
+        hoursReport={hoursReport(1, 1)}
+      />,
+    );
+    const nav = screen.getByRole("navigation", {
+      name: "Segmentos de relatório",
+    });
+    const labels = Array.from(nav.querySelectorAll("a")).map(
+      (a) => a.textContent,
+    );
+    expect(labels).toEqual(["Horas", "Consolidado"]);
+  });
+});

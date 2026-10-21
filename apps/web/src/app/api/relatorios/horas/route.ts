@@ -1,5 +1,7 @@
 import { requireUser } from "@/lib/auth/guards";
 import { isDatabaseConfigured } from "@/lib/db/config";
+import { canEach } from "@/lib/auth/permissions";
+import { SUBSCREEN_CODES } from "@/lib/auth/permission-codes";
 import {
   hoursReportFilterSchema,
   resolveDetailRange,
@@ -8,6 +10,7 @@ import { buildHoursCsv } from "@/lib/reports/csv";
 import { timeEntryStatusLabels } from "@/lib/timesheet/types";
 import {
   csvResponse,
+  forbiddenResponse,
   noDatabaseResponse,
   invalidInputResponse,
   rangeSlug,
@@ -24,6 +27,17 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   const user = await requireUser();
   if (!isDatabaseConfigured()) return noDatabaseResponse();
+
+  // Relatórios "Horas" subtela. This endpoint is ALSO the CSV export of the
+  // Horas and Aprovações screens (same read, scoped to the real user), so it only
+  // refuses when the user can view NONE of the screens that link it — denying
+  // the subtela must not break the other screens' export.
+  const access = await canEach([
+    SUBSCREEN_CODES.reports.hours,
+    "HORAS",
+    "APROVACOES",
+  ]);
+  if (!Object.values(access).some(Boolean)) return forbiddenResponse();
 
   const params = Object.fromEntries(new URL(request.url).searchParams);
   const parsed = hoursReportFilterSchema.safeParse(params);

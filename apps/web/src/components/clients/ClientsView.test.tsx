@@ -156,3 +156,33 @@ describe("ClientsView", () => {
     expect(document.activeElement).toBe(cnpj);
   });
 });
+
+describe("ClientsView — subtela Tipos de cobrança (matriz)", () => {
+  function renderWith(canViewBillingTypes?: boolean) {
+    return render(
+      <ClientsView
+        mode="demo"
+        canManageClients
+        canViewFinancials
+        canManageBillingTypes
+        canViewBillingTypes={canViewBillingTypes}
+        cnpjLookupAvailable={false}
+        logoUploadAvailable={false}
+      />,
+    );
+  }
+
+  it("esconde o chip quando a matriz nega a subtela", () => {
+    renderWith(false);
+    expect(
+      screen.queryByRole("button", { name: /Tipos de cobrança/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Clientes/ })).toBeInTheDocument();
+  });
+
+  it("mostra o chip e a aba quando concedida (padrão)", () => {
+    renderWith();
+    fireEvent.click(screen.getByRole("button", { name: /Tipos de cobrança/ }));
+    expect(screen.getByRole("button", { name: /Novo tipo/ })).toBeInTheDocument();
+  });
+});

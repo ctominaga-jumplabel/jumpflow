@@ -35,13 +35,31 @@ export interface CoeViewProps {
   projects: AllocationProjectOption[];
   skillOptions: AllocationSkillOption[];
   squads: CoeSquadView[];
-  bundle: CoeCompositionBundle;
+  /** `null` quando a subtela de composição não está liberada pela matriz. */
+  bundle: CoeCompositionBundle | null;
   query: CoeCompositionQueryInput;
   /** RBAC resolvido no servidor: pode curar o núcleo. */
   canCurate: boolean;
   /** RBAC resolvido no servidor: pode salvar propostas de time. */
   canPropose: boolean;
+  /**
+   * Subtelas liberadas pela matriz (resolvido no servidor). A visão geral é
+   * governada pelo código da tela e está sempre presente. Omitido = todas.
+   */
+  allowedTabs?: CoeAllowedTabs;
 }
+
+export interface CoeAllowedTabs {
+  composition: boolean;
+  proposals: boolean;
+  curation: boolean;
+}
+
+const ALL_TABS_ALLOWED: CoeAllowedTabs = {
+  composition: true,
+  proposals: true,
+  curation: true,
+};
 
 /**
  * Casca do COE. Abre na VISÃO GERAL — as referências da Jump por área de
@@ -63,13 +81,23 @@ export function CoeView({
   query,
   canCurate,
   canPropose,
+  allowedTabs = ALL_TABS_ALLOWED,
 }: CoeViewProps) {
-  const [tab, setTab] = useState<Tab>("OVERVIEW");
+  const [selectedTab, setTab] = useState<Tab>("OVERVIEW");
+  const tabAllowed: Record<Tab, boolean> = {
+    OVERVIEW: true,
+    COMPOSITION: allowedTabs.composition && bundle !== null,
+    SQUADS: allowedTabs.proposals,
+    NUCLEUS: allowedTabs.curation,
+  };
+  const visibleTabs = TABS.filter((value) => tabAllowed[value]);
+  // Aba negada nunca fica ativa: cai na visão geral.
+  const tab: Tab = tabAllowed[selectedTab] ? selectedTab : "OVERVIEW";
   const activeMembers = members.filter((m) => m.active);
 
   const tabCounts: Record<Tab, number | undefined> = {
     OVERVIEW: undefined,
-    COMPOSITION: bundle.composition.assignments.length || undefined,
+    COMPOSITION: bundle?.composition.assignments.length || undefined,
     NUCLEUS: activeMembers.length || undefined,
     SQUADS: squads.length || undefined,
   };
@@ -80,7 +108,7 @@ export function CoeView({
         aria-label="Seções do COE"
         className="flex flex-wrap items-center gap-2"
       >
-        {TABS.map((value) => (
+        {visibleTabs.map((value) => (
           <FilterChip
             key={value}
             label={tabLabels[value]}
@@ -94,10 +122,12 @@ export function CoeView({
       {tab === "OVERVIEW" ? (
         <CoeOverviewPanel
           members={members}
-          onCompose={() => setTab("COMPOSITION")}
+          onCompose={
+            tabAllowed.COMPOSITION ? () => setTab("COMPOSITION") : undefined
+          }
         />
       ) : null}
-      {tab === "COMPOSITION" ? (
+      {tab === "COMPOSITION" && bundle ? (
         <CoeCompositionPanel
           bundle={bundle}
           query={query}

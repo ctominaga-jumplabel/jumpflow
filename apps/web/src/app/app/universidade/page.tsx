@@ -3,7 +3,7 @@ import { BookOpen } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { UniversityView } from "@/components/university/UniversityView";
-import { requireUser } from "@/lib/auth/guards";
+import { requirePermission } from "@/lib/auth/guards";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { getConsultantForUser } from "@/lib/db/timesheet";
 import { listActiveSkillOptions } from "@/lib/db/competencies";
@@ -20,8 +20,9 @@ import { canCurate, canViewRanking } from "@/lib/university/visibility";
 export const metadata: Metadata = { title: "JumpAcademy" };
 
 export default async function UniversidadePage() {
-  // Catálogo visível a todos os autenticados; curadoria/ranking gated por papel.
-  const user = await requireUser();
+  // Sem item de menu, nenhum gate de layout se aplica: a matriz decide o acesso
+  // à página (UNIVERSIDADE "view"). Dentro dela, curadoria/ranking por papel.
+  const user = await requirePermission("UNIVERSIDADE", "view");
   const databaseReady = isDatabaseConfigured();
   const curate = canCurate(user.roles);
   const ranking = canViewRanking(user.roles);

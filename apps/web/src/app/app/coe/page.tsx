@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { CoeView } from "@/components/coe/CoeView";
 import { requireRole } from "@/lib/auth/guards";
+import { SUBSCREEN_CODES } from "@/lib/auth/permission-codes";
+import { canEach } from "@/lib/auth/permissions";
 import {
   COE_READ_ROLES,
   canCurateCoe,
@@ -52,6 +54,10 @@ function numberParam(
  * server actions (curadoria e proposta são fronteiras diferentes). O fator
  * financeiro do ranking é resolvido no servidor e nunca chega ao cliente para
  * quem não pode vê-lo.
+ *
+ * Subtelas: "Visão geral" segue o código da própria tela; composição, propostas
+ * e curadoria exigem `view` na matriz no código de cada uma. Aba negada não
+ * aparece e os dados dela nem são carregados.
  */
 export default async function CoePage({ searchParams }: PageProps) {
   const user = await requireRole(COE_READ_ROLES);
@@ -79,14 +85,29 @@ export default async function CoePage({ searchParams }: PageProps) {
     ? parsed.data
     : coeCompositionQuerySchema.parse({});
 
+  const subscreens = await canEach([
+    SUBSCREEN_CODES.coe.composition,
+    SUBSCREEN_CODES.coe.proposals,
+    SUBSCREEN_CODES.coe.curation,
+  ]);
+  const allowedTabs = {
+    composition: subscreens[SUBSCREEN_CODES.coe.composition],
+    proposals: subscreens[SUBSCREEN_CODES.coe.proposals],
+    curation: subscreens[SUBSCREEN_CODES.coe.curation],
+  };
+
+  // Membros alimentam a visão geral (aba padrão) e a curadoria; o resto só é
+  // lido quando a aba correspondente está liberada.
   const [members, candidateOptions, projects, skillOptions, squads, bundle] =
     await Promise.all([
       listCoeMembers(),
-      listCoeCandidateOptions(),
-      listCoeProjectOptions(),
-      listCoeSkillOptions(),
-      listCoeSquads(),
-      getCoeComposition(user, query),
+      allowedTabs.curation ? listCoeCandidateOptions() : Promise.resolve([]),
+      allowedTabs.composition ? listCoeProjectOptions() : Promise.resolve([]),
+      allowedTabs.composition ? listCoeSkillOptions() : Promise.resolve([]),
+      allowedTabs.proposals ? listCoeSquads() : Promise.resolve([]),
+      allowedTabs.composition
+        ? getCoeComposition(user, query)
+        : Promise.resolve(null),
     ]);
 
   return (
@@ -106,6 +127,7 @@ export default async function CoePage({ searchParams }: PageProps) {
         query={query}
         canCurate={canCurateCoe(user.roles)}
         canPropose={canWriteCoeSquad(user.roles)}
+        allowedTabs={allowedTabs}
       />
     </div>
   );

@@ -38,6 +38,14 @@ vi.mock("@/lib/auth/guards", () => ({
   requireUser: vi.fn(async () => currentUser),
 }));
 
+// Permission matrix: every code granted unless a test denies it.
+let denied = new Set<string>();
+vi.mock("@/lib/auth/permissions", () => ({
+  canEach: vi.fn(async (codes: readonly string[]) =>
+    Object.fromEntries(codes.map((c) => [c, !denied.has(c)])),
+  ),
+}));
+
 vi.mock("@/lib/db/config", () => ({
   isDatabaseConfigured: vi.fn(() => databaseConfigured),
 }));
@@ -98,6 +106,7 @@ beforeEach(() => {
     roles: ["CONSULTANT"],
   };
   databaseConfigured = true;
+  denied = new Set();
   calls.hours = undefined;
   calls.expenses = undefined;
   calls.consolidated = undefined;
@@ -319,5 +328,41 @@ describe("RBAC matches the screen (same read function)", () => {
     expect(dataLines).toHaveLength(1);
     expect(dataLines[0]).toContain("Ana");
     expect(dataLines[0]).toContain("Atlas");
+  });
+});
+
+describe("matrix subtela gate -> 403 FORBIDDEN", () => {
+  it("expenses CSV refuses when RELATORIOS_DESPESAS is denied", async () => {
+    denied = new Set(["RELATORIOS_DESPESAS"]);
+    const res = await expensesGet(req("/api/relatorios/despesas"));
+    expect(res.status).toBe(403);
+    expect(await res.text()).toBe("FORBIDDEN");
+    expect(calls.expenses).toBeUndefined();
+  });
+
+  it("consolidated CSV refuses when RELATORIOS_CONSOLIDADO is denied", async () => {
+    denied = new Set(["RELATORIOS_CONSOLIDADO"]);
+    const res = await consolidatedGet(req("/api/relatorios/consolidado"));
+    expect(res.status).toBe(403);
+    expect(calls.consolidated).toBeUndefined();
+  });
+
+  it("hours CSV refuses when the subtela AND the screens that link it are denied", async () => {
+    denied = new Set(["HORAS_RELATORIOS", "HORAS", "APROVACOES"]);
+    const res = await hoursGet(req("/api/relatorios/horas"));
+    expect(res.status).toBe(403);
+    expect(calls.hours).toBeUndefined();
+  });
+
+  it("hours CSV still serves the Horas/Aprovações export when only the subtela is denied", async () => {
+    denied = new Set(["HORAS_RELATORIOS"]);
+    const res = await hoursGet(req("/api/relatorios/horas"));
+    expect(res.status).toBe(200);
+  });
+
+  it("denying one tab does not affect another tab's export", async () => {
+    denied = new Set(["RELATORIOS_DESPESAS"]);
+    const res = await consolidatedGet(req("/api/relatorios/consolidado"));
+    expect(res.status).toBe(200);
   });
 });

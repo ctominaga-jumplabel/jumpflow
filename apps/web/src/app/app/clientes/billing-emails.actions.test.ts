@@ -66,6 +66,10 @@ vi.mock("@/lib/auth/guards", () => ({
   requireRole: vi.fn(async () => h.store.currentUser),
 }));
 
+vi.mock("@/lib/auth/permissions", () => ({
+  can: vi.fn(async () => true),
+}));
+
 vi.mock("@/lib/db/users", () => ({
   resolveDbUser: vi.fn(async () => ({ id: "user-1" })),
 }));

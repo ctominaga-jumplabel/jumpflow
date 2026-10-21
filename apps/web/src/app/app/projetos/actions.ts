@@ -5,6 +5,8 @@ import { Prisma, prisma } from "@jumpflow/database";
 import type { ZodType } from "zod";
 import type { ActionResult, ErrorCode } from "@/lib/actions/result";
 import { requireRole, requireUser } from "@/lib/auth/guards";
+import { SUBSCREEN_CODES } from "@/lib/auth/permission-codes";
+import { can } from "@/lib/auth/permissions";
 import type { RoleName } from "@/lib/auth/roles";
 import {
   FINANCIAL_ROLES,
@@ -121,6 +123,23 @@ function ensureDatabase(): void {
     throw new ActionError(
       "NO_DATABASE",
       "Banco de dados nao configurado para projetos.",
+    );
+  }
+}
+
+/**
+ * Subtela do detalhe 360 do projeto na matriz de permissões. As actions que
+ * servem SÓ uma aba (vínculos, skills da alocação, tipo de pagamento/projeto,
+ * recebimentos, acompanhamento) recusam com FORBIDDEN quando a matriz nega a
+ * aba — além do gate de papel, nunca no lugar dele. Actions compartilhadas com
+ * Comercial/Financeiro/Automações (valor de venda, regra de cobrança, aprovação
+ * automática) seguem só com o gate de papel, para não bloquear aquelas telas.
+ */
+async function requireDetailTab(code: string): Promise<void> {
+  if (!(await can(code, "view"))) {
+    throw new ActionError(
+      "FORBIDDEN",
+      "Seu perfil nao tem acesso a esta aba do projeto.",
     );
   }
 }
@@ -964,6 +983,7 @@ export async function createAllocation(
   try {
     ensureDatabase();
     await requireRole(PROJECT_WRITE_ROLES);
+    await requireDetailTab(SUBSCREEN_CODES.projects.links);
     const parsed = parseInput(allocationInputSchema, input);
     const allocation = await prisma.allocation.create({
       data: allocationData(parsed),
@@ -982,6 +1002,7 @@ export async function updateAllocation(
   try {
     ensureDatabase();
     await requireRole(PROJECT_WRITE_ROLES);
+    await requireDetailTab(SUBSCREEN_CODES.projects.links);
     const parsed = parseInput(allocationUpdateSchema, input);
     const previous = await prisma.allocation.findUnique({ where: { id: parsed.id } });
     if (!previous) throw new ActionError("NOT_FOUND", "Vinculo nao encontrado.");
@@ -1017,6 +1038,7 @@ export async function removeAllocation(
   try {
     ensureDatabase();
     await requireRole(PROJECT_WRITE_ROLES);
+    await requireDetailTab(SUBSCREEN_CODES.projects.links);
     const parsed = parseInput(allocationRemoveSchema, input);
     const allocation = await prisma.allocation.findUnique({
       where: { id: parsed.id },
@@ -1125,6 +1147,7 @@ export async function updateProjectPaymentType(
   try {
     ensureDatabase();
     await requireRole(SALE_RATE_ROLES);
+    await requireDetailTab(SUBSCREEN_CODES.projects.saleValues);
     const parsed = parseInput(projectPaymentTypeSchema, input);
     const previous = await prisma.project.findUnique({
       where: { id: parsed.id },
@@ -1153,6 +1176,7 @@ export async function updateProjectOpportunityType(
   try {
     ensureDatabase();
     await requireRole(SALE_RATE_ROLES);
+    await requireDetailTab(SUBSCREEN_CODES.projects.saleValues);
     const parsed = parseInput(projectOpportunityTypeSchema, input);
     const previous = await prisma.project.findUnique({
       where: { id: parsed.id },
@@ -1276,6 +1300,7 @@ export async function createReceivable(
   try {
     ensureDatabase();
     await requireRole(RECEIVABLE_ROLES);
+    await requireDetailTab(SUBSCREEN_CODES.projects.expectedReceipts);
     const parsed = parseInput(receivableInputSchema, input);
     const project = await prisma.project.findUnique({
       where: { id: parsed.projectId },
@@ -1312,6 +1337,7 @@ export async function updateReceivable(
   try {
     ensureDatabase();
     await requireRole(RECEIVABLE_ROLES);
+    await requireDetailTab(SUBSCREEN_CODES.projects.expectedReceipts);
     const parsed = parseInput(receivableUpdateSchema, input);
     const previous = await prisma.projectReceivableSchedule.findUnique({
       where: { id: parsed.id },
@@ -1362,6 +1388,7 @@ export async function deleteReceivable(
   try {
     ensureDatabase();
     await requireRole(RECEIVABLE_ROLES);
+    await requireDetailTab(SUBSCREEN_CODES.projects.expectedReceipts);
     const parsed = parseInput(receivableRemoveSchema, input);
     const previous = await prisma.projectReceivableSchedule.findUnique({
       where: { id: parsed.id },
@@ -1535,6 +1562,7 @@ export async function addAllocationSkill(
   try {
     ensureDatabase();
     await requireRole(PROJECT_WRITE_ROLES);
+    await requireDetailTab(SUBSCREEN_CODES.projects.skills);
     const parsed = parseInput(allocationSkillInputSchema, input);
     const allocation = await prisma.allocation.findUnique({
       where: { id: parsed.allocationId },
@@ -1582,6 +1610,7 @@ export async function updateAllocationSkill(
   try {
     ensureDatabase();
     await requireRole(PROJECT_WRITE_ROLES);
+    await requireDetailTab(SUBSCREEN_CODES.projects.skills);
     const parsed = parseInput(allocationSkillUpdateSchema, input);
     const previous = await prisma.allocationSkill.findUnique({
       where: { id: parsed.id },
@@ -1613,6 +1642,7 @@ export async function removeAllocationSkill(
   try {
     ensureDatabase();
     await requireRole(PROJECT_WRITE_ROLES);
+    await requireDetailTab(SUBSCREEN_CODES.projects.skills);
     const parsed = parseInput(allocationSkillRemoveSchema, input);
     const previous = await prisma.allocationSkill.findUnique({
       where: { id: parsed.id },
@@ -1659,6 +1689,7 @@ export async function getProjectTracking(input: {
         "Acompanhamento financeiro restrito ao gestor do projeto, Financeiro e Comercial.",
       );
     }
+    await requireDetailTab(SUBSCREEN_CODES.projects.tracking);
     const project = await prisma.project.findUnique({
       where: { id: parsed.projectId },
       select: { managerUserId: true },

@@ -4,7 +4,10 @@ import { History, UserX } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { NewTimeEntryScreen } from "@/components/timesheet/NewTimeEntryScreen";
+import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth/guards";
+import { can } from "@/lib/auth/permissions";
+import { SCREEN_CODES } from "@/lib/auth/permission-codes";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { isStorageConfigured } from "@/lib/storage/provider";
 import { isTranscriptionEnabled } from "@/lib/transcription/flags";
@@ -39,13 +42,16 @@ interface LancamentoPageProps {
  * "Ver Histórico" para a grade.
  *
  * O gate de rota é o prefixo `/app/horas` na matriz de permissões (o proxy já
- * protege `/app/*`); `requireUser` continua no lugar e TODA autorização de
- * escrita é das server actions.
+ * protege `/app/*`); a tela cheia exige ainda "view" em HORAS_LANCAMENTOS
+ * e TODA autorização de escrita é das server actions. Sem ela, volta para a
+ * grade (/app/horas) em vez de /access-denied: esta é a home do Consultor após
+ * o login, então negar a tela cheia não pode trancar o consultor na entrada.
  */
 export default async function NovoLancamentoPage({
   searchParams,
 }: LancamentoPageProps) {
   const user = await requireUser();
+  if (!(await can(SCREEN_CODES.newTimeEntry, "view"))) redirect("/app/horas");
   const params = await searchParams;
 
   const header = (

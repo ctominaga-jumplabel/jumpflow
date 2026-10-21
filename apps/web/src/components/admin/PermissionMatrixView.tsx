@@ -31,6 +31,7 @@ import type {
 } from "@/lib/db/permissions";
 import { saveRolePermissions } from "@/app/app/admin/permissoes/actions";
 import { SearchableSelect } from "@/components/ui/SearchableSelect";
+import { groupPermissionTree } from "@/lib/auth/permission-tree";
 
 interface Grant {
   view: boolean;
@@ -66,6 +67,14 @@ export interface PermissionMatrixViewProps {
   permissions: PermissionView[];
   /** roleId → matrix cells. */
   matrices: Record<string, RolePermissionCell[]>;
+  /** permission code → screen route (from the navigation), shown next to the code. */
+  screenRoutes?: Record<string, string>;
+  /**
+   * Controlled group selection, so the Grupos tab can open a group's matrix.
+   * Uncontrolled (first active group) when omitted.
+   */
+  selectedRoleId?: string;
+  onSelectRole?: (roleId: string) => void;
 }
 
 /**
@@ -78,9 +87,26 @@ export function PermissionMatrixView({
   roles,
   permissions,
   matrices,
+  screenRoutes = {},
+  selectedRoleId,
+  onSelectRole,
 }: PermissionMatrixViewProps) {
   const activeRoles = roles.filter((r) => r.active);
-  const [roleId, setRoleId] = useState<string>(activeRoles[0]?.id ?? roles[0]?.id ?? "");
+  const [localRoleId, setLocalRoleId] = useState<string>(
+    activeRoles[0]?.id ?? roles[0]?.id ?? "",
+  );
+  // Fall back to the first active group when the selection was deleted.
+  const fallbackRoleId = activeRoles[0]?.id ?? roles[0]?.id ?? "";
+  const roleId =
+    selectedRoleId && roles.some((r) => r.id === selectedRoleId)
+      ? selectedRoleId
+      : roles.some((r) => r.id === localRoleId)
+        ? localRoleId
+        : fallbackRoleId;
+  const setRoleId = (id: string) => {
+    setLocalRoleId(id);
+    onSelectRole?.(id);
+  };
   const [query, setQuery] = useState("");
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [pending, startTransition] = useTransition();
@@ -117,6 +143,11 @@ export function PermissionMatrixView({
   };
 
   // Cells whose current value differs from the baseline, for the selected role.
+  const knownPermissionIds = useMemo(
+    () => new Set(permissions.map((p) => p.id)),
+    [permissions],
+  );
+
   const changedUpdates = useMemo(() => {
     const roleOverrides = overrides[roleId] ?? {};
     const base = baseline[roleId] ?? {};
@@ -127,6 +158,8 @@ export function PermissionMatrixView({
       canDelete: boolean;
     }> = [];
     for (const [permId, grant] of Object.entries(roleOverrides)) {
+      // Drafts on a feature deleted in the Funcionalidades tab are dropped.
+      if (!knownPermissionIds.has(permId)) continue;
       const b = base[permId] ?? EMPTY_GRANT;
       if (!grantsEqual(grant, b)) {
         updates.push({
@@ -139,7 +172,7 @@ export function PermissionMatrixView({
       }
     }
     return updates;
-  }, [overrides, baseline, roleId]);
+  }, [overrides, baseline, roleId, knownPermissionIds]);
 
   const dirty = changedUpdates.length > 0;
 
@@ -155,14 +188,11 @@ export function PermissionMatrixView({
     );
   }, [permissions, normalizedQuery]);
 
-  const modules = useMemo(() => {
-    const map = new Map<string, PermissionView[]>();
-    for (const p of visiblePermissions) {
-      if (!map.has(p.module)) map.set(p.module, []);
-      map.get(p.module)!.push(p);
-    }
-    return [...map.entries()];
-  }, [visiblePermissions]);
+  // Módulo → tela → subtelas, in menu order (shared with the Funcionalidades tab).
+  const modules = useMemo(
+    () => groupPermissionTree(visiblePermissions),
+    [visiblePermissions],
+  );
 
   const toggleModule = (module: string) => {
     setCollapsed((prev) => {
@@ -232,7 +262,7 @@ export function PermissionMatrixView({
 
       <SectionPanel
         title="Grupo de acesso"
-        description="Escolha o grupo para configurar suas permissões. As alterações ficam em rascunho até você salvar."
+        description="Escolha o grupo para configurar suas permissões. As alterações ficam em rascunho até você salvar. Em subtelas (└), “Ver” controla se a aba aparece e se os dados dela são carregados; onde a aba tem ações próprias, Criar/Editar também são checados. O perfil (papel) continua valendo junto."
         action={
           <div className="flex items-center gap-2">
             {selectedRole ? (
@@ -391,6 +421,7 @@ export function PermissionMatrixView({
                                   </span>
                                   <span className="text-[11px] font-mono text-soft">
                                     {p.code}
+                                    {screenRoutes[p.code] ? ` · ${screenRoutes[p.code]}` : ""}
                                   </span>
                                 </div>
                               </td>

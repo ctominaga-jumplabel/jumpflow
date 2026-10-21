@@ -71,6 +71,15 @@ vi.mock("@jumpflow/database", () => ({
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+// Matriz de permissões: libera tudo por padrão; cada teste nega códigos em
+// `perm.denied` para provar a recusa da subtela.
+const perm = vi.hoisted(() => ({ denied: new Set<string>() }));
+vi.mock("@/lib/auth/permissions", () => ({
+  can: vi.fn(async (code: string) => !perm.denied.has(code)),
+  canEach: vi.fn(async (codes: string[]) =>
+    Object.fromEntries(codes.map((code) => [code, !perm.denied.has(code)])),
+  ),
+}));
 
 vi.mock("@/lib/auth/guards", () => ({
   requireUser: vi.fn(async () => h.store.currentUser),
@@ -256,5 +265,21 @@ describe("updateProjectOpportunityType", () => {
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toBe("NOT_FOUND");
+  });
+});
+
+describe("updateProjectOpportunityType — subtela Valores de venda da matriz", () => {
+  afterEach(() => perm.denied.clear());
+
+  it("recusa com FORBIDDEN quando a matriz nega PROJETOS_FINANCEIRO", async () => {
+    perm.denied.add("PROJETOS_FINANCEIRO");
+    const result = await updateProjectOpportunityType({
+      id: "prj-1",
+      opportunityType: "SQUAD",
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBe("FORBIDDEN");
+    expect(h.store.updates).toHaveLength(0);
+    expect(h.store.audits).toHaveLength(0);
   });
 });

@@ -20,6 +20,8 @@ const tabLabels: Record<Tab, string> = {
  * de escopo de dono) e recebe o gate da leitura de currículo por IA. A aba
  * "Catálogo" (gerenciamento de skills) só aparece quando `catalogContent` é
  * fornecido — a page só passa esse conteúdo para quem tem permissão de escrita.
+ * "Meu Currículo" só aparece com `showCurriculum` (subtela liberada na matriz,
+ * calculada no servidor; as actions do currículo também recusam sem ela).
  * Mantem o conteudo de Skills montado para preservar o estado ao alternar as
  * abas.
  */
@@ -27,16 +29,20 @@ export function SkillsTabs({
   skillsContent,
   catalogContent,
   aiImportEnabled = false,
+  showCurriculum,
 }: {
   skillsContent: ReactNode;
   catalogContent?: ReactNode;
   aiImportEnabled?: boolean;
+  showCurriculum: boolean;
 }) {
   const [tab, setTab] = useState<Tab>("SKILLS");
 
-  const tabOrder: Tab[] = catalogContent
-    ? ["SKILLS", "CURRICULUM", "CATALOG"]
-    : ["SKILLS", "CURRICULUM"];
+  const tabOrder: Tab[] = [
+    "SKILLS",
+    ...(showCurriculum ? (["CURRICULUM"] as const) : []),
+    ...(catalogContent ? (["CATALOG"] as const) : []),
+  ];
 
   return (
     <div className="space-y-5">
@@ -55,7 +61,7 @@ export function SkillsTabs({
       </nav>
 
       <div hidden={tab !== "SKILLS"}>{skillsContent}</div>
-      {tab === "CURRICULUM" ? (
+      {tab === "CURRICULUM" && showCurriculum ? (
         <MyCurriculumTab aiImportEnabled={aiImportEnabled} />
       ) : null}
       {tab === "CATALOG" && catalogContent ? <div>{catalogContent}</div> : null}

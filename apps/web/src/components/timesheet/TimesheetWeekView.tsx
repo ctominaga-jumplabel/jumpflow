@@ -301,6 +301,13 @@ export interface TimesheetWeekViewProps {
    * virada de dia) exatamente na tela onde a data é o dado.
    */
   todayIso?: string;
+  /**
+   * db mode: a matriz concede "view" em HORAS_LANCAMENTOS (tela cheia
+   * `/app/horas/lancamento`). Resolvido no SERVIDOR. Sem ela, "Novo lançamento"
+   * não navega para a tela cheia e abre o formulário da própria grade. Default
+   * `true` preserva o comportamento.
+   */
+  canOpenNewEntryScreen?: boolean;
 }
 
 export interface TimesheetDefaultOption extends TimeEntryFormProject {
@@ -673,6 +680,8 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
   // Injetado em cada action de gravação para o servidor gravar na grade dele.
   const onBehalfOf = props.onBehalfOf ?? null;
   const onBehalfId = onBehalfOf?.id;
+  // Tela cheia de lançamento só quando a matriz concede (decidido no servidor).
+  const canOpenNewEntryScreen = props.canOpenNewEntryScreen ?? true;
   const formProjects = isDemo ? demoProjects : dbProjects;
   // Demo project dropdown: narrow by the chosen project status (db mode gets the
   // already-narrowed list from the server via listAllowedProjects).
@@ -805,11 +814,12 @@ export function TimesheetWeekView(props: TimesheetWeekViewProps) {
    * contextos: o modo DEMO (sem banco, a tela cheia não tem o que gravar) e o
    * modo "em nome de" (a grade está mostrando o consultor-alvo escolhido no
    * seletor; a tela cheia trataria isso como lote). Editar uma linha existente
-   * continua sempre no formulário da própria grade.
+   * continua sempre no formulário da própria grade. Sem acesso à tela cheia na
+   * matriz (`canOpenNewEntryScreen`), o formulário da grade também é usado.
    */
   function openNew() {
     setNewPrefill(null);
-    if (!isDemo && !onBehalfId) {
+    if (!isDemo && !onBehalfId && canOpenNewEntryScreen) {
       router.push(`${NEW_ENTRY_HREF}?semana=${week.startDate}`);
       return;
     }

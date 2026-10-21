@@ -18,8 +18,11 @@ import type { CoeContractType, CoeMemberView } from "@/lib/coe/types";
 
 export interface CoeOverviewPanelProps {
   members: CoeMemberView[];
-  /** Leva para a composição de time (aba de trabalho detalhada). */
-  onCompose: () => void;
+  /**
+   * Leva para a composição de time (aba de trabalho detalhada). Ausente quando
+   * a subtela de composição não está liberada — o botão some.
+   */
+  onCompose?: () => void;
 }
 
 const CONTRACT_ORDER: CoeContractType[] = ["CLT", "CLT_FLEX", "PJ"];
@@ -311,16 +314,18 @@ export function CoeOverviewPanel({
         footer={
           selected ? (
             <div className="flex flex-wrap justify-end gap-2">
-              <ActionButton
-                variant="secondary"
-                tactile={false}
-                onClick={() => {
-                  setSelected(null);
-                  onCompose();
-                }}
-              >
-                Compor time
-              </ActionButton>
+              {onCompose ? (
+                <ActionButton
+                  variant="secondary"
+                  tactile={false}
+                  onClick={() => {
+                    setSelected(null);
+                    onCompose();
+                  }}
+                >
+                  Compor time
+                </ActionButton>
+              ) : null}
               <a
                 href={`mailto:${selected.email}`}
                 className={cn(

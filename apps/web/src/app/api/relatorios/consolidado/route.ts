@@ -1,9 +1,12 @@
 import { requireUser } from "@/lib/auth/guards";
 import { isDatabaseConfigured } from "@/lib/db/config";
+import { canEach } from "@/lib/auth/permissions";
+import { SUBSCREEN_CODES } from "@/lib/auth/permission-codes";
 import { consolidatedReportFilterSchema } from "@/lib/reports/schemas";
 import { buildConsolidatedCsv } from "@/lib/reports/csv";
 import {
   csvResponse,
+  forbiddenResponse,
   noDatabaseResponse,
   invalidInputResponse,
   periodSlug,
@@ -19,6 +22,10 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   const user = await requireUser();
   if (!isDatabaseConfigured()) return noDatabaseResponse();
+
+  // Relatórios "Consolidado" subtela: without matrix `view`, the export refuses.
+  const access = await canEach([SUBSCREEN_CODES.reports.consolidated]);
+  if (!access[SUBSCREEN_CODES.reports.consolidated]) return forbiddenResponse();
 
   const params = Object.fromEntries(new URL(request.url).searchParams);
   const parsed = consolidatedReportFilterSchema.safeParse(params);
