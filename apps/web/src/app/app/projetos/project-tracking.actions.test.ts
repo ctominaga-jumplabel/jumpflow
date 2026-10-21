@@ -48,6 +48,15 @@ vi.mock("@jumpflow/database", () => ({
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+// Matriz de permissões: libera tudo por padrão; cada teste nega códigos em
+// `perm.denied` para provar a recusa da subtela.
+const perm = vi.hoisted(() => ({ denied: new Set<string>() }));
+vi.mock("@/lib/auth/permissions", () => ({
+  can: vi.fn(async (code: string) => !perm.denied.has(code)),
+  canEach: vi.fn(async (codes: string[]) =>
+    Object.fromEntries(codes.map((code) => [code, !perm.denied.has(code)])),
+  ),
+}));
 
 vi.mock("@/lib/auth/guards", () => ({
   requireUser: vi.fn(async () => h.store.currentUser),
@@ -139,5 +148,18 @@ describe("getProjectTracking RBAC (D5)", () => {
     const r = await getProjectTracking({ projectId: "prj-1" });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toBe("NOT_FOUND");
+  });
+});
+
+describe("getProjectTracking — subtela Acompanhamento da matriz", () => {
+  afterEach(() => perm.denied.clear());
+
+  it("recusa com FORBIDDEN (sem carregar dados) quando a matriz nega PROJETOS_RELATORIOS", async () => {
+    perm.denied.add("PROJETOS_RELATORIOS");
+    h.store.currentUser.roles = ["FINANCE"];
+    const r = await getProjectTracking({ projectId: "prj-1" });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toBe("FORBIDDEN");
+    expect(h.loadTracking).not.toHaveBeenCalled();
   });
 });

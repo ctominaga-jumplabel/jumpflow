@@ -8,6 +8,7 @@ import {
   TriangleAlert,
   Users,
 } from "lucide-react";
+import type { ReactNode } from "react";
 import type { Expense } from "@/lib/expenses/types";
 import { formatCurrencyPrecise, formatHours } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -29,6 +30,11 @@ import { BillingSignals } from "./receivables/BillingSignals";
 import { PendingClosingsView } from "./receivables/PendingClosingsView";
 import { ExpensesFinancePanel } from "./ExpensesFinancePanel";
 import { FinanceTabs } from "./FinanceTabs";
+
+/** Abas do Financeiro (`?tab=`), na ordem em que aparecem. */
+export type FinanceTabId = "receber" | "pagar" | "pendentes";
+
+const ALL_FINANCE_TABS: readonly FinanceTabId[] = ["receber", "pagar", "pendentes"];
 
 export interface FinancialOverviewProps {
   /** "db": jornada real de Contas a Receber; "demo": banco não configurado. */
@@ -64,6 +70,11 @@ export interface FinancialOverviewProps {
   expensesStorageAvailable?: boolean;
   /** Tab pré-selecionada (?tab=), preservada no client. */
   defaultTab?: string;
+  /**
+   * Abas liberadas pela matriz (subtelas), resolvidas no server. As demais não
+   * são renderizadas (e a página nem carrega os dados delas). Default: todas.
+   */
+  allowedTabs?: readonly FinanceTabId[];
   /** `.xlsx` export href da aba Contas a Pagar (Onda 6). db mode. */
   pagarExportHref?: string;
   /**
@@ -103,6 +114,7 @@ export function FinancialOverview({
   financeExpenses,
   expensesStorageAvailable = false,
   defaultTab,
+  allowedTabs = ALL_FINANCE_TABS,
   pagarExportHref,
   pendingClosings,
   canClosePending = false,
@@ -246,18 +258,20 @@ export function FinancialOverview({
     />
   );
 
+  const tabs: Array<{ id: FinanceTabId; label: string; content: ReactNode }> = [
+    { id: "receber", label: "Contas a Receber", content: receber },
+    { id: "pagar", label: "Contas a Pagar", content: pagar },
+    {
+      id: "pendentes",
+      label: "Status de Faturamento",
+      content: pendentes,
+    },
+  ];
+
   return (
     <FinanceTabs
       defaultTabId={defaultTab}
-      tabs={[
-        { id: "receber", label: "Contas a Receber", content: receber },
-        { id: "pagar", label: "Contas a Pagar", content: pagar },
-        {
-          id: "pendentes",
-          label: "Status de Faturamento",
-          content: pendentes,
-        },
-      ]}
+      tabs={tabs.filter((tab) => allowedTabs.includes(tab.id))}
     />
   );
 }

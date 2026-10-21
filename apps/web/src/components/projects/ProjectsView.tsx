@@ -104,7 +104,7 @@ import {
 import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 type Mode = "demo" | "db";
-type DetailTab =
+export type ProjectDetailTab =
   | "ALLOCATIONS"
   | "SKILLS"
   | "RATES"
@@ -112,6 +112,18 @@ type DetailTab =
   | "BILLING"
   | "APPROVAL"
   | "TRACKING";
+type DetailTab = ProjectDetailTab;
+
+/** Ordem de exibição das abas do detalhe (a primeira liberada é a padrão). */
+export const PROJECT_DETAIL_TABS: readonly ProjectDetailTab[] = [
+  "ALLOCATIONS",
+  "SKILLS",
+  "APPROVAL",
+  "RATES",
+  "RECEIVABLES",
+  "BILLING",
+  "TRACKING",
+];
 
 /** Rótulos pt-BR dos tipos de pagamento do cliente (comercial). */
 const paymentTypeLabels: Record<ProjectPaymentType, string> = {
@@ -143,6 +155,13 @@ interface ProjectsViewProps {
    * forma na server action.
    */
   trackingManagerUserId?: string | null;
+  /**
+   * Subtelas do detalhe liberadas pela matriz de permissões (calculadas no
+   * servidor, que também omite do payload os dados das abas negadas). Cada aba
+   * ainda respeita as regras de papel existentes (cobrança, acompanhamento,
+   * mascaramento comercial). Ausente = todas (demo/testes).
+   */
+  allowedDetailTabs?: readonly ProjectDetailTab[];
 }
 
 const statusFilters: (ProjectStatus | "ALL")[] = [
@@ -239,6 +258,7 @@ export function ProjectsView({
   canManageReceivables,
   canViewTracking = false,
   trackingManagerUserId = null,
+  allowedDetailTabs = PROJECT_DETAIL_TABS,
 }: ProjectsViewProps) {
   // Single optimistic copy of the list, seeded from server props. It re-seeds
   // whenever the server sends fresh data (e.g. after a revalidatePath from a
@@ -277,6 +297,11 @@ export function ProjectsView({
   const detailProject = detailProjectId
     ? (items.find((project) => project.id === detailProjectId) ?? null)
     : null;
+  // Aba padrão do detalhe = primeira subtela liberada pela matriz. Sem nenhuma
+  // liberada, o detalhe nem é oferecido (a lista segue governada por PROJETOS).
+  const defaultDetailTab = PROJECT_DETAIL_TABS.find((value) =>
+    allowedDetailTabs.includes(value),
+  );
 
   const rows = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -356,13 +381,19 @@ export function ProjectsView({
       header: "Equipe",
       align: "right",
       cell: (project) => (
-        <button
-          type="button"
-          className="rounded-md px-2 py-1 tabular-nums hover:bg-surface-muted"
-          onClick={() => openDetail(project.id)}
-        >
-          {project.allocatedConsultants}
-        </button>
+        defaultDetailTab ? (
+          <button
+            type="button"
+            className="rounded-md px-2 py-1 tabular-nums hover:bg-surface-muted"
+            onClick={() => openDetail(project.id)}
+          >
+            {project.allocatedConsultants}
+          </button>
+        ) : (
+          <span className="px-2 py-1 tabular-nums">
+            {project.allocatedConsultants}
+          </span>
+        )
       ),
     },
     {
@@ -371,14 +402,16 @@ export function ProjectsView({
       align: "right",
       cell: (project) => (
         <div className="flex justify-end gap-1">
-          <button
-            type="button"
-            aria-label={`Vínculos e valores de ${project.name}`}
-            onClick={() => openDetail(project.id)}
-            className="rounded-md p-2 text-medium hover:bg-surface-muted"
-          >
-            <Link2 aria-hidden="true" className="size-4" />
-          </button>
+          {defaultDetailTab ? (
+            <button
+              type="button"
+              aria-label={`Vínculos e valores de ${project.name}`}
+              onClick={() => openDetail(project.id)}
+              className="rounded-md p-2 text-medium hover:bg-surface-muted"
+            >
+              <Link2 aria-hidden="true" className="size-4" />
+            </button>
+          ) : null}
           {canManageProjects ? (
             <button
               type="button"
@@ -447,7 +480,9 @@ export function ProjectsView({
 
   // Reset the on-demand tracking cache whenever the open project changes, so a
   // stale snapshot from another project never flashes in the new modal.
-  function openDetail(projectId: string, tab: DetailTab = "ALLOCATIONS") {
+  function openDetail(projectId: string) {
+    if (!defaultDetailTab) return;
+    const tab = defaultDetailTab;
     setTracking(null);
     setTrackingError(null);
     setTrackingLoading(false);
@@ -473,6 +508,7 @@ export function ProjectsView({
   // Initialize the billing form lazily when the Cobrança tab is opened (avoids
   // setState-in-effect; the form holds the user's edits across data refreshes).
   function handleDetailTabChange(next: DetailTab) {
+    if (!allowedDetailTabs.includes(next)) return;
     if (next === "BILLING" && detailProject) {
       setBillingForm(billingConfigToForm(detailProject));
     }
@@ -1027,6 +1063,7 @@ export function ProjectsView({
         canManageReceivables={canManageReceivables}
         canViewTracking={canViewTracking && mode === "db"}
         trackingManagerUserId={trackingManagerUserId}
+        allowedTabs={allowedDetailTabs}
         tracking={tracking}
         trackingLoading={trackingLoading}
         trackingError={trackingError}
@@ -1287,6 +1324,7 @@ function ProjectDetailModal({
   canManageReceivables,
   canViewTracking,
   trackingManagerUserId,
+  allowedTabs,
   tracking,
   trackingLoading,
   trackingError,
@@ -1320,6 +1358,7 @@ function ProjectDetailModal({
   canManageReceivables: boolean;
   canViewTracking: boolean;
   trackingManagerUserId: string | null;
+  allowedTabs: readonly DetailTab[];
   tracking: ProjectTracking | null;
   trackingLoading: boolean;
   trackingError: string | null;
@@ -1368,8 +1407,14 @@ function ProjectDetailModal({
   // reforça o mesmo escopo na server action (defesa em profundidade).
   const showTracking =
     canViewTracking &&
+    allowedTabs.includes("TRACKING") &&
     (trackingManagerUserId == null ||
       project.managerUserId === trackingManagerUserId);
+  // Matriz de permissões: cada chip só aparece se a subtela estiver liberada
+  // (AND com as regras de papel já existentes). O conteúdo também é gated, para
+  // que um estado de aba obsoleto nunca renderize uma subtela negada.
+  const allows = (value: DetailTab) => allowedTabs.includes(value);
+  const showBilling = canEditBillingConfig && allows("BILLING");
 
   return (
     <Modal
@@ -1383,7 +1428,7 @@ function ProjectDetailModal({
           <ActionButton variant="secondary" onClick={onClose}>
             Fechar
           </ActionButton>
-          {tab === "ALLOCATIONS" ? (
+          {!allows(tab) ? null : tab === "ALLOCATIONS" ? (
             <ActionButton
               icon={Link2}
               disabled={!canManageProjects}
@@ -1486,32 +1531,42 @@ function ProjectDetailModal({
         </div>
       ) : null}
       <div className="mb-4 flex flex-wrap gap-2">
-        <FilterChip
-          label="Vínculos"
-          active={tab === "ALLOCATIONS"}
-          onClick={() => onTabChange("ALLOCATIONS")}
-        />
-        <FilterChip
-          label="Skills"
-          active={tab === "SKILLS"}
-          onClick={() => onTabChange("SKILLS")}
-        />
-        <FilterChip
-          label="Aprovação"
-          active={tab === "APPROVAL"}
-          onClick={() => onTabChange("APPROVAL")}
-        />
-        <FilterChip
-          label="Valores de venda"
-          active={tab === "RATES"}
-          onClick={() => onTabChange("RATES")}
-        />
-        <FilterChip
-          label="Recebimentos previstos"
-          active={tab === "RECEIVABLES"}
-          onClick={() => onTabChange("RECEIVABLES")}
-        />
-        {canEditBillingConfig ? (
+        {allows("ALLOCATIONS") ? (
+          <FilterChip
+            label="Vínculos"
+            active={tab === "ALLOCATIONS"}
+            onClick={() => onTabChange("ALLOCATIONS")}
+          />
+        ) : null}
+        {allows("SKILLS") ? (
+          <FilterChip
+            label="Skills"
+            active={tab === "SKILLS"}
+            onClick={() => onTabChange("SKILLS")}
+          />
+        ) : null}
+        {allows("APPROVAL") ? (
+          <FilterChip
+            label="Aprovação"
+            active={tab === "APPROVAL"}
+            onClick={() => onTabChange("APPROVAL")}
+          />
+        ) : null}
+        {allows("RATES") ? (
+          <FilterChip
+            label="Valores de venda"
+            active={tab === "RATES"}
+            onClick={() => onTabChange("RATES")}
+          />
+        ) : null}
+        {allows("RECEIVABLES") ? (
+          <FilterChip
+            label="Recebimentos previstos"
+            active={tab === "RECEIVABLES"}
+            onClick={() => onTabChange("RECEIVABLES")}
+          />
+        ) : null}
+        {showBilling ? (
           <FilterChip
             label="Cobrança"
             active={tab === "BILLING"}
@@ -1526,7 +1581,7 @@ function ProjectDetailModal({
           />
         ) : null}
       </div>
-      {tab === "ALLOCATIONS" ? (
+      {!allows(tab) ? null : tab === "ALLOCATIONS" ? (
         <DataTable
           columns={[
             {

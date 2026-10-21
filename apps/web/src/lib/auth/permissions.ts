@@ -51,3 +51,17 @@ export async function can(
   const matrix = await getCurrentMatrix();
   return matrixAllows(matrix, code, action);
 }
+
+/**
+ * Which of `codes` the current user may perform `action` on, in ONE matrix
+ * read. Used by screens to gate their subtelas (tabs): `{ [code]: boolean }`.
+ */
+export async function canEach<const C extends string>(
+  codes: readonly C[],
+  action: PermissionAction = "view",
+): Promise<Record<C, boolean>> {
+  const matrix = await getCurrentMatrix();
+  const out = {} as Record<C, boolean>;
+  for (const code of codes) out[code] = matrixAllows(matrix, code, action);
+  return out;
+}

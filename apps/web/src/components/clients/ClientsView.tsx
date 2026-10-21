@@ -83,6 +83,11 @@ interface ClientsViewProps {
   canManageClients: boolean;
   canViewFinancials: boolean;
   canManageBillingTypes: boolean;
+  /**
+   * Subtela "Tipos de cobrança" liberada pela matriz (resolvido no servidor).
+   * Omitido = liberada, para manter o comportamento de quem nao passa o flag.
+   */
+  canViewBillingTypes?: boolean;
   cnpjLookupAvailable: boolean;
   logoUploadAvailable: boolean;
 }
@@ -164,6 +169,7 @@ export function ClientsView({
   canManageClients,
   canViewFinancials,
   canManageBillingTypes,
+  canViewBillingTypes = true,
   cnpjLookupAvailable,
   logoUploadAvailable,
 }: ClientsViewProps) {
@@ -174,7 +180,9 @@ export function ClientsView({
   const [localTypes, setLocalTypes] = useState(billingTypes);
   const items = mode === "db" ? clients : localItems;
   const types = mode === "db" ? billingTypes : localTypes;
-  const [tab, setTab] = useState<Tab>("CLIENTS");
+  const [selectedTab, setTab] = useState<Tab>("CLIENTS");
+  // Subtela negada pela matriz nunca fica ativa (nem se o flag mudar depois).
+  const tab: Tab = canViewBillingTypes ? selectedTab : "CLIENTS";
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<"ALL" | "ACTIVE" | "INACTIVE">("ALL");
   const [editingClient, setEditingClient] = useState<ClientItem | null>(null);
@@ -519,11 +527,13 @@ export function ClientsView({
               active={tab === "CLIENTS"}
               onClick={() => setTab("CLIENTS")}
             />
-            <FilterChip
-              label="Tipos de cobrança"
-              active={tab === "BILLING_TYPES"}
-              onClick={() => setTab("BILLING_TYPES")}
-            />
+            {canViewBillingTypes ? (
+              <FilterChip
+                label="Tipos de cobrança"
+                active={tab === "BILLING_TYPES"}
+                onClick={() => setTab("BILLING_TYPES")}
+              />
+            ) : null}
             {tab === "CLIENTS" ? (
               <>
                 {(["ALL", "ACTIVE", "INACTIVE"] as const).map((item) => (

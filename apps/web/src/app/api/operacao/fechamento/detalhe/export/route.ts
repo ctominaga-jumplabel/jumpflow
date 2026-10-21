@@ -1,4 +1,5 @@
 import { requirePermission } from "@/lib/auth/guards";
+import { SUBSCREEN_CODES } from "@/lib/auth/permission-codes";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { buildWorkbook, defineSheet, xlsxResponse } from "@/lib/export/xlsx";
 import { hoursReportFilterSchema } from "@/lib/reports/schemas";
@@ -12,7 +13,8 @@ export const dynamic = "force-dynamic";
 
 /**
  * `.xlsx` export of the "Detalhamento por consultor" tab of the Fechamento
- * Operacional. Same gate as the screen (`OPERACAO_FECHAMENTO` view) and reuses
+ * Operacional. Same gate as the screen (`OPERACAO_FECHAMENTO` view) PLUS the
+ * tab's subtela code (`OPERACAO_FECHAMENTO_DETALHAMENTO` view), and reuses
  * `listOperationDetailRows` with the SAME filter contract as the screen (the
  * `hoursReportFilterSchema` — período, cliente, projeto, consultor, status,
  * atividade, faturável, status de cliente/projeto/consultor, ordenação). No
@@ -21,6 +23,7 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(request: Request) {
   const user = await requirePermission("OPERACAO_FECHAMENTO", "view");
+  await requirePermission(SUBSCREEN_CODES.operationalClosing.detail, "view");
   if (!isDatabaseConfigured()) return noDatabaseResponse();
 
   const url = new URL(request.url);

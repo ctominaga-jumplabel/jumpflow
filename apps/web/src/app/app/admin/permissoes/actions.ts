@@ -43,6 +43,10 @@ function mapPermissionError(code: PermissionErrorCode): ErrorCode {
       return "LAST_ADMIN_PERMISSION";
     case "SYSTEM_ROLE_PROTECTED":
       return "SYSTEM_ROLE_PROTECTED";
+    case "SYSTEM_PERMISSION_PROTECTED":
+      return "SYSTEM_PERMISSION_PROTECTED";
+    case "IN_USE":
+      return "IN_USE";
     case "DUPLICATE_CODE":
       return "DUPLICATE_CODE";
     case "NOT_FOUND":
@@ -221,6 +225,8 @@ const upsertRoleSchema = z.object({
   key: z.string().trim().optional(),
   label: z.string().trim().min(1),
   description: z.string().trim().optional(),
+  /** Create only: clone the matrix of an existing group. */
+  copyFromRoleId: z.string().min(1).nullable().optional(),
 });
 
 export type UpsertRoleFormInput = z.infer<typeof upsertRoleSchema>;
@@ -289,5 +295,78 @@ export async function toggleRoleActive(
     }
     console.error("[permissoes] toggleRoleActive failed", error);
     return { ok: false, error: "UNEXPECTED", message: "Falha ao alterar o grupo." };
+  }
+}
+
+// --- Deletions ---------------------------------------------------------------
+
+const deletePermissionSchema = z.object({ permissionId: z.string().min(1) });
+
+/**
+ * Permanently delete an admin-created feature. Native features are protected
+ * by the domain layer (SYSTEM_PERMISSION_PROTECTED) — they can only be
+ * inactivated.
+ */
+export async function deletePermissionAction(
+  input: z.infer<typeof deletePermissionSchema>,
+): Promise<ActionResult<{ id: string }>> {
+  const user = await requireRole(["ADMIN"]);
+  if (!isDatabaseConfigured()) return noDatabase();
+
+  const parsed = deletePermissionSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: "INVALID_INPUT", message: "Dados inválidos." };
+  }
+  const actor = await resolveDbUser(user);
+  if (!actor) {
+    return { ok: false, error: "FORBIDDEN", message: "Ação não autorizada." };
+  }
+
+  try {
+    const { deletePermission } = await import("@/lib/db/permissions");
+    const result = await deletePermission({ ...parsed.data, actorDbUserId: actor.id });
+    revalidatePath(ROUTE);
+    return { ok: true, data: result };
+  } catch (error) {
+    if (error instanceof PermissionError) {
+      return { ok: false, error: mapPermissionError(error.code), message: error.message };
+    }
+    console.error("[permissoes] deletePermissionAction failed", error);
+    return { ok: false, error: "UNEXPECTED", message: "Falha ao excluir a funcionalidade." };
+  }
+}
+
+const deleteRoleSchema = z.object({ roleId: z.string().min(1) });
+
+/**
+ * Permanently delete a custom access group with no members. System groups are
+ * protected (SYSTEM_ROLE_PROTECTED); groups with users return IN_USE.
+ */
+export async function deleteRoleAction(
+  input: z.infer<typeof deleteRoleSchema>,
+): Promise<ActionResult<{ id: string }>> {
+  const user = await requireRole(["ADMIN"]);
+  if (!isDatabaseConfigured()) return noDatabase();
+
+  const parsed = deleteRoleSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: "INVALID_INPUT", message: "Dados inválidos." };
+  }
+  const actor = await resolveDbUser(user);
+  if (!actor) {
+    return { ok: false, error: "FORBIDDEN", message: "Ação não autorizada." };
+  }
+
+  try {
+    const { deleteRole } = await import("@/lib/db/permissions");
+    const result = await deleteRole({ ...parsed.data, actorDbUserId: actor.id });
+    revalidatePath(ROUTE);
+    return { ok: true, data: result };
+  } catch (error) {
+    if (error instanceof PermissionError) {
+      return { ok: false, error: mapPermissionError(error.code), message: error.message };
+    }
+    console.error("[permissoes] deleteRoleAction failed", error);
+    return { ok: false, error: "UNEXPECTED", message: "Falha ao excluir o grupo." };
   }
 }

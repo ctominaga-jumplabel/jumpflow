@@ -101,6 +101,15 @@ vi.mock("@jumpflow/database", () => ({
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+// Matriz de permissões: libera tudo por padrão; cada teste nega códigos em
+// `perm.denied` para provar a recusa da subtela.
+const perm = vi.hoisted(() => ({ denied: new Set<string>() }));
+vi.mock("@/lib/auth/permissions", () => ({
+  can: vi.fn(async (code: string) => !perm.denied.has(code)),
+  canEach: vi.fn(async (codes: string[]) =>
+    Object.fromEntries(codes.map((code) => [code, !perm.denied.has(code)])),
+  ),
+}));
 
 vi.mock("@/lib/auth/guards", () => ({
   requireUser: vi.fn(async () => h.store.currentUser),
@@ -160,5 +169,20 @@ describe("removeAllocation", () => {
     const result = await removeAllocation({ id: "missing" });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toBe("NOT_FOUND");
+  });
+});
+
+describe("removeAllocation — subtela Vínculos da matriz", () => {
+  afterEach(() => perm.denied.clear());
+
+  it("recusa com FORBIDDEN (sem tocar o banco) quando a matriz nega PROJETOS_EQUIPES", async () => {
+    perm.denied.add("PROJETOS_EQUIPES");
+    h.store.timeEntryCount = 0;
+    const result = await removeAllocation({ id: "alloc-1" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBe("FORBIDDEN");
+    expect(h.store.deleted.allocation).toBe(false);
+    expect(h.store.updates).toHaveLength(0);
+    expect(h.store.audits).toHaveLength(0);
   });
 });

@@ -22,6 +22,8 @@ import { GovernancaView } from "@/components/talent-dashboard/GovernancaView";
 
 export interface TalentDashboardViewProps {
   data: TalentDashboardData;
+  /** Abas liberadas no servidor (papel + matriz), na ordem de exibição. */
+  allowedTabs: readonly TalentTabId[];
 }
 
 /**
@@ -29,8 +31,21 @@ export interface TalentDashboardViewProps {
  * não há banco, abas client-side e o modal de perfil compartilhado. Distribui as
  * fatias tipadas do payload para a sub-view ativa.
  */
-export function TalentDashboardView({ data }: TalentDashboardViewProps) {
-  const [activeTab, setActiveTab] = useState<TalentTabId>(TALENT_TABS[0].id);
+export function TalentDashboardView({
+  data,
+  allowedTabs,
+}: TalentDashboardViewProps) {
+  const tabs = useMemo(
+    () => TALENT_TABS.filter((tab) => allowedTabs.includes(tab.id)),
+    [allowedTabs],
+  );
+  const [selectedTab, setActiveTab] = useState<TalentTabId>(
+    tabs[0]?.id ?? TALENT_TABS[0].id,
+  );
+  // Aba fora das liberadas nunca renderiza: cai na primeira permitida.
+  const activeTab = allowedTabs.includes(selectedTab)
+    ? selectedTab
+    : (tabs[0]?.id ?? null);
   const [selectedConsultantId, setSelectedConsultantId] = useState<
     string | null
   >(null);
@@ -70,7 +85,7 @@ export function TalentDashboardView({ data }: TalentDashboardViewProps) {
         aria-label="Seções do painel de talentos"
         className="flex flex-wrap gap-2"
       >
-        {TALENT_TABS.map((tab) => (
+        {tabs.map((tab) => (
           <FilterChip
             key={tab.id}
             label={tab.label}

@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 
 import { requireRole } from "@/lib/auth/guards";
 import { RECEIVABLES_ROLES } from "@/lib/auth/route-permissions";
+import { SUBSCREEN_CODES } from "@/lib/auth/permission-codes";
+import { can } from "@/lib/auth/permissions";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { formatDate } from "@/lib/format";
 import {
@@ -58,6 +61,11 @@ export default async function ApuracaoPage({
   // Apuração é [ADMIN, FINANCE] (Melhorias v2, RECEIVABLES_ROLES): o
   // AREA_MANAGER não apura/envia — só libera em Pendentes de Fechamento.
   const user = await requireRole(RECEIVABLES_ROLES);
+  // A Apuração faz parte da subtela "Contas a Receber": sem `view` nela na
+  // matriz, a tela inteira é negada (nada é consultado).
+  if (!(await can(SUBSCREEN_CODES.finance.receivables, "view"))) {
+    redirect("/access-denied");
+  }
   const params = (await searchParams) ?? {};
 
   // Gates de papel (a UI só ajusta affordance; o gate real é server-side na

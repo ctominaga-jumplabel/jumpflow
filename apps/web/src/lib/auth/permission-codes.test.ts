@@ -1,5 +1,9 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  SYSTEM_PERMISSION_CODES,
+  isSystemPermissionCode,
   aggregateRolePermissions,
   filterViewableCodes,
   fullControlMatrix,
@@ -76,5 +80,30 @@ describe("fullControlMatrix", () => {
 
   it("answers viewable for any list of codes", () => {
     expect(filterViewableCodes(fullControlMatrix(), ["A", "B"])).toEqual(["A", "B"]);
+  });
+});
+
+describe("SYSTEM_PERMISSION_CODES", () => {
+  // The seed is plain ESM that runs on import, so read its catalog as text.
+  const seed = readFileSync(
+    join(process.cwd(), "../../packages/database/prisma/seed.mjs"),
+    "utf8",
+  );
+  const block = seed.slice(
+    seed.indexOf("const PERMISSION_CATALOG = ["),
+    seed.indexOf("async function seedPermissions"),
+  );
+  const seededCodes = [...block.matchAll(/\{\s*code:\s*"([A-Z0-9_]+)"/g)].map(
+    (m) => m[1],
+  );
+
+  it("matches exactly the codes seeded by PERMISSION_CATALOG", () => {
+    expect(seededCodes.length).toBeGreaterThan(0);
+    expect([...SYSTEM_PERMISSION_CODES].sort()).toEqual([...seededCodes].sort());
+  });
+
+  it("includes the matrix-management code and rejects ad-hoc codes", () => {
+    expect(isSystemPermissionCode(MANAGE_PERMISSIONS_CODE)).toBe(true);
+    expect(isSystemPermissionCode("AUDITORIA_INTERNA")).toBe(false);
   });
 });

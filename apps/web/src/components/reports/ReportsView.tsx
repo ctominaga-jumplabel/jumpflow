@@ -87,6 +87,11 @@ const PAGE_LINK_PARAMS: Record<Tab, string[]> = {
 export interface ReportsViewProps {
   mode: "db" | "demo";
   tab: Tab;
+  /**
+   * Tabs the permission matrix allows (computed on the server). Denied tabs are
+   * left out of the tab bar. Defaults to every tab.
+   */
+  allowedTabs?: readonly Tab[];
   includeFinancials: boolean;
   filterOptions: ReportFilterOptions;
   rawParams: Record<string, string>;
@@ -134,6 +139,7 @@ function buildPageHref(
 export function ReportsView({
   mode,
   tab,
+  allowedTabs,
   includeFinancials,
   filterOptions,
   rawParams,
@@ -156,7 +162,9 @@ export function ReportsView({
           aria-label="Segmentos de relatório"
           className="inline-flex items-center gap-1 rounded-md border border-border bg-surface p-1"
         >
-          {TABS.map((t) => {
+          {TABS.filter(
+            (t) => !allowedTabs || allowedTabs.includes(t.key),
+          ).map((t) => {
             const active = t.key === tab;
             return (
               <a

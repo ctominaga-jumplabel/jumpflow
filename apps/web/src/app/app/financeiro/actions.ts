@@ -5,6 +5,8 @@ import { Prisma, prisma } from "@jumpflow/database";
 import { z, type ZodType } from "zod";
 import type { ActionResult, ErrorCode } from "@/lib/actions/result";
 import { requireRole } from "@/lib/auth/guards";
+import { SUBSCREEN_CODES } from "@/lib/auth/permission-codes";
+import { can } from "@/lib/auth/permissions";
 import { FINANCIAL_ROLES, RECEIVABLES_ROLES } from "@/lib/auth/route-permissions";
 import type { RoleName } from "@/lib/auth/roles";
 import {
@@ -81,6 +83,19 @@ class ActionError extends Error {
     message: string,
   ) {
     super(message);
+  }
+}
+
+/**
+ * Subtela "Contas a Receber" da matriz: as actions que só servem a Apuração
+ * (enviar / marcar faturada) recusam com FORBIDDEN quando ela é negada.
+ */
+async function ensureReceivablesSubscreen(): Promise<void> {
+  if (!(await can(SUBSCREEN_CODES.finance.receivables, "view"))) {
+    throw new ActionError(
+      "FORBIDDEN",
+      "Sem permissão para Contas a Receber.",
+    );
   }
 }
 
@@ -1553,6 +1568,7 @@ export async function enviarApuracao(input: {
     // = [ADMIN, FINANCE]). AREA_MANAGER só LIBERA (fecharApuracao), não envia.
     // A action é o limite real (POST) — defesa em profundidade.
     const user = await requireRole(RECEIVABLES_ROLES);
+    await ensureReceivablesSubscreen();
     const parsed = parseInput(enviarApuracaoSchema, input);
     const dbUser = await resolveDbUser(user);
     const observacoes = parsed.observacoes?.trim() ?? "";
@@ -1746,6 +1762,7 @@ export async function marcarApuracaoFaturada(input: {
   try {
     ensureDatabase();
     const user = await requireRole(RECEIVABLES_ROLES);
+    await ensureReceivablesSubscreen();
     const parsed = parseInput(marcarFaturadoSchema, input);
     const dbUser = await resolveDbUser(user);
 

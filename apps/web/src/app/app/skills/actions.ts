@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import { Prisma, prisma } from "@jumpflow/database";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth/guards";
+import { SUBSCREEN_CODES } from "@/lib/auth/permission-codes";
+import { can } from "@/lib/auth/permissions";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { getConsultantForUser } from "@/lib/db/timesheet";
 import { resolveDbUser } from "@/lib/db/users";
@@ -269,6 +271,24 @@ async function requireConsultant() {
     );
   }
   return { user, consultant };
+}
+
+/**
+ * Escopo de dono + subtela "Meu Currículo" da matriz (SKILLS_CURRICULO). Todas
+ * as actions do currículo servem SÓ essa aba: se a matriz nega a aba, elas
+ * recusam com FORBIDDEN (a aba some da tela, mas a action continua chamável).
+ * As actions de sugestão semanal servem a aba "Skills" e seguem em
+ * requireConsultant().
+ */
+async function requireCurriculumConsultant() {
+  const context = await requireConsultant();
+  if (!(await can(SUBSCREEN_CODES.skills.curriculum, "view"))) {
+    throw new ActionError(
+      "FORBIDDEN",
+      "Seu perfil nao tem acesso ao Meu Curriculo.",
+    );
+  }
+  return context;
 }
 
 export async function generateWeeklySkillSuggestions(
@@ -578,7 +598,7 @@ export interface MyCurriculumView {
 export async function loadMyCurriculum(): Promise<ActionResult<MyCurriculumView>> {
   try {
     ensureDatabase();
-    const { consultant } = await requireConsultant();
+    const { consultant } = await requireCurriculumConsultant();
     const curriculum = await buildConsultantCurriculum(consultant.id);
     if (!curriculum) {
       throw new ActionError("NOT_FOUND", "Curriculo nao encontrado.");
@@ -605,7 +625,7 @@ export async function saveMyCurriculumBio(
       throw new ActionError("INVALID_INPUT", "Revise os campos informados.");
     }
     const parsed = result.data;
-    const { user, consultant } = await requireConsultant();
+    const { user, consultant } = await requireCurriculumConsultant();
     const dbUser = await resolveDbUser(user);
 
     const previous = {
@@ -651,7 +671,7 @@ export async function loadMyExperiences(): Promise<
 > {
   try {
     ensureDatabase();
-    const { consultant } = await requireConsultant();
+    const { consultant } = await requireCurriculumConsultant();
     const rows = await listConsultantExperiences(consultant.id);
     return { ok: true, data: rows };
   } catch (error) {
@@ -670,7 +690,7 @@ export async function saveMyExperience(
       throw new ActionError("INVALID_INPUT", "Revise os campos informados.");
     }
     const parsed = result.data;
-    const { user, consultant } = await requireConsultant();
+    const { user, consultant } = await requireCurriculumConsultant();
     const dbUser = await resolveDbUser(user);
 
     const data = {
@@ -737,7 +757,7 @@ export async function deleteMyExperience(
       throw new ActionError("INVALID_INPUT", "Identificador invalido.");
     }
     const parsed = result.data;
-    const { user, consultant } = await requireConsultant();
+    const { user, consultant } = await requireCurriculumConsultant();
     const dbUser = await resolveDbUser(user);
 
     const previous = await prisma.consultantExperience.findFirst({
@@ -849,7 +869,7 @@ export interface MySkillsView {
 export async function loadMySkills(): Promise<ActionResult<MySkillsView>> {
   try {
     ensureDatabase();
-    const { consultant } = await requireConsultant();
+    const { consultant } = await requireCurriculumConsultant();
     const [rows, catalog] = await Promise.all([
       prisma.consultantSkill.findMany({
         where: { consultantId: consultant.id },
@@ -899,7 +919,7 @@ export async function saveMySkill(
   try {
     ensureDatabase();
     const parsed = mySkillSchema.parse(input);
-    const { user, consultant } = await requireConsultant();
+    const { user, consultant } = await requireCurriculumConsultant();
     const dbUser = await resolveDbUser(user);
 
     const skill = await prisma.skill.findUnique({
@@ -987,7 +1007,7 @@ export async function deleteMySkill(
   try {
     ensureDatabase();
     const parsed = deleteMySkillSchema.parse(input);
-    const { user, consultant } = await requireConsultant();
+    const { user, consultant } = await requireCurriculumConsultant();
     const dbUser = await resolveDbUser(user);
 
     const existing = await prisma.consultantSkill.findUnique({
@@ -1094,7 +1114,7 @@ export async function extractCurriculumFromPdf(
       );
     }
     const parsed = importFileSchema.parse(input);
-    const { user, consultant } = await requireConsultant();
+    const { user, consultant } = await requireCurriculumConsultant();
     const dbUser = await resolveDbUser(user);
 
     if (!parsed.fileName.toLowerCase().endsWith(".pdf")) {
@@ -1214,7 +1234,7 @@ export async function applyCurriculumImport(
   try {
     ensureDatabase();
     const parsed = applyImportSchema.parse(input);
-    const { user, consultant } = await requireConsultant();
+    const { user, consultant } = await requireCurriculumConsultant();
     const dbUser = await resolveDbUser(user);
 
     const weekStart = weekStartOf(startOfUtcDay(new Date()));
@@ -1463,7 +1483,7 @@ export async function loadMyCertificates(): Promise<
 > {
   try {
     ensureDatabase();
-    const { consultant } = await requireConsultant();
+    const { consultant } = await requireCurriculumConsultant();
     const rows = await prisma.certificate.findMany({
       where: { consultantId: consultant.id },
       select: {
@@ -1500,7 +1520,7 @@ export async function loadMyCertificates(): Promise<
 export async function loadMyCases(): Promise<ActionResult<MyCaseView[]>> {
   try {
     ensureDatabase();
-    const { consultant } = await requireConsultant();
+    const { consultant } = await requireCurriculumConsultant();
     const rows = await prisma.case.findMany({
       where: { consultantId: consultant.id },
       select: {
@@ -1531,7 +1551,7 @@ export async function deleteMyCertificate(
   try {
     ensureDatabase();
     const { id } = z.object({ id: idSchema }).parse(input);
-    const { user, consultant } = await requireConsultant();
+    const { user, consultant } = await requireCurriculumConsultant();
     const dbUser = await resolveDbUser(user);
 
     const row = await prisma.certificate.findUnique({
@@ -1579,7 +1599,7 @@ export async function deleteMyCase(
   try {
     ensureDatabase();
     const { id } = z.object({ id: idSchema }).parse(input);
-    const { user, consultant } = await requireConsultant();
+    const { user, consultant } = await requireCurriculumConsultant();
     const dbUser = await resolveDbUser(user);
 
     const row = await prisma.case.findUnique({

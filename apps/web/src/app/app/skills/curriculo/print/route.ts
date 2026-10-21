@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/guards";
+import { SUBSCREEN_CODES } from "@/lib/auth/permission-codes";
+import { can } from "@/lib/auth/permissions";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { getConsultantForUser } from "@/lib/db/timesheet";
 import { buildConsultantCurriculum } from "@/lib/consultants/curriculum";
@@ -17,6 +19,10 @@ import { renderCurriculumHtml } from "@/lib/consultants/curriculum-html";
  */
 export async function GET() {
   const user = await requireUser();
+  // Serve só a aba "Meu Currículo": se a matriz nega a subtela, recusa também.
+  if (!(await can(SUBSCREEN_CODES.skills.curriculum, "view"))) {
+    return new NextResponse("Acesso negado.", { status: 403 });
+  }
   if (!isDatabaseConfigured()) {
     return new NextResponse("Banco de dados nao configurado.", { status: 503 });
   }

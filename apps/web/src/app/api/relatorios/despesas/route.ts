@@ -1,5 +1,7 @@
 import { requireUser } from "@/lib/auth/guards";
 import { isDatabaseConfigured } from "@/lib/db/config";
+import { canEach } from "@/lib/auth/permissions";
+import { SUBSCREEN_CODES } from "@/lib/auth/permission-codes";
 import {
   expensesReportFilterSchema,
   resolveDetailRange,
@@ -8,6 +10,7 @@ import { buildExpensesCsv } from "@/lib/reports/csv";
 import { expenseStatusLabels } from "@/lib/expenses/types";
 import {
   csvResponse,
+  forbiddenResponse,
   noDatabaseResponse,
   invalidInputResponse,
   rangeSlug,
@@ -23,6 +26,10 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   const user = await requireUser();
   if (!isDatabaseConfigured()) return noDatabaseResponse();
+
+  // Relatórios "Despesas" subtela: without matrix `view`, the export refuses.
+  const access = await canEach([SUBSCREEN_CODES.reports.expenses]);
+  if (!access[SUBSCREEN_CODES.reports.expenses]) return forbiddenResponse();
 
   const params = Object.fromEntries(new URL(request.url).searchParams);
   const parsed = expensesReportFilterSchema.safeParse(params);

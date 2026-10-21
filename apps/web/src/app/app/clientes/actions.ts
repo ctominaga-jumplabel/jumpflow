@@ -5,6 +5,11 @@ import { Prisma, prisma } from "@jumpflow/database";
 import type { ZodType } from "zod";
 import type { ActionResult, ErrorCode } from "@/lib/actions/result";
 import { requireRole, requireUser } from "@/lib/auth/guards";
+import {
+  SUBSCREEN_CODES,
+  type PermissionAction,
+} from "@/lib/auth/permission-codes";
+import { can } from "@/lib/auth/permissions";
 import { FINANCIAL_ROLES, hasRole } from "@/lib/auth/route-permissions";
 import type { RoleName } from "@/lib/auth/types";
 import { recordAuditEvent } from "@/lib/db/audit";
@@ -55,6 +60,22 @@ function ensureDatabase(): void {
     throw new ActionError(
       "NO_DATABASE",
       "Banco de dados nao configurado para clientes.",
+    );
+  }
+}
+
+/**
+ * Tipos de cobranca sao uma subtela de Clientes: alem do papel financeiro, a
+ * matriz precisa conceder a acao no codigo da subtela. Soma-se ao guard de
+ * papel (nunca o substitui).
+ */
+async function ensureBillingTypesPermission(
+  action: PermissionAction,
+): Promise<void> {
+  if (!(await can(SUBSCREEN_CODES.clients.billingTypes, action))) {
+    throw new ActionError(
+      "FORBIDDEN",
+      "Sem permissao para gerenciar tipos de cobranca.",
     );
   }
 }
@@ -196,6 +217,7 @@ export async function createBillingType(
   try {
     ensureDatabase();
     await requireRole(FINANCIAL_ROLES);
+    await ensureBillingTypesPermission("create");
     const parsed = parseInput(billingTypeInputSchema, input);
     const billingType = await prisma.billingType.create({ data: parsed });
     const dbUser = await resolveDbUser(await requireUser());
@@ -220,6 +242,7 @@ export async function updateBillingType(
   try {
     ensureDatabase();
     await requireRole(FINANCIAL_ROLES);
+    await ensureBillingTypesPermission("edit");
     const parsed = parseInput(billingTypeUpdateSchema, input);
     const previous = await prisma.billingType.findUnique({
       where: { id: parsed.id },

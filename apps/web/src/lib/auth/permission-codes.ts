@@ -88,6 +88,175 @@ export type ConsultantGroupKey = keyof typeof CONSULTANT_GROUP_CODES;
  */
 export const REPORT_CONSULTANT_FILTER_CODE = "RELATORIOS_CONSULTORES";
 
+/**
+ * Screens that used to be gated only by role (no matrix code). Their menu item
+ * now carries the code, so the layout gate enforces `view`; the route's static
+ * role list still applies on top (the matrix narrows, never widens, these).
+ */
+export const SCREEN_CODES = {
+  cockpit: "OPERACAO_COCKPIT",
+  myInvoices: "MINHAS_NOTAS",
+  reimbursementPolicy: "DESPESAS_POLITICA",
+  billingStatus: "FINANCEIRO_STATUS_FATURAMENTO",
+  menuOrder: "CONFIGURACOES_MENU",
+  autoApproval: "AUTOMACOES",
+  talentDashboard: "PAINEL_TALENTOS",
+  newTimeEntry: "HORAS_LANCAMENTOS",
+} as const;
+
+/**
+ * Subtelas (tabs/sections) of each screen, by the EXACT label the UI shows.
+ * Each one gates `view` of that tab on the server: hidden from the tab bar, its
+ * data is not loaded and its export endpoints refuse. The parent screen's own
+ * code keeps governing the screen and its first/default tab. Born (migration
+ * 20261021120000) as a copy of the parent's grants, so nobody loses a tab.
+ */
+export const SUBSCREEN_CODES = {
+  reports: {
+    hours: "HORAS_RELATORIOS",
+    expenses: "RELATORIOS_DESPESAS",
+    consolidated: "RELATORIOS_CONSOLIDADO",
+  },
+  operationalClosing: {
+    detail: "OPERACAO_FECHAMENTO_DETALHAMENTO",
+  },
+  finance: {
+    receivables: "FINANCEIRO_CONTAS_RECEBER",
+    payables: "FINANCEIRO_CONTAS_PAGAR",
+    billingStatus: "FINANCEIRO_STATUS_FATURAMENTO",
+  },
+  clients: {
+    billingTypes: "CLIENTES_TIPOS_COBRANCA",
+  },
+  coe: {
+    composition: "COE_COMPOSICAO",
+    proposals: "COE_PROPOSTAS",
+    curation: "COE_CURADORIA",
+  },
+  talentDashboard: {
+    talentFinder: "PAINEL_TALENTOS_TALENT_FINDER",
+    skills: "PAINEL_TALENTOS_SKILLS",
+    certifications: "PAINEL_TALENTOS_CERTIFICACOES",
+    consultants: "PAINEL_TALENTOS_CONSULTORES",
+    skillsMatrix: "PAINEL_TALENTOS_MATRIZ_SKILLS",
+    inactive: "PAINEL_TALENTOS_INATIVOS",
+    governance: "PAINEL_TALENTOS_GOVERNANCA",
+  },
+  skills: {
+    curriculum: "SKILLS_CURRICULO",
+    catalog: "SKILLS_CATALOGO",
+  },
+  projects: {
+    links: "PROJETOS_EQUIPES",
+    skills: "PROJETOS_SKILLS",
+    approval: "PROJETOS_APROVACAO",
+    saleValues: "PROJETOS_FINANCEIRO",
+    expectedReceipts: "PROJETOS_RECEBIMENTOS",
+    billing: "PROJETOS_COBRANCA",
+    tracking: "PROJETOS_RELATORIOS",
+  },
+} as const;
+
+/**
+ * Codes of the platform's NATIVE features — the ones seeded by
+ * `PERMISSION_CATALOG` in `packages/database/prisma/seed.mjs` and checked by the
+ * app (navigation gate, guards, server actions). In the admin CRUD they can be
+ * renamed/reordered/inactivated, but their `code` is immutable and they cannot
+ * be deleted: changing either would silently break the guards that read them.
+ * Features created by an admin through the screen are NOT in this set.
+ *
+ * Kept in sync with the seed by `permission-codes.test.ts`.
+ */
+export const SYSTEM_PERMISSION_CODES: ReadonlySet<string> = new Set([
+  "DASHBOARD",
+  "HORAS",
+  "HORAS_LANCAMENTOS",
+  "HORAS_APROVACOES",
+  "HORAS_RELATORIOS",
+  "DESPESAS",
+  "DESPESAS_PAGAMENTO",
+  "SOBREAVISO",
+  "AUSENCIAS",
+  "OPERACAO_FECHAMENTO",
+  "PROJETOS",
+  "PROJETOS_CADASTRO",
+  "PROJETOS_EQUIPES",
+  "PROJETOS_FINANCEIRO",
+  "PROJETOS_RELATORIOS",
+  "CLIENTES",
+  "COMERCIAL",
+  "CONSULTORES",
+  "CONSULTORES_PESSOAIS",
+  "CONSULTORES_DOCUMENTOS",
+  "CONSULTORES_CURRICULO",
+  "CONSULTORES_BANCARIAS",
+  "CONSULTORES_REMUNERACAO",
+  "SKILLS",
+  "COMPETENCIAS",
+  "DISPONIBILIDADE",
+  "CERTIFICADOS",
+  "CHECKPOINT",
+  "OPPORTUNITY",
+  "CASE",
+  "FEEDBACK",
+  "AVALIACOES",
+  "PDI",
+  "CLIMA",
+  "METAS",
+  "UNIVERSIDADE",
+  "ALOCACAO_IA",
+  "RISCO_PROJETOS",
+  "SCORE_CONSULTOR",
+  "COE",
+  "FEED",
+  "APROVACOES",
+  "AUTOMACOES",
+  "RELATORIOS",
+  "RELATORIOS_CONSULTORES",
+  "FINANCEIRO",
+  "FINANCEIRO_COBRANCA",
+  "FINANCEIRO_FECHAMENTO",
+  "PAGAMENTOS",
+  "ADMIN_ACESSOS",
+  "CONFIGURACOES_PERMISSOES",
+  "CONFIGURACOES_NOTIFICACOES",
+  "CONFIGURACOES_FERIADOS",
+  // Screens formerly role-gated + subtelas (migration 20261021120000).
+  "OPERACAO_COCKPIT",
+  "MINHAS_NOTAS",
+  "DESPESAS_POLITICA",
+  "FINANCEIRO_STATUS_FATURAMENTO",
+  "CONFIGURACOES_MENU",
+  "PAINEL_TALENTOS",
+  "RELATORIOS_DESPESAS",
+  "RELATORIOS_CONSOLIDADO",
+  "OPERACAO_FECHAMENTO_DETALHAMENTO",
+  "FINANCEIRO_CONTAS_RECEBER",
+  "FINANCEIRO_CONTAS_PAGAR",
+  "CLIENTES_TIPOS_COBRANCA",
+  "COE_COMPOSICAO",
+  "COE_PROPOSTAS",
+  "COE_CURADORIA",
+  "PAINEL_TALENTOS_TALENT_FINDER",
+  "PAINEL_TALENTOS_SKILLS",
+  "PAINEL_TALENTOS_CERTIFICACOES",
+  "PAINEL_TALENTOS_CONSULTORES",
+  "PAINEL_TALENTOS_MATRIZ_SKILLS",
+  "PAINEL_TALENTOS_INATIVOS",
+  "PAINEL_TALENTOS_GOVERNANCA",
+  "SKILLS_CURRICULO",
+  "SKILLS_CATALOGO",
+  "PROJETOS_SKILLS",
+  "PROJETOS_APROVACAO",
+  "PROJETOS_RECEBIMENTOS",
+  "PROJETOS_COBRANCA",
+]);
+
+/** Whether `code` is a native (seeded) feature — immutable code, not deletable. */
+export function isSystemPermissionCode(code: string): boolean {
+  return SYSTEM_PERMISSION_CODES.has(code);
+}
+
 const EMPTY_GRANT: PermissionGrant = {
   view: false,
   create: false,

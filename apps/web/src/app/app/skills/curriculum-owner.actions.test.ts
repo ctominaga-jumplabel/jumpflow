@@ -72,6 +72,15 @@ vi.mock("@jumpflow/database", () => ({
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+// Matriz de permissões: libera tudo por padrão; cada teste nega códigos em
+// `perm.denied` para provar a recusa da subtela.
+const perm = vi.hoisted(() => ({ denied: new Set<string>() }));
+vi.mock("@/lib/auth/permissions", () => ({
+  can: vi.fn(async (code: string) => !perm.denied.has(code)),
+  canEach: vi.fn(async (codes: string[]) =>
+    Object.fromEntries(codes.map((code) => [code, !perm.denied.has(code)])),
+  ),
+}));
 
 vi.mock("@/lib/db/config", () => ({ isDatabaseConfigured: () => true }));
 
@@ -227,5 +236,22 @@ describe("saveMyCurriculumBio — escopo de dono", () => {
     const result = await saveMyCurriculumBio({ headline: "a".repeat(161), summary: undefined });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toBe("INVALID_INPUT");
+  });
+});
+
+describe("Meu Currículo — subtela da matriz", () => {
+  afterEach(() => perm.denied.clear());
+
+  it("recusa carregar e salvar com FORBIDDEN quando a matriz nega SKILLS_CURRICULO", async () => {
+    perm.denied.add("SKILLS_CURRICULO");
+    const loaded = await loadMyCurriculum();
+    expect(loaded.ok).toBe(false);
+    if (!loaded.ok) expect(loaded.error).toBe("FORBIDDEN");
+    const saved = await saveMyCurriculumBio({ headline: "X", summary: undefined });
+    expect(saved.ok).toBe(false);
+    if (!saved.ok) expect(saved.error).toBe("FORBIDDEN");
+    const mine = h.store.consultants.find((c) => c.id === "con-mine")!;
+    expect(mine.curriculumHeadline).not.toBe("X");
+    expect(h.store.audits).toHaveLength(0);
   });
 });

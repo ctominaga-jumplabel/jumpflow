@@ -1,8 +1,14 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { FinancialOverview } from "@/components/financial/FinancialOverview";
+import {
+  FinancialOverview,
+  type FinanceTabId,
+} from "@/components/financial/FinancialOverview";
 import { requireRole } from "@/lib/auth/guards";
 import { RECEIVABLES_ROLES, hasRole } from "@/lib/auth/route-permissions";
+import { SUBSCREEN_CODES } from "@/lib/auth/permission-codes";
+import { canEach } from "@/lib/auth/permissions";
 import { BILLABLE_MANAGER_ROLES } from "@/lib/auth/billable-roles";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { isStorageConfigured } from "@/lib/storage/provider";
@@ -13,6 +19,17 @@ import {
 } from "@/lib/financial/receivables-journey-core";
 
 export const metadata: Metadata = { title: "Financeiro" };
+
+/**
+ * Abas do Financeiro → subtela da matriz que governa cada uma. As TRÊS são
+ * subtelas (inclusive a primeira), então todas são checadas; a ordem aqui é a
+ * ordem das abas e define o fallback (primeira permitida).
+ */
+const FINANCE_TAB_CODES = [
+  ["receber", SUBSCREEN_CODES.finance.receivables],
+  ["pagar", SUBSCREEN_CODES.finance.payables],
+  ["pendentes", SUBSCREEN_CODES.finance.billingStatus],
+] as const satisfies ReadonlyArray<readonly [FinanceTabId, string]>;
 
 /**
  * Período default da aba Contas a Receber = MÊS ATUAL (mockup 02: "01/07 até
@@ -88,7 +105,22 @@ export default async function FinanceiroPage({
 
   const databaseConfigured = isDatabaseConfigured();
   const params = (await searchParams) ?? {};
-  const tab = parseSingle(params.tab);
+
+  // Subtelas da matriz (uma leitura): uma aba só aparece — e só tem seus dados
+  // carregados — se a matriz conceder `view` no código dela. Nenhuma permitida
+  // → /access-denied. A aba pedida (?tab=) negada cai na primeira permitida
+  // (inclui links do menu, ex.: "Contas a Pagar" = ?tab=pagar).
+  const tabGrants = await canEach(FINANCE_TAB_CODES.map(([, code]) => code));
+  const allowedTabs: FinanceTabId[] = FINANCE_TAB_CODES.filter(
+    ([, code]) => tabGrants[code],
+  ).map(([id]) => id);
+  if (allowedTabs.length === 0) redirect("/access-denied");
+  const requestedTab = parseSingle(params.tab);
+  const tab: FinanceTabId =
+    allowedTabs.find((id) => id === requestedTab) ?? allowedTabs[0];
+  const showReceber = allowedTabs.includes("receber");
+  const showPagar = allowedTabs.includes("pagar");
+  const showPendentes = allowedTabs.includes("pendentes");
   const canEditBillable = hasRole(user, BILLABLE_MANAGER_ROLES);
   // A liberação (CLOSE) é do Gerente de Área/ADMIN; o gate real é server-side na
   // action `fecharApuracao`. Aqui a UI só decide a affordance do botão "Liberar".
@@ -134,46 +166,51 @@ export default async function FinanceiroPage({
     );
     const { getReportFilterOptions } = await import("@/lib/db/reports");
 
+    // Só consulta os dados das abas permitidas pela matriz.
     const [
       receivablesResult,
       filterOptionsResult,
       financeExpensesResult,
       pendingResult,
     ] = await Promise.all([
-      getReceivablesOverview(user, filter),
-      getReportFilterOptions(user),
-      listFinanceExpenses().then((r) => r.expenses),
-      listPendingClosings(user, pendingCompetence),
+      showReceber ? getReceivablesOverview(user, filter) : undefined,
+      showReceber ? getReportFilterOptions(user) : undefined,
+      showPagar
+        ? listFinanceExpenses().then((r) => r.expenses)
+        : undefined,
+      showPendentes ? listPendingClosings(user, pendingCompetence) : undefined,
     ]);
     receivables = receivablesResult;
     receivablesFilterOptions = filterOptionsResult;
     financeExpenses = financeExpensesResult;
-    pendingClosings = {
+    pendingClosings = pendingResult && {
       rows: pendingResult.rows,
       month: pendingResult.month,
       year: pendingResult.year,
       pendingCount: pendingResult.pendingCount,
     };
 
-    // Exportar Timesheet: reaproveita o XLSX de Relatórios com os filtros da
-    // tela (status=APPROVED). Com exatamente 1 projeto, fixa `projectId`; com
-    // múltiplos, OMITE `projectId` para exportar o recorte cliente+período (o
-    // schema de Relatórios aceita um único projectId).
-    const timesheetQuery = new URLSearchParams();
-    if (filter.from) timesheetQuery.set("from", filter.from);
-    if (filter.to) timesheetQuery.set("to", filter.to);
-    if (filter.clientId) timesheetQuery.set("clientId", filter.clientId);
-    timesheetQuery.set("status", "APPROVED");
-    if (filter.projectIds.length === 1) {
-      timesheetQuery.set("projectId", filter.projectIds[0]);
-    }
-    // `layout=client`: mesmo layout do print/anexo do e-mail (Contas a Receber).
-    timesheetQuery.set("layout", "client");
-    timesheetExportHref = `/api/relatorios/horas/xlsx?${timesheetQuery.toString()}`;
+    if (showReceber) {
+      // Exportar Timesheet: reaproveita o XLSX de Relatórios com os filtros da
+      // tela (status=APPROVED). Com exatamente 1 projeto, fixa `projectId`; com
+      // múltiplos, OMITE `projectId` para exportar o recorte cliente+período (o
+      // schema de Relatórios aceita um único projectId).
+      const timesheetQuery = new URLSearchParams();
+      if (filter.from) timesheetQuery.set("from", filter.from);
+      if (filter.to) timesheetQuery.set("to", filter.to);
+      if (filter.clientId) timesheetQuery.set("clientId", filter.clientId);
+      timesheetQuery.set("status", "APPROVED");
+      if (filter.projectIds.length === 1) {
+        timesheetQuery.set("projectId", filter.projectIds[0]);
+      }
+      // `layout=client`: mesmo layout do print/anexo do e-mail (Contas a Receber).
+      timesheetQuery.set("layout", "client");
+      timesheetExportHref = `/api/relatorios/horas/xlsx?${timesheetQuery.toString()}`;
 
-    // Ver Apuração (tela da Wave C): preserva os filtros na query (projectIds
-    // repetidos, um por projeto selecionado).
-    apuracaoHref = `/app/financeiro/apuracao?${buildQuery(filter).toString()}`;
+      // Ver Apuração (tela da Wave C): preserva os filtros na query (projectIds
+      // repetidos, um por projeto selecionado).
+      apuracaoHref = `/app/financeiro/apuracao?${buildQuery(filter).toString()}`;
+    }
   }
 
   return (
@@ -203,7 +240,10 @@ export default async function FinanceiroPage({
         financeExpenses={financeExpenses}
         expensesStorageAvailable={databaseConfigured && isStorageConfigured()}
         defaultTab={tab}
-        pagarExportHref={databaseConfigured ? "/api/financeiro/pagar/export" : undefined}
+        allowedTabs={allowedTabs}
+        pagarExportHref={
+          databaseConfigured && showPagar ? "/api/financeiro/pagar/export" : undefined
+        }
         pendingClosings={pendingClosings}
         canClosePending={canClosePending}
         canRevertPending={hasRole(user, ["ADMIN", "FINANCE"])}

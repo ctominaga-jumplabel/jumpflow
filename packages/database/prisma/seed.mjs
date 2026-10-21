@@ -1115,23 +1115,30 @@ const CONSULTANT_ALLOWED_CODES = new Set([
   "CERTIFICADOS",
   // Onda D: o consultor solicita/cancela as próprias ausências nesta tela.
   "AUSENCIAS",
+  // Subtelas/telas do consultor que passaram a ser checadas pela matriz
+  // (migração 20261021120000): Novo lançamento de horas, Minhas Notas e as
+  // abas Meu Currículo/Catálogo de Skills (o Catálogo segue role-gated).
+  "HORAS_LANCAMENTOS",
+  "MINHAS_NOTAS",
+  "SKILLS_CURRICULO",
+  "SKILLS_CATALOGO",
 ]);
 
 // Each entry: code, name, module (display group), parent code (hierarchy),
 // sortOrder and the role sets per action. ADMIN is added to every action set
 // automatically (platform owner = full control), so it is omitted below.
 const PERMISSION_CATALOG = [
-  { code: "DASHBOARD", name: "Dashboard", module: "Operação", sort: 0, view: ALL_ROLES },
+  { code: "DASHBOARD", name: "Dashboard", module: "Relatórios & Análises", sort: 0, view: ALL_ROLES },
 
   { code: "HORAS", name: "Horas", module: "Horas", sort: 10, view: ALL_ROLES, create: ALL_ROLES, edit: ALL_ROLES, del: ["AREA_MANAGER", "PROJECT_MANAGER"] },
-  { code: "HORAS_LANCAMENTOS", name: "Lançamentos", module: "Horas", parent: "HORAS", sort: 11, view: ALL_ROLES, create: ALL_ROLES, edit: ALL_ROLES, del: ALL_ROLES },
-  { code: "HORAS_APROVACOES", name: "Aprovações", module: "Horas", parent: "HORAS", sort: 12, view: APPROVALS, edit: APPROVALS },
-  { code: "HORAS_RELATORIOS", name: "Relatórios de horas", module: "Horas", parent: "HORAS", sort: 13, view: ALL_ROLES },
+  { code: "HORAS_LANCAMENTOS", name: "Novo lançamento", module: "Horas", parent: "HORAS", sort: 11, view: ALL_ROLES, create: ALL_ROLES, edit: ALL_ROLES, del: ALL_ROLES },
+  { code: "HORAS_APROVACOES", name: "Aprovações de horas", module: "Horas", parent: "HORAS", sort: 12, view: APPROVALS, edit: APPROVALS, active: false },
+  { code: "HORAS_RELATORIOS", name: "Horas", module: "Relatórios & Análises", parent: "RELATORIOS", sort: 101, view: ALL_ROLES },
 
   { code: "DESPESAS", name: "Despesas", module: "Despesas", sort: 20, view: ALL_ROLES, create: ALL_ROLES, edit: ALL_ROLES, del: ["FINANCE"] },
-  { code: "DESPESAS_PAGAMENTO", name: "Status de pagamento", module: "Despesas", parent: "DESPESAS", sort: 21, view: FINANCIAL, edit: FINANCIAL },
+  { code: "DESPESAS_PAGAMENTO", name: "Status de pagamento", module: "Despesas", parent: "DESPESAS", sort: 21, view: FINANCIAL, edit: FINANCIAL, active: false },
 
-  { code: "SOBREAVISO", name: "Sobreaviso", module: "Operação", sort: 22, view: ALL_ROLES, create: ALL_ROLES, edit: APPROVALS, del: ALL_ROLES },
+  { code: "SOBREAVISO", name: "Sobreaviso", module: "Horas", parent: "HORAS", sort: 14, view: ALL_ROLES, create: ALL_ROLES, edit: APPROVALS, del: ALL_ROLES, active: false },
   // Ausências (Onda D): consultor solicita as próprias (create/view); a decisão
   // (edit) e a visão da fila são de PEOPLE (ADMIN implícito). O CONSULTANT vê a
   // tela via allow-list; a decisão é enforced no servidor (requireRole).
@@ -1140,29 +1147,29 @@ const PERMISSION_CATALOG = [
   // marcação/reabertura (edit) é dos papéis que tocam a operação do projeto.
   { code: "OPERACAO_FECHAMENTO", name: "Fechamento Operacional", module: "Operação", sort: 24, view: ["AREA_MANAGER", "PROJECT_MANAGER", "FINANCE", "PEOPLE"], edit: ["AREA_MANAGER", "PROJECT_MANAGER"] },
 
-  { code: "PROJETOS", name: "Projetos", module: "Projetos", sort: 30, view: ALL_ROLES, create: PROJECT_WRITE, edit: PROJECT_WRITE, del: ["AREA_MANAGER"] },
-  { code: "PROJETOS_CADASTRO", name: "Cadastro", module: "Projetos", parent: "PROJETOS", sort: 31, view: ALL_ROLES, create: PROJECT_WRITE, edit: PROJECT_WRITE, del: ["AREA_MANAGER"] },
-  { code: "PROJETOS_EQUIPES", name: "Equipes / Alocação", module: "Projetos", parent: "PROJETOS", sort: 32, view: ALL_ROLES, create: PROJECT_WRITE, edit: PROJECT_WRITE, del: PROJECT_WRITE },
-  { code: "PROJETOS_FINANCEIRO", name: "Financeiro do projeto", module: "Projetos", parent: "PROJETOS", sort: 33, view: FINANCIAL, edit: FINANCIAL },
-  { code: "PROJETOS_RELATORIOS", name: "Relatórios de projeto", module: "Projetos", parent: "PROJETOS", sort: 34, view: ALL_ROLES },
+  { code: "PROJETOS", name: "Projetos", module: "Projetos & Clientes", sort: 30, view: ALL_ROLES, create: PROJECT_WRITE, edit: PROJECT_WRITE, del: ["AREA_MANAGER"] },
+  { code: "PROJETOS_CADASTRO", name: "Cadastro", module: "Projetos & Clientes", parent: "PROJETOS", sort: 31, view: ALL_ROLES, create: PROJECT_WRITE, edit: PROJECT_WRITE, del: ["AREA_MANAGER"], active: false },
+  { code: "PROJETOS_EQUIPES", name: "Vínculos", module: "Projetos & Clientes", parent: "PROJETOS", sort: 32, view: ALL_ROLES, create: PROJECT_WRITE, edit: PROJECT_WRITE, del: PROJECT_WRITE },
+  { code: "PROJETOS_FINANCEIRO", name: "Valores de venda", module: "Projetos & Clientes", parent: "PROJETOS", sort: 33, view: SALE_RATE, edit: FINANCIAL },
+  { code: "PROJETOS_RELATORIOS", name: "Acompanhamento", module: "Projetos & Clientes", parent: "PROJETOS", sort: 34, view: ALL_ROLES },
 
-  { code: "CLIENTES", name: "Clientes", module: "Clientes", sort: 40, view: CLIENT_ACCESS, create: CLIENT_ACCESS, edit: CLIENT_ACCESS, del: ADMIN_ONLY },
+  { code: "CLIENTES", name: "Clientes", module: "Projetos & Clientes", sort: 40, view: CLIENT_ACCESS, create: CLIENT_ACCESS, edit: CLIENT_ACCESS, del: ADMIN_ONLY },
 
-  { code: "COMERCIAL", name: "Comercial", module: "Comercial", sort: 50, view: SALE_RATE, create: SALE_RATE, edit: SALE_RATE },
+  { code: "COMERCIAL", name: "Comercial", module: "Projetos & Clientes", sort: 50, view: SALE_RATE, create: SALE_RATE, edit: SALE_RATE },
 
   { code: "CONSULTORES", name: "Consultores", module: "Pessoas", sort: 60, view: ALL_ROLES, create: PEOPLE_MANAGE.concat("AREA_MANAGER"), edit: PEOPLE_MANAGE.concat("AREA_MANAGER"), del: ADMIN_ONLY },
   // M1: grupos do cadastro do consultor, cada um liberável pela Matriz. "Pessoais"
   // e "Currículo" têm leitura ampla (CONSULTANT_PROFILE_VIEW) e gestão por
   // Financeiro+People; "Documentações" e "Contas bancárias" ficam restritos a
   // Financeiro+People. "Remuneração" (abaixo) é a quinta divisão.
-  { code: "CONSULTORES_PESSOAIS", name: "Dados pessoais", module: "Pessoas", parent: "CONSULTORES", sort: 60, view: CONSULTANT_PROFILE_VIEW, create: FINANCIAL_PEOPLE, edit: FINANCIAL_PEOPLE, del: ADMIN_ONLY },
+  { code: "CONSULTORES_PESSOAIS", name: "Informações pessoais", module: "Pessoas", parent: "CONSULTORES", sort: 60, view: CONSULTANT_PROFILE_VIEW, create: FINANCIAL_PEOPLE, edit: FINANCIAL_PEOPLE, del: ADMIN_ONLY },
   { code: "CONSULTORES_DOCUMENTOS", name: "Documentações", module: "Pessoas", parent: "CONSULTORES", sort: 60, view: FINANCIAL_PEOPLE, create: FINANCIAL_PEOPLE, edit: FINANCIAL_PEOPLE, del: FINANCIAL_PEOPLE },
   { code: "CONSULTORES_CURRICULO", name: "Currículo", module: "Pessoas", parent: "CONSULTORES", sort: 60, view: CONSULTANT_PROFILE_VIEW, create: FINANCIAL_PEOPLE, edit: FINANCIAL_PEOPLE, del: FINANCIAL_PEOPLE },
   { code: "CONSULTORES_BANCARIAS", name: "Contas bancárias", module: "Pessoas", parent: "CONSULTORES", sort: 60, view: FINANCIAL_PEOPLE, create: FINANCIAL_PEOPLE, edit: FINANCIAL_PEOPLE, del: FINANCIAL_PEOPLE },
   // Remuneração do consultor (pontual + acordada) dentro do cadastro. Sub-seção
   // financeira gerenciável pela Matriz: Financeiro + People/DP. Não expõe demais
   // campos financeiros (valor hora/custo/margem), que ficam em outros codes.
-  { code: "CONSULTORES_REMUNERACAO", name: "Remuneração do consultor", module: "Pessoas", parent: "CONSULTORES", sort: 60, view: FINANCIAL_PEOPLE, create: FINANCIAL_PEOPLE, edit: FINANCIAL_PEOPLE, del: FINANCIAL_PEOPLE },
+  { code: "CONSULTORES_REMUNERACAO", name: "Valores e remuneração", module: "Pessoas", parent: "CONSULTORES", sort: 60, view: FINANCIAL_PEOPLE, create: FINANCIAL_PEOPLE, edit: FINANCIAL_PEOPLE, del: FINANCIAL_PEOPLE },
   { code: "SKILLS", name: "Skills", module: "Pessoas", sort: 61, view: ALL_ROLES, create: ALL_ROLES, edit: ALL_ROLES },
   { code: "COMPETENCIAS", name: "Competências", module: "Pessoas", sort: 62, view: COMPETENCY_READ, create: COMPETENCY_WRITE, edit: COMPETENCY_WRITE, del: COMPETENCY_WRITE },
   { code: "DISPONIBILIDADE", name: "Disponibilidade", module: "Pessoas", sort: 63, view: AVAILABILITY_READ },
@@ -1174,20 +1181,20 @@ const PERMISSION_CATALOG = [
   // checkpoints SHARED — com conteúdo REDIGIDO (sem transcrição/notas crus nem
   // candidatos), enforced pelo read-scope "subject" + canViewCheckpointRaw=false.
   // Oportunidade/Case continuam INTERNOS (só gestão) + handoff manual.
-  { code: "CHECKPOINT", name: "Checkpoint / 1-on-1", module: "Pessoas", sort: 65, view: TALENT_READ, create: TALENT_MANAGE, edit: TALENT_MANAGE, del: ["PEOPLE"] },
-  { code: "OPPORTUNITY", name: "Oportunidades", module: "Pessoas", sort: 66, view: TALENT_MANAGE, create: TALENT_MANAGE, edit: TALENT_MANAGE, del: ["PEOPLE"] },
-  { code: "CASE", name: "Cases", module: "Pessoas", sort: 67, view: TALENT_MANAGE, create: TALENT_MANAGE, edit: TALENT_MANAGE, del: ["PEOPLE"] },
+  { code: "CHECKPOINT", name: "Checkpoints", module: "Pessoas", sort: 65, view: TALENT_READ, create: TALENT_MANAGE, edit: TALENT_MANAGE, del: ["PEOPLE"] },
+  { code: "OPPORTUNITY", name: "Oportunidades", module: "Pessoas", parent: "CHECKPOINT", sort: 66, view: TALENT_MANAGE, create: TALENT_MANAGE, edit: TALENT_MANAGE, del: ["PEOPLE"] },
+  { code: "CASE", name: "Cases", module: "Pessoas", parent: "CHECKPOINT", sort: 67, view: TALENT_MANAGE, create: TALENT_MANAGE, edit: TALENT_MANAGE, del: ["PEOPLE"] },
 
-  { code: "FEEDBACK", name: "Feedback contínuo", module: "Desenvolvimento", sort: 70, view: TALENT_READ, create: TALENT_MANAGE, edit: TALENT_MANAGE },
+  { code: "FEEDBACK", name: "Feedback", module: "Desenvolvimento", sort: 70, view: TALENT_READ, create: TALENT_MANAGE, edit: TALENT_MANAGE },
   { code: "AVALIACOES", name: "Avaliações", module: "Desenvolvimento", sort: 71, view: TALENT_READ, create: PEOPLE_MANAGE, edit: PEOPLE_MANAGE },
   { code: "PDI", name: "PDI", module: "Desenvolvimento", sort: 72, view: TALENT_READ, create: TALENT_MANAGE, edit: TALENT_MANAGE },
-  { code: "CLIMA", name: "Clima / NPS", module: "Desenvolvimento", sort: 73, view: ["PEOPLE", "AREA_MANAGER", "CONSULTANT"], create: PEOPLE_MANAGE, edit: PEOPLE_MANAGE },
-  { code: "METAS", name: "Metas e OKRs", module: "Desenvolvimento", sort: 74, view: TALENT_READ, create: TALENT_MANAGE, edit: TALENT_MANAGE },
-  { code: "UNIVERSIDADE", name: "Universidade Jump", module: "Desenvolvimento", sort: 75, view: ALL_ROLES, create: PEOPLE_MANAGE, edit: PEOPLE_MANAGE },
+  { code: "CLIMA", name: "Clima", module: "Desenvolvimento", sort: 73, view: ["PEOPLE", "AREA_MANAGER", "CONSULTANT"], create: PEOPLE_MANAGE, edit: PEOPLE_MANAGE },
+  { code: "METAS", name: "Metas", module: "Desenvolvimento", sort: 74, view: TALENT_READ, create: TALENT_MANAGE, edit: TALENT_MANAGE },
+  { code: "UNIVERSIDADE", name: "JumpAcademy", module: "Desenvolvimento", sort: 75, view: ALL_ROLES, create: PEOPLE_MANAGE, edit: PEOPLE_MANAGE },
 
-  { code: "ALOCACAO_IA", name: "IA de Alocação", module: "Inteligência", sort: 80, view: PROJECT_WRITE },
-  { code: "RISCO_PROJETOS", name: "Risco de Projetos", module: "Inteligência", sort: 81, view: ["AREA_MANAGER", "PROJECT_MANAGER", "FINANCE"] },
-  { code: "SCORE_CONSULTOR", name: "Score do Consultor", module: "Inteligência", sort: 82, view: ["PEOPLE", "AREA_MANAGER", "FINANCE", "CONSULTANT"] },
+  { code: "ALOCACAO_IA", name: "IA de Alocação", module: "Relatórios & Análises", sort: 80, view: PROJECT_WRITE },
+  { code: "RISCO_PROJETOS", name: "Risco de Projetos", module: "Relatórios & Análises", sort: 81, view: ["AREA_MANAGER", "PROJECT_MANAGER", "FINANCE"] },
+  { code: "SCORE_CONSULTOR", name: "Score", module: "Relatórios & Análises", sort: 82, view: ["PEOPLE", "AREA_MANAGER", "FINANCE", "CONSULTANT"] },
   // COE — Centro Operacional de Excelência. SÓ `view` é semeado, de propósito.
   // O módulo tem DUAS escritas com fronteiras diferentes — curar o núcleo
   // (ADMIN/PEOPLE/AREA_MANAGER) e propor time (PROJECT_WRITE) — e um único code
@@ -1196,32 +1203,64 @@ const PERMISSION_CATALOG = [
   // sugeriria um controle que a matriz não exerce (revogar não bloquearia
   // nada), então não semeamos. Separar em codes-filhos (nos moldes de
   // CONSULTORES_*) é a evolução natural se a matriz precisar governá-las.
-  { code: "COE", name: "COE — Centro Operacional de Excelência", module: "Inteligência", sort: 83, view: [...new Set([...PROJECT_WRITE, "PEOPLE"])] },
+  { code: "COE", name: "Painel COE", module: "Inteligência", sort: 83, view: [...new Set([...PROJECT_WRITE, "PEOPLE"])] },
 
   // Feed social interno (Melhoria #5, fatia 1). Todos os usuários ativos veem,
   // postam e editam (edição do próprio conteúdo; pin/moderação são refinados na
   // app). del = moderação: ADMIN + PEOPLE.
   { code: "FEED", name: "Feed", module: "Comunicação", sort: 85, view: ALL_ROLES, create: ALL_ROLES, edit: ALL_ROLES, del: ["PEOPLE"] },
 
-  { code: "APROVACOES", name: "Aprovações", module: "Aprovações", sort: 90, view: APPROVALS, edit: APPROVALS },
-  { code: "AUTOMACOES", name: "Automações", module: "Aprovações", sort: 91, view: AUTOMATION, edit: AUTOMATION },
+  { code: "APROVACOES", name: "Aprovações", module: "Operação", sort: 90, view: APPROVALS, edit: APPROVALS },
+  { code: "AUTOMACOES", name: "Regras de aprovação automática", module: "Administração", sort: 124, view: AUTOMATION, edit: AUTOMATION },
 
-  { code: "RELATORIOS", name: "Relatórios", module: "Relatórios", sort: 100, view: ALL_ROLES },
+  { code: "RELATORIOS", name: "Relatórios", module: "Relatórios & Análises", sort: 100, view: ALL_ROLES },
   // Filtro por consultor nos relatórios = escopo amplo ("todos os consultores").
   // Antes implícito nos papéis amplos (ADMIN/AREA_MANAGER/FINANCE); agora também
   // liberável pela Matriz a People/DP. NÃO libera colunas financeiras.
-  { code: "RELATORIOS_CONSULTORES", name: "Filtro por consultor", module: "Relatórios", parent: "RELATORIOS", sort: 101, view: FINANCIAL_PEOPLE },
+  { code: "RELATORIOS_CONSULTORES", name: "Filtro por consultor", module: "Relatórios & Análises", parent: "RELATORIOS", sort: 104, view: FINANCIAL_PEOPLE },
 
   { code: "FINANCEIRO", name: "Financeiro", module: "Financeiro", sort: 110, view: FINANCIAL, create: FINANCIAL, edit: FINANCIAL },
   { code: "FINANCEIRO_COBRANCA", name: "Cobrança de projetos", module: "Financeiro", parent: "FINANCEIRO", sort: 111, view: FINANCIAL, edit: FINANCIAL },
-  { code: "FINANCEIRO_FECHAMENTO", name: "Fechamento mensal", module: "Financeiro", parent: "FINANCEIRO", sort: 112, view: FINANCIAL, edit: FINANCIAL },
+  { code: "FINANCEIRO_FECHAMENTO", name: "Fechamento mensal", module: "Financeiro", parent: "FINANCEIRO", sort: 112, view: FINANCIAL, edit: FINANCIAL, active: false },
   { code: "PAGAMENTOS", name: "Pagamentos", module: "Financeiro", sort: 113, view: FINANCIAL, edit: FINANCIAL },
 
-  { code: "ADMIN_ACESSOS", name: "Acessos (usuários e convites)", module: "Administração", sort: 120, view: ADMIN_ONLY, create: ADMIN_ONLY, edit: ADMIN_ONLY, del: ADMIN_ONLY },
+  { code: "ADMIN_ACESSOS", name: "Acessos", module: "Administração", sort: 120, view: ADMIN_ONLY, create: ADMIN_ONLY, edit: ADMIN_ONLY, del: ADMIN_ONLY },
   { code: "CONFIGURACOES_PERMISSOES", name: "Matriz de Permissões", module: "Administração", sort: 121, view: ADMIN_ONLY, edit: ADMIN_ONLY },
   { code: "CONFIGURACOES_NOTIFICACOES", name: "Regras de Notificação", module: "Administração", sort: 122, view: ADMIN_ONLY, create: ADMIN_ONLY, edit: ADMIN_ONLY, del: ADMIN_ONLY },
   // Feriados (Onda A-ext): calendário operacional gerido por ADMIN + PEOPLE (DP).
   { code: "CONFIGURACOES_FERIADOS", name: "Feriados", module: "Administração", sort: 123, view: PEOPLE_MANAGE, create: PEOPLE_MANAGE, edit: PEOPLE_MANAGE, del: PEOPLE_MANAGE },
+  // --- Telas antes role-gated + subtelas (migração 20261021120000) ---------
+  // Cada subtela nasce com os MESMOS papéis da tela pai (em prod, a migração
+  // copia as células atuais do pai), então ninguém perde aba no dia 1. A
+  // subtela controla a visibilidade (view) da aba; escrita segue a tela/papel.
+  { code: "MINHAS_NOTAS", name: "Minhas Notas", module: "Despesas", sort: 25, view: ["CONSULTANT", "AREA_MANAGER", "FINANCE"] },
+  { code: "DESPESAS_POLITICA", name: "Política de Reembolso", module: "Despesas", parent: "DESPESAS", sort: 22, view: ["AREA_MANAGER", "FINANCE", "PEOPLE"] },
+  { code: "OPERACAO_COCKPIT", name: "Cockpit do Gestor", module: "Operação", sort: 25, view: ["AREA_MANAGER", "PROJECT_MANAGER"] },
+  { code: "OPERACAO_FECHAMENTO_DETALHAMENTO", name: "Detalhamento por consultor", module: "Operação", parent: "OPERACAO_FECHAMENTO", sort: 26, view: ["AREA_MANAGER", "PROJECT_MANAGER", "FINANCE", "PEOPLE"], edit: ["AREA_MANAGER", "PROJECT_MANAGER"] },
+  { code: "PROJETOS_SKILLS", name: "Skills", module: "Projetos & Clientes", parent: "PROJETOS", sort: 35, view: ALL_ROLES, create: PROJECT_WRITE, edit: PROJECT_WRITE, del: ["AREA_MANAGER"] },
+  { code: "PROJETOS_APROVACAO", name: "Aprovação", module: "Projetos & Clientes", parent: "PROJETOS", sort: 36, view: ALL_ROLES, create: PROJECT_WRITE, edit: PROJECT_WRITE, del: ["AREA_MANAGER"] },
+  { code: "PROJETOS_RECEBIMENTOS", name: "Recebimentos previstos", module: "Projetos & Clientes", parent: "PROJETOS", sort: 37, view: SALE_RATE, edit: FINANCIAL },
+  { code: "PROJETOS_COBRANCA", name: "Cobrança", module: "Projetos & Clientes", parent: "PROJETOS", sort: 38, view: FINANCIAL, edit: FINANCIAL },
+  { code: "CLIENTES_TIPOS_COBRANCA", name: "Tipos de cobrança", module: "Projetos & Clientes", parent: "CLIENTES", sort: 41, view: CLIENT_ACCESS, create: CLIENT_ACCESS, edit: CLIENT_ACCESS, del: ADMIN_ONLY },
+  { code: "PAINEL_TALENTOS", name: "Painel de Talentos", module: "Pessoas", sort: 61, view: ALL_ROLES },
+  { code: "PAINEL_TALENTOS_TALENT_FINDER", name: "Talent Finder", module: "Pessoas", parent: "PAINEL_TALENTOS", sort: 61, view: ALL_ROLES },
+  { code: "PAINEL_TALENTOS_SKILLS", name: "Skills", module: "Pessoas", parent: "PAINEL_TALENTOS", sort: 62, view: ALL_ROLES },
+  { code: "PAINEL_TALENTOS_CERTIFICACOES", name: "Certificações", module: "Pessoas", parent: "PAINEL_TALENTOS", sort: 63, view: ALL_ROLES },
+  { code: "PAINEL_TALENTOS_CONSULTORES", name: "Consultores", module: "Pessoas", parent: "PAINEL_TALENTOS", sort: 64, view: ALL_ROLES },
+  { code: "PAINEL_TALENTOS_MATRIZ_SKILLS", name: "Matriz de Skills", module: "Pessoas", parent: "PAINEL_TALENTOS", sort: 65, view: ALL_ROLES },
+  { code: "PAINEL_TALENTOS_INATIVOS", name: "Banco de Inativos", module: "Pessoas", parent: "PAINEL_TALENTOS", sort: 66, view: ALL_ROLES },
+  { code: "PAINEL_TALENTOS_GOVERNANCA", name: "Governança", module: "Pessoas", parent: "PAINEL_TALENTOS", sort: 67, view: ALL_ROLES },
+  { code: "SKILLS_CURRICULO", name: "Meu Currículo", module: "Pessoas", parent: "SKILLS", sort: 62, view: ALL_ROLES, create: ALL_ROLES, edit: ALL_ROLES },
+  { code: "SKILLS_CATALOGO", name: "Catálogo", module: "Pessoas", parent: "SKILLS", sort: 63, view: ALL_ROLES, create: ALL_ROLES, edit: ALL_ROLES },
+  { code: "COE_COMPOSICAO", name: "Composição de time", module: "Inteligência", parent: "COE", sort: 84, view: [...new Set([...PROJECT_WRITE, "PEOPLE"])] },
+  { code: "COE_PROPOSTAS", name: "Propostas salvas", module: "Inteligência", parent: "COE", sort: 85, view: [...new Set([...PROJECT_WRITE, "PEOPLE"])] },
+  { code: "COE_CURADORIA", name: "Curadoria", module: "Inteligência", parent: "COE", sort: 86, view: [...new Set([...PROJECT_WRITE, "PEOPLE"])] },
+  { code: "RELATORIOS_DESPESAS", name: "Despesas", module: "Relatórios & Análises", parent: "RELATORIOS", sort: 102, view: ALL_ROLES },
+  { code: "RELATORIOS_CONSOLIDADO", name: "Consolidado", module: "Relatórios & Análises", parent: "RELATORIOS", sort: 103, view: ALL_ROLES },
+  { code: "FINANCEIRO_CONTAS_RECEBER", name: "Contas a Receber", module: "Financeiro", parent: "FINANCEIRO", sort: 110, view: FINANCIAL, create: FINANCIAL, edit: FINANCIAL },
+  { code: "FINANCEIRO_CONTAS_PAGAR", name: "Contas a Pagar", module: "Financeiro", parent: "FINANCEIRO", sort: 111, view: FINANCIAL, create: FINANCIAL, edit: FINANCIAL },
+  { code: "FINANCEIRO_STATUS_FATURAMENTO", name: "Status de Faturamento", module: "Financeiro", parent: "FINANCEIRO", sort: 112, view: ["AREA_MANAGER", "FINANCE"] },
+  { code: "CONFIGURACOES_MENU", name: "Ordem do Menu", module: "Administração", sort: 125, view: ADMIN_ONLY, edit: ADMIN_ONLY },
 ];
 
 async function seedPermissions() {
@@ -1229,8 +1268,8 @@ async function seedPermissions() {
   for (const p of PERMISSION_CATALOG) {
     await prisma.permission.upsert({
       where: { code: p.code },
-      update: { name: p.name, module: p.module, sortOrder: p.sort, active: true },
-      create: { code: p.code, name: p.name, module: p.module, sortOrder: p.sort },
+      update: { name: p.name, module: p.module, sortOrder: p.sort, active: p.active ?? true },
+      create: { code: p.code, name: p.name, module: p.module, sortOrder: p.sort, active: p.active ?? true },
     });
   }
   // Pass 2: wire the hierarchy (parentId) now that all rows exist.

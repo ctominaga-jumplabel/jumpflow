@@ -1,6 +1,7 @@
 import { Prisma, prisma } from "@jumpflow/database";
 import {
   aggregateRolePermissions,
+  isSystemPermissionCode,
   MANAGE_PERMISSIONS_CODE,
   type PermissionMatrix,
 } from "@/lib/auth/permission-codes";
@@ -24,6 +25,8 @@ export type PermissionErrorCode =
   | "NOT_FOUND"
   | "LAST_ADMIN_PERMISSION"
   | "SYSTEM_ROLE_PROTECTED"
+  | "SYSTEM_PERMISSION_PROTECTED"
+  | "IN_USE"
   | "DUPLICATE_CODE";
 
 /** Thrown by the domain layer; server actions map `.code` to an ErrorCode. */
@@ -86,6 +89,8 @@ export interface RoleView {
   description: string | null;
   active: boolean;
   isSystem: boolean;
+  /** Users currently assigned to this group (blocks deletion when > 0). */
+  userCount: number;
 }
 
 export interface PermissionView {
@@ -97,6 +102,8 @@ export interface PermissionView {
   active: boolean;
   parentId: string | null;
   sortOrder: number;
+  /** Native (seeded) feature: code is immutable and it cannot be deleted. */
+  isSystem: boolean;
 }
 
 export interface RolePermissionCell {
@@ -119,16 +126,9 @@ function roleLabelOf(row: {
 export async function listRoles(): Promise<RoleView[]> {
   const rows = await prisma.role.findMany({
     orderBy: [{ isSystem: "desc" }, { key: "asc" }],
+    include: { _count: { select: { users: true } } },
   });
-  return rows.map((r) => ({
-    id: r.id,
-    key: r.key,
-    name: r.name,
-    label: roleLabelOf(r),
-    description: r.description,
-    active: r.active,
-    isSystem: r.isSystem,
-  }));
+  return rows.map((r) => toRoleView(r, r._count.users));
 }
 
 /** List the full permission catalog (active + inactive), ordered for display. */
@@ -136,16 +136,7 @@ export async function listPermissions(): Promise<PermissionView[]> {
   const rows = await prisma.permission.findMany({
     orderBy: [{ module: "asc" }, { sortOrder: "asc" }, { name: "asc" }],
   });
-  return rows.map((r) => ({
-    id: r.id,
-    code: r.code,
-    name: r.name,
-    module: r.module,
-    description: r.description,
-    active: r.active,
-    parentId: r.parentId,
-    sortOrder: r.sortOrder,
-  }));
+  return rows.map(toPermissionView);
 }
 
 /** The matrix cells for a single role, keyed by permissionId. */
@@ -200,9 +191,12 @@ export async function listAllRoleMatrices(): Promise<
 // ---------------------------------------------------------------------------
 
 /**
- * Count ACTIVE roles that retain `view` + `edit` on the manage-permissions
- * permission, OPTIONALLY excluding one role (whose new values are simulated by
- * the caller). Run inside the mutation transaction so the count is consistent.
+ * Count ACTIVE roles WITH AT LEAST ONE MEMBER that retain `view` + `edit` on
+ * the manage-permissions permission, OPTIONALLY excluding one role (whose new
+ * values are simulated by the caller). An empty group never counts: otherwise a
+ * group copied from Administrador (0 users) would satisfy the invariant while
+ * the real admins lose the screen. Run inside the mutation transaction so the
+ * count is consistent.
  */
 async function countRolesWithManageAuthority(
   tx: Prisma.TransactionClient,
@@ -212,7 +206,11 @@ async function countRolesWithManageAuthority(
     where: {
       canView: true,
       canEdit: true,
-      role: { active: true, ...(excludeRoleId ? { id: { not: excludeRoleId } } : {}) },
+      role: {
+        active: true,
+        users: { some: {} },
+        ...(excludeRoleId ? { id: { not: excludeRoleId } } : {}),
+      },
       permission: { code: MANAGE_PERMISSIONS_CODE, active: true },
     },
   });
@@ -255,6 +253,13 @@ export async function setRolePermissions(
   if (!role) throw new PermissionError("NOT_FOUND", "Grupo não encontrado.");
 
   const permissionIds = updates.map((u) => u.permissionId);
+  const known = await prisma.permission.count({ where: { id: { in: permissionIds } } });
+  if (known !== new Set(permissionIds).size) {
+    throw new PermissionError(
+      "NOT_FOUND",
+      "Uma ou mais funcionalidades não existem mais. Descarte o rascunho e tente de novo.",
+    );
+  }
 
   await prisma.$transaction(async (tx) => {
     // Snapshot the affected cells BEFORE the change for the audit trail.
@@ -371,45 +376,184 @@ export async function upsertPermission(
   }
 
   // Uniqueness of code (excluding self on update).
-  const existing = await prisma.permission.findUnique({ where: { code } });
-  if (existing && existing.id !== input.id) {
+  const clash = await prisma.permission.findUnique({ where: { code } });
+  if (clash && clash.id !== input.id) {
     throw new PermissionError("DUPLICATE_CODE", "Já existe uma funcionalidade com este código.");
+  }
+
+  const existing = input.id
+    ? await prisma.permission.findUnique({ where: { id: input.id } })
+    : null;
+  if (input.id && !existing) {
+    throw new PermissionError("NOT_FOUND", "Funcionalidade não encontrada.");
+  }
+  // The guards read native features by code: renaming one would silently
+  // revoke (or orphan) every check that depends on it.
+  if (existing && isSystemPermissionCode(existing.code) && existing.code !== code) {
+    throw new PermissionError(
+      "SYSTEM_PERMISSION_PROTECTED",
+      "O código de uma funcionalidade do sistema não pode ser alterado.",
+    );
+  }
+
+  // Hierarchy is two levels (tela → subtela/funcionalidade): the parent must be
+  // a top-level item, never the item itself, and an item with children cannot
+  // become a child. The child inherits the parent's module so the matrix groups
+  // them together.
+  const parentId = input.parentId || null;
+  let effectiveModule = moduleName;
+  if (parentId) {
+    if (parentId === input.id) {
+      throw new PermissionError("INVALID_INPUT", "Uma funcionalidade não pode ser pai dela mesma.");
+    }
+    const parent = await prisma.permission.findUnique({ where: { id: parentId } });
+    if (!parent) throw new PermissionError("NOT_FOUND", "Tela pai não encontrada.");
+    if (parent.parentId) {
+      throw new PermissionError(
+        "INVALID_INPUT",
+        "Escolha uma tela principal como pai (a hierarquia tem dois níveis).",
+      );
+    }
+    if (input.id) {
+      const children = await prisma.permission.count({ where: { parentId: input.id } });
+      if (children > 0) {
+        throw new PermissionError(
+          "INVALID_INPUT",
+          "Esta funcionalidade possui subtelas e não pode ficar abaixo de outra.",
+        );
+      }
+    }
+    effectiveModule = parent.module;
   }
 
   const data = {
     code,
     name,
-    module: moduleName,
+    module: effectiveModule,
     description: input.description?.trim() || null,
-    parentId: input.parentId || null,
-    sortOrder: input.sortOrder ?? 0,
+    parentId,
+    sortOrder: input.sortOrder ?? existing?.sortOrder ?? 0,
   };
 
-  const saved = input.id
-    ? await prisma.permission.update({ where: { id: input.id }, data })
-    : await prisma.permission.create({ data });
+  let movedChildren: string[] = [];
+  const saved = await prisma.$transaction(async (tx) => {
+    const row = input.id
+      ? await tx.permission.update({ where: { id: input.id }, data })
+      : await tx.permission.create({ data });
+    // Moving a top-level screen to another module carries its subtelas along.
+    if (existing && !parentId && existing.module !== row.module) {
+      const children = await tx.permission.findMany({
+        where: { parentId: row.id },
+        select: { code: true },
+      });
+      movedChildren = children.map((c) => c.code);
+      await tx.permission.updateMany({
+        where: { parentId: row.id },
+        data: { module: row.module },
+      });
+    }
+    return row;
+  });
 
   await recordAuditEvent({
     actorUserId: input.actorDbUserId,
     entityType: "Permission",
     entityId: saved.id,
     action: input.id ? "PERMISSION_UPDATED" : "PERMISSION_CREATED",
-    before: existing
-      ? { code: existing.code, name: existing.name, module: existing.module, active: existing.active }
-      : null,
-    after: { code: saved.code, name: saved.name, module: saved.module, active: saved.active },
+    before: existing ? catalogAuditShape(existing) : null,
+    after: {
+      ...catalogAuditShape(saved),
+      ...(movedChildren.length > 0 ? { movedChildren } : {}),
+    },
   });
 
+  return toPermissionView(saved);
+}
+
+/** Fields of a catalog row recorded in PERMISSION_CREATED/UPDATED audits. */
+function catalogAuditShape(r: {
+  code: string;
+  name: string;
+  module: string;
+  description: string | null;
+  parentId: string | null;
+  sortOrder: number;
+  active: boolean;
+}) {
   return {
-    id: saved.id,
-    code: saved.code,
-    name: saved.name,
-    module: saved.module,
-    description: saved.description,
-    active: saved.active,
-    parentId: saved.parentId,
-    sortOrder: saved.sortOrder,
+    code: r.code,
+    name: r.name,
+    module: r.module,
+    description: r.description,
+    parentId: r.parentId,
+    sortOrder: r.sortOrder,
+    active: r.active,
   };
+}
+
+/**
+ * Permanently delete a feature created through the admin screen. Native
+ * (seeded) features are protected — inactivate them instead — and an item with
+ * subtelas must have them moved or deleted first. Its matrix cells go with it
+ * (RolePermission cascades). Audited with the grants it held.
+ */
+export async function deletePermission(input: {
+  permissionId: string;
+  actorDbUserId: string;
+}): Promise<{ id: string }> {
+  const perm = await prisma.permission.findUnique({
+    where: { id: input.permissionId },
+    include: { _count: { select: { children: true } } },
+  });
+  if (!perm) throw new PermissionError("NOT_FOUND", "Funcionalidade não encontrada.");
+
+  if (isSystemPermissionCode(perm.code)) {
+    throw new PermissionError(
+      "SYSTEM_PERMISSION_PROTECTED",
+      "Funcionalidades do sistema não podem ser excluídas. Inative-a para ocultá-la da matriz.",
+    );
+  }
+  if (perm._count.children > 0) {
+    throw new PermissionError(
+      "IN_USE",
+      "Esta funcionalidade possui subtelas. Exclua-as ou mova-as antes de excluí-la.",
+    );
+  }
+
+  await prisma.$transaction(async (tx) => {
+    const grants = await tx.rolePermission.findMany({
+      where: { permissionId: perm.id },
+      select: {
+        canView: true,
+        canCreate: true,
+        canEdit: true,
+        canDelete: true,
+        role: { select: { key: true } },
+      },
+    });
+    await tx.permission.delete({ where: { id: perm.id } });
+    await recordAuditEvent({
+      actorUserId: input.actorDbUserId,
+      entityType: "Permission",
+      entityId: perm.id,
+      action: "PERMISSION_DELETED",
+      before: {
+        code: perm.code,
+        name: perm.name,
+        module: perm.module,
+        grants: grants.map((g) => ({
+          roleKey: g.role.key,
+          canView: g.canView,
+          canCreate: g.canCreate,
+          canEdit: g.canEdit,
+          canDelete: g.canDelete,
+        })),
+      },
+      after: null,
+    });
+  });
+
+  return { id: perm.id };
 }
 
 export async function setPermissionActive(input: {
@@ -461,6 +605,8 @@ export interface UpsertRoleInput {
   key?: string;
   label: string;
   description?: string | null;
+  /** Create only: start the new group with a copy of this group's matrix. */
+  copyFromRoleId?: string | null;
   actorDbUserId: string;
 }
 
@@ -483,7 +629,7 @@ export async function upsertRole(input: UpsertRoleInput): Promise<RoleView> {
       before: { label: existing.label, description: existing.description },
       after: { label: saved.label, description: saved.description },
     });
-    return toRoleView(saved);
+    return toRoleView(saved, await prisma.userRole.count({ where: { roleId: saved.id } }));
   }
 
   // Create a NEW dynamic group (no enum name; identified by slug `key`).
@@ -497,24 +643,57 @@ export async function upsertRole(input: UpsertRoleInput): Promise<RoleView> {
   const clash = await prisma.role.findUnique({ where: { key } });
   if (clash) throw new PermissionError("DUPLICATE_CODE", "Já existe um grupo com este identificador.");
 
-  const saved = await prisma.role.create({
-    data: {
-      key,
-      label,
-      description: input.description?.trim() || null,
-      isSystem: false,
-      active: true,
-    },
+  const source = input.copyFromRoleId
+    ? await prisma.role.findUnique({ where: { id: input.copyFromRoleId } })
+    : null;
+  if (input.copyFromRoleId && !source) {
+    throw new PermissionError("NOT_FOUND", "Grupo de origem não encontrado.");
+  }
+
+  const saved = await prisma.$transaction(async (tx) => {
+    const created = await tx.role.create({
+      data: {
+        key,
+        label,
+        description: input.description?.trim() || null,
+        isSystem: false,
+        active: true,
+      },
+    });
+    let copied = 0;
+    if (source) {
+      const cells = await tx.rolePermission.findMany({
+        where: { roleId: source.id },
+        select: {
+          permissionId: true,
+          canView: true,
+          canCreate: true,
+          canEdit: true,
+          canDelete: true,
+        },
+      });
+      if (cells.length > 0) {
+        await tx.rolePermission.createMany({
+          data: cells.map((c) => ({ ...c, roleId: created.id })),
+        });
+      }
+      copied = cells.length;
+    }
+    await recordAuditEvent({
+      actorUserId: input.actorDbUserId,
+      entityType: "Role",
+      entityId: created.id,
+      action: "ROLE_CREATED",
+      before: null,
+      after: {
+        key: created.key,
+        label: created.label,
+        ...(source ? { copiedFrom: source.key, copiedCells: copied } : {}),
+      },
+    });
+    return created;
   });
-  await recordAuditEvent({
-    actorUserId: input.actorDbUserId,
-    entityType: "Role",
-    entityId: saved.id,
-    action: "ROLE_CREATED",
-    before: null,
-    after: { key: saved.key, label: saved.label },
-  });
-  return toRoleView(saved);
+  return toRoleView(saved, 0);
 }
 
 export async function setRoleActive(input: {
@@ -563,15 +742,85 @@ export async function setRoleActive(input: {
   return { id: saved.id, active: saved.active };
 }
 
-function toRoleView(r: {
-  id: string;
-  key: string;
-  name: string | null;
-  label: string | null;
-  description: string | null;
-  active: boolean;
-  isSystem: boolean;
-}): RoleView {
+/**
+ * Permanently delete a custom access group. System groups are protected and a
+ * group with members must have them reassigned first (Acessos), so deleting
+ * never silently strips anyone's access. Its matrix cells cascade. The
+ * last-admin invariant is re-checked inside the transaction.
+ */
+export async function deleteRole(input: {
+  roleId: string;
+  actorDbUserId: string;
+}): Promise<{ id: string }> {
+  const role = await prisma.role.findUnique({
+    where: { id: input.roleId },
+    include: { _count: { select: { users: true } } },
+  });
+  if (!role) throw new PermissionError("NOT_FOUND", "Grupo não encontrado.");
+
+  if (role.isSystem) {
+    throw new PermissionError(
+      "SYSTEM_ROLE_PROTECTED",
+      "Grupos do sistema não podem ser excluídos.",
+    );
+  }
+  if (role._count.users > 0) {
+    throw new PermissionError(
+      "IN_USE",
+      `Este grupo tem ${role._count.users} usuário(s). Remova-os do grupo em Acessos antes de excluí-lo.`,
+    );
+  }
+
+  await prisma.$transaction(async (tx) => {
+    // Re-check inside the tx: UserRole cascades, so a member assigned since the
+    // first read would otherwise silently lose this group.
+    const members = await tx.userRole.count({ where: { roleId: role.id } });
+    if (members > 0) {
+      throw new PermissionError(
+        "IN_USE",
+        `Este grupo tem ${members} usuário(s). Remova-os do grupo em Acessos antes de excluí-lo.`,
+      );
+    }
+    const cells = await tx.rolePermission.count({ where: { roleId: role.id } });
+    await tx.role.delete({ where: { id: role.id } });
+    const remaining = await countRolesWithManageAuthority(tx);
+    if (remaining === 0) {
+      throw new PermissionError(
+        "LAST_ADMIN_PERMISSION",
+        "Não é possível excluir o último grupo com acesso à Matriz de Permissões.",
+      );
+    }
+    await recordAuditEvent({
+      actorUserId: input.actorDbUserId,
+      entityType: "Role",
+      entityId: role.id,
+      action: "ROLE_DELETED",
+      before: {
+        key: role.key,
+        label: role.label,
+        description: role.description,
+        active: role.active,
+        cells,
+      },
+      after: null,
+    });
+  });
+
+  return { id: role.id };
+}
+
+function toRoleView(
+  r: {
+    id: string;
+    key: string;
+    name: string | null;
+    label: string | null;
+    description: string | null;
+    active: boolean;
+    isSystem: boolean;
+  },
+  userCount: number,
+): RoleView {
   return {
     id: r.id,
     key: r.key,
@@ -580,5 +829,29 @@ function toRoleView(r: {
     description: r.description,
     active: r.active,
     isSystem: r.isSystem,
+    userCount,
+  };
+}
+
+function toPermissionView(r: {
+  id: string;
+  code: string;
+  name: string;
+  module: string;
+  description: string | null;
+  active: boolean;
+  parentId: string | null;
+  sortOrder: number;
+}): PermissionView {
+  return {
+    id: r.id,
+    code: r.code,
+    name: r.name,
+    module: r.module,
+    description: r.description,
+    active: r.active,
+    parentId: r.parentId,
+    sortOrder: r.sortOrder,
+    isSystem: isSystemPermissionCode(r.code),
   };
 }

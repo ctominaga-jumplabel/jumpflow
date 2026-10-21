@@ -149,22 +149,24 @@ const primaryNavigationRaw: NavItemDef[] = [
   {
     // Minhas Notas Fiscais (melhoria #3): self-service do consultor para
     // acompanhar os próprios pagamentos e anexar a NF dos meses em aberto. O
-    // read é escopado ao usuário logado. Role-gated (sem permissionCode) para
-    // aparecer no menu do CONSULTANT sem depender de célula na matriz; a rota
-    // reforça o mesmo conjunto no servidor.
+    // read é escopado ao usuário logado. Gate pela matriz (MINHAS_NOTAS, semeado
+    // na migração 20261021120000 com os mesmos papéis abaixo); a rota reforça o
+    // mesmo conjunto de papéis no servidor.
     label: "Minhas Notas",
     href: "/app/minhas-notas",
+    permissionCode: "MINHAS_NOTAS",
     icon: ReceiptText,
     description: "Meus pagamentos por competência e envio da nota fiscal.",
     requiredRoles: ["CONSULTANT", "ADMIN", "AREA_MANAGER", "FINANCE"],
   },
   {
     // Política de Reembolso (P12 + item 12): tipos de despesa + limites de
-    // prazo/valor. Governança financeira/People — role-gated (sem permissionCode)
-    // para aparecer no menu direto, sem depender de célula na matriz. A tela já
-    // reforça o mesmo conjunto de papéis no servidor (requireRole).
+    // prazo/valor. Governança financeira/People — gate pela matriz
+    // (DESPESAS_POLITICA, subtela de Despesas). A tela segue reforçando o mesmo
+    // conjunto de papéis no servidor (requireRole).
     label: "Política de Reembolso",
     href: "/app/despesas/politica",
+    permissionCode: "DESPESAS_POLITICA",
     icon: Wallet,
     description:
       "Tipos de despesa e limites (prazo/valor) de reembolso por tipo.",
@@ -223,14 +225,14 @@ const primaryNavigationRaw: NavItemDef[] = [
   {
     // Painel de Talentos: dashboard de skills & certificações ligado ao banco
     // (Visão Executiva, Talent Finder, Skills, Certificações, Consultores,
-    // Matriz, Banco de Inativos, Governança). Reusa a permissão CONSULTORES
-    // (código ATIVO e já semeado em prod) para audiência de gestão/Pessoas —
-    // evita mintar um código novo que a matriz negaria antes do seed. NÃO reusar
-    // COMPETENCIAS: está em disabled-modules.ts e o menu esconderia a aba. O
-    // escopo/PII é reforçado no servidor. Discoverability, não a fronteira.
+    // Matriz, Banco de Inativos, Governança). Código próprio PAINEL_TALENTOS (e
+    // uma subtela por aba), nascido na migração 20261021120000 como cópia das
+    // células de CONSULTORES — mesma audiência de antes. NÃO reusar COMPETENCIAS:
+    // está em disabled-modules.ts e o menu esconderia a aba. O escopo/PII é
+    // reforçado no servidor.
     label: "Painel de Talentos",
     href: "/app/painel-talentos",
-    permissionCode: "CONSULTORES",
+    permissionCode: "PAINEL_TALENTOS",
     icon: Radar,
     description:
       "Dashboard de skills e certificações: busca de talentos, matriz e governança da base.",
@@ -501,14 +503,15 @@ const primaryNavigationRaw: NavItemDef[] = [
   {
     // Cockpit do Gestor de Área (proposta Fase 4a): ponto único onde o gestor
     // acompanha, por projeto/consultor, o que falta e libera os dois eixos
-    // (Financeiro + DP). Role-gated (sem permissionCode) para o AREA_MANAGER
-    // alcançá-lo pelo menu sem depender de célula na matriz; a rota reforça o
+    // (Financeiro + DP). Gate pela matriz (OPERACAO_COCKPIT, semeado com os
+    // mesmos papéis do gate de rota); a rota reforça o
     // acesso no servidor (COCKPIT_ROLES = ADMIN/AREA_MANAGER/PROJECT_MANAGER;
     // FINANCE/PEOPLE não entram). Fase 4a apenas ADICIONA o item — a decisão de
     // repontar/ocultar "Pendentes de Fechamento" e "Fechamento Operacional" (que
     // o cockpit unifica) fica para a revisão da Fase 6.
     label: "Cockpit do Gestor",
     href: "/app/operacao/cockpit",
+    permissionCode: "OPERACAO_COCKPIT",
     icon: Compass,
     description:
       "Acompanhamento por projeto e consultor com as liberações Financeiro e DP em um só lugar.",
@@ -537,12 +540,13 @@ const primaryNavigationRaw: NavItemDef[] = [
   {
     // Pendentes de Fechamento (Melhorias v2 / correções de navegação): o Gerente
     // de Área libera o faturamento por projeto/competência; FINANCE/ADMIN
-    // acompanham. Role-gated (sem permissionCode) para aparecer no menu direto,
-    // sem depender de célula na matriz — como o AREA_MANAGER cai no Feed em
-    // `/app`, é por aqui que ele alcança a fila. A rota (PENDING_CLOSING_ROLES) e
+    // acompanham. Gate pela matriz (FINANCEIRO_STATUS_FATURAMENTO, semeado com
+    // PENDING_CLOSING_ROLES) — como o AREA_MANAGER cai no Feed em `/app`, é por
+    // aqui que ele alcança a fila. A rota (PENDING_CLOSING_ROLES) e
     // a action de liberar (ADMIN/AREA_MANAGER) reforçam o acesso no servidor.
     label: "Status de Faturamento",
     href: "/app/financeiro/pendentes",
+    permissionCode: "FINANCEIRO_STATUS_FATURAMENTO",
     icon: ListChecks,
     description:
       "Acompanhamento por competência: Pendente → Liberado → Faturado.",
@@ -606,12 +610,12 @@ export const adminNavigation: NavItemDef[] = [
   },
   {
     // Regras de aprovação automática: configuração, exceções e pendências do
-    // motor de auto-aprovação. Gate SÓ por papel (ADMIN) e sem permissionCode
-    // (evita semear um novo código na matriz); a rota `/app/automacoes` reforça
-    // ADMIN/AREA_MANAGER no servidor e a página, o acesso. A princípio, só o
-    // ADMIN a descobre pelo menu de Administração.
+    // motor de auto-aprovação. Gate pela matriz (AUTOMACOES); a rota
+    // `/app/automacoes` reforça ADMIN/AREA_MANAGER no servidor e a página, o
+    // acesso. Quem tem `view` em AUTOMACOES passa a vê-la no menu.
     label: "Regras de aprovação automática",
     href: "/app/automacoes/aprovacao-automatica",
+    permissionCode: "AUTOMACOES",
     icon: Sparkles,
     description:
       "Configuração, exceções e pendências da aprovação automática de horas e despesas.",
@@ -633,12 +637,12 @@ export const adminNavigation: NavItemDef[] = [
   },
   {
     // Ordem do menu (P28). Reordena o menu principal de forma GLOBAL (por
-    // organização). Gate SÓ por papel (ADMIN), sem permissionCode: evita semear
-    // um novo código na matriz; a página e as server actions reforçam
-    // requireRole(["ADMIN"]) no servidor. Não é reordenável a si própria (é da
+    // organização). Gate pela matriz (CONFIGURACOES_MENU, só ADMIN por padrão);
+    // a página e as server actions reforçam requireRole(["ADMIN"]) no servidor. Não é reordenável a si própria (é da
     // navegação de Administração, não da principal).
     label: "Ordem do Menu",
     href: "/app/admin/menu",
+    permissionCode: "CONFIGURACOES_MENU",
     icon: ListOrdered,
     description:
       "Reordena os itens do menu principal (ordem global da organização).",
@@ -694,6 +698,7 @@ export const financeGroupedNavigation: NavGroupDef[] = [
       {
         label: "Status de Faturamento",
         href: "/app/financeiro/pendentes",
+        permissionCode: "FINANCEIRO_STATUS_FATURAMENTO",
         icon: ListChecks,
         description:
           "Acompanhamento por competência: Pendente → Liberado → Faturado.",
@@ -722,6 +727,7 @@ export const financeGroupedNavigation: NavGroupDef[] = [
       {
         label: "Política de Reembolso",
         href: "/app/despesas/politica",
+        permissionCode: "DESPESAS_POLITICA",
         icon: Wallet,
         description:
           "Tipos de despesa e limites (prazo/valor) de reembolso por tipo.",
@@ -974,6 +980,20 @@ export function navPermissionCodes(): string[] {
     if (item.permissionCode) codes.add(item.permissionCode);
   }
   return [...codes];
+}
+
+/**
+ * Map each permission code to the internal screen route its menu item opens
+ * (first occurrence wins; external links are skipped). Shown in the Permission
+ * Matrix admin so each feature reads as the screen it governs.
+ */
+export function navScreenRoutes(): Record<string, string> {
+  const routes: Record<string, string> = {};
+  for (const item of [...primaryNavigation, ...adminNavigation]) {
+    if (!item.permissionCode || !item.href.startsWith("/")) continue;
+    routes[item.permissionCode] ??= item.href;
+  }
+  return routes;
 }
 
 /**

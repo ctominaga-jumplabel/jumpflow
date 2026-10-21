@@ -7,6 +7,8 @@ import { TimesheetWeekView } from "@/components/timesheet/TimesheetWeekView";
 import { HorasConsultaPanel } from "@/components/timesheet/HorasConsultaPanel";
 import { OnBehalfConsultantPicker } from "@/components/timesheet/OnBehalfConsultantPicker";
 import { requireUser } from "@/lib/auth/guards";
+import { can } from "@/lib/auth/permissions";
+import { SCREEN_CODES } from "@/lib/auth/permission-codes";
 import { hasRole } from "@/lib/auth/route-permissions";
 import { canActOnBehalf } from "@/lib/db/on-behalf";
 import { isDatabaseConfigured } from "@/lib/db/config";
@@ -141,6 +143,9 @@ export async function HorasScreen({
   // funcionaria mas a transcrição voltaria vazia — degrade honesto: esconder.
   const transcriptionAvailable =
     isTranscriptionEnabled() && isTranscriptionConfigured();
+  // "Novo lançamento" só leva à tela cheia (`/app/horas/lancamento`) quando a
+  // matriz concede "view" em HORAS_LANCAMENTOS; sem isso, o formulário da grade.
+  const canOpenNewEntryScreen = await can(SCREEN_CODES.newTimeEntry, "view");
 
   // A user who is neither a consultant nor a manager has nothing to show here.
   if (!consultant && !isManager) {
@@ -259,6 +264,7 @@ export async function HorasScreen({
         onBehalfOf={onBehalfTarget}
         presentation={presentation}
         todayIso={todayIso}
+        canOpenNewEntryScreen={canOpenNewEntryScreen}
       />
     );
   }

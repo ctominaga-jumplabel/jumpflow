@@ -134,6 +134,15 @@ vi.mock("@jumpflow/database", () => ({
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+// Matriz de permissões: libera tudo por padrão; cada teste nega códigos em
+// `perm.denied` para provar a recusa da subtela.
+const perm = vi.hoisted(() => ({ denied: new Set<string>() }));
+vi.mock("@/lib/auth/permissions", () => ({
+  can: vi.fn(async (code: string) => !perm.denied.has(code)),
+  canEach: vi.fn(async (codes: string[]) =>
+    Object.fromEntries(codes.map((code) => [code, !perm.denied.has(code)])),
+  ),
+}));
 
 vi.mock("@/lib/auth/guards", () => ({
   requireUser: vi.fn(async () => h.store.currentUser),
@@ -296,5 +305,25 @@ describe("removeAllocationSkill", () => {
     const result = await removeAllocationSkill({ id: "alloc-skill-missing" });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toBe("NOT_FOUND");
+  });
+});
+
+describe("skills da alocação — subtela Skills da matriz", () => {
+  afterEach(() => perm.denied.clear());
+
+  it("recusa add/remove com FORBIDDEN quando a matriz nega PROJETOS_SKILLS", async () => {
+    perm.denied.add("PROJETOS_SKILLS");
+    const added = await addAllocationSkill({
+      allocationId: "alloc-1",
+      skillId: "skill-active",
+      level: "ADVANCED",
+    });
+    expect(added.ok).toBe(false);
+    if (!added.ok) expect(added.error).toBe("FORBIDDEN");
+    const removed = await removeAllocationSkill({ id: "as-1" });
+    expect(removed.ok).toBe(false);
+    if (!removed.ok) expect(removed.error).toBe("FORBIDDEN");
+    expect(h.store.allocationSkills).toHaveLength(0);
+    expect(h.store.audits).toHaveLength(0);
   });
 });

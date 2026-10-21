@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 import { UserX } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -6,6 +7,8 @@ import { ReportsView } from "@/components/reports/ReportsView";
 import { requireUser } from "@/lib/auth/guards";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { hasRole } from "@/lib/auth/route-permissions";
+import { canEach } from "@/lib/auth/permissions";
+import { SUBSCREEN_CODES } from "@/lib/auth/permission-codes";
 import {
   consolidatedReportFilterSchema,
   expensesReportFilterSchema,
@@ -23,9 +26,23 @@ interface RelatoriosPageProps {
 const TABS = ["horas", "despesas", "consolidado"] as const;
 type Tab = (typeof TABS)[number];
 
-function resolveTab(value: string | string[] | undefined): Tab {
+/**
+ * Every tab is a matrix subtela (the screen code `RELATORIOS` governs only the
+ * screen itself), so each one needs `view` on its own code.
+ */
+const TAB_CODES = {
+  horas: SUBSCREEN_CODES.reports.hours,
+  despesas: SUBSCREEN_CODES.reports.expenses,
+  consolidado: SUBSCREEN_CODES.reports.consolidated,
+} as const satisfies Record<Tab, string>;
+
+/** The requested tab when allowed; otherwise the first allowed one. */
+function resolveTab(
+  value: string | string[] | undefined,
+  allowed: readonly Tab[],
+): Tab {
   const raw = Array.isArray(value) ? value[0] : value;
-  return TABS.includes(raw as Tab) ? (raw as Tab) : "horas";
+  return allowed.includes(raw as Tab) ? (raw as Tab) : allowed[0];
 }
 
 /** Flatten searchParams (first value wins) for Zod parsing. */
@@ -50,7 +67,12 @@ export default async function RelatoriosPage({
 }: RelatoriosPageProps) {
   const user = await requireUser();
   const params = await searchParams;
-  const tab = resolveTab(params.tab);
+  // Matrix gate per tab (server-side): a denied tab is hidden, its data is not
+  // read and its CSV endpoint refuses. No tab left → no access to the screen.
+  const access = await canEach(Object.values(TAB_CODES));
+  const allowedTabs = TABS.filter((t) => access[TAB_CODES[t]]);
+  if (allowedTabs.length === 0) redirect("/access-denied");
+  const tab = resolveTab(params.tab, allowedTabs);
   const flat = flatten(params);
   const includeFinancials = hasRole(user, ["ADMIN", "AREA_MANAGER", "FINANCE"]);
 
@@ -69,6 +91,7 @@ export default async function RelatoriosPage({
         <ReportsView
           mode="demo"
           tab={tab}
+          allowedTabs={allowedTabs}
           includeFinancials={includeFinancials}
           filterOptions={{
             clients: [],
@@ -135,6 +158,7 @@ export default async function RelatoriosPage({
       <ReportsView
         mode="db"
         tab={tab}
+        allowedTabs={allowedTabs}
         includeFinancials={includeFinancials}
         filterOptions={filterOptions}
         rawParams={flat}

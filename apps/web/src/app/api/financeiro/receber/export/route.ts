@@ -1,5 +1,7 @@
 import { requireRole } from "@/lib/auth/guards";
 import { RECEIVABLES_ROLES } from "@/lib/auth/route-permissions";
+import { SUBSCREEN_CODES } from "@/lib/auth/permission-codes";
+import { can } from "@/lib/auth/permissions";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { buildWorkbook, defineSheet, xlsxResponse } from "@/lib/export/xlsx";
 import {
@@ -13,6 +15,14 @@ import {
 import { noDatabaseResponse } from "../../../relatorios/shared";
 
 export const dynamic = "force-dynamic";
+
+/** 403 quando a matriz nega a subtela que este export serve. */
+function forbiddenResponse(): Response {
+  return new Response("FORBIDDEN", {
+    status: 403,
+    headers: { "Content-Type": "text/plain; charset=utf-8" },
+  });
+}
 
 function clampInt(
   raw: string | null,
@@ -35,6 +45,10 @@ function clampInt(
  */
 export async function GET(request: Request) {
   const user = await requireRole(RECEIVABLES_ROLES);
+  // Subtela da matriz: sem `view` em Contas a Receber, o export recusa (403).
+  if (!(await can(SUBSCREEN_CODES.finance.receivables, "view"))) {
+    return forbiddenResponse();
+  }
   if (!isDatabaseConfigured()) return noDatabaseResponse();
 
   const url = new URL(request.url);

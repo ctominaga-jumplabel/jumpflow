@@ -7,6 +7,8 @@ import { SkillSuggestionPanel } from "@/components/skills/SkillSuggestionPanel";
 import { SkillsTabs } from "@/components/skills/SkillsTabs";
 import { SkillCatalogManager } from "@/components/competencies/SkillCatalogManager";
 import { requireUser, hasRole } from "@/lib/auth/guards";
+import { SUBSCREEN_CODES } from "@/lib/auth/permission-codes";
+import { canEach } from "@/lib/auth/permissions";
 import { COMPETENCY_WRITE_ROLES } from "@/lib/auth/route-permissions";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { isCurriculumAiImportEnabled } from "@/lib/skills/flags";
@@ -31,9 +33,19 @@ export default async function SkillsPage({ searchParams }: SkillsPageProps) {
   // derivada de ConsultantSkill). Sem DB, usa o mock — apenas em dev/offline,
   // nunca como fallback silencioso em produção (o page só atinge isto sem DB).
   let catalogSkills: Skill[] = mockSkills;
+  // Subtelas da matriz: "Skills" é a aba padrão (governada pelo código da tela,
+  // já checado no layout); "Meu Currículo" e "Catálogo" exigem view na matriz.
+  const tabAccess = await canEach([
+    SUBSCREEN_CODES.skills.curriculum,
+    SUBSCREEN_CODES.skills.catalog,
+  ]);
+  const showCurriculum = tabAccess[SUBSCREEN_CODES.skills.curriculum];
   // Gerenciamento de catálogo (reusa as actions de /app/competencias). Só é
-  // exposto a quem pode escrever (ADMIN/PEOPLE); a escrita é gated no servidor.
-  const canManageCatalog = hasRole(user, COMPETENCY_WRITE_ROLES);
+  // exposto a quem pode escrever (ADMIN/PEOPLE) E tem a subtela na matriz; a
+  // escrita é gated no servidor.
+  const canManageCatalog =
+    hasRole(user, COMPETENCY_WRITE_ROLES) &&
+    tabAccess[SUBSCREEN_CODES.skills.catalog];
   let catalogItems: SkillCatalogItem[] = [];
   const aiImportEnabled = isCurriculumAiImportEnabled();
 
@@ -87,6 +99,7 @@ export default async function SkillsPage({ searchParams }: SkillsPageProps) {
       />
       <SkillsTabs
         aiImportEnabled={aiImportEnabled}
+        showCurriculum={showCurriculum}
         catalogContent={
           databaseReady && canManageCatalog ? (
             <SkillCatalogManager catalog={catalogItems} canManage />
