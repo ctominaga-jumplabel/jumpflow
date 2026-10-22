@@ -11,9 +11,8 @@ import type {
 import { PermissionMatrixView } from "./PermissionMatrixView";
 import { AccessGroupsPanel } from "./AccessGroupsPanel";
 import { PermissionCatalogPanel } from "./PermissionCatalogPanel";
+import { PERMISSION_ADMIN_TABS, type PermissionAdminTab } from "./permission-admin-tabs";
 
-export const PERMISSION_ADMIN_TABS = ["matriz", "grupos", "funcionalidades"] as const;
-export type PermissionAdminTab = (typeof PERMISSION_ADMIN_TABS)[number];
 
 const TAB_LABELS: Record<PermissionAdminTab, string> = {
   matriz: "Matriz",
