@@ -2,11 +2,11 @@ import type { Metadata } from "next";
 import { KeyRound } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { PermissionAdminView } from "@/components/admin/PermissionAdminView";
 import {
   PERMISSION_ADMIN_TABS,
-  PermissionAdminView,
   type PermissionAdminTab,
-} from "@/components/admin/PermissionAdminView";
+} from "@/components/admin/permission-admin-tabs";
 import { requireRole } from "@/lib/auth/guards";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { navScreenRoutes } from "@/lib/navigation";
