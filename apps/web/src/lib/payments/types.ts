@@ -6,7 +6,11 @@ export interface ConsultantPaymentLineView {
   projectName: string;
   description: string;
   hours: number;
-  unitRate: number;
+  /**
+   * Valor/hora da linha = custo/hora do consultor. null na visão do Financeiro
+   * fora do grupo Dados Sensíveis (o próprio consultor vê o seu).
+   */
+  unitRate: number | null;
   amount: number;
 }
 

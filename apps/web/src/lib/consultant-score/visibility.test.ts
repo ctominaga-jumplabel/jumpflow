@@ -63,10 +63,11 @@ describe("resolveConsultantScoreScope", () => {
 });
 
 describe("includeFinancialFactor (gate por papel)", () => {
-  it("true para FINANCIAL_ROLES", () => {
-    expect(includeFinancialFactor(["ADMIN"])).toBe(true);
-    expect(includeFinancialFactor(["AREA_MANAGER"])).toBe(true);
-    expect(includeFinancialFactor(["FINANCE"])).toBe(true);
+  it("true só para o grupo Dados Sensíveis", () => {
+    expect(includeFinancialFactor(["SENSITIVE_DATA"])).toBe(true);
+    expect(includeFinancialFactor(["ADMIN"])).toBe(false);
+    expect(includeFinancialFactor(["AREA_MANAGER"])).toBe(false);
+    expect(includeFinancialFactor(["FINANCE"])).toBe(false);
   });
 
   it("false para PEOPLE / CONSULTANT", () => {
@@ -79,24 +80,35 @@ describe("includeFinancialForViewer (decisão final por escopo)", () => {
   it("CONSULTANT no próprio score (self) NUNCA recebe o fator financeiro", () => {
     const scope = { kind: "self" as const, consultantId: "cons-1" };
     // mesmo se, por acaso, detiver papel financeiro:
-    expect(includeFinancialForViewer(scope, ["CONSULTANT", "FINANCE"])).toBe(false);
+    expect(
+      includeFinancialForViewer(scope, ["CONSULTANT", "SENSITIVE_DATA"]),
+    ).toBe(false);
     expect(includeFinancialForViewer(scope, ["CONSULTANT"])).toBe(false);
   });
 
-  it("gestão (all) com papel financeiro recebe o fator", () => {
-    expect(includeFinancialForViewer({ kind: "all" }, ["ADMIN"])).toBe(true);
-    expect(includeFinancialForViewer({ kind: "all" }, ["FINANCE"])).toBe(true);
+  it("gestão (all) recebe o fator só com o grupo Dados Sensíveis", () => {
+    expect(
+      includeFinancialForViewer({ kind: "all" }, ["FINANCE", "SENSITIVE_DATA"]),
+    ).toBe(true);
+    expect(includeFinancialForViewer({ kind: "all" }, ["ADMIN"])).toBe(false);
+    expect(includeFinancialForViewer({ kind: "all" }, ["FINANCE"])).toBe(false);
   });
 
   it("gestão (all) sem papel financeiro NÃO recebe o fator (PEOPLE)", () => {
     expect(includeFinancialForViewer({ kind: "all" }, ["PEOPLE"])).toBe(false);
   });
 
-  it("manager com AREA_MANAGER (financeiro) recebe o fator", () => {
+  it("manager só recebe o fator se também for do grupo Dados Sensíveis", () => {
     expect(
       includeFinancialForViewer(
         { kind: "manager", managerUserId: "m1" },
         ["AREA_MANAGER"],
+      ),
+    ).toBe(false);
+    expect(
+      includeFinancialForViewer(
+        { kind: "manager", managerUserId: "m1" },
+        ["AREA_MANAGER", "SENSITIVE_DATA"],
       ),
     ).toBe(true);
   });

@@ -148,10 +148,10 @@ function pjConsultant(id: string, hourlyRate: number, name = "Consultor") {
       {
         contractType: "PJ" as const,
         pjRateMode: "HOURLY" as const,
-        hourlyRate,
-        cltAmount: 0,
-        pjAmount: 0,
-        benefitCardAmount: 0,
+        hourlyRateEncrypted: String(hourlyRate),
+        cltAmountEncrypted: "0",
+        pjAmountEncrypted: "0",
+        benefitCardAmountEncrypted: "0",
         discountRules: null,
         startsAt: new Date(Date.UTC(2020, 0, 1)),
         endsAt: null,
@@ -174,10 +174,10 @@ function cltConsultant(id: string, name = "Carla") {
     compensations: [
       {
         contractType: "CLT" as const,
-        hourlyRate: 0,
-        cltAmount: 5000,
-        pjAmount: 0,
-        benefitCardAmount: 0,
+        hourlyRateEncrypted: "0",
+        cltAmountEncrypted: "5000",
+        pjAmountEncrypted: "0",
+        benefitCardAmountEncrypted: "0",
         discountRules: null,
         startsAt: new Date(Date.UTC(2020, 0, 1)),
         endsAt: null,
@@ -489,7 +489,7 @@ describe("reconcileConsultantPaymentsForConsultants — decisão por estado", ()
     state.consultants = [pjConsultant("c1", 100)];
     state.entries = [entry("c1", 10)]; // 1000
     state.adHocs = [
-      { consultantId: "c1", projectId: "p1", kind: "BONUS", amount: 250, project: { name: "Alpha" } },
+      { consultantId: "c1", projectId: "p1", kind: "BONUS", amountEncrypted: "250", project: { name: "Alpha" } },
     ];
     state.existingByConsultant = { c1: null };
 

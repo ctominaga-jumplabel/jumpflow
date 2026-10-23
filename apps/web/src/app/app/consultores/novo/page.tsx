@@ -3,9 +3,8 @@ import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { NewConsultantForm } from "@/components/consultants/NewConsultantForm";
 import { getCurrentUser } from "@/lib/auth/current-user";
-import { FINANCIAL_ROLES, hasRole } from "@/lib/auth/route-permissions";
-import { hasRoleOrPermission } from "@/lib/auth/guards";
-import { CONSULTANT_COMPENSATION_CODE } from "@/lib/auth/permission-codes";
+import { hasRole } from "@/lib/auth/route-permissions";
+import { canAccessSensitiveCost } from "@/lib/auth/sensitive-data";
 import type { RoleName } from "@/lib/auth/types";
 
 export const metadata: Metadata = { title: "Novo consultor" };
@@ -15,20 +14,16 @@ const CREATE_CONSULTANT_ROLES: RoleName[] = ["ADMIN", "PEOPLE"];
 /**
  * Formulario completo de criacao de consultor. Rota protegida no servidor:
  * apenas ADMIN/PEOPLE criam consultores (mesma regra da server action). A secao
- * financeira (remuneracao) so aparece para papeis financeiros e a criacao do
- * perfil ADMIN so e oferecida a administradores.
+ * de remuneracao acordada (custo do consultor) so aparece para o grupo Dados
+ * Sensiveis e a concessao dos perfis ADMIN/Dados Sensiveis so e oferecida a
+ * administradores.
  */
 export default async function NovoConsultorPage() {
   const user = await getCurrentUser();
   if (!hasRole(user, CREATE_CONSULTANT_ROLES)) {
     redirect("/app/consultores");
   }
-  const canManageFinancials = await hasRoleOrPermission(
-    user,
-    FINANCIAL_ROLES,
-    CONSULTANT_COMPENSATION_CODE,
-    "view",
-  );
+  const canManageFinancials = canAccessSensitiveCost(user);
 
   return (
     <div className="space-y-6">

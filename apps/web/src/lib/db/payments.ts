@@ -1,4 +1,9 @@
 import { Prisma, prisma } from "@jumpflow/database";
+import { ENCRYPTED_FIELDS, decryptMoneyNumber } from "@jumpflow/database/field-encryption";
+import {
+  decryptAdHocPayment,
+  decryptConsultantRemuneration,
+} from "@/lib/db/sensitive-values";
 import { buildConsultantPaymentAmounts } from "@/lib/payments/amounts";
 import { timeEntryEffectiveHours } from "@/lib/timesheet/effective-hours";
 import {
@@ -105,6 +110,14 @@ function paymentLineView(row: {
   };
 }
 
+/** Remove o valor/hora (custo do consultor) das linhas de um pagamento. */
+function withoutUnitRate(view: ConsultantPaymentView): ConsultantPaymentView {
+  return {
+    ...view,
+    lines: view.lines.map((line) => ({ ...line, unitRate: null })),
+  };
+}
+
 /**
  * Prisma `include` shared by the finance list and the consultant's own list so
  * both build the IDENTICAL {@link ConsultantPaymentView} (incl. NF fields).
@@ -188,6 +201,8 @@ export async function listConsultantPayments(input: {
   consultantId?: string;
   status?: ConsultantPaymentStatus;
   contractType?: ConsultantContractType;
+  /** Grupo Dados Sensíveis: inclui o valor/hora (custo) de cada linha. */
+  includeUnitRate?: boolean;
 }): Promise<ConsultantPaymentView[]> {
   const rows = await prisma.consultantPayment.findMany({
     where: {
@@ -205,7 +220,8 @@ export async function listConsultantPayments(input: {
     orderBy: [{ consultant: { name: "asc" } }],
   });
 
-  return rows.map(toPaymentView);
+  const views = rows.map(toPaymentView);
+  return input.includeUnitRate ? views : views.map(withoutUnitRate);
 }
 
 /**
@@ -597,13 +613,15 @@ export async function generateConsultantPayments(input: {
   // vinculada ao projeto (projectId sempre presente), e SOMA ao total. A
   // idempotencia segue o mesmo skip por consultor: se ja existe ConsultantPayment
   // do mes, nada e regerado (as pontuais tampouco duplicam).
-  const adHocPayments = await prisma.consultantAdHocPayment.findMany({
-    where: {
-      status: { not: "CANCELLED" },
-      payAt: { gte: start, lt: end },
-    },
-    include: { project: { select: { name: true } } },
-  });
+  const adHocPayments = (
+    await prisma.consultantAdHocPayment.findMany({
+      where: {
+        status: { not: "CANCELLED" },
+        payAt: { gte: start, lt: end },
+      },
+      include: { project: { select: { name: true } } },
+    })
+  ).map(decryptAdHocPayment);
 
   const byConsultant = new Map<string, typeof entries>();
   for (const entry of entries) {
@@ -629,7 +647,11 @@ export async function generateConsultantPayments(input: {
     list.push({
       startsAt: rate.startsAt,
       endsAt: rate.endsAt,
-      hourlyRate: toNumber(rate.hourlyRate),
+      hourlyRate:
+        decryptMoneyNumber(
+          ENCRYPTED_FIELDS.projectRateHourlyRate,
+          rate.hourlyRateEncrypted,
+        ) ?? 0,
     });
     projectRateWindows.set(key, list);
   }
@@ -712,9 +734,10 @@ export async function generateConsultantPayments(input: {
         continue;
       }
 
-      const consultantRecord =
+      const encryptedRecord =
         consultantEntries[0]?.consultant ?? consultantById.get(consultantId);
-      if (!consultantRecord) continue;
+      if (!encryptedRecord) continue;
+      const consultantRecord = decryptConsultantRemuneration(encryptedRecord);
 
       const computed = computeConsultantMonthlyPayment({
         consultantId,
@@ -895,14 +918,16 @@ export async function reconcileConsultantPaymentsForConsultants(input: {
     },
     include: { project: { select: { name: true } } },
   });
-  const adHocPayments = await prisma.consultantAdHocPayment.findMany({
-    where: {
-      status: { not: "CANCELLED" },
-      payAt: { gte: start, lt: end },
-      consultantId: { in: consultantIds },
-    },
-    include: { project: { select: { name: true } } },
-  });
+  const adHocPayments = (
+    await prisma.consultantAdHocPayment.findMany({
+      where: {
+        status: { not: "CANCELLED" },
+        payAt: { gte: start, lt: end },
+        consultantId: { in: consultantIds },
+      },
+      include: { project: { select: { name: true } } },
+    })
+  ).map(decryptAdHocPayment);
 
   const byConsultant = new Map<string, typeof entries>();
   for (const entry of entries) {
@@ -927,7 +952,11 @@ export async function reconcileConsultantPaymentsForConsultants(input: {
     list.push({
       startsAt: rate.startsAt,
       endsAt: rate.endsAt,
-      hourlyRate: toNumber(rate.hourlyRate),
+      hourlyRate:
+        decryptMoneyNumber(
+          ENCRYPTED_FIELDS.projectRateHourlyRate,
+          rate.hourlyRateEncrypted,
+        ) ?? 0,
     });
     projectRateWindows.set(key, list);
   }
@@ -948,7 +977,7 @@ export async function reconcileConsultantPaymentsForConsultants(input: {
 
     const computed = computeConsultantMonthlyPayment({
       consultantId,
-      consultantRecord: record,
+      consultantRecord: decryptConsultantRemuneration(record),
       approvedEntries: byConsultant.get(consultantId) ?? [],
       adHocs: adHocByConsultant.get(consultantId) ?? [],
       start,

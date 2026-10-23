@@ -99,7 +99,19 @@ describe("getProjectTracking RBAC (D5)", () => {
     h.store.currentUser.roles = ["FINANCE"];
     const r = await getProjectTracking({ projectId: "prj-1" });
     expect(r.ok).toBe(true);
-    expect(h.loadTracking).toHaveBeenCalledWith("prj-1");
+    // FINANCE fora do grupo Dados Sensíveis: sem custo unitário por linha.
+    expect(h.loadTracking).toHaveBeenCalledWith("prj-1", {
+      includeCostDetail: false,
+    });
+  });
+
+  it("libera o custo por linha só para o grupo Dados Sensíveis", async () => {
+    h.store.currentUser.roles = ["FINANCE", "SENSITIVE_DATA"];
+    const r = await getProjectTracking({ projectId: "prj-1" });
+    expect(r.ok).toBe(true);
+    expect(h.loadTracking).toHaveBeenCalledWith("prj-1", {
+      includeCostDetail: true,
+    });
   });
 
   it("allows SALES (comercial) on any project", async () => {

@@ -1,9 +1,11 @@
 import { Prisma, prisma } from "@jumpflow/database";
+import { ENCRYPTED_FIELDS, decryptMoneyNumber } from "@jumpflow/database/field-encryption";
 import type { AppUser } from "@/lib/auth/types";
 import { resolveDbUser } from "@/lib/db/users";
 import { getConsultantForUser } from "@/lib/db/timesheet";
 import { computeConsultantScores } from "@/lib/consultant-score/engine";
 import {
+  includeFinancialFactor,
   includeFinancialForViewer,
   resolveConsultantScoreScope,
   type ConsultantScoreScope,
@@ -120,9 +122,7 @@ export async function getConsultantScores(
   if (!isDatabaseConfigured()) {
     // Sem viewer real: o escopo financeiro segue o gate de papel (o mock não
     // resolve "self"), suficiente para demonstrar a tela.
-    const includeFinancial = user.roles.some((r) =>
-      ["ADMIN", "AREA_MANAGER", "FINANCE"].includes(r),
-    );
+    const includeFinancial = includeFinancialFactor(user.roles);
     return buildConsultantScoreMock(includeFinancial, selectedConsultantId);
   }
 
@@ -387,7 +387,7 @@ async function loadFinancialRates(consultantIds: string[]): Promise<{
     prisma.consultantAllocationCostRate.findMany({
       where: { consultantId: { in: consultantIds } },
       orderBy: { startsAt: "desc" },
-      select: { consultantId: true, hourlyCost: true },
+      select: { consultantId: true, hourlyCostEncrypted: true },
     }),
   ]);
 
@@ -400,7 +400,10 @@ async function loadFinancialRates(consultantIds: string[]): Promise<{
   }
   for (const row of costRows) {
     if (!costRateById.has(row.consultantId)) {
-      const value = decimalToNumber(row.hourlyCost);
+      const value = decryptMoneyNumber(
+        ENCRYPTED_FIELDS.allocationCostRateHourlyCost,
+        row.hourlyCostEncrypted,
+      );
       if (value !== null) costRateById.set(row.consultantId, value);
     }
   }

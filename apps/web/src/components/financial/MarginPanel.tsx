@@ -22,9 +22,12 @@ function marginColor(pct: number | null): string {
 export function MarginPanel({
   today,
   projects,
+  canSeeCost = false,
 }: {
   today: string;
   projects: ProjectMarginRow[];
+  /** Grupo Dados Sensíveis: vê e define o custo/hora por consultor. */
+  canSeeCost?: boolean;
 }) {
   const { feedback, notify } = useFeedback();
   const [isPending, startTransition] = useTransition();
@@ -92,7 +95,14 @@ export function MarginPanel({
       header: "Custo/h",
       align: "right",
       cell: (a) =>
-        a.costRate != null ? (
+        !canSeeCost ? (
+          <span
+            className="text-sm tabular-nums text-soft"
+            title="Visível apenas ao grupo Dados Sensíveis"
+          >
+            {MASKED_VALUE}
+          </span>
+        ) : a.costRate != null ? (
           <span className="text-sm tabular-nums">{formatCurrency(a.costRate)}</span>
         ) : editing === a.allocationId ? (
           <span className="inline-flex items-center gap-1">
@@ -142,7 +152,11 @@ export function MarginPanel({
       align: "right",
       cell: (a) => (
         <span className={`text-sm font-semibold tabular-nums ${marginColor(a.marginPct)}`}>
-          {a.margin != null ? formatCurrency(a.margin) : "—"}
+          {a.margin != null
+            ? formatCurrency(a.margin)
+            : canSeeCost
+              ? "—"
+              : MASKED_VALUE}
           {a.marginPct != null ? ` (${a.marginPct}%)` : ""}
         </span>
       ),

@@ -32,6 +32,7 @@ const ROLE_NAMES = [
   "FINANCE",
   "PEOPLE",
   "SALES",
+  "SENSITIVE_DATA",
 ];
 
 const DEV_USER = {
@@ -49,6 +50,7 @@ const ROLE_LABELS = {
   FINANCE: "Financeiro",
   PEOPLE: "RH / People",
   SALES: "Comercial",
+  SENSITIVE_DATA: "Dados Sensíveis",
 };
 
 async function seedRoles() {

@@ -48,6 +48,10 @@ Valores iniciais:
 - `FINANCE`
 - `PEOPLE`
 - `SALES`
+- `SENSITIVE_DATA` (grupo "Dados Sensiveis"): UNICO grupo que ve e edita o
+  custo do consultor — valor hora de custo e valores acordados de remuneracao
+  (nao o valor de venda do Comercial). Nao e herdado por nenhum outro papel,
+  nem ADMIN, e nao e concedido pela Matriz; so ADMIN adiciona membros.
 
 Relacionamentos:
 
@@ -83,7 +87,7 @@ Regras:
 
 - Consultor ativo pode ser alocado.
 - Consultor inativo nao deve receber novas alocacoes.
-- `hourlyCost` deve ser visivel apenas para perfis autorizados.
+- `hourlyCost` e CIFRADO no banco e visivel apenas ao grupo Dados Sensiveis.
 
 ### Client
 
@@ -470,6 +474,21 @@ convivem com o modelo MVP existente para permitir migracao gradual.
   e outros.
 - Dados pessoais, bancarios e remuneracao exigem RBAC estrito, testes
   negativos e auditoria em alteracoes.
+- Valores de recebimento do consultor sao CIFRADOS em nivel de aplicacao
+  (AES-256-GCM, chave `FIELD_ENCRYPTION_KEY` fora do banco; formato
+  `enc:v1:<keyId>:<iv>:<tag>:<ct>`, AAD = tabela.campo):
+  `Consultant.hourlyCost`, `ConsultantCompensation.{hourlyRate, cltAmount,
+  pjAmount, benefitCardAmount}`, `ConsultantBenefit.amount`,
+  `ConsultantAllocationCostRate.hourlyCost`, `ConsultantProjectRate.hourlyRate`
+  e `ConsultantAdHocPayment.amount`. As colunas sao TEXT e os campos Prisma
+  chamam-se `*Encrypted` (`@map` para a coluna original); ler/gravar so via
+  `@jumpflow/database/field-encryption`. Nao ha agregacao/filtro numerico no
+  banco sobre esses campos: somas acontecem na aplicacao apos decifrar. A
+  auditoria guarda apenas o valor cifrado.
+- Custo do consultor (valor acordado, valor/hora por projeto, custo/hora por
+  alocacao) so e exibido/editado pelo grupo Dados Sensiveis. Calculos de
+  servidor (pagamento, margem, risco) seguem usando o valor; telas de margem e
+  acompanhamento mostram aos demais apenas os totais do projeto.
 - Entidades sensiveis de consultor usam `onDelete: Restrict`; consultores devem
   ser inativados por status, nao removidos fisicamente quando houver historico.
 

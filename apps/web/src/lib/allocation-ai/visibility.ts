@@ -2,7 +2,7 @@ import type { RoleName } from "@/lib/auth/roles";
 // Importado do módulo FOLHA (não de `route-permissions`): `route-permissions`
 // importa ESTE arquivo para montar a regra de rota, e o ciclo fazia a constante
 // resolver como `undefined` conforme a ordem de inicialização.
-import { FINANCIAL_ROLES } from "@/lib/auth/roles";
+import { SENSITIVE_DATA_ROLE } from "@/lib/auth/roles";
 
 /**
  * Pure RBAC helpers for the IA de Alocação (§8.2). No I/O. The page guard and the
@@ -27,10 +27,12 @@ export const ALLOCATION_AI_READ_ROLES: RoleName[] = [
 
 /**
  * O fator financeiro (custo/valor hora → margem) só é computado e exibido para
- * FINANCIAL_ROLES (ADMIN/AREA_MANAGER/FINANCE). Para os demais, a engine roda sem
+ * o grupo Dados Sensíveis (SENSITIVE_DATA). Para os demais, a engine roda sem
  * o fator (não é mascarar a saída — o servidor nem busca o dado financeiro). Note
  * que SALES e PROJECT_MANAGER alocam mas NÃO veem margem.
  */
 export function includeFinancialFactor(roles: readonly RoleName[]): boolean {
-  return roles.some((r) => FINANCIAL_ROLES.includes(r));
+  // O fator usa o custo/hora do CONSULTOR (margem por pessoa revela o custo):
+  // exclusivo do grupo Dados Sensíveis, nenhum outro papel (nem ADMIN/FINANCE).
+  return roles.includes(SENSITIVE_DATA_ROLE);
 }

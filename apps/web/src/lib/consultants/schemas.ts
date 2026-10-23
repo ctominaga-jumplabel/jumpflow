@@ -26,9 +26,11 @@ const optionalDate = z
   .optional()
   .transform((value) => (value ? value : undefined));
 
+// Valores monetarios: sem o antigo Decimal(12,2) no banco (colunas cifradas
+// sao TEXT), o teto passa a ser validado aqui.
 const optionalNumber = z.preprocess(
   (value) => (value === "" || value === null ? undefined : value),
-  z.coerce.number().nonnegative().optional(),
+  z.coerce.number().nonnegative().max(9_999_999.99).optional(),
 );
 
 const optionalEmail = z
@@ -423,7 +425,7 @@ export const benefitSchema = z
       "BENEFIT_CARD",
       "OTHER",
     ]),
-    amount: z.coerce.number().positive(),
+    amount: z.coerce.number().positive().max(9_999_999.99),
     startsAt: z.string().trim().min(10).max(10),
     endsAt: optionalDate,
     note: optionalText(300),

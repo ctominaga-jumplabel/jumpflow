@@ -2,7 +2,7 @@ import type { RoleName } from "@/lib/auth/roles";
 // Importado do módulo FOLHA (não de `route-permissions`): `route-permissions`
 // importa ESTE arquivo para montar a regra de rota, e o ciclo fazia a constante
 // resolver como `undefined` conforme a ordem de inicialização.
-import { FINANCIAL_ROLES } from "@/lib/auth/roles";
+import { SENSITIVE_DATA_ROLE } from "@/lib/auth/roles";
 
 /**
  * Pure RBAC + LGPD helpers for the Score do Consultor (§8.4). No I/O. The page
@@ -27,14 +27,16 @@ export const CONSULTANT_SCORE_READ_ROLES: RoleName[] = [
 ];
 
 /**
- * O fator de realização financeira só é computado e exibido para FINANCIAL_ROLES
- * (ADMIN/AREA_MANAGER/FINANCE). Para os demais (PEOPLE, o próprio CONSULTANT), a
+ * O fator de realização financeira só é computado e exibido para o grupo Dados
+ * Sensíveis (SENSITIVE_DATA). Para os demais (PEOPLE, o próprio CONSULTANT), a
  * engine roda sem o fator — não é mascarar a saída, o servidor nem busca o dado
  * financeiro (design §5). O consultor vê o próprio score SEM o componente
  * financeiro mesmo que seja, por acaso, FINANCE: ver `includeFinancialForViewer`.
  */
 export function includeFinancialFactor(roles: readonly RoleName[]): boolean {
-  return roles.some((r) => FINANCIAL_ROLES.includes(r));
+  // O fator usa o custo/hora do CONSULTOR (margem por pessoa revela o custo):
+  // exclusivo do grupo Dados Sensíveis, nenhum outro papel (nem ADMIN/FINANCE).
+  return roles.includes(SENSITIVE_DATA_ROLE);
 }
 
 /**

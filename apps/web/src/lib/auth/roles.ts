@@ -10,6 +10,7 @@ export const ROLE_NAMES = [
   "FINANCE",
   "PEOPLE",
   "SALES",
+  "SENSITIVE_DATA",
 ] as const;
 
 export type RoleName = (typeof ROLE_NAMES)[number];
@@ -23,6 +24,7 @@ export const roleLabels: Record<RoleName, string> = {
   FINANCE: "Financeiro",
   PEOPLE: "RH / People",
   SALES: "Comercial",
+  SENSITIVE_DATA: "Dados Sensíveis",
 };
 
 /**
@@ -39,6 +41,15 @@ export const roleLabels: Record<RoleName, string> = {
  * símbolo, então todos os consumidores históricos seguem funcionando.
  */
 export const FINANCIAL_ROLES: RoleName[] = ["ADMIN", "AREA_MANAGER", "FINANCE"];
+
+/**
+ * Grupo "Dados Sensíveis": o ÚNICO que vê e edita o custo do consultor (valor
+ * hora de custo e valores acordados de remuneração — NÃO o valor de venda do
+ * Comercial). Nenhum outro papel herda esse acesso, nem ADMIN, e a Matriz de
+ * Permissões não o concede: a pertença ao grupo é a única chave. Ver
+ * `lib/auth/sensitive-data.ts`.
+ */
+export const SENSITIVE_DATA_ROLE: RoleName = "SENSITIVE_DATA";
 
 export function isRoleName(value: unknown): value is RoleName {
   return (

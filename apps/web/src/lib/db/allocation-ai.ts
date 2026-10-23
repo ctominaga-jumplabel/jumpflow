@@ -1,4 +1,5 @@
 import { Prisma, prisma } from "@jumpflow/database";
+import { decryptMoneyNumber, ENCRYPTED_FIELDS } from "@jumpflow/database/field-encryption";
 import type { AppUser } from "@/lib/auth/types";
 import {
   buildAvailabilityMap,
@@ -295,7 +296,7 @@ export async function getAllocationFit(
             ? {
                 orderBy: { startsAt: "desc" },
                 take: 1,
-                select: { hourlyCost: true },
+                select: { hourlyCostEncrypted: true },
               }
             : false,
         },
@@ -345,7 +346,10 @@ export async function getAllocationFit(
     if (includeFinancial) {
       for (const a of c.allocations) {
         if ("costRates" in a && a.costRates) {
-          const cost = decimalToNumber(a.costRates[0]?.hourlyCost ?? null);
+          const cost = decryptMoneyNumber(
+            ENCRYPTED_FIELDS.allocationCostRateHourlyCost,
+            a.costRates[0]?.hourlyCostEncrypted,
+          );
           if (cost !== null) {
             hourlyCost = hourlyCost === null ? cost : Math.min(hourlyCost, cost);
           }

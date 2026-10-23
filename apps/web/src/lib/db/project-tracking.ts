@@ -6,8 +6,14 @@
  * APROVADAS a partir dos TimeEntry e alimenta o builder puro
  * `computeProjectTracking`. RBAC/escopo (D5) é aplicado pelo CHAMADOR (a server
  * action `getProjectTracking`), não aqui.
+ *
+ * Custo do consultor (custo/h de alocação, valor/hora por projeto, pontuais) é
+ * CIFRADO no banco e decifrado só aqui, no servidor. O custo UNITÁRIO por linha
+ * (e custo/margem por alocação, que o revelam) só sai para o grupo Dados
+ * Sensíveis (`includeCostDetail`); os totais do projeto seguem completos.
  */
 import { prisma } from "@jumpflow/database";
+import { ENCRYPTED_FIELDS, decryptMoneyNumber } from "@jumpflow/database/field-encryption";
 import { resolveSaleRate, type SaleRateRange } from "@/lib/projects/rates";
 import {
   resolveProjectRate,
@@ -32,7 +38,9 @@ const PLANNED_STATUSES = new Set(["ACTIVE", "PLANNED"]);
 
 export async function loadProjectTracking(
   projectId: string,
+  options: { includeCostDetail?: boolean } = {},
 ): Promise<ProjectTracking | null> {
+  const includeCostDetail = options.includeCostDetail ?? false;
   const today = iso(new Date());
 
   const project = await prisma.project.findUnique({
@@ -59,7 +67,7 @@ export async function loadProjectTracking(
           consultantId: true,
           startsAt: true,
           endsAt: true,
-          hourlyRate: true,
+          hourlyRateEncrypted: true,
         },
       },
       allocations: {
@@ -74,7 +82,7 @@ export async function loadProjectTracking(
           consultant: { select: { name: true } },
           costRates: {
             orderBy: { startsAt: "desc" },
-            select: { startsAt: true, endsAt: true, hourlyCost: true },
+            select: { startsAt: true, endsAt: true, hourlyCostEncrypted: true },
           },
         },
       },
@@ -91,7 +99,11 @@ export async function loadProjectTracking(
     list.push({
       startsAt: rate.startsAt,
       endsAt: rate.endsAt,
-      hourlyRate: num(rate.hourlyRate),
+      hourlyRate:
+        decryptMoneyNumber(
+          ENCRYPTED_FIELDS.projectRateHourlyRate,
+          rate.hourlyRateEncrypted,
+        ) ?? 0,
     });
     projectRateByConsultant.set(rate.consultantId, list);
   }
@@ -156,7 +168,13 @@ export async function loadProjectTracking(
       todayDate,
     );
     const costRate =
-      projectRateOverride ?? (cost ? num(cost.hourlyCost) : null);
+      projectRateOverride ??
+      (cost
+        ? decryptMoneyNumber(
+            ENCRYPTED_FIELDS.allocationCostRateHourlyCost,
+            cost.hourlyCostEncrypted,
+          )
+        : null);
 
     let plannedHours: number | null = null;
     if (PLANNED_STATUSES.has(a.status)) {
@@ -201,9 +219,10 @@ export async function loadProjectTracking(
       // realizado, e não pode inflar o custo realizado. Janela = TODO o histórico
       // do projeto, coerente com a base CUMULATIVA do realizado (horas aprovadas
       // + fechamentos são acumulados, sem filtro de mês).
-      prisma.consultantAdHocPayment.aggregate({
+      // Valor cifrado: a soma é feita aqui, após decifrar (sem _sum no banco).
+      prisma.consultantAdHocPayment.findMany({
         where: { projectId, status: "PAID" },
-        _sum: { amount: true },
+        select: { amountEncrypted: true },
       }),
     ]);
   const receivablesForecast = num(
@@ -213,7 +232,17 @@ export async function loadProjectTracking(
     receivableGroups.find((g) => g.status === "RECEIVED")?._sum.amount,
   );
 
-  return computeProjectTracking({
+  const adHocPaidTotal = adHocAgg.reduce(
+    (sum, row) =>
+      sum +
+      (decryptMoneyNumber(
+        ENCRYPTED_FIELDS.adHocPaymentAmount,
+        row.amountEncrypted,
+      ) ?? 0),
+    0,
+  );
+
+  const tracking = computeProjectTracking({
     projectId: project.id,
     projectName: project.name,
     clientName: project.client.name,
@@ -230,6 +259,22 @@ export async function loadProjectTracking(
     // projeto entra no custo realizado da margem, via o ponto de extensão
     // `additionalRealizedCost` do builder puro. PLANNED não conta como realizado.
     // Janela: todo o histórico do projeto (base cumulativa do realizado).
-    additionalRealizedCost: round2(num(adHocAgg._sum.amount)),
+    additionalRealizedCost: round2(adHocPaidTotal),
   });
+  if (includeCostDetail) return tracking;
+  // Fora do grupo Dados Sensíveis: nenhuma linha carrega custo unitário nem o
+  // que o revela (custo/margem da alocação). Totais permanecem.
+  return {
+    ...tracking,
+    rows: tracking.rows.map((row) => ({
+      ...row,
+      costRate: null,
+      plannedCost: null,
+      plannedMargin: null,
+      plannedMarginPct: null,
+      realizedCost: null,
+      realizedMargin: null,
+      realizedMarginPct: null,
+    })),
+  };
 }
