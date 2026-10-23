@@ -10,6 +10,7 @@ import {
   FileText,
   Gift,
   GraduationCap,
+  Lock,
   Plus,
   Trash2,
   UserPlus,
@@ -40,6 +41,7 @@ import {
   loadConsultantAdHocPayments,
   loadConsultantProfile,
   loadConsultantProjectRates,
+  loadConsultantSensitiveCompensation,
   saveBankAccount,
   saveCompensation,
   saveConsultantAdHocPayment,
@@ -65,6 +67,7 @@ import {
 import { contractTypeLabels } from "@/lib/consultants/labels";
 import type {
   ConsultantBankAccountView,
+  ConsultantCompensationView,
   ConsultantProfile,
 } from "@/lib/db/consultants";
 import { computeCompensation } from "@/lib/consultants/compensation";
@@ -103,7 +106,16 @@ export interface ConsultantGroupPerms {
   curriculum: ConsultantGroupPermission;
   bank: ConsultantGroupPermission;
   compensation: ConsultantGroupPermission;
+  /**
+   * Custo do consultor (valor acordado + valor/hora por projeto): exclusivo do
+   * grupo Dados Sensíveis. Ausente = sem acesso.
+   */
+  sensitiveCost?: ConsultantGroupPermission;
 }
+
+type ResolvedGroupPerms = ConsultantGroupPerms & {
+  sensitiveCost: ConsultantGroupPermission;
+};
 
 export interface ConsultantDirectoryProps {
   consultants?: Consultant[];
@@ -140,12 +152,16 @@ export function ConsultantDirectory({
   // Resolve per-group perms. Without an explicit map (demo/tests), fall back to
   // the legacy booleans so behavior is unchanged: People groups follow
   // canManagePeople; the compensation group follows canManageFinancials.
-  const perms: ConsultantGroupPerms = groupPerms ?? {
+  const resolvedPerms: ConsultantGroupPerms = groupPerms ?? {
     personal: { view: canManagePeople, edit: canManagePeople },
     documents: { view: canManagePeople, edit: canManagePeople },
     curriculum: { view: canManagePeople, edit: canManagePeople },
     bank: { view: canManagePeople, edit: canManagePeople },
     compensation: { view: canManageFinancials, edit: canManageFinancials },
+  };
+  const perms: ResolvedGroupPerms = {
+    ...resolvedPerms,
+    sensitiveCost: resolvedPerms.sensitiveCost ?? { view: false, edit: false },
   };
   // The profile blob (personal/documents/curriculum/bank) backs four groups; load
   // it if ANY of them is viewable (not just the legacy People flag).
@@ -163,6 +179,10 @@ export function ConsultantDirectory({
   const [adHoc, setAdHoc] = useState<AdHocPaymentsView | null>(null);
   const [projectRates, setProjectRates] =
     useState<ConsultantProjectRatesView | null>(null);
+  // Remuneracao vigente COM valores (grupo Dados Sensiveis), carregada a parte
+  // do perfil: o grupo nao depende do acesso aos dados pessoais.
+  const [sensitiveCompensation, setSensitiveCompensation] =
+    useState<ConsultantCompensationView | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   // Tom da mensagem de feedback: "error" destaca falhas (ex.: save rejeitado
   // pela validacao) para que nao passem despercebidas como texto neutro.
@@ -183,18 +203,26 @@ export function ConsultantDirectory({
     setProfile(null);
     setAdHoc(null);
     setProjectRates(null);
+    setSensitiveCompensation(null);
     notify(null);
-    // Remuneracoes pontuais + valor/hora por projeto sao dado financeiro:
-    // carregados sob demanda para quem pode ver o grupo de valores. Leitura
-    // tambem gated server-side nas actions.
-    if (perms.compensation.view) {
-      const [adHocResult, ratesResult] = await Promise.all([
-        loadConsultantAdHocPayments(consultant.id),
-        loadConsultantProjectRates(consultant.id),
-      ]);
-      if (adHocResult.ok) setAdHoc(adHocResult.data);
-      if (ratesResult.ok) setProjectRates(ratesResult.data);
-    }
+    // Remuneracoes pontuais sao dado financeiro: carregadas sob demanda para
+    // quem pode ver o grupo de valores. Valor acordado e valor/hora por projeto
+    // (custo do consultor) so para o grupo Dados Sensiveis. Leitura tambem
+    // gated server-side nas actions.
+    const [adHocResult, ratesResult, compensationResult] = await Promise.all([
+      perms.compensation.view
+        ? loadConsultantAdHocPayments(consultant.id)
+        : null,
+      perms.sensitiveCost.view
+        ? loadConsultantProjectRates(consultant.id)
+        : null,
+      perms.sensitiveCost.view
+        ? loadConsultantSensitiveCompensation(consultant.id)
+        : null,
+    ]);
+    if (adHocResult?.ok) setAdHoc(adHocResult.data);
+    if (ratesResult?.ok) setProjectRates(ratesResult.data);
+    if (compensationResult?.ok) setSensitiveCompensation(compensationResult.data);
     // O perfil (pessoais/documentos/curriculo/bancarias) e carregado se QUALQUER
     // um desses grupos for visivel. Usuarios so-financeiro veem apenas Valores.
     if (!canViewProfile) return;
@@ -218,7 +246,7 @@ export function ConsultantDirectory({
   }
 
   async function reloadProjectRates() {
-    if (!selected || !perms.compensation.view) return;
+    if (!selected || !perms.sensitiveCost.view) return;
     const result = await loadConsultantProjectRates(selected.id);
     if (result.ok) setProjectRates(result.data);
   }
@@ -228,6 +256,7 @@ export function ConsultantDirectory({
     setProfile(null);
     setAdHoc(null);
     setProjectRates(null);
+    setSensitiveCompensation(null);
   }
 
   // Abre o perfil do consultor recem-criado (retorno de /novo) uma unica vez. O
@@ -398,6 +427,7 @@ export function ConsultantDirectory({
         loadingProfile={loadingProfile}
         adHoc={adHoc}
         projectRates={projectRates}
+        sensitiveCompensation={sensitiveCompensation}
         perms={perms}
         message={message}
         messageTone={messageTone}
@@ -417,6 +447,7 @@ function ConsultantDetailModal({
   loadingProfile,
   adHoc,
   projectRates,
+  sensitiveCompensation,
   perms,
   message,
   messageTone,
@@ -431,7 +462,8 @@ function ConsultantDetailModal({
   loadingProfile: boolean;
   adHoc: AdHocPaymentsView | null;
   projectRates: ConsultantProjectRatesView | null;
-  perms: ConsultantGroupPerms;
+  sensitiveCompensation: ConsultantCompensationView | null;
+  perms: ResolvedGroupPerms;
   message: string | null;
   messageTone: "neutral" | "error";
   onMessage: (message: string | null, tone?: "neutral" | "error") => void;
@@ -482,20 +514,23 @@ function ConsultantDetailModal({
   // reais, entao Salvar faz UPDATE da mesma linha em vez de criar duplicata. So
   // caimos no rascunho zerado (novo registro) quando o consultor ainda nao tem
   // nenhuma remuneracao — e ai o tipo de contrato herda a identidade.
+  // Valores acordados so chegam (decifrados) para o grupo Dados Sensiveis, via
+  // carga dedicada; o perfil traz apenas a vigencia sem valores.
+  const savedCompensation = sensitiveCompensation ?? profile?.compensation ?? null;
   const baseCompensation: CompensationInput =
     compensation ??
-    (profile?.compensation
+    (savedCompensation
       ? ({
           consultantId: consultant.id,
-          id: profile.compensation.id,
-          contractType: profile.compensation.contractType,
-          pjRateMode: profile.compensation.pjRateMode,
-          startsAt: profile.compensation.startsAt,
-          endsAt: profile.compensation.endsAt ?? undefined,
-          hourlyRate: profile.compensation.hourlyRate ?? undefined,
-          cltAmount: profile.compensation.cltAmount ?? undefined,
-          pjAmount: profile.compensation.pjAmount ?? undefined,
-          benefitCardAmount: profile.compensation.benefitCardAmount ?? undefined,
+          id: savedCompensation.id,
+          contractType: savedCompensation.contractType,
+          pjRateMode: savedCompensation.pjRateMode,
+          startsAt: savedCompensation.startsAt,
+          endsAt: savedCompensation.endsAt ?? undefined,
+          hourlyRate: savedCompensation.hourlyRate ?? undefined,
+          cltAmount: savedCompensation.cltAmount ?? undefined,
+          pjAmount: savedCompensation.pjAmount ?? undefined,
+          benefitCardAmount: savedCompensation.benefitCardAmount ?? undefined,
           discountRulesJson:
             '{"version":1,"fixedDiscounts":[],"percentDiscounts":[]}',
           note: undefined,
@@ -520,7 +555,7 @@ function ConsultantDetailModal({
 
   // Existe uma vigencia salva para corrigir? So entao oferecemos a escolha
   // "corrigir atual vs nova vigencia" (senao, todo Salvar ja e uma criacao).
-  const hasExistingCompensation = profile?.compensation != null;
+  const hasExistingCompensation = savedCompensation != null;
   // O tipo de contrato da remuneracao segue AO VIVO a identidade (fonte unica):
   // escolher PJ/CLT/CLT FLEX na identidade (ou no seletor desta secao, que
   // escreve na mesma identidade) troca imediatamente o modo dos campos e o que
@@ -596,6 +631,7 @@ function ConsultantDetailModal({
   );
 
   // Abre por padrão o primeiro grupo visível (os demais iniciam recolhidos).
+  const canViewValues = perms.compensation.view || perms.sensitiveCost.view;
   const firstOpen: keyof ConsultantGroupPerms | null = perms.personal.view
     ? "personal"
     : perms.documents.view
@@ -604,7 +640,7 @@ function ConsultantDetailModal({
         ? "curriculum"
         : perms.bank.view
           ? "bank"
-          : perms.compensation.view
+          : canViewValues
             ? "compensation"
             : null;
 
@@ -835,18 +871,25 @@ function ConsultantDetailModal({
           </CollapsibleGroup>
         ) : null}
 
-        {perms.compensation.view ? (
+        {canViewValues ? (
           <CollapsibleGroup
             title="Valores e remuneração"
             icon={BadgeDollarSign}
             defaultOpen={firstOpen === "compensation"}
-            hint={perms.compensation.edit ? undefined : "Somente leitura"}
+            hint={
+              perms.compensation.edit || perms.sensitiveCost.edit
+                ? undefined
+                : "Somente leitura"
+            }
           >
             <section className="space-y-3">
               <div className="flex items-center gap-2 text-sm font-semibold text-strong">
                 <BadgeDollarSign aria-hidden="true" className="size-4" />
                 Valor acordado
               </div>
+
+              {perms.sensitiveCost.view ? (
+                <>
 
               {/* Tipo de contrato: self-service aqui na secao de remuneracao
                   (mesma fonte unica da identidade). Trocar aqui ja alterna os
@@ -859,8 +902,8 @@ function ConsultantDetailModal({
                 <SearchableSelect
                   id="compensation-contract-type"
                   aria-label="Tipo de contrato da remuneração"
-                  disabled={!perms.compensation.edit}
-                  value={currentIdentity.contractType ?? ""}
+                  disabled={!perms.sensitiveCost.edit}
+                  value={compContractType ?? ""}
                   onChange={(event) => {
                     onMessage(null);
                     setIdentity({
@@ -1055,9 +1098,17 @@ function ConsultantDetailModal({
                   </p>
                 </fieldset>
               ) : null}
+                </>
+              ) : (
+                <p className="flex items-start gap-2 rounded-md border border-border bg-surface-muted px-3 py-2 text-sm text-medium">
+                  <Lock aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+                  Valor acordado, valor/hora e vigências de remuneração são
+                  visíveis apenas ao grupo Dados Sensíveis.
+                </p>
+              )}
 
               <div className="grid gap-3 md:grid-cols-3">
-            {currentCompensation.contractType === "PJ" ? (
+            {!perms.sensitiveCost.view ? null : currentCompensation.contractType === "PJ" ? (
               (currentCompensation.pjRateMode ?? "FIXED") === "HOURLY" ? (
                 <NumberInput
                   label="Valor/hora (valor/hora)"
@@ -1093,32 +1144,39 @@ function ConsultantDetailModal({
                 />
               </>
             )}
-            <NumberInput
-              label="Cartão benefício"
-              value={currentCompensation.benefitCardAmount ?? undefined}
-              onChange={(value) =>
-                setCompensation({
-                  ...currentCompensation,
-                  benefitCardAmount: value,
-                })
-              }
-            />
-            <NumberInput
-              label="VR (Vale Refeição)"
-              value={vouchers.vr}
-              onChange={(value) => setVouchers({ ...vouchers, vr: value })}
-            />
-            <NumberInput
-              label="VA (Vale Alimentação)"
-              value={vouchers.va}
-              onChange={(value) => setVouchers({ ...vouchers, va: value })}
-            />
-            <NumberInput
-              label="VT (Vale Transporte)"
-              value={vouchers.vt}
-              onChange={(value) => setVouchers({ ...vouchers, vt: value })}
-            />
+            {perms.sensitiveCost.view ? (
+              <NumberInput
+                label="Cartão benefício"
+                value={currentCompensation.benefitCardAmount ?? undefined}
+                onChange={(value) =>
+                  setCompensation({
+                    ...currentCompensation,
+                    benefitCardAmount: value,
+                  })
+                }
+              />
+            ) : null}
+            {perms.compensation.view ? (
+              <>
+                <NumberInput
+                  label="VR (Vale Refeição)"
+                  value={vouchers.vr}
+                  onChange={(value) => setVouchers({ ...vouchers, vr: value })}
+                />
+                <NumberInput
+                  label="VA (Vale Alimentação)"
+                  value={vouchers.va}
+                  onChange={(value) => setVouchers({ ...vouchers, va: value })}
+                />
+                <NumberInput
+                  label="VT (Vale Transporte)"
+                  value={vouchers.vt}
+                  onChange={(value) => setVouchers({ ...vouchers, vt: value })}
+                />
+              </>
+            ) : null}
           </div>
+          {perms.sensitiveCost.view ? (
           <div className="flex flex-wrap items-end gap-3">
             <NumberInput
               label="Dependentes (IRRF)"
@@ -1134,8 +1192,10 @@ function ConsultantDetailModal({
               Aplicar encargos CLT (INSS/IRRF) ao liquido
             </label>
           </div>
+          ) : null}
 
-          {currentCompensation.contractType !== "PJ" &&
+          {perms.sensitiveCost.view &&
+          currentCompensation.contractType !== "PJ" &&
           preview.cltCharges ? (
             <dl className="grid gap-2 rounded-md border border-border bg-surface-muted p-3 text-sm text-medium md:grid-cols-2">
               <div className="flex justify-between gap-2">
@@ -1174,26 +1234,31 @@ function ConsultantDetailModal({
           ) : null}
 
               <div className="flex flex-wrap gap-2">
-                <ActionButton
-                  size="sm"
-                  disabled={!perms.compensation.edit}
-                  onClick={saveFlex}
-                  icon={BadgeDollarSign}
-                >
-                  Salvar compensacao
-                </ActionButton>
-                <ActionButton
-                  size="sm"
-                  variant="secondary"
-                  disabled={!perms.compensation.edit}
-                  onClick={saveVouchers}
-                  icon={CreditCard}
-                >
-                  Salvar VA/VR/VT
-                </ActionButton>
+                {perms.sensitiveCost.view ? (
+                  <ActionButton
+                    size="sm"
+                    disabled={!perms.sensitiveCost.edit}
+                    onClick={saveFlex}
+                    icon={BadgeDollarSign}
+                  >
+                    Salvar compensacao
+                  </ActionButton>
+                ) : null}
+                {perms.compensation.view ? (
+                  <ActionButton
+                    size="sm"
+                    variant="secondary"
+                    disabled={!perms.compensation.edit}
+                    onClick={saveVouchers}
+                    icon={CreditCard}
+                  >
+                    Salvar VA/VR/VT
+                  </ActionButton>
+                ) : null}
               </div>
             </section>
 
+            {perms.compensation.view ? (
             <section className="space-y-3 border-t border-border pt-4">
               <div className="flex items-center gap-2 text-sm font-semibold text-strong">
                 <Gift aria-hidden="true" className="size-4" />
@@ -1212,7 +1277,9 @@ function ConsultantDetailModal({
                 onReload={onReloadAdHoc}
               />
             </section>
+            ) : null}
 
+            {perms.sensitiveCost.view ? (
             <section className="space-y-3 border-t border-border pt-4">
               <div className="flex items-center gap-2 text-sm font-semibold text-strong">
                 <BadgeDollarSign aria-hidden="true" className="size-4" />
@@ -1227,11 +1294,12 @@ function ConsultantDetailModal({
               <ConsultantProjectRatesSection
                 consultantId={consultantId}
                 data={projectRates}
-                canEdit={perms.compensation.edit}
+                canEdit={perms.sensitiveCost.edit}
                 onMessage={onMessage}
                 onReload={onReloadProjectRates}
               />
             </section>
+            ) : null}
           </CollapsibleGroup>
         ) : null}
       </div>

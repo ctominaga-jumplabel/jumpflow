@@ -3,6 +3,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { ConsultantPaymentsPanel } from "@/components/payments/ConsultantPaymentsPanel";
 import { PaymentForecastPanel } from "@/components/payments/PaymentForecastPanel";
 import { requireRole } from "@/lib/auth/guards";
+import { canAccessSensitiveCost } from "@/lib/auth/sensitive-data";
 import { FINANCIAL_ROLES } from "@/lib/auth/route-permissions";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import type { ConsultantPaymentStatus } from "@/lib/payments/state-machine";
@@ -73,7 +74,7 @@ export default async function PagamentosPage({
 }: {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 } = {}) {
-  await requireRole(FINANCIAL_ROLES);
+  const user = await requireRole(FINANCIAL_ROLES);
 
   const databaseConfigured = isDatabaseConfigured();
   const now = new Date();
@@ -99,6 +100,8 @@ export default async function PagamentosPage({
         consultantId,
         status,
         contractType,
+        // Valor/hora de cada linha é o custo do consultor: só Dados Sensíveis.
+        includeUnitRate: canAccessSensitiveCost(user),
       }),
       listPaymentForecasts({ month, year }),
       listPaymentConsultants(),

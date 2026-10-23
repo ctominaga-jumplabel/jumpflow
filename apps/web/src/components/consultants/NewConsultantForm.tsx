@@ -102,8 +102,9 @@ export function NewConsultantForm({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // ADMIN e Dados Sensiveis so sao concedidos por administradores.
   const roleOptions = ROLE_NAMES.filter(
-    (role) => role !== "ADMIN" || canGrantAdmin,
+    (role) => (role !== "ADMIN" && role !== "SENSITIVE_DATA") || canGrantAdmin,
   );
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {

@@ -27,6 +27,7 @@ const projectFindUnique = vi.fn(async (): Promise<AnyRow | null> => ({
       hourlyRate: 100,
     },
   ],
+  consultantProjectRates: [],
   allocations: [
     {
       id: "a1",
@@ -35,7 +36,8 @@ const projectFindUnique = vi.fn(async (): Promise<AnyRow | null> => ({
       status: "ACTIVE",
       consultantId: "c1",
       consultant: { name: "Bia" },
-      costRates: [{ startsAt: past, endsAt: null, hourlyCost: 50 }],
+      // Valor legado em texto (pré-backfill) também é lido.
+      costRates: [{ startsAt: past, endsAt: null, hourlyCostEncrypted: "50.00" }],
     },
   ],
 }));
@@ -44,20 +46,17 @@ const timeEntryFindMany = vi.fn(async (): Promise<AnyRow[]> => [
   { allocationId: "a1", hours: 10, multiplier: 1, billable: true },
 ]);
 
-// Dataset de pontuais: 300 PAID + 500 PLANNED + 999 CANCELLED. O aggregate
-// honra o where para provar M3 (só PAID entra no custo REALIZADO).
+// Dataset de pontuais: 300 PAID + 500 PLANNED + 999 CANCELLED. O findMany
+// honra o where para provar M3 (só PAID entra no custo REALIZADO). O valor é
+// cifrado no banco, então a soma acontece na aplicação (sem _sum).
 const adHocRows = [
-  { status: "PAID", amount: 300 },
-  { status: "PLANNED", amount: 500 },
-  { status: "CANCELLED", amount: 999 },
+  { status: "PAID", amountEncrypted: "300.00" },
+  { status: "PLANNED", amountEncrypted: "500.00" },
+  { status: "CANCELLED", amountEncrypted: "999.00" },
 ];
-const adHocAggregate = vi.fn(
-  async ({ where }: { where: { status?: string } }): Promise<AnyRow> => {
-    const sum = adHocRows
-      .filter((r) => r.status === where.status)
-      .reduce((acc, r) => acc + r.amount, 0);
-    return { _sum: { amount: sum || null } };
-  },
+const adHocFindMany = vi.fn(
+  async ({ where }: { where: { status?: string } }): Promise<AnyRow[]> =>
+    adHocRows.filter((r) => r.status === where.status),
 );
 
 vi.mock("@jumpflow/database", () => ({
@@ -70,7 +69,7 @@ vi.mock("@jumpflow/database", () => ({
     },
     projectReceivableSchedule: { groupBy: async () => [] },
     consultantAdHocPayment: {
-      aggregate: (args: { where: { status?: string } }) => adHocAggregate(args),
+      findMany: (args: { where: { status?: string } }) => adHocFindMany(args),
     },
   },
 }));
@@ -91,7 +90,7 @@ describe("loadProjectTracking — remuneração pontual no custo realizado", () 
     expect(tracking).not.toBeNull();
     if (!tracking) return;
     // A consulta filtra status PAID.
-    expect(adHocAggregate).toHaveBeenCalledWith(
+    expect(adHocFindMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.objectContaining({ status: "PAID" }) }),
     );
     // Realizado por horas: receita 10x100=1000; custo por horas 10x50=500.
@@ -102,8 +101,26 @@ describe("loadProjectTracking — remuneração pontual no custo realizado", () 
   });
 
   it("não soma nada quando não há pontuais PAID", async () => {
-    adHocAggregate.mockResolvedValueOnce({ _sum: { amount: null } });
+    adHocFindMany.mockResolvedValueOnce([]);
     const tracking = await loadProjectTracking("prj-1");
     expect(tracking?.realized.cost).toBeCloseTo(500, 6);
+  });
+
+  it("fora do grupo Dados Sensíveis, nenhuma linha traz custo unitário (totais mantidos)", async () => {
+    const tracking = await loadProjectTracking("prj-1");
+    expect(tracking?.rows[0]).toMatchObject({
+      costRate: null,
+      realizedCost: null,
+      realizedMargin: null,
+      plannedCost: null,
+    });
+    expect(tracking?.realized.cost).toBeCloseTo(800, 6);
+  });
+
+  it("para o grupo Dados Sensíveis, a linha traz o custo/h decifrado", async () => {
+    const tracking = await loadProjectTracking("prj-1", {
+      includeCostDetail: true,
+    });
+    expect(tracking?.rows[0].costRate).toBe(50);
   });
 });

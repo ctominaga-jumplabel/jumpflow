@@ -1,4 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  ENCRYPTED_FIELDS,
+  decryptMoneyNumber,
+  isEncryptedValue,
+} from "@jumpflow/database/field-encryption";
 
 /**
  * Server-action tests for the ad-hoc consultant remuneration (Onda D / D2):
@@ -12,7 +17,8 @@ interface AdHocRec {
   consultantId: string;
   projectId: string;
   allocationId: string | null;
-  amount: number;
+  /** Valor cifrado (field-encryption), como fica no banco. */
+  amountEncrypted: string;
   payAt: Date;
   reason: string;
   kind: string;
@@ -65,7 +71,7 @@ const h = vi.hoisted(() => {
           consultantId: data.consultantId,
           projectId: data.projectId,
           allocationId: data.allocationId ?? null,
-          amount: Number(data.amount),
+          amountEncrypted: data.amountEncrypted,
           payAt: data.payAt,
           reason: data.reason,
           kind: data.kind,
@@ -77,11 +83,7 @@ const h = vi.hoisted(() => {
       },
       update: async ({ where, data }: { where: Where; data: Where }) => {
         const row = store.adHoc.find((r) => r.id === where.id)!;
-        Object.assign(
-          row,
-          data,
-          data.amount !== undefined ? { amount: Number(data.amount) } : {},
-        );
+        Object.assign(row, data);
         return { ...row };
       },
       delete: async ({ where }: { where: Where }) => {
@@ -176,6 +178,9 @@ import {
 
 const CONSULTANT_ID = "seed-consultant-1";
 
+const amountOf = (row: AdHocRec) =>
+  decryptMoneyNumber(ENCRYPTED_FIELDS.adHocPaymentAmount, row.amountEncrypted);
+
 import type { AdHocPaymentInput } from "@/lib/consultants/schemas";
 
 const baseInput: AdHocPaymentInput = {
@@ -213,9 +218,11 @@ describe("saveConsultantAdHocPayment", () => {
     const result = await saveConsultantAdHocPayment(baseInput);
     expect(result.ok).toBe(true);
     expect(h.store.adHoc).toHaveLength(1);
+    // Persistido CIFRADO: o banco nunca recebe o valor em claro.
+    expect(isEncryptedValue(h.store.adHoc[0].amountEncrypted)).toBe(true);
+    expect(amountOf(h.store.adHoc[0])).toBe(1500);
     expect(h.store.adHoc[0]).toMatchObject({
       projectId: "seed-project-1",
-      amount: 1500,
       kind: "BONUS",
       status: "PLANNED",
       createdByUserId: "user-1",
@@ -258,7 +265,13 @@ describe("saveConsultantAdHocPayment", () => {
     });
     expect(result.ok).toBe(true);
     expect(h.store.adHoc).toHaveLength(1);
-    expect(h.store.adHoc[0]).toMatchObject({ amount: 2000, status: "PAID" });
+    expect(amountOf(h.store.adHoc[0])).toBe(2000);
+    expect(h.store.adHoc[0]).toMatchObject({ status: "PAID" });
+    // A auditoria também só carrega o valor cifrado.
+    const updatedAudit = h.store.audits.find(
+      (a) => a.action === "CONSULTANT_ADHOC_PAYMENT_UPDATED",
+    ) as { after: Record<string, unknown> };
+    expect(JSON.stringify(updatedAudit.after)).not.toContain("2000");
     expect(
       h.store.audits.filter(
         (a) => a.action === "CONSULTANT_ADHOC_PAYMENT_UPDATED",

@@ -2,9 +2,14 @@
 
 import { revalidatePath } from "next/cache";
 import { Prisma, prisma } from "@jumpflow/database";
+import { ENCRYPTED_FIELDS, encryptMoney } from "@jumpflow/database/field-encryption";
 import type { ZodType } from "zod";
 import type { ActionResult, ErrorCode } from "@/lib/actions/result";
 import { requireRole, requireUser } from "@/lib/auth/guards";
+import {
+  canAccessSensitiveCost,
+  requireSensitiveData,
+} from "@/lib/auth/sensitive-data";
 import { SUBSCREEN_CODES } from "@/lib/auth/permission-codes";
 import { can } from "@/lib/auth/permissions";
 import type { RoleName } from "@/lib/auth/roles";
@@ -1459,7 +1464,8 @@ export async function createCostRate(
 ): Promise<ActionResult<{ id: string }>> {
   try {
     ensureDatabase();
-    await requireRole(FINANCIAL_ROLES);
+    // Custo/hora do consultor: exclusivo do grupo Dados Sensiveis.
+    await requireSensitiveData();
     const parsed = parseInput(costRateInputSchema, input);
     const created = await prisma.$transaction(async (tx) => {
       const allocation = await loadAllocationForCostRate(tx, parsed.allocationId);
@@ -1470,14 +1476,21 @@ export async function createCostRate(
           allocationId: parsed.allocationId,
           startsAt: toDate(parsed.startsAt),
           endsAt: parsed.endsAt ? toDate(parsed.endsAt) : null,
-          hourlyCost: parsed.hourlyCost,
+          hourlyCostEncrypted: encryptMoney(
+            ENCRYPTED_FIELDS.allocationCostRateHourlyCost,
+            parsed.hourlyCost,
+          ),
           currency: parsed.currency,
           note: parsed.note,
         },
-        select: { id: true },
+        select: { id: true, hourlyCostEncrypted: true },
       });
     });
-    await audit("ConsultantAllocationCostRate", created.id, "COST_RATE_CREATED", null, parsed);
+    // Auditoria nunca guarda o custo em claro: so o valor cifrado.
+    await audit("ConsultantAllocationCostRate", created.id, "COST_RATE_CREATED", null, {
+      ...parsed,
+      hourlyCost: created.hourlyCostEncrypted,
+    });
     revalidateProjectViews();
     return { ok: true, data: created };
   } catch (error) {
@@ -1490,12 +1503,17 @@ export async function updateCostRate(
 ): Promise<ActionResult<{ id: string }>> {
   try {
     ensureDatabase();
-    await requireRole(FINANCIAL_ROLES);
+    // Custo/hora do consultor: exclusivo do grupo Dados Sensiveis.
+    await requireSensitiveData();
     const parsed = parseInput(costRateUpdateSchema, input);
     const previous = await prisma.consultantAllocationCostRate.findUnique({
       where: { id: parsed.id },
     });
     if (!previous) throw new ActionError("NOT_FOUND", "Custo não encontrado.");
+    const hourlyCostEncrypted = encryptMoney(
+      ENCRYPTED_FIELDS.allocationCostRateHourlyCost,
+      parsed.hourlyCost,
+    );
     await prisma.$transaction(async (tx) => {
       await ensureNoCostRateOverlap(tx, parsed.allocationId, parsed);
       await tx.consultantAllocationCostRate.update({
@@ -1503,13 +1521,16 @@ export async function updateCostRate(
         data: {
           startsAt: toDate(parsed.startsAt),
           endsAt: parsed.endsAt ? toDate(parsed.endsAt) : null,
-          hourlyCost: parsed.hourlyCost,
+          hourlyCostEncrypted,
           currency: parsed.currency,
           note: parsed.note,
         },
       });
     });
-    await audit("ConsultantAllocationCostRate", parsed.id, "COST_RATE_UPDATED", previous, parsed);
+    await audit("ConsultantAllocationCostRate", parsed.id, "COST_RATE_UPDATED", previous, {
+      ...parsed,
+      hourlyCost: hourlyCostEncrypted,
+    });
     revalidateProjectViews();
     return { ok: true, data: { id: parsed.id } };
   } catch (error) {
@@ -1522,7 +1543,8 @@ export async function deleteCostRate(
 ): Promise<ActionResult<{ id: string }>> {
   try {
     ensureDatabase();
-    await requireRole(FINANCIAL_ROLES);
+    // Custo/hora do consultor: exclusivo do grupo Dados Sensiveis.
+    await requireSensitiveData();
     const parsed = parseInput(costRateRemoveSchema, input);
     const previous = await prisma.consultantAllocationCostRate.findUnique({
       where: { id: parsed.id },
@@ -1708,7 +1730,9 @@ export async function getProjectTracking(input: {
         );
       }
     }
-    const tracking = await loadProjectTracking(parsed.projectId);
+    const tracking = await loadProjectTracking(parsed.projectId, {
+      includeCostDetail: canAccessSensitiveCost(user),
+    });
     if (!tracking) {
       throw new ActionError("NOT_FOUND", "Projeto nao encontrado.");
     }

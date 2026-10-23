@@ -76,10 +76,10 @@ function pjConsultant(hourlyRate: number) {
       {
         contractType: "PJ" as const,
         pjRateMode: "HOURLY" as const,
-        hourlyRate,
-        cltAmount: 0,
-        pjAmount: 0,
-        benefitCardAmount: 0,
+        hourlyRateEncrypted: String(hourlyRate),
+        cltAmountEncrypted: "0",
+        pjAmountEncrypted: "0",
+        benefitCardAmountEncrypted: "0",
         discountRules: null,
         startsAt: new Date(Date.UTC(2020, 0, 1)),
         endsAt: null,
@@ -112,7 +112,7 @@ function adHoc(opts: {
     id: `adhoc-${Math.random().toString(36).slice(2)}`,
     consultantId: opts.consultantId ?? "c1",
     projectId: "p1",
-    amount: opts.amount,
+    amountEncrypted: String(opts.amount),
     status: opts.status ?? "PLANNED",
     kind: opts.kind ?? "BONUS",
     project: { name: "Alpha" },
@@ -125,16 +125,16 @@ function pjFixedConsultant(pjAmount: number) {
     compensations: [
       {
         contractType: "PJ" as const,
-        hourlyRate: null,
-        cltAmount: 0,
-        pjAmount,
-        benefitCardAmount: 0,
+        hourlyRateEncrypted: null,
+        cltAmountEncrypted: "0",
+        pjAmountEncrypted: String(pjAmount),
+        benefitCardAmountEncrypted: "0",
         discountRules: null,
         startsAt: new Date(Date.UTC(2020, 0, 1)),
         endsAt: null,
       },
     ],
-    benefits: [{ type: "MEAL_VOUCHER", amount: 300, startsAt: new Date(Date.UTC(2020, 0, 1)), endsAt: null }],
+    benefits: [{ type: "MEAL_VOUCHER", amountEncrypted: "300", startsAt: new Date(Date.UTC(2020, 0, 1)), endsAt: null }],
   };
 }
 

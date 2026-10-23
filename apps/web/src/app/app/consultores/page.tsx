@@ -4,6 +4,7 @@ import { ConsultantDirectory } from "@/components/consultants/ConsultantDirector
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { FINANCIAL_ROLES, hasRole } from "@/lib/auth/route-permissions";
 import { hasRoleOrPermission } from "@/lib/auth/guards";
+import { canAccessSensitiveCost } from "@/lib/auth/sensitive-data";
 import {
   CONSULTANT_BANK_CODE,
   CONSULTANT_COMPENSATION_CODE,
@@ -49,9 +50,20 @@ export default async function ConsultoresPage({
       groupPerm(PEOPLE_ROLES, CONSULTANT_BANK_CODE),
       groupPerm(FINANCIAL_ROLES, CONSULTANT_COMPENSATION_CODE),
     ]);
-  const groupPerms = { personal, documents, curriculum, bank, compensation };
-  // Remuneração é visível a papéis financeiros OU a quem a Matriz liberar.
-  const canManageFinancials = compensation.view;
+  // Custo do consultor (valor acordado, valor/hora por projeto): exclusivo do
+  // grupo Dados Sensíveis — não vem da Matriz nem de FINANCIAL_ROLES.
+  const sensitiveCost = canAccessSensitiveCost(user);
+  const groupPerms = {
+    personal,
+    documents,
+    curriculum,
+    bank,
+    compensation,
+    sensitiveCost: { view: sensitiveCost, edit: sensitiveCost },
+  };
+  // Remuneração é visível a papéis financeiros OU a quem a Matriz liberar, e
+  // sempre ao grupo Dados Sensíveis (que edita os valores acordados).
+  const canManageFinancials = compensation.view || sensitiveCost;
 
   return (
     <div className="space-y-6">

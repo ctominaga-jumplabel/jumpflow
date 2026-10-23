@@ -3,6 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { Prisma, prisma } from "@jumpflow/database";
+import {
+  ENCRYPTED_FIELDS,
+  decryptMoneyNumber,
+  encryptMoney,
+} from "@jumpflow/database/field-encryption";
 import type { ZodType } from "zod";
 import type { ActionResult, ErrorCode } from "@/lib/actions/result";
 import {
@@ -20,10 +25,16 @@ import {
   CONSULTANT_PERSONAL_CODE,
 } from "@/lib/auth/permission-codes";
 import type { RoleName } from "@/lib/auth/types";
+import {
+  canAccessSensitiveCost,
+  requireSensitiveData,
+} from "@/lib/auth/sensitive-data";
 import { buildAuditEventData, recordAuditEvent } from "@/lib/db/audit";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import {
   getConsultantProfile,
+  getCurrentConsultantCompensation,
+  type ConsultantCompensationView,
   type ConsultantProfile,
 } from "@/lib/db/consultants";
 import { resolveDbUser } from "@/lib/db/users";
@@ -277,13 +288,37 @@ export async function loadConsultantProfile(
       CONSULTANT_COMPENSATION_CODE,
       "view",
     );
+    // Valores acordados (valor/hora, CLT, PJ, cartao beneficio) sao custo do
+    // consultor: so o grupo Dados Sensiveis recebe os numeros. Os demais com a
+    // view de remuneracao veem a vigencia/contrato com valores nulos.
     const profile = await getConsultantProfile(consultantId, {
       canViewCompensation,
+      canViewSensitiveCost: canAccessSensitiveCost(user),
     });
     if (!profile) {
       throw new ActionError("NOT_FOUND", "Consultor nao encontrado.");
     }
     return { ok: true, data: profile };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/**
+ * Remuneracao vigente do consultor COM os valores acordados. Exclusivo do grupo
+ * Dados Sensiveis; nao depende do acesso ao perfil completo (nenhum dado
+ * pessoal no payload).
+ */
+export async function loadConsultantSensitiveCompensation(
+  consultantId: string,
+): Promise<ActionResult<ConsultantCompensationView | null>> {
+  try {
+    ensureDatabase();
+    await requireSensitiveData();
+    return {
+      ok: true,
+      data: await getCurrentConsultantCompensation(consultantId),
+    };
   } catch (error) {
     return toFailure(error);
   }
@@ -307,21 +342,23 @@ export async function createConsultant(
     const actorUser = await requireRole(CREATE_CONSULTANT_ROLES);
     const parsed = parseInput(createConsultantSchema, input);
 
-    // Remuneração (pontual + acordada) é liberável pela Matriz (People/DP) além
-    // dos papéis financeiros — mesma regra do painel de remuneração no cadastro.
-    const canFinancials = await hasRoleOrPermission(
-      actorUser,
-      FINANCIAL_ROLES,
-      CONSULTANT_COMPENSATION_CODE,
-      "edit",
-    );
+    // Remuneracao acordada e custo do consultor: so o grupo Dados Sensiveis
+    // grava esses valores (nenhum outro papel, nem via Matriz).
+    const canFinancials = canAccessSensitiveCost(actorUser);
     const isAdmin = hasRole(actorUser, ["ADMIN"]);
 
-    // Anti-escalonamento: so ADMIN concede o perfil Administrador.
+    // Anti-escalonamento: so ADMIN concede o perfil Administrador ou o grupo
+    // Dados Sensiveis.
     if (parsed.roles.includes("ADMIN") && !isAdmin) {
       throw new ActionError(
         "FORBIDDEN",
         "Apenas administradores podem conceder o perfil Administrador.",
+      );
+    }
+    if (parsed.roles.includes("SENSITIVE_DATA") && !isAdmin) {
+      throw new ActionError(
+        "FORBIDDEN",
+        "Apenas administradores podem conceder o grupo Dados Sensiveis.",
       );
     }
 
@@ -473,9 +510,18 @@ export async function createConsultant(
                             `${parsed.compensationStartsAt}T00:00:00.000Z`,
                           )
                         : new Date(),
-                      cltAmount: parsed.cltAmount ?? null,
-                      pjAmount: parsed.pjAmount ?? null,
-                      benefitCardAmount: parsed.benefitCardAmount ?? null,
+                      cltAmountEncrypted: encryptMoney(
+                        ENCRYPTED_FIELDS.compensationCltAmount,
+                        parsed.cltAmount ?? null,
+                      ),
+                      pjAmountEncrypted: encryptMoney(
+                        ENCRYPTED_FIELDS.compensationPjAmount,
+                        parsed.pjAmount ?? null,
+                      ),
+                      benefitCardAmountEncrypted: encryptMoney(
+                        ENCRYPTED_FIELDS.compensationBenefitCardAmount,
+                        parsed.benefitCardAmount ?? null,
+                      ),
                     },
                   ],
                 }
@@ -721,7 +767,8 @@ export async function saveCompensation(
 ): Promise<ActionResult<{ id: string }>> {
   try {
     ensureDatabase();
-    await requireRoleOrPermission(FINANCIAL_ROLES, CONSULTANT_COMPENSATION_CODE, "edit");
+    // Valor acordado = custo do consultor: exclusivo do grupo Dados Sensiveis.
+    await requireSensitiveData();
     const parsed = parseInput(compensationSchema, input);
     if (parsed.contractType === "CLT_FLEX") {
       await ensureFlexBankAccounts(parsed.consultantId);
@@ -735,10 +782,22 @@ export async function saveCompensation(
         parsed.contractType === "PJ" ? (parsed.pjRateMode ?? null) : null,
       startsAt: new Date(`${parsed.startsAt}T00:00:00.000Z`),
       endsAt: toDate(parsed.endsAt),
-      hourlyRate: parsed.hourlyRate,
-      cltAmount: parsed.cltAmount,
-      pjAmount: parsed.pjAmount,
-      benefitCardAmount: parsed.benefitCardAmount,
+      hourlyRateEncrypted: encryptMoney(
+        ENCRYPTED_FIELDS.compensationHourlyRate,
+        parsed.hourlyRate,
+      ),
+      cltAmountEncrypted: encryptMoney(
+        ENCRYPTED_FIELDS.compensationCltAmount,
+        parsed.cltAmount,
+      ),
+      pjAmountEncrypted: encryptMoney(
+        ENCRYPTED_FIELDS.compensationPjAmount,
+        parsed.pjAmount,
+      ),
+      benefitCardAmountEncrypted: encryptMoney(
+        ENCRYPTED_FIELDS.compensationBenefitCardAmount,
+        parsed.benefitCardAmount,
+      ),
       discountRules: parseJson(parsed.discountRulesJson),
       note: parsed.note,
     };
@@ -786,7 +845,7 @@ export async function saveBenefit(
     const data = {
       consultantId: parsed.consultantId,
       type: parsed.type,
-      amount: parsed.amount,
+      amountEncrypted: encryptMoney(ENCRYPTED_FIELDS.benefitAmount, parsed.amount),
       startsAt: new Date(`${parsed.startsAt}T00:00:00.000Z`),
       endsAt: toDate(parsed.endsAt),
       note: parsed.note,
@@ -880,10 +939,14 @@ export async function saveVoucherBenefits(
         );
       }
 
+      const amountEncrypted = encryptMoney(
+        ENCRYPTED_FIELDS.benefitAmount,
+        amount,
+      );
       const data = {
         consultantId: parsed.consultantId,
         type,
-        amount,
+        amountEncrypted,
         startsAt,
         endsAt: null,
         note: null,
@@ -891,7 +954,7 @@ export async function saveVoucherBenefits(
       if (current) {
         const updated = await prisma.consultantBenefit.update({
           where: { id: current.id },
-          data: { amount, startsAt, endsAt: null },
+          data: { amountEncrypted, startsAt, endsAt: null },
         });
         await audit(
           "ConsultantBenefit",
@@ -1884,7 +1947,7 @@ function adHocPaymentView(row: {
   projectId: string;
   project: { name: string } | null;
   allocationId: string | null;
-  amount: Prisma.Decimal;
+  amountEncrypted: string;
   payAt: Date;
   reason: string;
   kind: AdHocPaymentKind;
@@ -1896,7 +1959,11 @@ function adHocPaymentView(row: {
     projectId: row.projectId,
     projectName: row.project?.name ?? "Projeto",
     allocationId: row.allocationId,
-    amount: Number(row.amount),
+    amount:
+      decryptMoneyNumber(
+        ENCRYPTED_FIELDS.adHocPaymentAmount,
+        row.amountEncrypted,
+      ) ?? 0,
     payAt: row.payAt.toISOString().slice(0, 10),
     reason: row.reason,
     kind: row.kind,
@@ -1955,7 +2022,10 @@ export async function saveConsultantAdHocPayment(
       consultantId: parsed.consultantId,
       projectId: parsed.projectId,
       allocationId: parsed.allocationId ?? null,
-      amount: parsed.amount,
+      amountEncrypted: encryptMoney(
+        ENCRYPTED_FIELDS.adHocPaymentAmount,
+        parsed.amount,
+      ),
       payAt: new Date(`${parsed.payAt}T00:00:00.000Z`),
       reason: parsed.reason,
       kind: parsed.kind,
@@ -1985,7 +2055,7 @@ export async function saveConsultantAdHocPayment(
       row.id,
       previous ? "CONSULTANT_ADHOC_PAYMENT_UPDATED" : "CONSULTANT_ADHOC_PAYMENT_CREATED",
       previous,
-      { ...data, amount: parsed.amount },
+      data,
     );
     revalidatePath(CONSULTORES_PATH);
     return { ok: true, data: { id: row.id } };
@@ -2050,7 +2120,7 @@ function projectRateView(row: {
   consultantId: string;
   projectId: string;
   project: { name: string; client: { name: string } } | null;
-  hourlyRate: Prisma.Decimal;
+  hourlyRateEncrypted: string;
   startsAt: Date;
   endsAt: Date | null;
   note: string | null;
@@ -2061,7 +2131,11 @@ function projectRateView(row: {
     projectId: row.projectId,
     projectName: row.project?.name ?? "Projeto",
     clientName: row.project?.client.name ?? "",
-    hourlyRate: Number(row.hourlyRate),
+    hourlyRate:
+      decryptMoneyNumber(
+        ENCRYPTED_FIELDS.projectRateHourlyRate,
+        row.hourlyRateEncrypted,
+      ) ?? 0,
     startsAt: row.startsAt.toISOString().slice(0, 10),
     endsAt: row.endsAt ? row.endsAt.toISOString().slice(0, 10) : null,
     note: row.note,
@@ -2070,14 +2144,14 @@ function projectRateView(row: {
 
 /**
  * Carrega os valores/hora por projeto do consultor + a lista de projetos para o
- * seletor. Leitura do grupo de remuneração (role OU matriz).
+ * seletor. Valor/hora de custo: exclusivo do grupo Dados Sensíveis.
  */
 export async function loadConsultantProjectRates(
   consultantId: string,
 ): Promise<ActionResult<ConsultantProjectRatesView>> {
   try {
     ensureDatabase();
-    await requireRoleOrPermission(FINANCIAL_ROLES, CONSULTANT_COMPENSATION_CODE, "view");
+    await requireSensitiveData();
     const [rows, projects] = await Promise.all([
       prisma.consultantProjectRate.findMany({
         where: { consultantId },
@@ -2105,18 +2179,21 @@ export async function loadConsultantProjectRates(
   }
 }
 
-/** Cria ou atualiza um valor/hora por projeto. Grupo de remuneração, auditado. */
+/** Cria ou atualiza um valor/hora por projeto. Grupo Dados Sensíveis, auditado. */
 export async function saveConsultantProjectRate(
   input: ProjectRateInput,
 ): Promise<ActionResult<{ id: string }>> {
   try {
     ensureDatabase();
-    await requireRoleOrPermission(FINANCIAL_ROLES, CONSULTANT_COMPENSATION_CODE, "edit");
+    await requireSensitiveData();
     const parsed = parseInput(projectRateSchema, input);
     const data = {
       consultantId: parsed.consultantId,
       projectId: parsed.projectId,
-      hourlyRate: parsed.hourlyRate,
+      hourlyRateEncrypted: encryptMoney(
+        ENCRYPTED_FIELDS.projectRateHourlyRate,
+        parsed.hourlyRate,
+      ),
       startsAt: new Date(`${parsed.startsAt}T00:00:00.000Z`),
       endsAt: parsed.endsAt ? new Date(`${parsed.endsAt}T00:00:00.000Z`) : null,
       note: parsed.note ?? null,
@@ -2145,7 +2222,7 @@ export async function saveConsultantProjectRate(
       row.id,
       previous ? "CONSULTANT_PROJECT_RATE_UPDATED" : "CONSULTANT_PROJECT_RATE_CREATED",
       previous,
-      { ...data, hourlyRate: parsed.hourlyRate },
+      data,
     );
     revalidatePath(CONSULTORES_PATH);
     return { ok: true, data: { id: row.id } };
@@ -2154,13 +2231,13 @@ export async function saveConsultantProjectRate(
   }
 }
 
-/** Remove um valor/hora por projeto. Grupo de remuneração, auditado. */
+/** Remove um valor/hora por projeto. Grupo Dados Sensíveis, auditado. */
 export async function deleteConsultantProjectRate(
   input: { id: string },
 ): Promise<ActionResult<{ id: string }>> {
   try {
     ensureDatabase();
-    await requireRoleOrPermission(FINANCIAL_ROLES, CONSULTANT_COMPENSATION_CODE, "delete");
+    await requireSensitiveData();
     const parsed = parseInput(deleteProjectRateSchema, input);
     const previous = await prisma.consultantProjectRate.findUnique({
       where: { id: parsed.id },

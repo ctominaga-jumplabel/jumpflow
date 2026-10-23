@@ -1,4 +1,5 @@
 import { Prisma, prisma } from "@jumpflow/database";
+import { decryptMoneyNumber, ENCRYPTED_FIELDS } from "@jumpflow/database/field-encryption";
 import type { AppUser } from "@/lib/auth/types";
 import { resolveDbUser } from "@/lib/db/users";
 import { computeProjectRisks } from "@/lib/project-risk/engine";
@@ -151,7 +152,7 @@ export async function getProjectRisks(
               costRates: {
                 orderBy: { startsAt: "desc" },
                 take: 1,
-                select: { hourlyCost: true },
+                select: { hourlyCostEncrypted: true },
               },
             },
           }
@@ -201,11 +202,16 @@ export async function getProjectRisks(
       );
       // Custo hora de referência: média do custo mais recente por alocação.
       const allocRows = extractRateRows<{
-        costRates: { hourlyCost: Prisma.Decimal }[];
+        costRates: { hourlyCostEncrypted: string }[];
       }>((p as Record<string, unknown>).allocations);
       const avgCost = avg(
         allocRows
-          .map((a) => decimalToNumber(a.costRates[0]?.hourlyCost ?? null))
+          .map((a) =>
+            decryptMoneyNumber(
+              ENCRYPTED_FIELDS.allocationCostRateHourlyCost,
+              a.costRates[0]?.hourlyCostEncrypted,
+            ),
+          )
           .filter((v): v is number => v !== null),
       );
       // Receita/custo estimados sobre as horas já aprovadas (proxy de realização).

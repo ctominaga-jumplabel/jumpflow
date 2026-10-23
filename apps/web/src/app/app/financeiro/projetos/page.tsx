@@ -3,6 +3,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { ProjectBillingView } from "@/components/financial/ProjectBillingView";
 import { MarginPanel } from "@/components/financial/MarginPanel";
 import { requireRole } from "@/lib/auth/guards";
+import { canAccessSensitiveCost } from "@/lib/auth/sensitive-data";
 import { FINANCIAL_ROLES } from "@/lib/auth/route-permissions";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { listBillingTypes } from "@/lib/db/clients";
@@ -15,7 +16,9 @@ export const metadata: Metadata = { title: "Cobrança de projetos" };
 
 export default async function FinanceiroProjetosPage() {
   // Regras de cobrança são financeiras e protegidas por papel.
-  await requireRole(FINANCIAL_ROLES);
+  const user = await requireRole(FINANCIAL_ROLES);
+  // Custo/hora por consultor: so o grupo Dados Sensiveis ve e define.
+  const canSeeCost = canAccessSensitiveCost(user);
 
   const databaseReady = isDatabaseConfigured();
   const today = new Date().toISOString().slice(0, 10);
@@ -23,7 +26,7 @@ export default async function FinanceiroProjetosPage() {
     ? await Promise.all([
         listProjects({ includeFinancials: true }),
         listBillingTypes(),
-        listProjectMargins(),
+        listProjectMargins({ includeCostDetail: canSeeCost }),
       ])
     : [demoProjects, [], []];
 
@@ -50,7 +53,7 @@ export default async function FinanceiroProjetosPage() {
         projects={projects}
         billingTypes={billingTypes}
       />
-      {databaseReady ? <MarginPanel today={today} projects={margins} /> : null}
+      {databaseReady ? <MarginPanel today={today} projects={margins} canSeeCost={canSeeCost} /> : null}
     </div>
   );
 }

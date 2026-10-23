@@ -1,4 +1,5 @@
 import { prisma } from "@jumpflow/database";
+import { ENCRYPTED_FIELDS, decryptMoneyNumber } from "@jumpflow/database/field-encryption";
 import type {
   Consultant,
   ConsultantSkillTag,
@@ -148,6 +149,7 @@ export interface ConsultantCompensationView {
   pjRateMode: "HOURLY" | "FIXED" | null;
   startsAt: string;
   endsAt: string | null;
+  /** Valores acordados: null para quem nao e do grupo Dados Sensiveis. */
   hourlyRate: number | null;
   cltAmount: number | null;
   pjAmount: number | null;
@@ -186,11 +188,15 @@ async function signKey(key: string | null): Promise<string | null> {
  */
 export async function getConsultantProfile(
   consultantId: string,
-  options?: { canViewCompensation?: boolean },
+  options?: { canViewCompensation?: boolean; canViewSensitiveCost?: boolean },
 ): Promise<ConsultantProfile | null> {
   // PII financeira: a remuneracao so e hidratada quando o chamador tem a view
   // de remuneracao. Sem o flag (default false) o payload nao expoe valores.
+  // Os VALORES acordados (custo do consultor) exigem, alem disso, o grupo Dados
+  // Sensiveis: sem ele a vigencia vem com todos os valores nulos e nada e
+  // decifrado.
   const canViewCompensation = options?.canViewCompensation ?? false;
+  const canViewSensitiveCost = options?.canViewSensitiveCost ?? false;
   if (!isDatabaseConfigured()) return null;
   const row = await prisma.consultant.findUnique({
     where: { id: consultantId },
@@ -346,35 +352,86 @@ export async function getConsultantProfile(
       accountNumber: account.accountNumber,
       pixKey: account.pixKey,
     })),
-    compensation: (() => {
-      // PII financeira: sem a view de remuneracao, nao expomos nenhum valor.
-      if (!canViewCompensation) return null;
-      // Vigente hoje: como a lista vem ordenada por startsAt desc, a primeira
-      // cujo startsAt <= hoje e a vigencia atual. Se todas forem futuras (nenhuma
-      // <= hoje), caimos na mais recente (row.compensations[0]).
-      const todayIso = new Date().toISOString().slice(0, 10);
-      const current =
-        row.compensations.find(
-          (comp) => comp.startsAt.toISOString().slice(0, 10) <= todayIso,
-        ) ?? row.compensations[0];
-      if (!current) return null;
-      return {
-        id: current.id,
-        contractType: current.contractType as "CLT" | "PJ" | "CLT_FLEX",
-        pjRateMode: current.pjRateMode as "HOURLY" | "FIXED" | null,
-        startsAt: current.startsAt.toISOString().slice(0, 10),
-        endsAt: toDateInput(current.endsAt ?? null),
-        hourlyRate:
-          current.hourlyRate != null ? Number(current.hourlyRate) : null,
-        cltAmount: current.cltAmount != null ? Number(current.cltAmount) : null,
-        pjAmount: current.pjAmount != null ? Number(current.pjAmount) : null,
-        benefitCardAmount:
-          current.benefitCardAmount != null
-            ? Number(current.benefitCardAmount)
-            : null,
-      };
-    })(),
+    compensation: canViewCompensation
+      ? currentCompensationView(row.compensations, canViewSensitiveCost)
+      : null,
   };
+}
+
+type CompensationRow = {
+  id: string;
+  contractType: string;
+  pjRateMode: string | null;
+  startsAt: Date;
+  endsAt: Date | null;
+  hourlyRateEncrypted: string | null;
+  cltAmountEncrypted: string | null;
+  pjAmountEncrypted: string | null;
+  benefitCardAmountEncrypted: string | null;
+};
+
+/**
+ * Remuneracao vigente hoje a partir das vigencias ordenadas por startsAt desc:
+ * a primeira cujo startsAt <= hoje; se todas forem futuras, a mais recente.
+ * Os VALORES so sao decifrados com `includeValues` (grupo Dados Sensiveis).
+ */
+function currentCompensationView(
+  compensations: CompensationRow[],
+  includeValues: boolean,
+): ConsultantCompensationView | null {
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const current =
+    compensations.find(
+      (comp) => comp.startsAt.toISOString().slice(0, 10) <= todayIso,
+    ) ?? compensations[0];
+  if (!current) return null;
+  return {
+    id: current.id,
+    contractType: current.contractType as "CLT" | "PJ" | "CLT_FLEX",
+    pjRateMode: current.pjRateMode as "HOURLY" | "FIXED" | null,
+    startsAt: current.startsAt.toISOString().slice(0, 10),
+    endsAt: toDateInput(current.endsAt ?? null),
+    hourlyRate: includeValues
+      ? decryptMoneyNumber(
+          ENCRYPTED_FIELDS.compensationHourlyRate,
+          current.hourlyRateEncrypted,
+        )
+      : null,
+    cltAmount: includeValues
+      ? decryptMoneyNumber(
+          ENCRYPTED_FIELDS.compensationCltAmount,
+          current.cltAmountEncrypted,
+        )
+      : null,
+    pjAmount: includeValues
+      ? decryptMoneyNumber(
+          ENCRYPTED_FIELDS.compensationPjAmount,
+          current.pjAmountEncrypted,
+        )
+      : null,
+    benefitCardAmount: includeValues
+      ? decryptMoneyNumber(
+          ENCRYPTED_FIELDS.compensationBenefitCardAmount,
+          current.benefitCardAmountEncrypted,
+        )
+      : null,
+  };
+}
+
+/**
+ * Remuneracao vigente COM valores, para o grupo Dados Sensiveis (que pode nao
+ * ter acesso ao perfil completo do consultor). So le as vigencias — nenhum dado
+ * pessoal. A autorizacao e feita no chamador (Server Action).
+ */
+export async function getCurrentConsultantCompensation(
+  consultantId: string,
+): Promise<ConsultantCompensationView | null> {
+  if (!isDatabaseConfigured()) return null;
+  const compensations = await prisma.consultantCompensation.findMany({
+    where: { consultantId },
+    orderBy: { startsAt: "desc" },
+  });
+  return currentCompensationView(compensations, true);
 }
 
 function mapSeniority(value: string): Seniority {

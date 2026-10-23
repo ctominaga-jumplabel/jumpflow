@@ -3,8 +3,14 @@
  * rate and cost rate and projects an EXPECTED MONTHLY margin
  * (monthlyHours = allocationPercent% × 160h). FINANCIAL_ROLES only — callers
  * gate with includeFinancialSignal before invoking.
+ *
+ * O custo/hora do consultor e CIFRADO no banco e so e exibido ao grupo Dados
+ * Sensiveis (`includeCostDetail`). Sem ele, as linhas por alocacao saem sem
+ * custo/margem unitarios; os TOTAIS do projeto seguem calculados com o custo
+ * real (agregado no servidor).
  */
 import { prisma } from "@jumpflow/database";
+import { ENCRYPTED_FIELDS, decryptMoneyNumber } from "@jumpflow/database/field-encryption";
 import {
   computeAllocationMargin,
   computeProjectMargin,
@@ -39,7 +45,10 @@ export interface ProjectMarginRow {
   totals: ProjectMarginTotals;
 }
 
-export async function listProjectMargins(): Promise<ProjectMarginRow[]> {
+export async function listProjectMargins(
+  options: { includeCostDetail?: boolean } = {},
+): Promise<ProjectMarginRow[]> {
+  const includeCostDetail = options.includeCostDetail ?? false;
   const today = iso(new Date());
 
   const projects = await prisma.project.findMany({
@@ -70,7 +79,7 @@ export async function listProjectMargins(): Promise<ProjectMarginRow[]> {
           consultant: { select: { name: true } },
           costRates: {
             orderBy: { startsAt: "desc" },
-            select: { startsAt: true, endsAt: true, hourlyCost: true },
+            select: { startsAt: true, endsAt: true, hourlyCostEncrypted: true },
           },
         },
       },
@@ -104,7 +113,12 @@ export async function listProjectMargins(): Promise<ProjectMarginRow[]> {
         return start <= today && (end === null || today < end);
       });
       const saleRate = sale?.hourlyRate ?? null;
-      const costRate = cost ? num(cost.hourlyCost) : null;
+      const costRate = cost
+        ? decryptMoneyNumber(
+            ENCRYPTED_FIELDS.allocationCostRateHourlyCost,
+            cost.hourlyCostEncrypted,
+          )
+        : null;
       const m = computeAllocationMargin({ hours: monthlyHours, saleRate, costRate });
       return {
         allocationId: a.id,
@@ -135,7 +149,17 @@ export async function listProjectMargins(): Promise<ProjectMarginRow[]> {
       projectId: project.id,
       projectName: project.name,
       clientName: project.client.name,
-      allocations,
+      // Fora do grupo Dados Sensiveis o custo unitario (e o que o revela:
+      // custo e margem da alocacao) nunca sai do servidor.
+      allocations: includeCostDetail
+        ? allocations
+        : allocations.map((a) => ({
+            ...a,
+            costRate: null,
+            cost: null,
+            margin: null,
+            marginPct: null,
+          })),
       totals,
     };
   });

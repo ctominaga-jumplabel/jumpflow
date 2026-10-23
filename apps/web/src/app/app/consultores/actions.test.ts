@@ -1,4 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  ENCRYPTED_FIELDS,
+  decryptMoneyNumber,
+  encryptMoney,
+  isEncryptedValue,
+} from "@jumpflow/database/field-encryption";
 
 /**
  * Server-action tests for VA/VR/VT voucher persistence (saveVoucherBenefits).
@@ -10,7 +16,8 @@ interface BenefitRec {
   id: string;
   consultantId: string;
   type: string;
-  amount: number;
+  /** Valor cifrado (field-encryption), como fica no banco. */
+  amountEncrypted: string;
   startsAt: Date;
   endsAt: Date | null;
   note: string | null;
@@ -68,7 +75,7 @@ const h = vi.hoisted(() => {
           id: nextId("ben"),
           consultantId: data.consultantId,
           type: data.type,
-          amount: Number(data.amount),
+          amountEncrypted: data.amountEncrypted,
           startsAt: data.startsAt,
           endsAt: data.endsAt ?? null,
           note: data.note ?? null,
@@ -78,11 +85,7 @@ const h = vi.hoisted(() => {
       },
       update: async ({ where, data }: { where: Where; data: Where }) => {
         const benefit = store.benefits.find((b) => b.id === where.id)!;
-        Object.assign(
-          benefit,
-          data,
-          data.amount !== undefined ? { amount: Number(data.amount) } : {},
-        );
+        Object.assign(benefit, data);
         return { ...benefit };
       },
     },
@@ -195,6 +198,9 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
+const amountOf = (b: BenefitRec) =>
+  decryptMoneyNumber(ENCRYPTED_FIELDS.benefitAmount, b.amountEncrypted);
+
 const baseInput = {
   consultantId: CONSULTANT_ID,
   startsAt: "2026-06-01",
@@ -209,11 +215,13 @@ describe("saveVoucherBenefits", () => {
       vt: 220,
     });
     expect(result.ok).toBe(true);
-    expect(activeOfType("MEAL_VOUCHER")).toMatchObject([{ amount: 660 }]);
-    expect(activeOfType("FOOD_VOUCHER")).toMatchObject([{ amount: 800 }]);
-    expect(activeOfType("TRANSPORTATION_VOUCHER")).toMatchObject([
-      { amount: 220 },
-    ]);
+    expect(activeOfType("MEAL_VOUCHER").map(amountOf)).toEqual([660]);
+    expect(activeOfType("FOOD_VOUCHER").map(amountOf)).toEqual([800]);
+    expect(activeOfType("TRANSPORTATION_VOUCHER").map(amountOf)).toEqual([220]);
+    // Persistido CIFRADO.
+    expect(
+      h.store.benefits.every((b) => isEncryptedValue(b.amountEncrypted)),
+    ).toBe(true);
     // One CREATE audit per voucher.
     expect(
       h.store.audits.filter((a) => a.action === "CONSULTANT_BENEFIT_CREATED"),
@@ -238,7 +246,7 @@ describe("saveVoucherBenefits", () => {
     expect(result.ok).toBe(true);
     const active = activeOfType("MEAL_VOUCHER");
     expect(active).toHaveLength(1);
-    expect(active[0].amount).toBe(700);
+    expect(amountOf(active[0])).toBe(700);
     expect(active[0].startsAt.toISOString()).toBe("2026-07-01T00:00:00.000Z");
     expect(
       h.store.audits.filter((a) => a.action === "CONSULTANT_BENEFIT_UPDATED"),
@@ -269,7 +277,7 @@ describe("saveVoucherBenefits", () => {
         id: "ben-a",
         consultantId: CONSULTANT_ID,
         type: "MEAL_VOUCHER",
-        amount: 500,
+        amountEncrypted: encryptMoney(ENCRYPTED_FIELDS.benefitAmount, 500),
         startsAt: new Date("2026-05-01T00:00:00.000Z"),
         endsAt: null,
         note: null,
@@ -278,7 +286,7 @@ describe("saveVoucherBenefits", () => {
         id: "ben-b",
         consultantId: CONSULTANT_ID,
         type: "MEAL_VOUCHER",
-        amount: 400,
+        amountEncrypted: encryptMoney(ENCRYPTED_FIELDS.benefitAmount, 400),
         startsAt: new Date("2026-04-01T00:00:00.000Z"),
         endsAt: null,
         note: null,
@@ -288,7 +296,7 @@ describe("saveVoucherBenefits", () => {
     expect(result.ok).toBe(true);
     const active = activeOfType("MEAL_VOUCHER");
     expect(active).toHaveLength(1);
-    expect(active[0].amount).toBe(660);
+    expect(amountOf(active[0])).toBe(660);
   });
 
   it("fails closed with NO_DATABASE when no database is configured", async () => {

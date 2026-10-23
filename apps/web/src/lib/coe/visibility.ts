@@ -2,7 +2,7 @@ import type { RoleName } from "@/lib/auth/roles";
 // Importado do módulo FOLHA (não de `route-permissions`): `route-permissions`
 // importa ESTE arquivo para montar a regra de rota, e o ciclo fazia a constante
 // resolver como `undefined` conforme a ordem de inicialização.
-import { FINANCIAL_ROLES } from "@/lib/auth/roles";
+import { SENSITIVE_DATA_ROLE } from "@/lib/auth/roles";
 
 /**
  * Pure RBAC helpers for the COE — Centro Operacional de Excelência. No I/O, so
@@ -62,10 +62,12 @@ export function canWriteCoeSquad(roles: readonly RoleName[]): boolean {
 
 /**
  * O fator financeiro do fit (custo × valor de venda → margem) só é computado
- * para FINANCIAL_ROLES, exatamente como na IA de Alocação — o servidor nem busca
+ * para o grupo Dados Sensíveis, exatamente como na IA de Alocação — o servidor nem busca
  * o dado para os demais. Note que PROJECT_MANAGER e SALES compõem times sem ver
  * margem, e que PEOPLE também não vê.
  */
 export function includeFinancialFactor(roles: readonly RoleName[]): boolean {
-  return roles.some((r) => FINANCIAL_ROLES.includes(r));
+  // O fator usa o custo/hora do CONSULTOR (margem por pessoa revela o custo):
+  // exclusivo do grupo Dados Sensíveis, nenhum outro papel (nem ADMIN/FINANCE).
+  return roles.includes(SENSITIVE_DATA_ROLE);
 }

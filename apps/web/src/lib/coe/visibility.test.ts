@@ -70,10 +70,11 @@ describe("canWriteCoeSquad", () => {
 });
 
 describe("includeFinancialFactor", () => {
-  it("libera o fator financeiro só para papéis financeiros", () => {
-    expect(includeFinancialFactor(["ADMIN"])).toBe(true);
-    expect(includeFinancialFactor(["AREA_MANAGER"])).toBe(true);
-    expect(includeFinancialFactor(["FINANCE"])).toBe(true);
+  it("libera o fator financeiro só para o grupo Dados Sensíveis", () => {
+    expect(includeFinancialFactor(["SENSITIVE_DATA"])).toBe(true);
+    expect(includeFinancialFactor(["ADMIN"])).toBe(false);
+    expect(includeFinancialFactor(["AREA_MANAGER"])).toBe(false);
+    expect(includeFinancialFactor(["FINANCE"])).toBe(false);
   });
 
   it("compõe time sem ver margem: PROJECT_MANAGER, SALES e PEOPLE", () => {
@@ -83,7 +84,7 @@ describe("includeFinancialFactor", () => {
   });
 
   it("é a união dos papéis do usuário", () => {
-    const roles: RoleName[] = ["SALES", "FINANCE"];
+    const roles: RoleName[] = ["SALES", "SENSITIVE_DATA"];
     expect(includeFinancialFactor(roles)).toBe(true);
   });
 });
