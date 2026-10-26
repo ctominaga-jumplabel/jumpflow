@@ -93,6 +93,7 @@ vi.mock("@/lib/automation/notifications/events", () => ({
     h.store.releaseCalls.push(closingId);
   }),
   notifyClientBillingSummary: vi.fn(async () => {}),
+  notifyRevenueClosingReopened: vi.fn(async () => {}),
 }));
 
 import { advanceRevenueClosing } from "./actions";

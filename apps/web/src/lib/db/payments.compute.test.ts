@@ -22,7 +22,10 @@ vi.mock("@jumpflow/database", () => ({
   Prisma: { JsonNull: "__JsonNull__" },
 }));
 
-import { computeConsultantMonthlyPayment } from "@/lib/db/payments";
+import {
+  computeConsultantMonthlyPayment,
+  entryMonthFactor,
+} from "@/lib/db/payments";
 import type { ProjectRateWindow } from "@/lib/consultants/project-rate";
 import { projectRateKey } from "@/lib/consultants/project-rate";
 
@@ -193,5 +196,89 @@ describe("computeConsultantMonthlyPayment — helper puro", () => {
     expect(p1.unitRate).toBeCloseTo(200, 6); // override, não o 100 acordado
     expect(p1.amount).toBeCloseTo(2000, 6);
     expect(result!.totalAmount).toBeCloseTo(2000, 6);
+  });
+});
+
+describe("computeConsultantMonthlyPayment — mês de entrada (início no meio do mês)", () => {
+  // Junho/2026: 22 dias de segunda a sexta => 176h esperadas.
+  const midMonth = new Date(Date.UTC(YEAR, MONTH - 1, 15));
+
+  function fixedRecord(contractType: "PJ" | "CLT_FLEX", amounts: { pj?: number; clt?: number }) {
+    return {
+      compensations: [
+        {
+          contractType,
+          pjRateMode: "FIXED" as const,
+          hourlyRate: null,
+          cltAmount: amounts.clt ?? 0,
+          pjAmount: amounts.pj ?? 0,
+          benefitCardAmount: 0,
+          discountRules: null,
+          startsAt: midMonth,
+          endsAt: null,
+        },
+      ],
+      benefits: [],
+    };
+  }
+
+  it("calcula o fator com dias de segunda a sexta × 8h, limitado a 1", () => {
+    const end = new Date(Date.UTC(YEAR, MONTH, 1));
+    expect(entryMonthFactor(88, start, end)).toBeCloseTo(0.5);
+    expect(entryMonthFactor(500, start, end)).toBe(1);
+    expect(entryMonthFactor(0, start, end)).toBe(0);
+  });
+
+  it("PJ por hora: paga horas × valor/hora (sem ser pulado)", () => {
+    const record = pjRecord(100);
+    record.compensations[0].startsAt = midMonth;
+    const result = computeConsultantMonthlyPayment({
+      consultantId: "c1",
+      consultantRecord: record,
+      approvedEntries: [entry("p1", "Alpha", 40)],
+      adHocs: [],
+      start,
+      projectRateWindows: noRates,
+    });
+    expect(result?.totalAmount).toBe(4000);
+  });
+
+  it("PJ fixo: paga o fixo proporcional às horas aprovadas", () => {
+    const result = computeConsultantMonthlyPayment({
+      consultantId: "c1",
+      consultantRecord: fixedRecord("PJ", { pj: 17600 }),
+      approvedEntries: [entry("p1", "Alpha", 88)],
+      adHocs: [],
+      start,
+      projectRateWindows: noRates,
+    });
+    expect(result?.pjAmount).toBe(8800);
+    expect(result?.totalAmount).toBe(8800);
+  });
+
+  it("sem horas aprovadas no mês de entrada, a base fica zerada", () => {
+    const result = computeConsultantMonthlyPayment({
+      consultantId: "c1",
+      consultantRecord: fixedRecord("PJ", { pj: 17600 }),
+      approvedEntries: [],
+      adHocs: [],
+      start,
+      projectRateWindows: noRates,
+    });
+    expect(result?.totalAmount).toBe(0);
+  });
+
+  it("mês cheio (vigente no dia 1º) não é proporcionalizado", () => {
+    const record = fixedRecord("PJ", { pj: 17600 });
+    record.compensations[0].startsAt = new Date(Date.UTC(2020, 0, 1));
+    const result = computeConsultantMonthlyPayment({
+      consultantId: "c1",
+      consultantRecord: record,
+      approvedEntries: [entry("p1", "Alpha", 10)],
+      adHocs: [],
+      start,
+      projectRateWindows: noRates,
+    });
+    expect(result?.pjAmount).toBe(17600);
   });
 });

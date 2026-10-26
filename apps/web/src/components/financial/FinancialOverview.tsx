@@ -29,6 +29,8 @@ import { ReceivablesDayGroups } from "./receivables/ReceivablesDayGroups";
 import { BillingSignals } from "./receivables/BillingSignals";
 import { PendingClosingsView } from "./receivables/PendingClosingsView";
 import { ExpensesFinancePanel } from "./ExpensesFinancePanel";
+import { ConsultantPayablesPanel } from "./ConsultantPayablesPanel";
+import type { ConsultantPaymentView } from "@/lib/payments/types";
 import { FinanceTabs } from "./FinanceTabs";
 
 /** Abas do Financeiro (`?tab=`), na ordem em que aparecem. */
@@ -78,6 +80,15 @@ export interface FinancialOverviewProps {
   /** `.xlsx` export href da aba Contas a Pagar (Onda 6). db mode. */
   pagarExportHref?: string;
   /**
+   * Pagamentos de consultores exibidos em Contas a Pagar (db mode). Sem
+   * competência = todos os pagamentos em aberto.
+   */
+  consultantPayables?: {
+    payments: ConsultantPaymentView[];
+    month?: number;
+    year?: number;
+  };
+  /**
    * Fila da aba "Pendentes de Fechamento" (competência corrente), quando há
    * banco. Reaproveita o `PendingClosingsView` da rota standalone. Ausente em
    * modo demo → a aba degrada com um EmptyState honesto.
@@ -116,6 +127,7 @@ export function FinancialOverview({
   defaultTab,
   allowedTabs = ALL_FINANCE_TABS,
   pagarExportHref,
+  consultantPayables,
   pendingClosings,
   canClosePending = false,
   canRevertPending = false,
@@ -225,12 +237,21 @@ export function FinancialOverview({
   );
 
   const pagar = (
-    <ExpensesFinancePanel
-      mode={expensesMode}
-      expenses={financeExpenses}
-      storageAvailable={expensesStorageAvailable}
-      exportHref={pagarExportHref}
-    />
+    <div className="space-y-6">
+      {consultantPayables ? (
+        <ConsultantPayablesPanel
+          payments={consultantPayables.payments}
+          month={consultantPayables.month}
+          year={consultantPayables.year}
+        />
+      ) : null}
+      <ExpensesFinancePanel
+        mode={expensesMode}
+        expenses={financeExpenses}
+        storageAvailable={expensesStorageAvailable}
+        exportHref={pagarExportHref}
+      />
+    </div>
   );
 
   // Pendentes de Fechamento: mesma fila da rota standalone (`PendingClosingsView`),

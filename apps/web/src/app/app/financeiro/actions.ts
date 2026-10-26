@@ -1987,6 +1987,133 @@ export async function retornarFaturamento(input: {
 }
 
 /**
+ * "Cancelar liberação" da tela Status de Faturamento: desfaz a liberação do
+ * faturamento, levando o(s) `RevenueClosing` de `CLOSED` (Liberado) de volta a
+ * `READY_TO_CLOSE` (Pendente) via `REOPEN` — o mesmo estado de onde o "Liberar"
+ * partiu, então liberar de novo funciona normalmente. Justificativa OBRIGATÓRIA
+ * (reversa sensível, auditada). Bloqueada quando existe NFS-e ativa (a
+ * transição reforça: cancele a NFS-e antes). O REOPEN destrava o lançamento de
+ * horas da competência e notifica o Gestor de Área. Gated a FINANCIAL_ROLES
+ * (quem libera — ADMIN/AREA_MANAGER — e o FINANCE). Auditoria dedicada
+ * `RECEIVABLES_RELEASE_CANCELLED` além da auditoria da transição.
+ */
+export async function cancelarLiberacao(input: {
+  projectId: string;
+  from: string;
+  to: string;
+  justificativa?: string;
+}): Promise<ActionResult<InvoiceApuracaoResult>> {
+  try {
+    ensureDatabase();
+    const user = await requireRole(FINANCIAL_ROLES);
+    const parsed = parseInput(retornarFaturamentoSchema, input);
+    const dbUser = await resolveDbUser(user);
+    const justificativa = parsed.justificativa?.trim() ?? "";
+
+    if (!justificativa) {
+      throw new ActionError(
+        "INVALID_INPUT",
+        "Informe uma justificativa para cancelar a liberação.",
+      );
+    }
+
+    const clientId = await resolveProjectClientId(parsed.projectId);
+    const months = monthsInRange(parsed.from, parsed.to);
+    const closings = await Promise.all(
+      months.map((m) =>
+        prisma.revenueClosing.findFirst({
+          where: {
+            clientId,
+            projectId: parsed.projectId,
+            month: m.month,
+            year: m.year,
+          },
+          select: { id: true, status: true },
+        }),
+      ),
+    );
+
+    const competences: CompetenceInvoiceResult[] = [];
+    for (let i = 0; i < months.length; i += 1) {
+      const m = months[i];
+      const closing = closings[i];
+      if (!closing) {
+        competences.push({
+          month: m.month,
+          year: m.year,
+          closingId: null,
+          status: "NOT_FOUND",
+          message: "Sem fechamento na competência.",
+        });
+        continue;
+      }
+      const base = { month: m.month, year: m.year, closingId: closing.id };
+      if (closing.status !== "CLOSED") {
+        competences.push({
+          ...base,
+          status: "NOT_CLOSED",
+          message:
+            closing.status === "INVOICED"
+              ? "Competência já Faturada — retorne o faturamento antes."
+              : "Competência não está Liberada — nada a cancelar.",
+        });
+        continue;
+      }
+
+      const result = await advanceRevenueClosing({
+        id: closing.id,
+        action: "REOPEN",
+        justification: justificativa,
+      });
+      competences.push({
+        ...base,
+        status: result.ok ? "REVERTED" : "ERROR",
+        ...(result.ok ? {} : { message: result.message }),
+      });
+
+      await prisma.auditEvent.create({
+        data: buildAuditEventData({
+          actorUserId: dbUser?.id ?? null,
+          entityType: "RevenueClosing",
+          entityId: closing.id,
+          action: "RECEIVABLES_RELEASE_CANCELLED",
+          after: {
+            clientId,
+            projectId: parsed.projectId,
+            from: parsed.from,
+            to: parsed.to,
+            month: m.month,
+            year: m.year,
+            justificativa,
+            result: result.ok ? "REVERTED" : "ERROR",
+          },
+        }),
+      });
+    }
+
+    const relevant = competences.filter((c) => c.status !== "NOT_FOUND");
+    const allDone =
+      relevant.length > 0 && relevant.every((c) => c.status === "REVERTED");
+
+    revalidatePath(FINANCEIRO_PATH);
+    revalidatePath(`${FINANCEIRO_PATH}/pendentes`);
+    return {
+      ok: true,
+      data: {
+        clientId,
+        projectId: parsed.projectId,
+        from: parsed.from,
+        to: parsed.to,
+        competences,
+        allDone,
+      },
+    };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/**
  * Send the ISSUED NFS-e notification to the client's contactEmail (Fase H).
  * Idempotent per fiscal document + competence via AutomationEmailLog (type
  * NFSE_ISSUED): a SENT log short-circuits re-sends; a FAILED log is retried.
