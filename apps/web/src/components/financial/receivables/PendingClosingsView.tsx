@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, ListChecks, Receipt, RotateCcw, Unlock } from "lucide-react";
+import { ListChecks, Receipt, RotateCcw, Undo2, Unlock } from "lucide-react";
 
 import { ActionButton } from "@/components/ui/ActionButton";
 import { Modal } from "@/components/ui/Modal";
@@ -12,6 +12,7 @@ import { FeedbackBanner, useFeedback } from "@/components/ui/Feedback";
 import { focusRing, focusRingInput } from "@/lib/styles";
 import { cn } from "@/lib/utils";
 import {
+  cancelarLiberacao,
   fecharApuracao,
   retornarFaturamento,
 } from "@/app/app/financeiro/actions";
@@ -134,6 +135,12 @@ export function PendingClosingsView({
   // Override otimista: projectIds cujo faturamento foi RETORNADO (Faturado →
   // Liberado) nesta sessão.
   const [reverted, setReverted] = useState<Set<string>>(new Set());
+  // Override otimista: projectIds cuja LIBERAÇÃO foi cancelada (Liberado →
+  // Pendente) nesta sessão.
+  const [unreleased, setUnreleased] = useState<Set<string>>(new Set());
+  // Quem libera (ADMIN/AREA_MANAGER) ou o Financeiro pode cancelar a liberação;
+  // o gate real é server-side em `cancelarLiberacao` (FINANCIAL_ROLES).
+  const canCancelRelease = canClose || canRevert;
   // Filtro de status (client-side): default esconde os Faturados dos pendentes.
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ABERTOS");
 
@@ -149,6 +156,13 @@ export function PendingClosingsView({
   const [revertObs, setRevertObs] = useState("");
   const [revertObsError, setRevertObsError] = useState<string | null>(null);
 
+  // Modal de CANCELAR LIBERAÇÃO: projeto alvo + justificativa OBRIGATÓRIA.
+  const [cancelTarget, setCancelTarget] = useState<PendingClosingRow | null>(
+    null,
+  );
+  const [cancelObs, setCancelObs] = useState("");
+  const [cancelObsError, setCancelObsError] = useState<string | null>(null);
+
   const yearOptions = useMemo(() => {
     const now = new Date().getFullYear();
     const lo = Math.min(year, now) - 2;
@@ -160,7 +174,9 @@ export function PendingClosingsView({
 
   function effectiveStatus(row: PendingClosingRow): PendingClosingStatus {
     // Otimista: retorno de faturamento tem precedência (Faturado → Liberado);
-    // depois a liberação (Pendente → Liberado).
+    // depois a liberação (Pendente → Liberado). O cancelamento da liberação
+    // (Liberado → Pendente) é a ação mais recente possível, então vem primeiro.
+    if (unreleased.has(row.projectId)) return "PENDENTE";
     if (reverted.has(row.projectId)) return "LIBERADO";
     if (released.has(row.projectId)) return "LIBERADO";
     return row.status;
@@ -189,6 +205,68 @@ export function PendingClosingsView({
     setRevertObs("");
     setRevertObsError(null);
     clear();
+  }
+
+  function openCancelarLiberacao(row: PendingClosingRow) {
+    setCancelTarget(row);
+    setCancelObs("");
+    setCancelObsError(null);
+    clear();
+  }
+
+  function confirmCancelarLiberacao() {
+    if (!cancelTarget) return;
+    const justificativa = cancelObs.trim();
+    if (justificativa.length === 0) {
+      setCancelObsError("Informe uma justificativa para cancelar a liberação.");
+      return;
+    }
+    setCancelObsError(null);
+    clear();
+    const row = cancelTarget;
+    startTransition(async () => {
+      const result = await cancelarLiberacao({
+        projectId: row.projectId,
+        from: row.from,
+        to: row.to,
+        justificativa,
+      });
+
+      if (!result.ok) {
+        if (result.error === "INVALID_INPUT") {
+          setCancelObsError(result.message);
+          return;
+        }
+        notify("warning", result.message);
+        return;
+      }
+
+      if (!result.data.allDone) {
+        const problem = result.data.competences.find(
+          (c) => c.status !== "REVERTED" && c.status !== "NOT_FOUND",
+        );
+        setCancelTarget(null);
+        notify(
+          "warning",
+          problem?.message ?? "Não foi possível cancelar a liberação.",
+        );
+        return;
+      }
+
+      // Otimista: a linha volta para "Pendente"; o refresh confirma.
+      setReleased((prev) => {
+        const next = new Set(prev);
+        next.delete(row.projectId);
+        return next;
+      });
+      setUnreleased((prev) => new Set(prev).add(row.projectId));
+      setCancelTarget(null);
+      notify(
+        "success",
+        `Liberação de "${row.projectName}" cancelada. O projeto voltou para Pendente.`,
+      );
+      router.refresh();
+    });
   }
 
   function confirmRetornar() {
@@ -287,6 +365,11 @@ export function PendingClosingsView({
       }
 
       // Otimista: a linha vira "Liberado" já; o refresh confirma pelo servidor.
+      setUnreleased((prev) => {
+        const next = new Set(prev);
+        next.delete(row.projectId);
+        return next;
+      });
       setReleased((prev) => {
         const next = new Set(prev);
         next.add(row.projectId);
@@ -480,11 +563,16 @@ export function PendingClosingsView({
                             Faturado
                           </span>
                         )
-                      ) : status === "LIBERADO" ? (
-                        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-success">
-                          <CheckCircle2 aria-hidden="true" className="size-4" />
-                          Liberado
-                        </span>
+                      ) : status === "LIBERADO" && canCancelRelease ? (
+                        <ActionButton
+                          variant="secondary"
+                          size="sm"
+                          icon={Undo2}
+                          disabled={isPending}
+                          onClick={() => openCancelarLiberacao(row)}
+                        >
+                          Cancelar liberação
+                        </ActionButton>
                       ) : (
                         <span className="text-soft">—</span>
                       )}
@@ -551,6 +639,67 @@ export function PendingClosingsView({
           <p className="mt-1 text-xs text-soft">
             A justificativa fica registrada na auditoria do fechamento (leva a
             competência para CLOSED e libera o envio da apuração pelo Financeiro).
+          </p>
+        )}
+      </Modal>
+
+      {/* Modal CANCELAR LIBERAÇÃO: Liberado → Pendente (justificativa). */}
+      <Modal
+        open={cancelTarget != null}
+        onClose={() => setCancelTarget(null)}
+        title="Cancelar liberação"
+        description={
+          cancelTarget
+            ? `${cancelTarget.projectName} · ${cancelTarget.clientName} — ${competenceLabel}`
+            : undefined
+        }
+        footer={
+          <>
+            <ActionButton
+              variant="secondary"
+              size="sm"
+              onClick={() => setCancelTarget(null)}
+            >
+              Voltar
+            </ActionButton>
+            <ActionButton
+              variant="primary"
+              size="sm"
+              icon={Undo2}
+              disabled={isPending}
+              onClick={confirmCancelarLiberacao}
+            >
+              Cancelar liberação
+            </ActionButton>
+          </>
+        }
+      >
+        <label className="block text-sm font-medium text-medium">
+          Justificativa (obrigatório)
+          <textarea
+            value={cancelObs}
+            onChange={(e) => {
+              setCancelObs(e.target.value);
+              if (cancelObsError) setCancelObsError(null);
+            }}
+            rows={3}
+            placeholder="Motivo para cancelar a liberação do faturamento..."
+            className={cn(
+              "mt-1 w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-strong",
+              focusRingInput,
+              cancelObsError && "border-danger",
+            )}
+          />
+        </label>
+        {cancelObsError ? (
+          <p className="mt-1 text-xs font-medium text-danger">
+            {cancelObsError}
+          </p>
+        ) : (
+          <p className="mt-1 text-xs text-soft">
+            Volta a competência de Liberado para Pendente, reabre o lançamento de
+            horas do mês e avisa o Gestor de Área. Bloqueado se houver NFS-e ativa
+            — cancele a NFS-e antes. Registrado na auditoria.
           </p>
         )}
       </Modal>

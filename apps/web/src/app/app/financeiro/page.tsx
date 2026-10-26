@@ -128,6 +128,19 @@ export default async function FinanceiroPage({
   // o FINANCE acompanha a aba em somente leitura.
   const canClosePending = hasRole(user, ["ADMIN", "AREA_MANAGER"]);
   const pendingCompetence = resolvePendingCompetence(params, new Date());
+  // Contas a Pagar → pagamentos de consultores: competência opcional
+  // (`pgmonth`/`pgyear`); sem ela, lista tudo o que está em aberto.
+  const payablesMonth = Number(parseSingle(params.pgmonth));
+  const payablesYear = Number(parseSingle(params.pgyear));
+  const payablesCompetence =
+    Number.isInteger(payablesMonth) &&
+    payablesMonth >= 1 &&
+    payablesMonth <= 12 &&
+    Number.isInteger(payablesYear) &&
+    payablesYear >= 2020 &&
+    payablesYear <= 2100
+      ? { month: payablesMonth, year: payablesYear }
+      : {};
 
   // Filtros da nova jornada Contas a Receber: período (from/to) + cliente +
   // projeto (multi). O schema aceita `projectIds` como array OU valor único.
@@ -147,6 +160,9 @@ export default async function FinanceiroPage({
   let receivables;
   let receivablesFilterOptions;
   let financeExpenses;
+  let consultantPayments:
+    | import("@/lib/payments/types").ConsultantPaymentView[]
+    | undefined;
   let timesheetExportHref: string | undefined;
   let apuracaoHref: string | undefined;
   let pendingClosings:
@@ -165,6 +181,7 @@ export default async function FinanceiroPage({
       "@/lib/financial/receivables-journey"
     );
     const { getReportFilterOptions } = await import("@/lib/db/reports");
+    const { listPayableConsultantPayments } = await import("@/lib/db/payments");
 
     // Só consulta os dados das abas permitidas pela matriz.
     const [
@@ -172,6 +189,7 @@ export default async function FinanceiroPage({
       filterOptionsResult,
       financeExpensesResult,
       pendingResult,
+      consultantPaymentsResult,
     ] = await Promise.all([
       showReceber ? getReceivablesOverview(user, filter) : undefined,
       showReceber ? getReportFilterOptions(user) : undefined,
@@ -179,7 +197,9 @@ export default async function FinanceiroPage({
         ? listFinanceExpenses().then((r) => r.expenses)
         : undefined,
       showPendentes ? listPendingClosings(user, pendingCompetence) : undefined,
+      showPagar ? listPayableConsultantPayments(payablesCompetence) : undefined,
     ]);
+    consultantPayments = consultantPaymentsResult;
     receivables = receivablesResult;
     receivablesFilterOptions = filterOptionsResult;
     financeExpenses = financeExpensesResult;
@@ -218,7 +238,7 @@ export default async function FinanceiroPage({
       <PageHeader
         eyebrow="Gestão"
         title="Financeiro"
-        description="Contas a Receber (horas aprovadas por dia, valor a faturar e apuração) e Contas a Pagar (pagamento de despesas)."
+        description="Contas a Receber (horas aprovadas por dia, valor a faturar e apuração) e Contas a Pagar (pagamentos de consultores e despesas)."
       />
       <FinancialOverview
         receivablesMode={databaseConfigured ? "db" : "demo"}
@@ -243,6 +263,11 @@ export default async function FinanceiroPage({
         allowedTabs={allowedTabs}
         pagarExportHref={
           databaseConfigured && showPagar ? "/api/financeiro/pagar/export" : undefined
+        }
+        consultantPayables={
+          consultantPayments
+            ? { payments: consultantPayments, ...payablesCompetence }
+            : undefined
         }
         pendingClosings={pendingClosings}
         canClosePending={canClosePending}

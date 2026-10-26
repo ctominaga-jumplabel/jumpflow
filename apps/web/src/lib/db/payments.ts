@@ -225,6 +225,30 @@ export async function listConsultantPayments(input: {
 }
 
 /**
+ * Pagamentos de consultores para a aba Contas a Pagar do Financeiro. Sem
+ * competência: tudo o que ainda está EM ABERTO (qualquer mês, exceto PAID/
+ * CANCELLED) — é a visão de "o que falta pagar". Com competência: todos os
+ * status daquele mês. Mesma restrição PJ/CLT_FLEX da tela de Pagamentos; nunca
+ * expõe o valor/hora (custo) das linhas.
+ */
+export async function listPayableConsultantPayments(input: {
+  month?: number;
+  year?: number;
+}): Promise<ConsultantPaymentView[]> {
+  const competence =
+    input.month && input.year ? { month: input.month, year: input.year } : null;
+  const rows = await prisma.consultantPayment.findMany({
+    where: {
+      contractType: { in: PAYMENT_CONTRACT_TYPES },
+      ...(competence ?? { status: { notIn: ["PAID", "CANCELLED"] } }),
+    },
+    include: paymentViewInclude,
+    orderBy: [{ year: "desc" }, { month: "desc" }, { consultant: { name: "asc" } }],
+  });
+  return rows.map(toPaymentView).map(withoutUnitRate);
+}
+
+/**
  * Consultant self-service read (melhoria #3): the payments that belong to the
  * LOGGED-IN user only. The owner scope is applied IN THE QUERY (`consultant:
  * { userId }`) — never trusted from the client — so a consultant can never see
@@ -449,10 +473,39 @@ interface ComputeConsultantAdHoc {
   project: { name: string } | null;
 }
 
+/** Jornada padrão usada para as horas esperadas do mês de entrada. */
+const ENTRY_MONTH_HOURS_PER_DAY = 8;
+
+/**
+ * Fator proporcional do mês de entrada: horas aprovadas ÷ horas esperadas do
+ * mês (dias de segunda a sexta × 8h), limitado a 1 — nunca paga mais que o
+ * fixo cheio. Feriados não são descontados (regra simples e previsível).
+ */
+export function entryMonthFactor(
+  approvedHours: number,
+  start: Date,
+  end: Date,
+): number {
+  let weekdays = 0;
+  for (
+    let day = new Date(start);
+    day < end;
+    day = new Date(day.getTime() + 24 * 60 * 60 * 1000)
+  ) {
+    const weekday = day.getUTCDay();
+    if (weekday !== 0 && weekday !== 6) weekdays += 1;
+  }
+  const expected = weekdays * ENTRY_MONTH_HOURS_PER_DAY;
+  if (expected <= 0) return 0;
+  return Math.min(1, Math.max(0, approvedHours / expected));
+}
+
 /**
  * Computa as linhas + montantes de UM consultor para um mês. Regras (idênticas
  * às aplicadas hoje na geração mensal):
- *  - Sem compensação vigente => null (consultor pulado).
+ *  - Sem compensação vigente no mês => null (consultor pulado). Se ela começa
+ *    DENTRO do mês (mês de entrada), o fixo fica proporcional às horas
+ *    realizadas (ver `entryMonthFactor`).
  *  - Pontuais (ad-hoc) viram linhas extras que SEMPRE somam ao total, mesmo sem
  *    horas (consultor só-pontual recebe apenas as pontuais).
  *  - A BASE (salário/pjAmount + benefícios + benefitCard) só compõe quando há
@@ -477,8 +530,21 @@ export function computeConsultantMonthlyPayment(input: {
     projectRateWindows,
   } = input;
 
-  const compensation = activeOn(consultantRecord.compensations, start);
+  // Mês de ENTRADA: sem compensação vigente na virada do mês, vale a que começa
+  // DENTRO do mês (consultor que entrou no meio do mês). Nesse caso a parte
+  // fixa é proporcional às horas realizadas (ver `partialFactor` abaixo).
+  const monthEnd = new Date(
+    Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1),
+  );
+  const fullMonthCompensation = activeOn(consultantRecord.compensations, start);
+  const compensation =
+    fullMonthCompensation ??
+    consultantRecord.compensations
+      .filter((row) => row.startsAt > start && row.startsAt < monthEnd)
+      .sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime())[0] ??
+    null;
   if (!compensation) return null;
+  const isEntryMonth = fullMonthCompensation == null;
 
   // Linhas de remuneração pontual (D2): uma por ConsultantAdHocPayment do mês.
   // hours=0, unitRate=amount (valor cheio). Somam SEMPRE por cima.
@@ -493,10 +559,14 @@ export function computeConsultantMonthlyPayment(input: {
 
   // C2 (folha): base só compõe quando há horas aprovadas no mês.
   const hasApprovedHours = approvedEntries.length > 0;
+  // No mês de entrada, benefícios que começam junto com o consultor (dentro do
+  // mês) também contam; nos demais meses, só os vigentes na virada.
+  const benefitRef = isEntryMonth ? compensation.startsAt : start;
   const benefits = hasApprovedHours
     ? consultantRecord.benefits.filter(
         (benefit) =>
-          benefit.startsAt <= start && (!benefit.endsAt || start < benefit.endsAt),
+          benefit.startsAt <= benefitRef &&
+          (!benefit.endsAt || benefitRef < benefit.endsAt),
       )
     : [];
 
@@ -570,6 +640,50 @@ export function computeConsultantMonthlyPayment(input: {
         projectLines,
       )
     : { cltNetAmount: 0, pjAmount: 0, benefitAmount: 0, totalAmount: 0 };
+
+  // Mês de entrada: tudo o que é FIXO (salário CLT, PJ fixo, benefícios) vira
+  // proporcional às horas realizadas = fixo × (horas aprovadas ÷ horas
+  // esperadas do mês). O que já é por hora (PJ HOURLY, PJ do CLT Flex com
+  // valor/hora) já é proporcional e não muda.
+  if (isEntryMonth && hasApprovedHours) {
+    const factor = entryMonthFactor(
+      projectLines.reduce((sum, line) => sum + line.hours, 0),
+      start,
+      monthEnd,
+    );
+    const lineSum = projectLines.reduce((sum, line) => sum + line.amount, 0);
+    const pjIsHourly =
+      compensation.contractType === "PJ"
+        ? compensation.pjRateMode === "HOURLY"
+        : compensation.contractType === "CLT_FLEX" &&
+          compensation.hourlyRate != null &&
+          lineSum > 0;
+    const cltNetAmount = round2(baseAmounts.cltNetAmount * factor);
+    const pjAmount = pjIsHourly
+      ? baseAmounts.pjAmount
+      : round2(baseAmounts.pjAmount * factor);
+    const benefitAmount = round2(baseAmounts.benefitAmount * factor);
+    const totalAmount =
+      compensation.contractType === "PJ"
+        ? pjAmount + benefitAmount
+        : compensation.contractType === "CLT_FLEX"
+          ? cltNetAmount + pjAmount
+          : cltNetAmount;
+    const proratedBenefitLines = benefitLines.map((line) => ({
+      ...line,
+      description: `${line.description} (proporcional - mes de entrada)`,
+      unitRate: round2(line.unitRate * factor),
+      amount: round2(line.amount * factor),
+    }));
+    return {
+      contractType: compensation.contractType,
+      cltNetAmount,
+      pjAmount,
+      benefitAmount,
+      totalAmount: round2(totalAmount) + adHocTotal,
+      lines: [...projectLines, ...proratedBenefitLines, ...adHocLines],
+    };
+  }
 
   return {
     contractType: compensation.contractType,

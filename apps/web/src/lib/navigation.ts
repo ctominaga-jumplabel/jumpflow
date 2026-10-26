@@ -715,7 +715,7 @@ export const financeGroupedNavigation: NavGroupDef[] = [
         href: "/app/financeiro?tab=pagar",
         permissionCode: "FINANCEIRO",
         icon: Wallet,
-        description: "Despesas aprovadas pelo financeiro (pagamento).",
+        description: "Pagamentos de consultores e despesas aprovadas (a pagar).",
       },
       {
         label: "Despesas",

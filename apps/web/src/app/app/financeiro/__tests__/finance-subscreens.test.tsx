@@ -16,6 +16,7 @@ const h = vi.hoisted(() => ({
 
 const m = vi.hoisted(() => ({
   listFinanceExpenses: vi.fn(async () => ({ expenses: [] })),
+  listPayableConsultantPayments: vi.fn(async () => []),
   getReceivablesOverview: vi.fn(async () => ({
     days: [],
     summary: {
@@ -72,6 +73,9 @@ vi.mock("@/lib/storage/provider", () => ({ isStorageConfigured: () => false }));
 
 vi.mock("@/lib/db/expenses", () => ({
   listFinanceExpenses: m.listFinanceExpenses,
+}));
+vi.mock("@/lib/db/payments", () => ({
+  listPayableConsultantPayments: m.listPayableConsultantPayments,
 }));
 vi.mock("@/lib/financial/receivables-journey", () => ({
   getReceivablesOverview: m.getReceivablesOverview,
@@ -146,6 +150,7 @@ describe("/app/financeiro — subtelas", () => {
     expect(m.getReceivablesOverview).toHaveBeenCalledTimes(1);
     expect(m.getReportFilterOptions).toHaveBeenCalledTimes(1);
     expect(m.listFinanceExpenses).toHaveBeenCalledTimes(1);
+    expect(m.listPayableConsultantPayments).toHaveBeenCalledTimes(1);
     expect(m.listPendingClosings).toHaveBeenCalledTimes(1);
     expect(props.apuracaoHref).toMatch(/^\/app\/financeiro\/apuracao\?/);
     expect(props.pagarExportHref).toBe("/api/financeiro/pagar/export");
@@ -169,6 +174,7 @@ describe("/app/financeiro — subtelas", () => {
     expect(props.allowedTabs).toEqual(["receber", "pendentes"]);
     expect(props.defaultTab).toBe("receber");
     expect(m.listFinanceExpenses).not.toHaveBeenCalled();
+    expect(m.listPayableConsultantPayments).not.toHaveBeenCalled();
     expect(props.financeExpenses).toBeUndefined();
     expect(props.pagarExportHref).toBeUndefined();
   });
@@ -193,6 +199,7 @@ describe("/app/financeiro — subtelas", () => {
     });
     expect(m.getReceivablesOverview).not.toHaveBeenCalled();
     expect(m.listFinanceExpenses).not.toHaveBeenCalled();
+    expect(m.listPayableConsultantPayments).not.toHaveBeenCalled();
     expect(m.listPendingClosings).not.toHaveBeenCalled();
   });
 });
