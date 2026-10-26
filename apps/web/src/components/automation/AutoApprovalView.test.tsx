@@ -84,11 +84,9 @@ function overview(over: Partial<AutoApprovalOverview> = {}): AutoApprovalOvervie
   };
 }
 
-/** The FeedbackBanner is the only aria-live="polite" region in the view. */
+/** The FeedbackBanner renders as the only alert dialog in the view. */
 function liveRegion(): HTMLElement {
-  const region = document.querySelector('[aria-live="polite"]');
-  if (!region) throw new Error("live region not found");
-  return region as HTMLElement;
+  return screen.getByRole("alertdialog");
 }
 
 beforeEach(() => {

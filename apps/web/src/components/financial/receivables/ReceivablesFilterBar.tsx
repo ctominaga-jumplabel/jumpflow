@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, Search, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { focusRing, focusRingInput } from "@/lib/styles";
 import { SearchableSelect } from "@/components/ui/SearchableSelect";
+import { MultiSelectCombo } from "@/components/ui/MultiSelectCombo";
 
 export interface ReceivablesFilterOption {
   id: string;
@@ -50,8 +51,6 @@ export function ReceivablesFilterBar({
 }: ReceivablesFilterBarProps) {
   const [clientId, setClientId] = useState(values.clientId ?? "");
   const [selected, setSelected] = useState<string[]>(values.projectIds);
-  const [open, setOpen] = useState(false);
-  const comboRef = useRef<HTMLDivElement>(null);
 
   // Projetos escopados ao cliente selecionado (sem cliente, todos).
   const availableProjects = useMemo(
@@ -66,30 +65,6 @@ export function ReceivablesFilterBar({
       prev.filter((id) => availableProjects.some((p) => p.id === id)),
     );
   }, [availableProjects]);
-
-  // Fecha o dropdown ao clicar fora.
-  useEffect(() => {
-    if (!open) return;
-    function onClick(event: MouseEvent) {
-      if (!comboRef.current?.contains(event.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", onClick);
-    return () => document.removeEventListener("mousedown", onClick);
-  }, [open]);
-
-  function toggleProject(id: string) {
-    setSelected((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
-    );
-  }
-
-  const selectedLabel =
-    selected.length === 0
-      ? "Todos os projetos"
-      : selected.length === 1
-        ? (availableProjects.find((p) => p.id === selected[0])?.name ??
-          "1 projeto")
-        : `${selected.length} projetos selecionados`;
 
   return (
     <form
@@ -142,81 +117,20 @@ export function ReceivablesFilterBar({
         </SearchableSelect>
       </label>
 
-      <div ref={comboRef} className="relative min-w-0">
+      <div className="min-w-0">
         <span className="text-xs font-semibold text-medium">Projeto</span>
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          aria-haspopup="listbox"
-          aria-expanded={open}
-          className={cn(
-            fieldClass,
-            "mt-1 flex items-center justify-between gap-2 text-left",
-            focusRing,
-          )}
-        >
-          <span
-            className={cn("truncate", selected.length === 0 && "text-soft")}
-          >
-            {selectedLabel}
-          </span>
-          <ChevronDown
-            aria-hidden="true"
-            className={cn(
-              "size-4 shrink-0 text-medium transition-transform",
-              open && "rotate-180",
-            )}
-          />
-        </button>
-        {open ? (
-          <div
-            role="listbox"
-            aria-multiselectable="true"
-            className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-md border-2 border-ink bg-surface p-1 shadow-[4px_4px_0_0_var(--color-ink)]"
-          >
-            {availableProjects.length === 0 ? (
-              <p className="px-2 py-2 text-xs text-soft">
-                Nenhum projeto disponível para o cliente.
-              </p>
-            ) : (
-              availableProjects.map((p) => {
-                const checked = selected.includes(p.id);
-                return (
-                  <button
-                    key={p.id}
-                    type="button"
-                    role="option"
-                    aria-selected={checked}
-                    onClick={() => toggleProject(p.id)}
-                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-strong hover:bg-surface-muted"
-                  >
-                    <span
-                      className={cn(
-                        "grid size-4 shrink-0 place-items-center rounded border-2 border-ink",
-                        checked ? "bg-brand-fill text-white" : "bg-surface",
-                      )}
-                    >
-                      {checked ? (
-                        <Check aria-hidden="true" className="size-3" />
-                      ) : null}
-                    </span>
-                    <span className="truncate">{p.name}</span>
-                  </button>
-                );
-              })
-            )}
-            {selected.length > 0 ? (
-              <button
-                type="button"
-                onClick={() => setSelected([])}
-                className="mt-1 flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-xs font-medium text-medium hover:bg-surface-muted"
-              >
-                <X aria-hidden="true" className="size-3.5" />
-                Limpar seleção
-              </button>
-            ) : null}
-          </div>
-        ) : null}
+        <MultiSelectCombo
+          options={availableProjects}
+          selected={selected}
+          onChange={setSelected}
+          placeholder="Todos os projetos"
+          pluralLabel={(n) =>
+            n === 1 ? "1 projeto" : `${n} projetos selecionados`
+          }
+          emptyText="Nenhum projeto disponível para o cliente."
+          searchPlaceholder="Digite para filtrar projetos…"
+          className={cn(fieldClass, "mt-1")}
+        />
       </div>
 
       <label className="min-w-0">
