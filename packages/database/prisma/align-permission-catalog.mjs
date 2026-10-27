@@ -108,6 +108,14 @@ export const PERMISSION_CATALOG_ALIGNMENT = [
   { code: "FINANCEIRO_CONTAS_PAGAR", name: "Contas a Pagar", module: "Financeiro", parent: "FINANCEIRO", sortOrder: 111 },
   { code: "FINANCEIRO_STATUS_FATURAMENTO", name: "Status de Faturamento", module: "Financeiro", parent: "FINANCEIRO", sortOrder: 112 },
   { code: "CONFIGURACOES_MENU", name: "Ordem do Menu", module: "Administração", parent: null, sortOrder: 125 },
+  // Fluxo de Horas: governança + SLA (migração 20261027120000).
+  { code: "FATURAMENTO_REABRIR_LIBERACAO", name: "Reabrir faturamento liberado", module: "Financeiro", parent: "FINANCEIRO", sortOrder: 113 },
+  { code: "PAGAMENTOS_LIBERACAO_DP", name: "Liberar pagamento (DP)", module: "Financeiro", parent: "PAGAMENTOS", sortOrder: 114 },
+  { code: "PAGAMENTOS_ENVIO_NF", name: "Enviar solicitação de NF", module: "Financeiro", parent: "PAGAMENTOS", sortOrder: 115 },
+  { code: "PAGAMENTOS_REABRIR_LIBERACAO", name: "Reabrir liberação de pagamento", module: "Financeiro", parent: "PAGAMENTOS", sortOrder: 116 },
+  { code: "CONFIGURACOES_TEMPLATES_EMAIL", name: "Templates de e-mail", module: "Administração", parent: null, sortOrder: 126 },
+  { code: "SLA_ACOMPANHAMENTO", name: "Acompanhamento de SLA", module: "Operação", parent: null, sortOrder: 27 },
+  { code: "SLA_CONFIGURACAO", name: "Configurar prazos de SLA", module: "Operação", parent: "SLA_ACOMPANHAMENTO", sortOrder: 28 },
 ];
 
 async function main() {

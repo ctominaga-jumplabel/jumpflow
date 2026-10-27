@@ -16,6 +16,7 @@
  */
 import { getEmailTransport, type EmailTransport } from "../email-transport";
 import { renderEmail, heading, type EmailBlock } from "../email/layout";
+import type { TemplateVars } from "../email/template-renderer";
 import {
   getWebhookTransport,
   type WebhookMessage,
@@ -52,6 +53,12 @@ export interface NotificationFragment {
    * its plain text under the section title.
    */
   prebuilt?: { subject: string; html: string; text: string };
+  /**
+   * Variáveis do evento para o template de e-mail personalizado (ITEM 3,
+   * /app/admin/templates-email). Quando presente e houver template ativo, o
+   * emit substitui `prebuilt`/`title` pelo template renderizado.
+   */
+  templateVars?: TemplateVars;
   /** Plain text for the Teams card body. */
   teamsText?: string;
   teamsFacts?: Array<{ name: string; value: string }>;

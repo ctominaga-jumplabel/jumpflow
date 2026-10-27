@@ -122,6 +122,26 @@ extra para o grupo Administrador.
 (catálogo de módulos/submódulos) e `seedRolePermissions` (matriz inicial que
 espelha os arrays estáticos atuais; ADMIN = controle total). Idempotente.
 
+Exceções ao "ADMIN = controle total" no seed: `noAdmin: true` (ADMIN não
+recebe nada) e `adminActions: [...]` (ADMIN só nas ações listadas). O ADMIN
+pode se conceder essas células pela Matriz.
+
+### Fluxo de Horas: governança + SLA (migration `20261027120000`)
+
+| Code | Nome | Pai | Grants padrão |
+|---|---|---|---|
+| `FATURAMENTO_REABRIR_LIBERACAO` | Reabrir faturamento liberado | `FINANCEIRO` | FINANCE view+edit (sem ADMIN) |
+| `PAGAMENTOS_LIBERACAO_DP` | Liberar pagamento (DP) | `PAGAMENTOS` | PEOPLE view+edit; FINANCE view; ADMIN view+edit |
+| `PAGAMENTOS_ENVIO_NF` | Enviar solicitação de NF | `PAGAMENTOS` | FINANCE view+edit; ADMIN view+edit |
+| `PAGAMENTOS_REABRIR_LIBERACAO` | Reabrir liberação de pagamento | `PAGAMENTOS` | FINANCE view+edit (sem ADMIN) |
+| `CONFIGURACOES_TEMPLATES_EMAIL` | Templates de e-mail | — (Administração) | ADMIN view+edit |
+| `SLA_ACOMPANHAMENTO` | Acompanhamento de SLA | — (Operação) | view: ADMIN, AREA_MANAGER, PROJECT_MANAGER, FINANCE, PEOPLE |
+| `SLA_CONFIGURACAO` | Configurar prazos de SLA | `SLA_ACOMPANHAMENTO` | ADMIN, FINANCE view+edit |
+
+Além disso, PEOPLE ganha `view` em `PAGAMENTOS`. Constantes TS em
+`FLOW_PERMISSION_CODES` (`apps/web/src/lib/auth/permission-codes.ts`); checagem
+no servidor com `can(code, "edit")` / `requirePermission(code, "edit")`.
+
 ## 11. Evolução futura (schema já preparado)
 
 Sem refatoração estrutural, dá para adicionar: **permissões por projeto/cliente/

@@ -24,6 +24,7 @@ import {
   LayoutDashboard,
   ListChecks,
   ListOrdered,
+  MailCheck,
   MessageSquareHeart,
   MessagesSquare,
   PlaneTakeoff,
@@ -36,6 +37,7 @@ import {
   ShieldAlert,
   Sprout,
   Target,
+  Timer,
   TrendingUp,
   Trophy,
   Radar,
@@ -531,6 +533,18 @@ const primaryNavigationRaw: NavItemDef[] = [
     requiredRoles: ["ADMIN", "AREA_MANAGER", "PROJECT_MANAGER", "FINANCE", "PEOPLE"],
   },
   {
+    // SLA do fluxo de horas (item 5): prazos em dias úteis por etapa/área do
+    // lançamento ao faturamento e ao pagamento. Gate pela matriz
+    // (SLA_ACOMPANHAMENTO); a configuração é sub-permissão (SLA_CONFIGURACAO).
+    label: "SLA do Fluxo de Horas",
+    href: "/app/sla",
+    permissionCode: "SLA_ACOMPANHAMENTO",
+    icon: Timer,
+    description:
+      "Prazos por etapa e área do fluxo de horas, com pendências, atrasos e histórico.",
+    requiredRoles: ["ADMIN", "AREA_MANAGER", "PROJECT_MANAGER", "FINANCE", "PEOPLE"],
+  },
+  {
     label: "Relatórios",
     href: "/app/relatorios",
     permissionCode: "RELATORIOS",
@@ -606,6 +620,17 @@ export const adminNavigation: NavItemDef[] = [
     icon: BellRing,
     description:
       "Define, por evento, quem é notificado e por qual canal (e-mail ou Teams).",
+    requiredRoles: ["ADMIN"],
+  },
+  {
+    // ITEM 3: lê e edita o e-mail enviado por cada evento de notificação.
+    // Gate pela matriz (CONFIGURACOES_TEMPLATES_EMAIL, ADMIN por padrão).
+    label: "Templates de E-mail",
+    href: "/app/admin/templates-email",
+    permissionCode: "CONFIGURACOES_TEMPLATES_EMAIL",
+    icon: MailCheck,
+    description:
+      "Assunto e corpo do e-mail enviado em cada evento de notificação, com pré-visualização e teste.",
     requiredRoles: ["ADMIN"],
   },
   {
@@ -837,6 +862,7 @@ const primaryNavGroupSpecs: PrimaryNavGroupSpec[] = [
     hrefs: [
       "/app/operacao/cockpit",
       "/app/operacao/fechamento",
+      "/app/sla",
       "/app/aprovacoes",
     ],
   },

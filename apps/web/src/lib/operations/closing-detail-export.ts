@@ -5,6 +5,11 @@ import {
   type TimeEntryStatus,
 } from "@/lib/timesheet/types";
 import type { OperationDetailRow } from "@/lib/operations/closing";
+import {
+  formatEntryExceptions,
+  getEntryExceptions,
+  weekdayLabelPt,
+} from "@/lib/timesheet/entry-exceptions";
 
 /**
  * Pure builder for the "Detalhamento por consultor" `.xlsx` export of the
@@ -17,6 +22,8 @@ import type { OperationDetailRow } from "@/lib/operations/closing";
 export interface OperationDetailExportRow {
   /** ISO date (yyyy-mm-dd) of the launch. */
   date: string;
+  /** Dia da semana pt-BR ("Sábado"). */
+  weekday: string;
   consultantName: string;
   /** "Cliente / Projeto" merged into one column for the sheet. */
   clientProject: string;
@@ -27,6 +34,8 @@ export interface OperationDetailExportRow {
   status: string;
   /** ISO datetime of the latest decision, or "". */
   decidedAt: string;
+  /** Exceções do lançamento ("Sábado; Sobreaviso"), ou "". */
+  alert: string;
 }
 
 function statusLabel(status: string): string {
@@ -38,6 +47,7 @@ export function buildOperationDetailExportRows(
 ): OperationDetailExportRow[] {
   return rows.map((r) => ({
     date: r.date,
+    weekday: weekdayLabelPt(r.date),
     consultantName: r.consultantName,
     clientProject: `${r.clientName} / ${r.projectName}`,
     activity: activityLabelOf(r.activityType),
@@ -45,6 +55,12 @@ export function buildOperationDetailExportRows(
     billable: r.billable ? "Sim" : "Não",
     status: statusLabel(r.status),
     decidedAt: r.decidedAt ?? "",
+    // Servidor envia `exceptions` (com feriados); sem ele, ao menos fim de
+    // semana e atividade são sinalizados.
+    alert: formatEntryExceptions(
+      r.exceptions ??
+        getEntryExceptions({ date: r.date, activityType: r.activityType }),
+    ),
   }));
 }
 
@@ -53,6 +69,7 @@ const HOURS_FMT = "#,##0.00";
 export function operationDetailXlsxColumns(): XlsxColumn<OperationDetailExportRow>[] {
   return [
     { header: "Data", value: (r) => r.date, width: 12 },
+    { header: "Dia", value: (r) => r.weekday, width: 10 },
     { header: "Consultor", value: (r) => r.consultantName, width: 24 },
     { header: "Cliente / Projeto", value: (r) => r.clientProject, width: 32 },
     { header: "Atividade", value: (r) => r.activity, width: 18 },
@@ -60,5 +77,6 @@ export function operationDetailXlsxColumns(): XlsxColumn<OperationDetailExportRo
     { header: "Faturável", value: (r) => r.billable, width: 12 },
     { header: "Status", value: (r) => r.status, width: 16 },
     { header: "Decidido em", value: (r) => r.decidedAt, width: 22 },
+    { header: "Alerta", value: (r) => r.alert, width: 32 },
   ];
 }

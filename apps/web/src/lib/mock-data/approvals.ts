@@ -8,6 +8,8 @@
  * prepared but not yet wired to a server action — see the page comments.
  */
 
+import type { EntryException } from "@/lib/timesheet/entry-exceptions";
+
 export type ApprovalStatus =
   | "PENDING"
   | "APPROVED"
@@ -49,6 +51,11 @@ export interface ApprovalHoursEntry {
   billable: boolean;
   /** Justification kept when a manager marked the day NON-billable. */
   nonBillableReason?: string;
+  /**
+   * Sinal de exceção (fim de semana, feriado, atividade fora do Dia Útil),
+   * calculado no servidor (`getEntryExceptions`). Nunca bloqueia a decisão.
+   */
+  exceptions?: EntryException[];
 }
 
 /** Which approval stage an EXPENSE item belongs to (two-stage chain). */

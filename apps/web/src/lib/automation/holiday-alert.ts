@@ -28,6 +28,7 @@ import {
   buildFeriadoProximoEmail,
   type FeriadoProximoLine,
 } from "./email/templates";
+import { feriadoProximoTemplateVars } from "./email/template-vars";
 import { emitNotification } from "./notifications/emit";
 
 /** Default look-ahead window in days. */
@@ -150,11 +151,12 @@ export async function runHolidayAlert(
         Parameters<typeof emitNotification>[0]["buildFragment"]
       >[0],
     ) => {
-      const built = buildFeriadoProximoEmail({
+      const emailInput = {
         recipientName: recipient.name ?? "equipe",
         holidays: group.lines,
         daysAhead,
-      });
+      };
+      const built = buildFeriadoProximoEmail(emailInput);
       const summary = group.lines
         .map((l) => `${l.name} (${l.dateLabel})`)
         .join(", ");
@@ -162,6 +164,7 @@ export async function runHolidayAlert(
         recipient,
         title: built.subject,
         prebuilt: built,
+        templateVars: feriadoProximoTemplateVars(emailInput),
         teamsText: `Feriado próximo: ${summary}`,
       };
     };

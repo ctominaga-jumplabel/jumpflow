@@ -3,8 +3,14 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { ConsultantPaymentsPanel } from "@/components/payments/ConsultantPaymentsPanel";
 import { PaymentForecastPanel } from "@/components/payments/PaymentForecastPanel";
 import { requireRole } from "@/lib/auth/guards";
+import { FLOW_PERMISSION_CODES } from "@/lib/auth/permission-codes";
+import { canEach } from "@/lib/auth/permissions";
 import { canAccessSensitiveCost } from "@/lib/auth/sensitive-data";
-import { FINANCIAL_ROLES } from "@/lib/auth/route-permissions";
+import {
+  FINANCIAL_ROLES,
+  PAYMENTS_ROUTE_ROLES,
+  hasRole,
+} from "@/lib/auth/route-permissions";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import type { ConsultantPaymentStatus } from "@/lib/payments/state-machine";
 import {
@@ -74,7 +80,28 @@ export default async function PagamentosPage({
 }: {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 } = {}) {
-  const user = await requireRole(FINANCIAL_ROLES);
+  // Governança Fluxo de Horas: o DP (PEOPLE) também entra — para LIBERAR os
+  // pagamentos. As ações financeiras (banco, aprovar, pago, previsão, NF,
+  // export com dados bancários) seguem só para FINANCIAL_ROLES.
+  const user = await requireRole(PAYMENTS_ROUTE_ROLES);
+  const canOperateFinance = hasRole(user, FINANCIAL_ROLES);
+  // Etapas do fluxo pela Matriz (calculadas no servidor; o gate real é nas
+  // server actions): liberar (DP), enviar solicitação de NF e reabrir
+  // liberação (Financeiro).
+  const flowGrants = await canEach(
+    [
+      FLOW_PERMISSION_CODES.paymentPeopleRelease,
+      FLOW_PERMISSION_CODES.paymentInvoiceRequest,
+      FLOW_PERMISSION_CODES.paymentReopenRelease,
+    ],
+    "edit",
+  );
+  const flowPermissions = {
+    canPeopleRelease: flowGrants[FLOW_PERMISSION_CODES.paymentPeopleRelease],
+    canRequestInvoice: flowGrants[FLOW_PERMISSION_CODES.paymentInvoiceRequest],
+    canReopenRelease: flowGrants[FLOW_PERMISSION_CODES.paymentReopenRelease],
+    canOperateFinance,
+  };
 
   const databaseConfigured = isDatabaseConfigured();
   const now = new Date();
@@ -87,6 +114,9 @@ export default async function PagamentosPage({
   let payments: ConsultantPaymentView[] = [];
   let forecasts: PaymentForecastView[] = [];
   let consultants: { id: string; name: string }[] = [];
+  let exceptionsByPayment:
+    | Record<string, import("@/lib/timesheet/entry-exceptions").EntryExceptionSummary>
+    | undefined;
   if (databaseConfigured) {
     const {
       listConsultantPayments,
@@ -103,9 +133,19 @@ export default async function PagamentosPage({
         // Valor/hora de cada linha é o custo do consultor: só Dados Sensíveis.
         includeUnitRate: canAccessSensitiveCost(user),
       }),
-      listPaymentForecasts({ month, year }),
+      canOperateFinance
+        ? listPaymentForecasts({ month, year })
+        : Promise.resolve([] as PaymentForecastView[]),
       listPaymentConsultants(),
     ]);
+    // Sinal para o DP: exceções (fim de semana/feriado/atividade) dos
+    // lançamentos de cada pagamento — leitura em lote, não por linha.
+    const { loadPaymentEntryExceptions } = await import(
+      "@/lib/db/entry-exceptions"
+    );
+    exceptionsByPayment = await loadPaymentEntryExceptions(
+      payments.map((p) => p.id),
+    );
   }
 
   // Export href reflete exatamente o filtro aplicado (mês/ano/contratação/
@@ -123,7 +163,7 @@ export default async function PagamentosPage({
       <PageHeader
         eyebrow="Financeiro"
         title="Pagamentos"
-        description="Fluxo de pagamento de consultores, notas fiscais, envio ao banco e confirmacao."
+        description="Fluxo de pagamento de consultores: liberacao do DP, notas fiscais, envio ao banco e confirmacao."
       />
       <form className="flex flex-wrap items-end gap-3 rounded-md border border-border bg-surface p-4">
         <label className="text-sm font-medium text-medium">
@@ -197,18 +237,22 @@ export default async function PagamentosPage({
           Filtrar
         </button>
       </form>
-      <PaymentForecastPanel
-        mode={databaseConfigured ? "db" : "demo"}
-        month={month}
-        year={year}
-        forecasts={forecasts}
-      />
+      {canOperateFinance ? (
+        <PaymentForecastPanel
+          mode={databaseConfigured ? "db" : "demo"}
+          month={month}
+          year={year}
+          forecasts={forecasts}
+        />
+      ) : null}
       <ConsultantPaymentsPanel
         mode={databaseConfigured ? "db" : "demo"}
         month={month}
         year={year}
         payments={payments}
-        exportHref={exportHref}
+        exportHref={canOperateFinance ? exportHref : undefined}
+        exceptionsByPayment={exceptionsByPayment}
+        permissions={flowPermissions}
       />
     </div>
   );

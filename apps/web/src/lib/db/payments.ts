@@ -19,9 +19,12 @@ import type {
 } from "@/lib/payments/types";
 import { appConfig } from "@/config/app";
 import { buildInvoiceComparison } from "@/lib/payments/invoice-validation";
+import { buildInvoiceProjectBreakdown } from "@/lib/payments/invoice-request";
 import { buildAuditEventData } from "@/lib/db/audit";
 import { getEmailTransport } from "@/lib/automation/email-transport";
 import { buildConsultantInvoiceRequestEmail } from "@/lib/automation/email/templates";
+import { applyEmailTemplate } from "@/lib/automation/email/apply-template";
+import { consultantInvoiceRequestTemplateVars } from "@/lib/automation/email/template-vars";
 import { resolveEventDelivery } from "@/lib/automation/notifications/event-delivery";
 
 type ConsultantContractType = "CLT" | "PJ" | "CLT_FLEX";
@@ -167,6 +170,8 @@ function toPaymentView(row: PaymentRowForView): ConsultantPaymentView {
     totalAmount,
     expectedPaymentAt: toIsoDate(row.expectedPaymentAt),
     confirmedPaidAt: toIsoDate(row.confirmedPaidAt),
+    peopleReleasedAt: toIsoDate(row.peopleReleasedAt),
+    invoiceRequestSentAt: toIsoDate(row.invoiceRequestSentAt),
     invoiceReceivedAt: toIsoDate(row.invoiceReceivedAt),
     invoiceValidatedAt: toIsoDate(row.invoiceValidatedAt),
     invoiceAmount,
@@ -1438,12 +1443,14 @@ export async function getInvoiceAttachmentForDownload(
 const INVOICE_REQUEST_EMAIL_TYPE = "CONSULTANT_INVOICE_REQUEST" as const;
 
 /**
- * Statuses onde pedir a NF ainda faz sentido (a nota ainda não chegou). Só PJ
- * passa por NF neste fluxo; CLT_FLEX também recebe NF, mas a MELHORIA pede o
- * lembrete restrito a PJ — a restrição de contrato é aplicada no envio.
+ * Statuses onde o e-mail de NF pode sair: só DEPOIS da liberação do DP
+ * (governança Fluxo de Horas). PEOPLE_RELEASED é o envio inicial (a transição
+ * para WAITING_FOR_INVOICE é feita por `requestInvoiceForPayment`, em
+ * lib/db/payment-release); WAITING_FOR_INVOICE permite o reenvio. Só PJ
+ * recebe o e-mail — a restrição de contrato é aplicada no envio.
  */
 const INVOICE_REQUEST_ELIGIBLE_STATUSES: ConsultantPaymentStatus[] = [
-  "OPEN",
+  "PEOPLE_RELEASED",
   "WAITING_FOR_INVOICE",
 ];
 
@@ -1482,6 +1489,18 @@ export async function sendConsultantInvoiceRequest(input: {
       pjAmount: true,
       totalAmount: true,
       consultant: { select: { name: true, email: true } },
+      // Quebra por projeto (referência no e-mail; a NF continua única).
+      lines: {
+        select: {
+          projectId: true,
+          description: true,
+          hours: true,
+          amount: true,
+          project: {
+            select: { name: true, client: { select: { name: true } } },
+          },
+        },
+      },
     },
   });
   if (!payment) return { status: "NOT_FOUND" };
@@ -1522,13 +1541,33 @@ export async function sendConsultantInvoiceRequest(input: {
   const notasUrl = appConfig.url
     ? `${appConfig.url}/app/minhas-notas`
     : undefined;
-  const email = buildConsultantInvoiceRequestEmail({
+  const expectedAmount = toNumber(payment.pjAmount);
+  const breakdown = buildInvoiceProjectBreakdown(
+    payment.lines.map((line) => ({
+      projectId: line.projectId,
+      projectName: line.project?.name ?? null,
+      clientName: line.project?.client?.name ?? null,
+      description: line.description,
+      hours: toNumber(line.hours),
+      amount: toNumber(line.amount),
+    })),
+    expectedAmount,
+  );
+  const invoiceEmailInput = {
     consultantName: payment.consultant.name,
     month: payment.month,
     year: payment.year,
-    expectedAmount: toNumber(payment.pjAmount),
+    expectedAmount,
     notasUrl,
-  });
+    projects: breakdown.projects,
+    projectAmountsProportional: breakdown.proportional,
+  };
+  // ITEM 3: template personalizado (/app/admin/templates-email), fail-open.
+  const email = await applyEmailTemplate(
+    INVOICE_REQUEST_EMAIL_TYPE,
+    consultantInvoiceRequestTemplateVars(invoiceEmailInput),
+    buildConsultantInvoiceRequestEmail(invoiceEmailInput),
+  );
 
   let sentId = "";
   let provider = "";
@@ -1595,9 +1634,17 @@ export async function sendConsultantInvoiceRequest(input: {
           recipients: delivery.emails,
           month: payment.month,
           year: payment.year,
+          projects: breakdown.projects.length,
         },
       }),
     });
+    // Marca o envio efetivo da solicitação (governança Fluxo de Horas).
+    if (logStatus === "SENT") {
+      await tx.consultantPayment.update({
+        where: { id: payment.id },
+        data: { invoiceRequestSentAt: new Date() },
+      });
+    }
   });
 
   if (logStatus === "FAILED") {
@@ -1606,41 +1653,5 @@ export async function sendConsultantInvoiceRequest(input: {
   return { status: "SENT", emailId: sentId, provider };
 }
 
-export interface RequestMonthlyInvoicesResult {
-  eligible: number;
-  sent: number;
-  skipped: number;
-}
-
-/**
- * Ação em massa "Solicitar NF do mês": envia o lembrete a TODOS os pagamentos PJ
- * elegíveis (status OPEN/WAITING_FOR_INVOICE) da competência. Idempotente por
- * pagamento — reexecutar não reenvia a quem já recebeu (SENT no log).
- */
-export async function requestMonthlyConsultantInvoices(input: {
-  month: number;
-  year: number;
-  actorUserId: string | null;
-}): Promise<RequestMonthlyInvoicesResult> {
-  const payments = await prisma.consultantPayment.findMany({
-    where: {
-      month: input.month,
-      year: input.year,
-      contractType: "PJ",
-      status: { in: INVOICE_REQUEST_ELIGIBLE_STATUSES },
-    },
-    select: { id: true },
-  });
-
-  let sent = 0;
-  let skipped = 0;
-  for (const payment of payments) {
-    const result = await sendConsultantInvoiceRequest({
-      paymentId: payment.id,
-      actorUserId: input.actorUserId,
-    });
-    if (result.status === "SENT") sent += 1;
-    else skipped += 1;
-  }
-  return { eligible: payments.length, sent, skipped };
-}
+// "Solicitar NF do mês" (massa) vive em lib/db/payment-release.ts
+// (`requestConsultantInvoices`): só pagamentos Liberados pelo DP.

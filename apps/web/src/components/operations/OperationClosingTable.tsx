@@ -18,8 +18,17 @@ import { FeedbackBanner, useFeedback } from "@/components/ui/Feedback";
 import { Modal } from "@/components/ui/Modal";
 import { SectionPanel } from "@/components/ui/SectionPanel";
 import { StatusBadge, type StatusTone } from "@/components/ui/StatusBadge";
+import {
+  EntryExceptionAlert,
+  EntryExceptionCountBadge,
+} from "@/components/ui/EntryExceptionAlert";
 import { formatHours } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import {
+  formatDayMonth,
+  summarizeEntryExceptions,
+  weekdayLabelPt,
+} from "@/lib/timesheet/entry-exceptions";
 import { focusRingInput } from "@/lib/styles";
 import {
   activityLabelOf,
@@ -278,7 +287,7 @@ export function OperationClosingTable({
           <button
             type="button"
             className="inline-flex items-center gap-1.5 rounded-md bg-warning-soft px-2.5 py-1 text-xs font-semibold text-warning hover:brightness-95"
-            title="Ver lançamentos fora do Dia Útil ou com anexo"
+            title="Ver lançamentos em fim de semana/feriado, fora do Dia Útil ou com anexo"
             onClick={() => openApuracao(r, true)}
           >
             <AlertTriangle size={14} /> {r.exceptionCount}
@@ -626,7 +635,8 @@ function ApuracaoBody({
         />
         Somente exceções
         <span className="text-soft">
-          (fora do Dia Útil ou com anexo · {detail.totalExceptions} no total)
+          (fim de semana, feriado, fora do Dia Útil ou com anexo ·{" "}
+          {detail.totalExceptions} no total)
         </span>
       </label>
 
@@ -646,11 +656,10 @@ function ApuracaoBody({
                 </p>
                 <div className="flex items-center gap-2 text-xs text-soft">
                   <span className="tabular-nums">{formatHours(c.totalHours)}</span>
-                  {c.exceptionCount > 0 ? (
-                    <span className="inline-flex items-center gap-1 rounded bg-warning-soft px-1.5 py-0.5 font-semibold text-warning">
-                      <AlertTriangle size={12} /> {c.exceptionCount}
-                    </span>
-                  ) : null}
+                  <EntryExceptionCountBadge
+                    count={c.exceptionCount}
+                    lines={apuracaoExceptionLines(c.entries)}
+                  />
                 </div>
               </div>
               {c.entries.length === 0 ? (
@@ -691,6 +700,20 @@ function ApuracaoBody({
   );
 }
 
+/**
+ * Linhas do tooltip do selo por consultor: dias com exceção tipada (fim de
+ * semana/feriado/atividade) + dias que só entram na regra por terem anexo.
+ */
+function apuracaoExceptionLines(entries: readonly OperationEntryDetail[]): string[] {
+  const typed = summarizeEntryExceptions(
+    entries.map((e) => ({ date: e.date, exceptions: e.exceptions ?? [] })),
+  ).lines;
+  const attachmentOnly = entries
+    .filter((e) => e.isException && (e.exceptions ?? []).length === 0)
+    .map((e) => `${formatDayMonth(e.date)}: Com anexo`);
+  return [...typed, ...attachmentOnly];
+}
+
 function ApuracaoRow({
   entry,
   onViewAttachment,
@@ -708,15 +731,19 @@ function ApuracaoRow({
       )}
     >
       <td className="whitespace-nowrap px-3 py-2 tabular-nums text-strong">
-        {new Date(entry.date).toLocaleDateString("pt-BR", { timeZone: "UTC" })}
+        <span className="inline-flex items-center gap-1.5">
+          {new Date(entry.date).toLocaleDateString("pt-BR", { timeZone: "UTC" })}
+          <span className="text-xs text-soft">
+            {weekdayLabelPt(entry.date).slice(0, 3)}
+          </span>
+          <EntryExceptionAlert
+            exceptions={entry.exceptions}
+            dateLabel={formatDayMonth(entry.date)}
+          />
+        </span>
       </td>
       <td className="px-3 py-2 text-medium">
-        <span className="inline-flex items-center gap-1.5">
-          {entry.activityType !== "WORKDAY" ? (
-            <AlertTriangle size={13} className="text-warning" />
-          ) : null}
-          {activityLabelOf(entry.activityType)}
-        </span>
+        {activityLabelOf(entry.activityType)}
       </td>
       <td className="px-3 py-2 text-right tabular-nums">{formatHours(entry.hours)}</td>
       <td className="px-3 py-2">

@@ -20,7 +20,11 @@ export type NotificationEventKey =
   | "ACCESS_INVITE"
   | "PRE_INVOICE_ISSUED"
   | "NFSE_ISSUED"
-  | "PAYMENT_FORECAST";
+  | "PAYMENT_FORECAST"
+  | "CONSULTANT_INVOICE_REQUEST"
+  | "PAYMENT_RELEASED_BY_PEOPLE"
+  | "SLA_DEADLINE_APPROACHING"
+  | "SLA_OVERDUE";
 
 export type NotificationScopeKey = "GLOBAL" | "PROJECT" | "ALLOCATION";
 export type NotificationChannelKey = "EMAIL" | "TEAMS";

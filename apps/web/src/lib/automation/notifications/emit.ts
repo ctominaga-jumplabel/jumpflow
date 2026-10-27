@@ -21,6 +21,7 @@ import {
 } from "./dispatch";
 import { resolveRecipients, type ResolveContext } from "./resolve";
 import { persistInAppNotifications } from "./in-app";
+import { applyEmailTemplateToFragments } from "../email/apply-template";
 
 export type NotificationEventKey =
   | "HOURS_RELEASED"
@@ -33,7 +34,12 @@ export type NotificationEventKey =
   | "FEED_POST_REPLIED"
   | "FEED_CONTENT_REACTED"
   | "FEED_MENTIONED"
-  | "HOLIDAY_UPCOMING";
+  | "HOLIDAY_UPCOMING"
+  // DP/People liberou pagamentos de consultores → avisa o Financeiro.
+  | "PAYMENT_RELEASED_BY_PEOPLE"
+  // Job de SLA do fluxo de horas (lib/automation/sla-reminders.ts).
+  | "SLA_DEADLINE_APPROACHING"
+  | "SLA_OVERDUE";
 
 export type NotificationScopeKey = "GLOBAL" | "PROJECT" | "ALLOCATION";
 
@@ -116,6 +122,9 @@ export async function emitNotification(
       else skipped += 1;
     }
     if (fragments.length === 0) return { ...empty, skipped };
+
+    // ITEM 3: template personalizado do evento (fail-open → e-mail padrão).
+    await applyEmailTemplateToFragments(input.event, fragments);
 
     const results = await dispatchNotifications(fragments);
 

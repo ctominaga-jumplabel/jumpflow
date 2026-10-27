@@ -15,7 +15,9 @@ const h = vi.hoisted(() => {
     closing: null as Any,
     updates: [] as Array<{ where: Any; data: Any }>,
     audits: [] as Array<Record<string, unknown>>,
-    currentUser: { id: "dev-user", roles: ["ADMIN"] as string[] },
+    currentUser: { id: "dev-user", name: "Gestora", roles: ["ADMIN"] as string[] },
+    releasedPayments: [] as Any[],
+    dpNotifies: [] as Any[],
   };
 
   const prismaMock: Any = {
@@ -61,6 +63,20 @@ vi.mock("@/lib/automation/notifications/events", () => ({
   notifyOperationClosed: vi.fn(async () => {}),
 }));
 
+// Leitura do fechamento (não usada pelo reopen) puxa a cadeia de auth
+// (next-auth) via reports/permissions — isolada aqui.
+vi.mock("@/lib/db/operation-closing", () => ({
+  getOperationClosingDetail: vi.fn(),
+  getOperationReadiness: vi.fn(),
+}));
+
+vi.mock("@/lib/db/payment-release", () => ({
+  findReleasedPaymentsForProjectMonth: vi.fn(async () => h.store.releasedPayments),
+  notifyPeopleOfOperationReopened: vi.fn(async (input: Any) => {
+    h.store.dpNotifies.push(input);
+  }),
+}));
+
 import { reopenOperation } from "./actions";
 
 const base = { projectId: "proj-1", month: 6, year: 2026 };
@@ -70,7 +86,9 @@ beforeEach(() => {
   h.store.closing = { id: "oc-1", status: "CLOSED", notes: null };
   h.store.updates = [];
   h.store.audits = [];
-  h.store.currentUser = { id: "dev-user", roles: ["ADMIN"] };
+  h.store.currentUser = { id: "dev-user", name: "Gestora", roles: ["ADMIN"] };
+  h.store.releasedPayments = [];
+  h.store.dpNotifies = [];
 });
 
 afterEach(() => vi.unstubAllEnvs());
@@ -106,5 +124,31 @@ describe("reopenOperation — P16 justificativa obrigatória", () => {
     const after = h.store.audits[0]!.after as Record<string, unknown>;
     expect(after.status).toBe("OPEN");
     expect(after.justification).toBe("Correção tardia de horas do consultor.");
+  });
+});
+
+describe("reopenOperation — governança Fluxo de Horas (pagamentos a jusante)", () => {
+  it("bloqueia quando há pagamento já liberado pelo DP (nenhum update/audit/aviso)", async () => {
+    h.store.releasedPayments = [
+      { id: "pay-1", consultantName: "Ana", status: "PEOPLE_RELEASED" },
+    ];
+    const result = await reopenOperation({ ...base, justification: "Correção" });
+    expect(result).toMatchObject({ ok: false, error: "ALREADY_DECIDED" });
+    if (!result.ok) {
+      expect(result.message).toMatch(/Devolva pelo Financeiro\/DP primeiro/);
+      expect(result.message).toContain("Ana");
+    }
+    // O guard roda DENTRO da transação (após travar o fechamento): o throw
+    // desfaz a reabertura no banco real; aqui: nenhum audit nem aviso.
+    expect(h.store.audits).toHaveLength(0);
+    expect(h.store.dpNotifies).toHaveLength(0);
+  });
+
+  it("sem pagamentos liberados: reabre e avisa o DP in-app", async () => {
+    const result = await reopenOperation({ ...base, justification: "Correção" });
+    expect(result.ok).toBe(true);
+    expect(h.store.dpNotifies).toEqual([
+      { ...base, justification: "Correção", actorName: "Gestora" },
+    ]);
   });
 });

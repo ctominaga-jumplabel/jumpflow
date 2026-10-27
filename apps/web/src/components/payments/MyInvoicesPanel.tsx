@@ -32,6 +32,7 @@ const contractTypeLabels: Record<
 
 const toneByStatus: Record<ConsultantPaymentView["status"], StatusTone> = {
   OPEN: "neutral",
+  PEOPLE_RELEASED: "info",
   WAITING_FOR_INVOICE: "warning",
   INVOICE_RECEIVED: "info",
   INVOICE_VALIDATED: "info",
@@ -45,6 +46,7 @@ const toneByStatus: Record<ConsultantPaymentView["status"], StatusTone> = {
 /** Statuses where the consultant can still send/replace the NF. */
 const UPLOADABLE_STATUSES: ConsultantPaymentView["status"][] = [
   "OPEN",
+  "PEOPLE_RELEASED",
   "WAITING_FOR_INVOICE",
 ];
 

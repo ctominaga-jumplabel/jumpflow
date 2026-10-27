@@ -28,6 +28,11 @@ import { MonthHeatmap } from "./MonthHeatmap";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { FilterChip } from "@/components/ui/FilterChip";
 import { FeedbackBanner, useFeedback } from "@/components/ui/Feedback";
+import {
+  EntryExceptionAlert,
+  EntryExceptionCountBadge,
+} from "@/components/ui/EntryExceptionAlert";
+import { summarizeEntryExceptions } from "@/lib/timesheet/entry-exceptions";
 import { cn } from "@/lib/utils";
 import { focusRing, focusRingInput, opsLabel, opsNum } from "@/lib/styles";
 import { formatCurrency, formatHours } from "@/lib/format";
@@ -1385,6 +1390,15 @@ function ApprovalRow({
     { dateStyle: "short", timeStyle: "short" },
   )}`;
 
+  // Sinal (não bloqueante) de dias fora do padrão: fim de semana, feriado,
+  // atividade fora do Dia Útil — calculado no servidor por lançamento.
+  const exceptionSummary = summarizeEntryExceptions(
+    (item.entries ?? []).map((e) => ({
+      date: e.date,
+      exceptions: e.exceptions ?? [],
+    })),
+  );
+
   return (
     <li>
       <div className="flex items-start gap-3 px-5 py-4">
@@ -1457,6 +1471,12 @@ function ApprovalRow({
 
         <div className="flex shrink-0 flex-col items-end gap-1.5">
           <div className="flex items-center gap-2">
+            {exceptionSummary.count > 0 ? (
+              <EntryExceptionCountBadge
+                count={exceptionSummary.count}
+                lines={exceptionSummary.lines}
+              />
+            ) : null}
             <span
               role="img"
               title={submittedAtLabel}
@@ -1659,11 +1679,17 @@ function ApprovalRow({
                       className="flex items-center justify-between gap-3 py-2"
                     >
                       <div className="min-w-0">
-                        <p className="text-sm font-medium text-strong">
-                          {shortDate(entry.date)} ·{" "}
-                          <span className="tabular-nums">
-                            {formatHours(entry.hours)}
+                        <p className="flex items-center gap-1.5 text-sm font-medium text-strong">
+                          <span>
+                            {shortDate(entry.date)} ·{" "}
+                            <span className="tabular-nums">
+                              {formatHours(entry.hours)}
+                            </span>
                           </span>
+                          <EntryExceptionAlert
+                            exceptions={entry.exceptions}
+                            dateLabel={shortDate(entry.date)}
+                          />
                         </p>
                         <p className="truncate text-xs text-soft">
                           {entry.activityLabel}
@@ -1703,11 +1729,17 @@ function ApprovalRow({
                       className="flex items-center justify-between gap-3 py-2"
                     >
                       <div className="min-w-0">
-                        <p className="text-sm font-medium text-strong">
-                          {shortDate(entry.date)} ·{" "}
-                          <span className="tabular-nums">
-                            {formatHours(entry.hours)}
+                        <p className="flex items-center gap-1.5 text-sm font-medium text-strong">
+                          <span>
+                            {shortDate(entry.date)} ·{" "}
+                            <span className="tabular-nums">
+                              {formatHours(entry.hours)}
+                            </span>
                           </span>
+                          <EntryExceptionAlert
+                            exceptions={entry.exceptions}
+                            dateLabel={shortDate(entry.date)}
+                          />
                         </p>
                         <p className="truncate text-xs text-soft">
                           {entry.activityLabel}

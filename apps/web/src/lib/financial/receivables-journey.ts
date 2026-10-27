@@ -13,6 +13,9 @@ import { preInvoiceReferenceKey } from "@/lib/billing/pre-invoice";
 import { timeEntryEffectiveHours } from "@/lib/timesheet/effective-hours";
 import { activityLabelOf } from "@/lib/timesheet/types";
 import { toIsoDate } from "@/lib/timesheet/week";
+import { getHolidayLookup } from "@/lib/db/timesheet";
+import { getEntryExceptions } from "@/lib/timesheet/entry-exceptions";
+import { EMPTY_HOLIDAY_LOOKUP } from "@/lib/timesheet/holidays";
 import {
   buildApuracao,
   classifyPendingStatus,
@@ -195,6 +198,12 @@ export async function loadReceivablesEntries(
     : new Map();
   // Sinal estrutural (não financeiro): tipo de cobrança não-horário por projeto.
   const nonHourlyMap = await loadNonHourlyBillingMap(projectIds);
+  // Sinal de exceção (fim de semana/feriado/atividade): UMA consulta de
+  // feriados; `rows` vem ordenado por data (primeiro/último = intervalo).
+  const holidays =
+    rows.length > 0
+      ? await getHolidayLookup(rows[0].date, rows[rows.length - 1].date)
+      : EMPTY_HOLIDAY_LOOKUP;
 
   const entries: ReceivablesEntry[] = rows.map((r) => {
     const hours = Number(r.hours);
@@ -208,7 +217,14 @@ export async function loadReceivablesEntries(
           ? Math.round(effectiveHours * saleRate * 100) / 100
           : null;
     }
+    const exceptions = getEntryExceptions({
+      date: toIsoDate(r.date),
+      activityType: r.activityType,
+      projectId: r.projectId,
+      holidays,
+    });
     return {
+      ...(exceptions.length > 0 ? { exceptions } : {}),
       id: r.id,
       date: toIsoDate(r.date),
       consultantId: r.consultantId,

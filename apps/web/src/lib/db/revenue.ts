@@ -210,6 +210,27 @@ export const revenueClosingTransitions: Record<
   },
 };
 
+/**
+ * Transições que DESFAZEM a liberação de faturamento: saem de `CLOSED`
+ * ("Liberado" pelo Gerente de Área) para TRÁS (hoje só `REOPEN`, CLOSED →
+ * READY_TO_CLOSE). Derivado da própria tabela (expected CLOSED e next fora de
+ * CLOSED/INVOICED/CANCELLED) para que uma reversa nova a partir de CLOSED herde
+ * o gate automaticamente. Governança (Fluxo de Horas): só quem tem
+ * `FATURAMENTO_REABRIR_LIBERACAO` edit (FINANCE por padrão) pode executá-las —
+ * o Gerente de Área libera, mas não reabre a própria liberação.
+ */
+export function isBillingReleaseReversal(
+  action: RevenueClosingAdvanceAction,
+): boolean {
+  const transition = revenueClosingTransitions[action];
+  return (
+    transition.expected === "CLOSED" &&
+    (transition.next === "OPEN" ||
+      transition.next === "IN_REVIEW" ||
+      transition.next === "READY_TO_CLOSE")
+  );
+}
+
 export async function listRevenueClosings(input: {
   month: number;
   year: number;

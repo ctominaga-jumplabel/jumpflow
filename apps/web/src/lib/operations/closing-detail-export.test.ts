@@ -30,6 +30,7 @@ describe("buildOperationDetailExportRows", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toEqual({
       date: "2026-06-10",
+      weekday: "Quarta",
       consultantName: "Bruno",
       clientProject: "Vix / Atlas",
       activity: "Dia Útil",
@@ -37,7 +38,23 @@ describe("buildOperationDetailExportRows", () => {
       billable: "Sim",
       status: "Aprovado",
       decidedAt: "2026-06-11T12:00:00.000Z",
+      alert: "",
     });
+  });
+
+  it("fills the Alerta column from server exceptions, or falls back to weekend/activity", () => {
+    const rows = buildOperationDetailExportRows([
+      detailRow({
+        date: "2026-11-20",
+        exceptions: [
+          { kind: "HOLIDAY", label: "Feriado: Consciência Negra", detail: "" },
+        ],
+      }),
+      detailRow({ date: "2026-06-13", activityType: "ON_CALL" }),
+    ]);
+    expect(rows[0].alert).toBe("Feriado: Consciência Negra");
+    expect(rows[1].alert).toBe("Sábado; Sobreaviso");
+    expect(rows[1].weekday).toBe("Sábado");
   });
 
   it("renders non-billable and a missing decision as blanks/Não", () => {
@@ -54,6 +71,7 @@ describe("operationDetailXlsxColumns", () => {
   it("has the headers the DP asked for, in order", () => {
     expect(operationDetailXlsxColumns().map((c) => c.header)).toEqual([
       "Data",
+      "Dia",
       "Consultor",
       "Cliente / Projeto",
       "Atividade",
@@ -61,6 +79,7 @@ describe("operationDetailXlsxColumns", () => {
       "Faturável",
       "Status",
       "Decidido em",
+      "Alerta",
     ]);
   });
 });

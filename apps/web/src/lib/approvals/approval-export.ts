@@ -7,6 +7,7 @@ import {
   type ApprovalKind,
   type ApprovalStatus,
 } from "@/lib/mock-data/approvals";
+import { summarizeEntryExceptions } from "@/lib/timesheet/entry-exceptions";
 
 /**
  * Pure helpers for the Aprovações `.xlsx` export (Onda 6). The route rebuilds
@@ -103,5 +104,18 @@ export function approvalXlsxColumns(): XlsxColumn<ApprovalItem>[] {
     { header: "Regra", value: (i) => i.ruleKey ?? "", width: 20 },
     { header: "Justificativa", value: (i) => i.comment ?? "", width: 30 },
     { header: "Enviado em", value: (i) => i.submittedAt, width: 22 },
+    {
+      // Item agregado (semana): lista os dias com exceção, ex.:
+      // "21/11 (Sáb): Sábado; Sobreaviso | 20/11 (Sex): Feriado: …".
+      header: "Alerta",
+      value: (i) =>
+        summarizeEntryExceptions(
+          (i.entries ?? []).map((e) => ({
+            date: e.date,
+            exceptions: e.exceptions ?? [],
+          })),
+        ).lines.join(" | "),
+      width: 40,
+    },
   ];
 }

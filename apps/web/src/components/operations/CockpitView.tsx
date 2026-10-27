@@ -16,6 +16,11 @@ import {
   Users,
 } from "lucide-react";
 
+import { EntryExceptionCountBadge } from "@/components/ui/EntryExceptionAlert";
+import {
+  formatDayMonth,
+  weekdayLabelPt,
+} from "@/lib/timesheet/entry-exceptions";
 import { ActionButton } from "@/components/ui/ActionButton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { FeedbackBanner, useFeedback } from "@/components/ui/Feedback";
@@ -67,19 +72,22 @@ function formatHours(hours: number): string {
 }
 
 /**
- * Texto do hover do alerta de exceções (itens 2/3): "dd/mm: Atividade (com
- * anexo) · …". Um "Dia Útil" só aparece aqui quando carrega anexo.
+ * Linhas do tooltip do alerta de exceções (itens 2/3): "dd/mm (Sáb): Sábado;
+ * Sobreaviso (com anexo)". Usa o sinal tipado (fim de semana/feriado/atividade)
+ * quando presente; um "Dia Útil" comum só aparece aqui quando carrega anexo.
  */
-function exceptionSummary(
-  exceptions: readonly CockpitException[],
-): string {
-  return exceptions
-    .map((e) => {
-      const [, mm, dd] = e.date.split("-");
-      const label = e.activityType !== "WORKDAY" ? e.activityLabel : "Dia Útil";
-      return `${dd}/${mm}: ${label}${e.hasAttachment ? " (com anexo)" : ""}`;
-    })
-    .join(" · ");
+function exceptionLines(exceptions: readonly CockpitException[]): string[] {
+  return exceptions.map((e) => {
+    const wd = weekdayLabelPt(e.date).slice(0, 3);
+    const typed = (e.exceptions ?? []).map((x) => x.label);
+    const labels =
+      typed.length > 0
+        ? typed
+        : [e.activityType !== "WORKDAY" ? e.activityLabel : "Dia Útil"];
+    return `${formatDayMonth(e.date)}${wd ? ` (${wd})` : ""}: ${labels.join("; ")}${
+      e.hasAttachment ? " (com anexo)" : ""
+    }`;
+  });
 }
 
 /** Abre o anexo de um lançamento numa nova aba via URL assinada (300s). */
@@ -520,16 +528,11 @@ function ExceptionAlert({
   if (exceptions.length === 0) {
     return <span className="text-sm text-soft">—</span>;
   }
-  const summary = exceptionSummary(exceptions);
   return (
-    <span
-      title={summary}
-      aria-label={`${exceptions.length} exceção(ões): ${summary}`}
-      className="inline-flex items-center gap-1 rounded-md bg-warning-soft px-2 py-0.5 text-xs font-semibold tabular-nums text-warning"
-    >
-      <AlertTriangle aria-hidden="true" className="size-3.5" />
-      {exceptions.length}
-    </span>
+    <EntryExceptionCountBadge
+      count={exceptions.length}
+      lines={exceptionLines(exceptions)}
+    />
   );
 }
 

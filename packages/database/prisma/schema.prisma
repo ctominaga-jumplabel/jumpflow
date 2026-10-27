@@ -626,8 +626,11 @@ enum InvoiceType {
   OTHER
 }
 
+/// Fluxo: OPEN -> PEOPLE_RELEASED (DP/People liberou) -> WAITING_FOR_INVOICE
+/// (Financeiro enviou a solicitacao de NF) -> INVOICE_RECEIVED -> ...
 enum ConsultantPaymentStatus {
   OPEN
+  PEOPLE_RELEASED
   WAITING_FOR_INVOICE
   INVOICE_RECEIVED
   INVOICE_VALIDATED
@@ -791,6 +794,7 @@ model User {
   validatedFiscalDocuments    FiscalDocument[]            @relation("FiscalDocumentValidator")
   paymentForecastsCreated     ConsultantPaymentForecast[] @relation("PaymentForecastCreator")
   consultantPaymentsApproved  ConsultantPayment[]         @relation("ConsultantPaymentApprover")
+  consultantPaymentsPeopleReleased ConsultantPayment[]    @relation("ConsultantPaymentPeopleReleaser")
   skillHistoryChanges         ConsultantSkillHistory[]    @relation("SkillHistoryChangedBy")
   feedbacksAuthored           Feedback[]                  @relation("FeedbackAuthor")
   feedbackRequestsMade        FeedbackRequest[]           @relation("FeedbackRequestRequestedBy")
@@ -2748,6 +2752,14 @@ model ConsultantPayment {
   approvedByUserId   String?
   approvedBy         User?                      @relation("ConsultantPaymentApprover", fields: [approvedByUserId], references: [id], onDelete: SetNull)
   approvedAt         DateTime?
+  /// Liberacao do pagamento pelo DP/People (status PEOPLE_RELEASED). A reabertura
+  /// limpa estes campos; a trilha fica no AuditEvent (sem tabela propria).
+  peopleReleasedAt       DateTime?
+  peopleReleasedByUserId String?
+  peopleReleasedBy       User?                      @relation("ConsultantPaymentPeopleReleaser", fields: [peopleReleasedByUserId], references: [id], onDelete: SetNull)
+  /// Quando o Financeiro enviou a solicitacao de NF ao consultor (status
+  /// WAITING_FOR_INVOICE). O log de entrega fica em AutomationEmailLog.
+  invoiceRequestSentAt   DateTime?
   lines              ConsultantPaymentLine[]
   invoiceAttachments ConsultantInvoiceAttachment[]
   createdAt          DateTime                   @default(now())
@@ -2917,6 +2929,10 @@ enum NotificationEvent {
   PRE_INVOICE_ISSUED // pre-fatura enviada ao contato do cliente
   NFSE_ISSUED // NFS-e emitida, e-mail ao contato do cliente
   PAYMENT_FORECAST // previsao de pagamento ao consultor
+  CONSULTANT_INVOICE_REQUEST // solicitacao de NF ao consultor PJ (Financeiro envia)
+  PAYMENT_RELEASED_BY_PEOPLE // DP/People liberou pagamentos -> avisa o Financeiro
+  SLA_DEADLINE_APPROACHING // job de SLA: etapa perto do prazo (warningBusinessDays)
+  SLA_OVERDUE // job de SLA: etapa com prazo vencido
 }
 
 /// Nivel de agregacao em que a regra dispara.
@@ -3538,4 +3554,105 @@ model CoeSquadMember {
   @@unique([squadId, slotKey])
   @@index([squadId])
   @@index([consultantId])
+}
+
+// ---------------------------------------------------------------------------
+// Templates de e-mail editaveis por evento de notificacao
+// ---------------------------------------------------------------------------
+
+/// Template de e-mail editavel pelo ADMIN (permissao CONFIGURACOES_TEMPLATES_EMAIL).
+/// No maximo um por NotificationEvent. AUSENCIA de linha (ou active = false) =
+/// usar o template padrao hardcoded do app. `body` e texto puro com
+/// {{placeholders}} e markdown leve; a renderizacao e a lista de placeholders
+/// validos por evento vivem no app, nao no schema. updatedByUserId e referencia
+/// solta ao User (sem FK), como em OperationClosing.
+model EmailTemplate {
+  id              String            @id @default(cuid())
+  event           NotificationEvent @unique
+  subject         String
+  body            String            @db.Text
+  active          Boolean           @default(true)
+  updatedByUserId String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// SLA do fluxo de horas (horas -> faturamento / horas -> pagamento)
+// ---------------------------------------------------------------------------
+
+/// Processo acompanhado pelo SLA.
+enum SlaProcess {
+  HOURS_TO_BILLING
+  HOURS_TO_PAYMENT
+}
+
+/// Etapa do fluxo. Combinada com SlaProcess forma a chave de SlaStage.
+enum SlaStageKey {
+  TIMESHEET_SUBMISSION
+  MANAGER_APPROVAL
+  OPERATION_CLOSING
+  BILLING_RELEASE
+  PEOPLE_PAYMENT_RELEASE
+  INVOICE_REQUEST
+  INVOICE_RECEIPT
+  PAYMENT
+}
+
+/// Area responsavel pela etapa (quem e cobrado no acompanhamento).
+enum SlaArea {
+  CONSULTANT
+  OPERATION
+  PEOPLE
+  FINANCE
+}
+
+/// Ancora do prazo de uma etapa, sempre em DIAS UTEIS (feriados nacionais do
+/// calendario Holiday; estaduais so se SlaSettings.considerStateHolidays):
+/// - COMPETENCE_MONTH_END: N dias uteis APOS o ultimo dia do mes de competencia,
+///   ou seja, o N-esimo dia util do mes seguinte. Convencao: N = 0 significa o
+///   ULTIMO dia util do proprio mes de competencia.
+/// - PAYMENT_DATE: N dias uteis ANTES da data de pagamento (dia
+///   SlaSettings.paymentDay do mes seguinte a competencia). N = 0 = a propria
+///   data de pagamento.
+enum SlaAnchor {
+  COMPETENCE_MONTH_END
+  PAYMENT_DATE
+}
+
+/// Configuracao global de SLA. Singleton: sempre id = "default" (ler/gravar via
+/// upsert, como AutomationConfig). updatedByUserId e referencia solta ao User.
+model SlaSettings {
+  id                    String   @id @default("default")
+  /// Dia do mes seguinte a competencia em que o consultor e pago. Ajuste para
+  /// dia util (se cair em fim de semana/feriado) e regra do servidor.
+  paymentDay            Int      @default(16)
+  considerStateHolidays Boolean  @default(false)
+  updatedByUserId       String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
+/// Prazo de uma etapa do fluxo de horas; uma linha por (process, stageKey).
+/// Prazo = ancora (SlaAnchor) +/- businessDays dias uteis. O alerta
+/// SLA_DEADLINE_APPROACHING dispara warningBusinessDays dias uteis antes do
+/// prazo e SLA_OVERDUE depois dele. Alteracoes sao auditadas (AuditEvent)
+/// pelas server actions. updatedByUserId e referencia solta ao User.
+model SlaStage {
+  id                  String      @id @default(cuid())
+  process             SlaProcess
+  stageKey            SlaStageKey
+  area                SlaArea
+  label               String
+  anchor              SlaAnchor
+  businessDays        Int
+  warningBusinessDays Int         @default(1)
+  sortOrder           Int
+  active              Boolean     @default(true)
+  updatedByUserId     String?
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+
+  @@unique([process, stageKey])
+  @@index([process, active, sortOrder])
 }

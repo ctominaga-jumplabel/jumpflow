@@ -519,6 +519,34 @@ convivem com o modelo MVP existente para permitir migracao gradual.
   horas, valor unitario e valor total.
 - Mudancas de status, valores, NF recebida/validada e pagamento confirmado
   devem gerar auditoria.
+- Fluxo DP -> Financeiro (migration `20261027120000_fluxo_horas_governanca_sla`):
+  status `PEOPLE_RELEASED` entre `OPEN` e `WAITING_FOR_INVOICE`. O DP/People
+  libera (`peopleReleasedAt`, `peopleReleasedByUserId` -> User, relacao
+  `ConsultantPaymentPeopleReleaser`); o Financeiro envia a solicitacao de NF
+  (`invoiceRequestSentAt`, status `WAITING_FOR_INVOICE`). Reabertura da
+  liberacao limpa os campos e fica registrada so em `AuditEvent`.
+
+### Templates de e-mail e SLA do fluxo de horas
+
+- **EmailTemplate**: um por `NotificationEvent` (`event` unico), `subject`,
+  `body` (texto com `{{placeholders}}` e markdown leve), `active`,
+  `updatedByUserId` (referencia solta). Sem linha ou `active = false` = template
+  padrao hardcoded do app. Sem seed.
+- **SlaSettings** (singleton `id = "default"`): `paymentDay` (16) e
+  `considerStateHolidays` (false).
+- **SlaStage**: prazo por (`process` `SlaProcess`, `stageKey` `SlaStageKey`),
+  com `area` (`SlaArea`), `label`, `anchor` (`SlaAnchor`), `businessDays`,
+  `warningBusinessDays`, `sortOrder`, `active`. Convencao de `businessDays`:
+  `COMPETENCE_MONTH_END` = N-esimo dia util do mes seguinte a competencia
+  (0 = ultimo dia util do proprio mes); `PAYMENT_DATE` = N dias uteis ANTES do
+  pagamento (0 = no dia). Defaults: lancamento 0, aprovacao 1, fechamento
+  operacional 1, liberacao de faturamento 1, liberacao do DP 4 (mes seguinte);
+  solicitacao de NF 5, recebimento da NF 2, pagamento 0 (antes do dia 16).
+- Novos `NotificationEvent`: `CONSULTANT_INVOICE_REQUEST` (consultor,
+  EVENT_TARGET), `PAYMENT_RELEASED_BY_PEOPLE` (ROLE FINANCE),
+  `SLA_DEADLINE_APPROACHING` e `SLA_OVERDUE` (ROLE AREA_MANAGER, PEOPLE,
+  FINANCE). `OPERATION_CLOSED` passa a incluir ROLE FINANCE na regra padrao.
+- Alteracoes de templates e prazos de SLA devem gerar `AuditEvent`.
 
 ### Integracoes Externas
 

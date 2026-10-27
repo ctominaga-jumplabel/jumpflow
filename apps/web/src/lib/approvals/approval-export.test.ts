@@ -116,4 +116,33 @@ describe("approvalXlsxColumns", () => {
     expect(byHeader["Justificativa"].value(e)).toBe("ok");
     expect(byHeader["Status"].value(e)).toBe("Aprovado");
   });
+
+  it("lists the days with exceptions on the Alerta column", () => {
+    const columns = approvalXlsxColumns();
+    const byHeader = Object.fromEntries(columns.map((c) => [c.header, c]));
+    const h = hours({
+      entries: [
+        {
+          id: "t1",
+          date: "2026-06-13",
+          hours: 4,
+          activityLabel: "Sobreaviso",
+          billable: true,
+          exceptions: [
+            { kind: "WEEKEND", label: "Sábado", detail: "" },
+            { kind: "ACTIVITY", label: "Sobreaviso", detail: "" },
+          ],
+        },
+        {
+          id: "t2",
+          date: "2026-06-10",
+          hours: 8,
+          activityLabel: "Dia Útil",
+          billable: true,
+        },
+      ],
+    });
+    expect(byHeader["Alerta"].value(h)).toBe("13/06 (Sáb): Sábado; Sobreaviso");
+    expect(byHeader["Alerta"].value(hours({}))).toBe("");
+  });
 });

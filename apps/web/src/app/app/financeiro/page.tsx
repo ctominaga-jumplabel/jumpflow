@@ -7,8 +7,11 @@ import {
 } from "@/components/financial/FinancialOverview";
 import { requireRole } from "@/lib/auth/guards";
 import { RECEIVABLES_ROLES, hasRole } from "@/lib/auth/route-permissions";
-import { SUBSCREEN_CODES } from "@/lib/auth/permission-codes";
-import { canEach } from "@/lib/auth/permissions";
+import {
+  FLOW_PERMISSION_CODES,
+  SUBSCREEN_CODES,
+} from "@/lib/auth/permission-codes";
+import { can, canEach } from "@/lib/auth/permissions";
 import { BILLABLE_MANAGER_ROLES } from "@/lib/auth/billable-roles";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { isStorageConfigured } from "@/lib/storage/provider";
@@ -127,6 +130,12 @@ export default async function FinanceiroPage({
   // Como `/app/financeiro` é [ADMIN, FINANCE], na prática só o ADMIN vê o botão;
   // o FINANCE acompanha a aba em somente leitura.
   const canClosePending = hasRole(user, ["ADMIN", "AREA_MANAGER"]);
+  // Cancelar a liberação (Liberado → Pendente) é só do Financeiro (Matriz
+  // FATURAMENTO_REABRIR_LIBERACAO edit). Gate real em `cancelarLiberacao`.
+  const canCancelReleasePending = await can(
+    FLOW_PERMISSION_CODES.billingReopen,
+    "edit",
+  );
   const pendingCompetence = resolvePendingCompetence(params, new Date());
   // Contas a Pagar → pagamentos de consultores: competência opcional
   // (`pgmonth`/`pgyear`); sem ela, lista tudo o que está em aberto.
@@ -162,6 +171,9 @@ export default async function FinanceiroPage({
   let financeExpenses;
   let consultantPayments:
     | import("@/lib/payments/types").ConsultantPaymentView[]
+    | undefined;
+  let paymentExceptions:
+    | Record<string, import("@/lib/timesheet/entry-exceptions").EntryExceptionSummary>
     | undefined;
   let timesheetExportHref: string | undefined;
   let apuracaoHref: string | undefined;
@@ -200,6 +212,16 @@ export default async function FinanceiroPage({
       showPagar ? listPayableConsultantPayments(payablesCompetence) : undefined,
     ]);
     consultantPayments = consultantPaymentsResult;
+    if (consultantPayments && consultantPayments.length > 0) {
+      // Sinal para o DP: exceções (fim de semana/feriado/atividade) dos
+      // lançamentos de cada pagamento — leitura em lote, não por linha.
+      const { loadPaymentEntryExceptions } = await import(
+        "@/lib/db/entry-exceptions"
+      );
+      paymentExceptions = await loadPaymentEntryExceptions(
+        consultantPayments.map((p) => p.id),
+      );
+    }
     receivables = receivablesResult;
     receivablesFilterOptions = filterOptionsResult;
     financeExpenses = financeExpensesResult;
@@ -266,12 +288,17 @@ export default async function FinanceiroPage({
         }
         consultantPayables={
           consultantPayments
-            ? { payments: consultantPayments, ...payablesCompetence }
+            ? {
+                payments: consultantPayments,
+                ...payablesCompetence,
+                exceptionsByPayment: paymentExceptions,
+              }
             : undefined
         }
         pendingClosings={pendingClosings}
         canClosePending={canClosePending}
         canRevertPending={hasRole(user, ["ADMIN", "FINANCE"])}
+        canCancelReleasePending={canCancelReleasePending}
       />
     </div>
   );

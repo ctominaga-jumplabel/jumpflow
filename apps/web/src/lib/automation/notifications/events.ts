@@ -15,6 +15,12 @@ import {
   type ApuracaoClienteLine,
   type FechamentoOperacaoLine,
 } from "@/lib/automation/email/templates";
+import {
+  apuracaoClienteTemplateVars,
+  fechamentoOperacaoTemplateVars,
+  liberacaoTemplateVars,
+  projetoCriadoTemplateVars,
+} from "@/lib/automation/email/template-vars";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { formatMonth } from "@/lib/format";
 import { createInAppNotifications } from "@/lib/db/notifications";
@@ -59,7 +65,7 @@ export async function notifyProjectCreated(
     context: { projectId, clientId: project.clientId },
     dedupeKey: projectId,
     buildFragment: (recipient) => {
-      const built = buildProjetoCriadoEmail({
+      const emailInput = {
         recipientName: recipient.name ?? "equipe",
         projectName: project.name,
         clientName: project.client?.name ?? "—",
@@ -68,11 +74,13 @@ export async function notifyProjectCreated(
         hasCommercialContract:
           options?.hasCommercialContract ??
           Boolean(project.commercialContractRef),
-      });
+      };
+      const built = buildProjetoCriadoEmail(emailInput);
       return {
         recipient,
         title: built.subject,
         prebuilt: built,
+        templateVars: projetoCriadoTemplateVars(emailInput),
         teamsText: `Novo projeto: ${project.name} (${project.client?.name ?? "—"})`,
       };
     },
@@ -116,18 +124,20 @@ export async function notifyHoursReleased(closingId: string): Promise<void> {
     context: { projectId: closing.projectId, clientId: closing.clientId },
     dedupeKey: closingId,
     buildFragment: (recipient) => {
-      const built = buildLiberacaoEmail({
+      const emailInput = {
         recipientName: recipient.name ?? "equipe",
         projectName: closing.project?.name ?? "Projeto",
         clientName: closing.client?.name ?? "—",
         periodLabel,
         totalHours: decimal(closing.totalHours),
         consultantsCount: consultants.size,
-      });
+      };
+      const built = buildLiberacaoEmail(emailInput);
       return {
         recipient,
         title: built.subject,
         prebuilt: built,
+        templateVars: liberacaoTemplateVars(emailInput),
         teamsText: `Horas liberadas: ${closing.project?.name ?? "Projeto"} (${periodLabel})`,
       };
     },
@@ -155,6 +165,12 @@ export async function notifyHoursReleased(closingId: string): Promise<void> {
 // ---------------------------------------------------------------------------
 export async function notifyRevenueClosingReopened(
   closingId: string,
+  details?: {
+    /** Justificativa obrigatória da reabertura (P16) — vai no corpo. */
+    justification?: string | null;
+    /** Quem reabriu (Financeiro) — vai no corpo. */
+    reopenedByName?: string | null;
+  },
 ): Promise<void> {
   if (!isDatabaseConfigured()) return;
   try {
@@ -198,8 +214,17 @@ export async function notifyRevenueClosingReopened(
         userId,
         event: "HOURS_RELEASED",
         title: `Faturamento reaberto — ${projectName} (${periodLabel})`,
-        body: `O Financeiro retornou a liberação de faturamento de ${projectName} · ${clientName} (${periodLabel}). O lançamento de horas dessa competência foi destravado para os consultores.`,
-        href: "/app/financeiro",
+        body: [
+          `O Financeiro${details?.reopenedByName ? ` (${details.reopenedByName})` : ""} retornou a liberação de faturamento de ${projectName} · ${clientName} (${periodLabel}). O lançamento de horas dessa competência foi destravado para os consultores.`,
+          details?.justification
+            ? `Justificativa: ${details.justification}`
+            : null,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        // O Gerente de Área não acessa /app/financeiro (RECEIVABLES_ROLES);
+        // a tela dele é Status de Faturamento (Pendentes), onde re-libera.
+        href: "/app/financeiro/pendentes",
       })),
     );
   } catch (error) {
@@ -272,7 +297,7 @@ export async function notifyOperationClosed(closingId: string): Promise<void> {
     },
     dedupeKey: closingId,
     buildFragment: (recipient) => {
-      const built = buildFechamentoOperacaoEmail({
+      const emailInput = {
         recipientName: recipient.name ?? "equipe",
         projectName: closing.project?.name ?? "Projeto",
         clientName: closing.project?.client?.name ?? "—",
@@ -280,11 +305,13 @@ export async function notifyOperationClosed(closingId: string): Promise<void> {
         lines,
         totalHours,
         closedByName: closer?.name ?? undefined,
-      });
+      };
+      const built = buildFechamentoOperacaoEmail(emailInput);
       return {
         recipient,
         title: built.subject,
         prebuilt: built,
+        templateVars: fechamentoOperacaoTemplateVars(emailInput),
         teamsText: `Operação fechada para o DP: ${closing.project?.name ?? "Projeto"} (${periodLabel}) — ${lines.length} consultor(es), ${totalHours.toFixed(2)}h`,
       };
     },
@@ -355,7 +382,7 @@ export async function notifyClientBillingSummary(
     context: { projectId: closing.projectId ?? undefined, clientId: closing.clientId },
     dedupeKey: closingId,
     buildFragment: (recipient) => {
-      const built = buildApuracaoClienteEmail({
+      const emailInput = {
         clientContactName: recipient.name ?? "cliente",
         clientName: closing.client?.name ?? "—",
         projectName: closing.project?.name ?? "Projeto",
@@ -364,8 +391,14 @@ export async function notifyClientBillingSummary(
         totalHours,
         totalAmount,
         showValues: options?.showValues ?? true,
-      });
-      return { recipient, title: built.subject, prebuilt: built };
+      };
+      const built = buildApuracaoClienteEmail(emailInput);
+      return {
+        recipient,
+        title: built.subject,
+        prebuilt: built,
+        templateVars: apuracaoClienteTemplateVars(emailInput),
+      };
     },
   });
 }

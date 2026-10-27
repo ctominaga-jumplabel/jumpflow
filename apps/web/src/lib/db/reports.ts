@@ -3,7 +3,9 @@ import { FINANCIAL_ROLES, hasRole } from "@/lib/auth/route-permissions";
 import { can } from "@/lib/auth/permissions";
 import { REPORT_CONSULTANT_FILTER_CODE } from "@/lib/auth/permission-codes";
 import type { AppUser } from "@/lib/auth/types";
-import { getConsultantForUser } from "@/lib/db/timesheet";
+import { getConsultantForUser, getHolidayLookup } from "@/lib/db/timesheet";
+import { getEntryExceptions } from "@/lib/timesheet/entry-exceptions";
+import { EMPTY_HOLIDAY_LOOKUP } from "@/lib/timesheet/holidays";
 import { resolveDbUser } from "@/lib/db/users";
 import { activityLabelOf, type TimeEntryStatus } from "@/lib/timesheet/types";
 import {
@@ -581,6 +583,15 @@ export async function getHoursReport(
     "TIME_ENTRY",
     rowsRaw.map((r) => r.id),
   );
+  // Sinal de exceção (fim de semana/feriado/atividade): UMA consulta de
+  // feriados cobrindo as datas da página/export, resolvida em memória.
+  const holidays =
+    rowsRaw.length > 0
+      ? await getHolidayLookup(
+          rowsRaw.reduce((m, r) => (r.date < m ? r.date : m), rowsRaw[0].date),
+          rowsRaw.reduce((m, r) => (r.date > m ? r.date : m), rowsRaw[0].date),
+        )
+      : EMPTY_HOLIDAY_LOOKUP;
   const rateContexts = includeFinancials
     ? await loadProjectRateContexts([
         ...rowsRaw.map((r) => r.projectId),
@@ -605,6 +616,13 @@ export async function getHoursReport(
       submittedAt: r.submittedAt?.toISOString(),
       decidedAt: decidedAt.get(r.id),
     };
+    const exceptions = getEntryExceptions({
+      date: row.date,
+      activityType: r.activityType,
+      projectId: r.projectId,
+      holidays,
+    });
+    if (exceptions.length > 0) row.exceptions = exceptions;
     if (includeFinancials) {
       const rate = resolveBillingRate(rateContexts, r);
       row.billingRate = rate;

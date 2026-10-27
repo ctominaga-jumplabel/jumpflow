@@ -85,6 +85,13 @@ export interface PendingClosingsViewProps {
    */
   canRevert?: boolean;
   /**
+   * Pode CANCELAR a liberação (Liberado → Pendente). Governança do Fluxo de
+   * Horas: só quem tem `FATURAMENTO_REABRIR_LIBERACAO` edit (FINANCE por
+   * padrão) — calculado no servidor. O gate real é server-side na action
+   * `cancelarLiberacao`.
+   */
+  canCancelRelease?: boolean;
+  /**
    * Destino (GET) do formulário de competência. Default: a rota standalone
    * `/app/financeiro/pendentes` (usada pelo AREA_MANAGER). Dentro da aba
    * Pendentes do Financeiro é `/app/financeiro`, preservando `tab=pendentes`.
@@ -120,6 +127,7 @@ export function PendingClosingsView({
   pendingCount,
   canClose,
   canRevert = false,
+  canCancelRelease = false,
   formAction = "/app/financeiro/pendentes",
   monthParam = "month",
   yearParam = "year",
@@ -138,9 +146,6 @@ export function PendingClosingsView({
   // Override otimista: projectIds cuja LIBERAÇÃO foi cancelada (Liberado →
   // Pendente) nesta sessão.
   const [unreleased, setUnreleased] = useState<Set<string>>(new Set());
-  // Quem libera (ADMIN/AREA_MANAGER) ou o Financeiro pode cancelar a liberação;
-  // o gate real é server-side em `cancelarLiberacao` (FINANCIAL_ROLES).
-  const canCancelRelease = canClose || canRevert;
   // Filtro de status (client-side): default esconde os Faturados dos pendentes.
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ABERTOS");
 

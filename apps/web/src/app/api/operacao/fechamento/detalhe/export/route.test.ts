@@ -27,7 +27,7 @@ vi.mock("@/lib/db/operation-closing", () => ({
 vi.mock("@/lib/db/users", () => ({
   resolveDbUser: vi.fn(async () => ({ id: "u1" })),
 }));
-const recordAuditEvent = vi.fn(async () => {});
+const recordAuditEvent = vi.fn(async (_input: unknown) => {});
 vi.mock("@/lib/db/audit", () => ({
   recordAuditEvent: (input: unknown) => recordAuditEvent(input as never),
 }));

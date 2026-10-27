@@ -13,6 +13,7 @@ import { prisma } from "@jumpflow/database";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { formatMonth } from "@/lib/format";
 import { buildAlertaHoraExtraEmail, type HoraExtraAlertLine } from "./email/templates";
+import { horaExtraTemplateVars } from "./email/template-vars";
 import { emitNotification } from "./notifications/emit";
 
 export type OvertimeContractType = "CLT" | "PJ" | "CLT_FLEX";
@@ -115,15 +116,17 @@ export async function runOvertimeAlert(
     context: {},
     dedupeKey: `${input.year}-${input.month}`,
     buildFragment: (recipient) => {
-      const built = buildAlertaHoraExtraEmail({
+      const emailInput = {
         recipientName: recipient.name ?? "equipe",
         competenceLabel: competence,
         lines,
-      });
+      };
+      const built = buildAlertaHoraExtraEmail(emailInput);
       return {
         recipient,
         title: built.subject,
         prebuilt: built,
+        templateVars: horaExtraTemplateVars(emailInput),
         teamsText: `Alerta de hora extra — ${competence}: ${lines.length} consultor(es).`,
       };
     },

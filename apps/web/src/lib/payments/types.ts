@@ -30,6 +30,10 @@ export interface ConsultantPaymentView {
   totalAmount: number;
   expectedPaymentAt: string | null;
   confirmedPaidAt: string | null;
+  /** Liberação do DP/People (governança Fluxo de Horas). ISO date. */
+  peopleReleasedAt: string | null;
+  /** Quando o Financeiro enviou a solicitação de NF. ISO date. */
+  invoiceRequestSentAt: string | null;
   invoiceReceivedAt: string | null;
   invoiceValidatedAt: string | null;
   /** Amount declared on the NF received from the consultant (melhoria #3). */
@@ -65,7 +69,9 @@ export const consultantPaymentStatusLabels: Record<
   ConsultantPaymentStatus,
   string
 > = {
-  OPEN: "Aberto",
+  // Aberto = aguardando a liberação do DP/People (governança Fluxo de Horas).
+  OPEN: "Aguardando DP",
+  PEOPLE_RELEASED: "Liberado pelo DP",
   WAITING_FOR_INVOICE: "Aguardando NF",
   INVOICE_RECEIVED: "NF recebida",
   INVOICE_VALIDATED: "NF validada",

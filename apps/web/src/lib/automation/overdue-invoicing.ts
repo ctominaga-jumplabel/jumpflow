@@ -11,6 +11,7 @@ import {
   buildFaturamentoPendenteEmail,
   type FaturamentoPendenteLine,
 } from "@/lib/automation/email/templates";
+import { faturamentoPendenteTemplateVars } from "@/lib/automation/email/template-vars";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { formatMonth } from "@/lib/format";
 import { emitNotification } from "./notifications/emit";
@@ -96,15 +97,17 @@ export async function runOverdueInvoicingReminder(input: {
     context: {},
     dedupeKey,
     buildFragment: (recipient) => {
-      const built = buildFaturamentoPendenteEmail({
+      const emailInput = {
         recipientName: recipient.name ?? "equipe",
         lines,
         appUrl: input.appUrl,
-      });
+      };
+      const built = buildFaturamentoPendenteEmail(emailInput);
       return {
         recipient,
         title: built.subject,
         prebuilt: built,
+        templateVars: faturamentoPendenteTemplateVars(emailInput),
         teamsText: `Faturamento pendente: ${lines.length} fechamento(s).`,
       };
     },

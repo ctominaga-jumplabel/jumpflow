@@ -14,6 +14,8 @@ import {
 } from "@/lib/db/invitations";
 import { getEmailTransport } from "@/lib/automation/email-transport";
 import { buildAccessInviteEmail } from "@/lib/automation/email/templates";
+import { applyEmailTemplate } from "@/lib/automation/email/apply-template";
+import { accessInviteTemplateVars } from "@/lib/automation/email/template-vars";
 import { resolveEventDelivery } from "@/lib/automation/notifications/event-delivery";
 
 /**
@@ -137,10 +139,13 @@ export async function inviteUser(
 
     if (hasRealEmailProvider()) {
       try {
-        const inviteEmail = buildAccessInviteEmail({
-          link,
-          recipientName: parsed.data.name,
-        });
+        const inviteInput = { link, recipientName: parsed.data.name };
+        // ITEM 3: template personalizado (/app/admin/templates-email), fail-open.
+        const inviteEmail = await applyEmailTemplate(
+          "ACCESS_INVITE",
+          accessInviteTemplateVars(inviteInput),
+          buildAccessInviteEmail(inviteInput),
+        );
         // ACCESS_INVITE rule (/app/admin/notificacoes): the invitee is the
         // EVENT_TARGET; admin can turn it off or add recipients.
         const delivery = await resolveEventDelivery("ACCESS_INVITE", {
@@ -246,7 +251,12 @@ export async function regenerateInvite(input: {
 
     if (hasRealEmailProvider()) {
       try {
-        const regenEmail = buildAccessInviteEmail({ link, regenerated: true });
+        const regenInput = { link, regenerated: true };
+        const regenEmail = await applyEmailTemplate(
+          "ACCESS_INVITE",
+          accessInviteTemplateVars(regenInput),
+          buildAccessInviteEmail(regenInput),
+        );
         const delivery = await resolveEventDelivery("ACCESS_INVITE", {
           targets: [{ email: result.invitation.email }],
         });

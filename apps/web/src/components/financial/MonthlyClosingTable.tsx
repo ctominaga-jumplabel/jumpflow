@@ -76,6 +76,12 @@ export interface MonthlyClosingTableProps {
    * per-line "Exceções" indicator + drill-down. Absent in demo mode.
    */
   exceptionsByProject?: RevenueExceptionsByProject;
+  /**
+   * Pode REABRIR uma liberação (CLOSED → READY_TO_CLOSE). Só quem tem
+   * `FATURAMENTO_REABRIR_LIBERACAO` edit (FINANCE por padrão); calcular no
+   * servidor. O gate real é server-side em `advanceRevenueClosing`.
+   */
+  canReopenRelease?: boolean;
 }
 
 /**
@@ -90,6 +96,7 @@ export function MonthlyClosingTable({
   monthLabel,
   exceptionsByProject,
   exportHref,
+  canReopenRelease = false,
 }: MonthlyClosingTableProps) {
   const isDemo = mode === "demo";
   const [isPending, startTransition] = useTransition();
@@ -534,7 +541,8 @@ export function MonthlyClosingTable({
               Faturado
             </ActionButton>
           ) : null}
-          {r.status === "CLOSED" &&
+          {canReopenRelease &&
+          r.status === "CLOSED" &&
           (!r.fiscalDocument || r.fiscalDocument.status === "CANCELLED") ? (
             <ActionButton
               size="sm"

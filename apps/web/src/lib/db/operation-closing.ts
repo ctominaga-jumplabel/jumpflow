@@ -10,6 +10,13 @@ import {
   type HoursSortField,
 } from "@/lib/reports/schemas";
 import type { PaginationMeta } from "@/lib/reports/types";
+import { getHolidayLookup } from "@/lib/db/timesheet";
+import { loadHolidayLookupForDates } from "@/lib/db/entry-exceptions";
+import {
+  getEntryExceptions,
+  type EntryException,
+} from "@/lib/timesheet/entry-exceptions";
+import type { HolidayLookup } from "@/lib/timesheet/holidays";
 import {
   classifyConsultantReadiness,
   isExceptionEntry,
@@ -105,6 +112,34 @@ function monthBounds(month: number, year: number): { start: Date; end: Date } {
   const start = new Date(Date.UTC(year, month - 1, 1));
   const end = new Date(Date.UTC(year, month, 1));
   return { start, end };
+}
+
+/**
+ * Exceções de calendário/atividade de um lançamento (fim de semana, feriado
+ * project-aware, atividade fora do Dia Útil). Sinal apenas — nunca bloqueia.
+ */
+function calendarExceptionsOf(
+  e: { date: Date; activityType: string; projectId: string },
+  holidays: HolidayLookup,
+): EntryException[] {
+  return getEntryExceptions({
+    date: toIsoDate(e.date),
+    activityType: e.activityType,
+    projectId: e.projectId,
+    holidays,
+  });
+}
+
+/**
+ * Regra ampliada de "exceção" do fechamento: a regra original
+ * (`isExceptionEntry`: fora do Dia Útil OU com anexo) somada ao calendário
+ * (sábado/domingo/feriado). Mantém contagens e destaques coerentes.
+ */
+function isClosingException(
+  e: { activityType: string; hasAttachment: boolean },
+  exceptions: readonly EntryException[],
+): boolean {
+  return isExceptionEntry(e) || exceptions.length > 0;
 }
 
 interface ConsultantAccumulator {
@@ -232,7 +267,7 @@ export async function listOperationClosings(
     input;
   const { start, end } = monthBounds(month, year);
 
-  const [allocations, entries, closings] = await Promise.all([
+  const [allocations, entries, closings, holidays] = await Promise.all([
     prisma.allocation.findMany({
       where: {
         status: "ACTIVE",
@@ -250,6 +285,7 @@ export async function listOperationClosings(
       select: {
         projectId: true,
         consultantId: true,
+        date: true,
         status: true,
         hours: true,
         activityType: true,
@@ -268,6 +304,8 @@ export async function listOperationClosings(
         notifiedAt: true,
       },
     }),
+    // Uma consulta de feriados para o mês inteiro (sinal de calendário).
+    getHolidayLookup(start, new Date(end.getTime() - 86_400_000)),
   ]);
 
   // projectId → (consultantId → accumulator)
@@ -292,10 +330,10 @@ export async function listOperationClosings(
     acc.statuses.push(e.status);
     acc.hours += Number(e.hours ?? 0);
     if (
-      isExceptionEntry({
-        activityType: e.activityType,
-        hasAttachment: e.attachment != null,
-      })
+      isClosingException(
+        { activityType: e.activityType, hasAttachment: e.attachment != null },
+        calendarExceptionsOf(e, holidays),
+      )
     ) {
       acc.exceptions += 1;
     }
@@ -406,6 +444,10 @@ export async function getOperationClosingDetail(input: {
     select: { consultantId: true, consultant: { select: { name: true } } },
   });
 
+  const holidays = await getHolidayLookup(
+    start,
+    new Date(end.getTime() - 86_400_000),
+  );
   const entries = await prisma.timeEntry.findMany({
     where: { projectId, date: { gte: start, lt: end } },
     orderBy: [{ consultantId: "asc" }, { date: "asc" }],
@@ -449,10 +491,11 @@ export async function getOperationClosingDetail(input: {
   for (const e of entries) {
     const detail = ensure(e.consultantId, e.consultant?.name ?? "");
     const hasAttachment = e.attachment != null;
-    const isException = isExceptionEntry({
-      activityType: e.activityType,
-      hasAttachment,
-    });
+    const exceptions = calendarExceptionsOf({ ...e, projectId }, holidays);
+    const isException = isClosingException(
+      { activityType: e.activityType, hasAttachment },
+      exceptions,
+    );
     const hours = Math.round(Number(e.hours ?? 0) * 100) / 100;
     const entry: OperationEntryDetail = {
       id: e.id,
@@ -463,6 +506,7 @@ export async function getOperationClosingDetail(input: {
       billable: e.billable,
       hasAttachment,
       isException,
+      exceptions,
     };
     detail.entries.push(entry);
     detail.totalHours = Math.round((detail.totalHours + hours) * 100) / 100;
@@ -495,6 +539,7 @@ const DETAIL_EXPORT_LIMIT = 50_000;
 const DETAIL_SELECT = {
   id: true,
   consultantId: true,
+  projectId: true,
   date: true,
   hours: true,
   status: true,
@@ -522,9 +567,13 @@ function detailWhere(
 async function mapDetailRows(
   raw: DetailRaw[],
 ): Promise<OperationDetailRow[]> {
-  const decidedAt = await loadDecidedAt(raw.map((e: DetailRaw) => e.id));
+  const [decidedAt, holidays] = await Promise.all([
+    loadDecidedAt(raw.map((e: DetailRaw) => e.id)),
+    loadHolidayLookupForDates(raw.map((e: DetailRaw) => e.date as Date)),
+  ]);
   return raw.map((e: DetailRaw) => {
     const hasAttachment = e.attachment != null;
+    const exceptions = calendarExceptionsOf(e, holidays);
     return {
       id: e.id,
       date: toIsoDate(e.date),
@@ -538,10 +587,11 @@ async function mapDetailRows(
       status: e.status,
       hasAttachment,
       decidedAt: decidedAt.get(e.id) ?? null,
-      isException: isExceptionEntry({
-        activityType: e.activityType,
-        hasAttachment,
-      }),
+      isException: isClosingException(
+        { activityType: e.activityType, hasAttachment },
+        exceptions,
+      ),
+      exceptions,
     };
   });
 }
@@ -585,20 +635,25 @@ export async function listOperationClosingDetail(
     where,
     select: {
       hours: true,
+      date: true,
+      projectId: true,
       activityType: true,
       attachment: { select: { id: true } },
     },
     take: DETAIL_EXPORT_LIMIT,
   });
+  const totalsHolidays = await loadHolidayLookupForDates(
+    totalsRaw.map((e) => e.date),
+  );
   let totalHours = 0;
   let totalExceptions = 0;
   for (const e of totalsRaw) {
     totalHours = round2(totalHours + Number(e.hours ?? 0));
     if (
-      isExceptionEntry({
-        activityType: e.activityType,
-        hasAttachment: e.attachment != null,
-      })
+      isClosingException(
+        { activityType: e.activityType, hasAttachment: e.attachment != null },
+        calendarExceptionsOf(e, totalsHolidays),
+      )
     ) {
       totalExceptions += 1;
     }

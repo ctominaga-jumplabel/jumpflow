@@ -6,6 +6,8 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { PendingClosingsView } from "@/components/financial/receivables/PendingClosingsView";
 import { requireRole } from "@/lib/auth/guards";
 import { PENDING_CLOSING_ROLES, hasRole } from "@/lib/auth/route-permissions";
+import { FLOW_PERMISSION_CODES } from "@/lib/auth/permission-codes";
+import { can } from "@/lib/auth/permissions";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import type { PendingClosingRow } from "@/lib/financial/receivables-journey-core";
 
@@ -67,6 +69,13 @@ export default async function PendentesFechamentoPage({
   // "Retornar faturamento" (Faturado → Liberado) é do Financeiro (RECEIVABLES_ROLES
   // = [ADMIN, FINANCE]); o gate real é server-side na action `retornarFaturamento`.
   const canRevert = hasRole(user, ["ADMIN", "FINANCE"]);
+  // "Cancelar liberação" (Liberado → Pendente) é só do Financeiro (Matriz
+  // FATURAMENTO_REABRIR_LIBERACAO edit) — o Gerente de Área libera mas não
+  // reabre. O gate real é server-side na action `cancelarLiberacao`.
+  const canCancelRelease = await can(
+    FLOW_PERMISSION_CODES.billingReopen,
+    "edit",
+  );
 
   const header = (
     <PageHeader
@@ -108,6 +117,7 @@ export default async function PendentesFechamentoPage({
         pendingCount={result.pendingCount}
         canClose={canClose}
         canRevert={canRevert}
+        canCancelRelease={canCancelRelease}
       />
     </div>
   );

@@ -3,6 +3,10 @@ import { z } from "zod";
 import type { ConsultantContractType } from "@/lib/consultants/schemas";
 import { parseIsoDateUtc } from "@/lib/timesheet/week";
 import {
+  summarizeEntryExceptions,
+  type EntryException,
+} from "@/lib/timesheet/entry-exceptions";
+import {
   buildWorkbook,
   defineSheet,
   type XlsxColumn,
@@ -344,6 +348,11 @@ export interface ReceivablesEntry {
    * a regra do tipo de cobrança). Sinal estrutural (não mascarado por RBAC).
    */
   nonHourlyBilling: boolean;
+  /**
+   * Sinal (não bloqueante) de exceção: fim de semana, feriado project-aware,
+   * atividade fora do Dia Útil. Calculado no servidor; ausente => comum.
+   */
+  exceptions?: EntryException[];
 }
 
 /** Um dia com seus lançamentos e o total de horas (efetivas) do dia. */
@@ -384,6 +393,10 @@ export interface ApuracaoConsultantRow {
   saleRate: number | null;
   /** Σ (horas efetivas × valor de venda); null sem financials. */
   totalAmount: number | null;
+  /** Nº de lançamentos com exceção (fim de semana/feriado/atividade). */
+  exceptionCount?: number;
+  /** Linhas do tooltip: "21/11 (Sáb): Sábado; Sobreaviso". */
+  exceptionLines?: string[];
 }
 
 /** Apuração de UM projeto (empilhável na UI). */
@@ -649,6 +662,14 @@ export function summarizeReceivables(
  * as taxas do consultor no projeto são iguais (caso comum). Sem financials,
  * `saleRate`/`totalAmount`/totais monetários ficam nulos.
  */
+/** Campos opcionais de exceção da linha (omitidos quando não há exceção). */
+function exceptionFields(
+  dated: ReadonlyArray<{ date: string; exceptions: readonly EntryException[] }>,
+): Pick<ApuracaoConsultantRow, "exceptionCount" | "exceptionLines"> {
+  const { count, lines } = summarizeEntryExceptions(dated);
+  return count > 0 ? { exceptionCount: count, exceptionLines: lines } : {};
+}
+
 export function buildApuracao(
   entries: ReadonlyArray<ReceivablesEntry>,
   includeFinancials: boolean,
@@ -660,6 +681,7 @@ export function buildApuracao(
     consultantName: string;
     totalHours: number;
     totalAmount: number;
+    dated: { date: string; exceptions: readonly EntryException[] }[];
   }
   interface ProjectAcc {
     projectId: string;
@@ -695,8 +717,12 @@ export function buildApuracao(
         consultantName: entry.consultantName,
         totalHours: 0,
         totalAmount: 0,
+        dated: [],
       };
       project.consultants.set(entry.consultantId, consultant);
+    }
+    if (entry.exceptions?.length) {
+      consultant.dated.push({ date: entry.date, exceptions: entry.exceptions });
     }
     consultant.totalHours += entry.effectiveHours;
     project.totalHours += entry.effectiveHours;
@@ -729,6 +755,7 @@ export function buildApuracao(
       ]
         .sort((a, b) => a.consultantName.localeCompare(b.consultantName, "pt-BR"))
         .map((consultant) => ({
+          ...exceptionFields(consultant.dated),
           consultantId: consultant.consultantId,
           consultantName: consultant.consultantName,
           totalHours: round2(consultant.totalHours),

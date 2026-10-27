@@ -1,6 +1,7 @@
 import type { TimeEntryStatus } from "@/lib/timesheet/types";
 import type { ExpenseStatus, ExpenseTotals } from "@/lib/expenses/types";
 import type { ExpenseStage } from "@/lib/reports/schemas";
+import type { EntryException } from "@/lib/timesheet/entry-exceptions";
 
 /**
  * Shared row/total shapes for the Relatorios module (docs section 5+7).
@@ -31,6 +32,11 @@ export interface HoursReportRow {
   billingRate?: number | null;
   /** FINANCIAL_ROLES only: hours × billingRate, or null when no rate. */
   billedAmount?: number | null;
+  /**
+   * Sinal de exceção (fim de semana, feriado, atividade fora do Dia Útil),
+   * calculado no servidor. Ausente/vazio => lançamento comum.
+   */
+  exceptions?: EntryException[];
 }
 
 export interface HoursReportTotals {
