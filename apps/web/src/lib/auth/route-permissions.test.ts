@@ -65,13 +65,15 @@ describe("hasRole", () => {
 });
 
 describe("accessForPath", () => {
-  it("keeps Pagamentos on the full financial role set", () => {
+  it("keeps Pagamentos on the financial role set + PEOPLE (DP)", () => {
     // Pagamentos (consultant payments) is a separate module — Melhorias v2 did
-    // NOT tighten it; AREA_MANAGER still reaches it.
+    // NOT tighten it; AREA_MANAGER still reaches it. Governança Fluxo de Horas:
+    // PEOPLE (DP) entra para liberar os pagamentos.
     expect(accessForPath("/app/pagamentos")).toEqual([
       "ADMIN",
       "AREA_MANAGER",
       "FINANCE",
+      "PEOPLE",
     ]);
   });
 

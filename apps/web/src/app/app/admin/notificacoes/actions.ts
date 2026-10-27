@@ -35,6 +35,10 @@ const eventEnum = z.enum([
   "PRE_INVOICE_ISSUED",
   "NFSE_ISSUED",
   "PAYMENT_FORECAST",
+  "CONSULTANT_INVOICE_REQUEST",
+  "PAYMENT_RELEASED_BY_PEOPLE",
+  "SLA_DEADLINE_APPROACHING",
+  "SLA_OVERDUE",
 ]);
 const scopeEnum = z.enum(["GLOBAL", "PROJECT", "ALLOCATION"]);
 const channelEnum = z.enum(["EMAIL", "TEAMS"]);

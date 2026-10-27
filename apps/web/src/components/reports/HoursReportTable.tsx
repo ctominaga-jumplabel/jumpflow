@@ -3,6 +3,11 @@ import { SectionPanel } from "@/components/ui/SectionPanel";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { StatTile } from "@/components/reports/StatTile";
 import { ReportPagination } from "@/components/reports/ReportPagination";
+import { EntryExceptionAlert } from "@/components/ui/EntryExceptionAlert";
+import {
+  formatDayMonth,
+  weekdayLabelPt,
+} from "@/lib/timesheet/entry-exceptions";
 import { formatCurrencyPrecise, formatDate, formatHours } from "@/lib/format";
 import {
   timeEntryStatusLabels,
@@ -56,7 +61,16 @@ export function HoursReportTable({
       className: "whitespace-nowrap",
       cell: (r) => (
         <div>
-          <p className="tabular-nums text-strong">{formatDate(r.date)}</p>
+          <p className="flex items-center gap-1.5 tabular-nums text-strong">
+            {formatDate(r.date)}
+            <span className="text-xs text-soft">
+              {weekdayLabelPt(r.date).slice(0, 3)}
+            </span>
+            <EntryExceptionAlert
+              exceptions={r.exceptions}
+              dateLabel={formatDayMonth(r.date)}
+            />
+          </p>
           <p className="text-xs text-soft">{r.weekLabel}</p>
         </div>
       ),

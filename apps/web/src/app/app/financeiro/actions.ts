@@ -5,7 +5,10 @@ import { Prisma, prisma } from "@jumpflow/database";
 import { z, type ZodType } from "zod";
 import type { ActionResult, ErrorCode } from "@/lib/actions/result";
 import { requireRole } from "@/lib/auth/guards";
-import { SUBSCREEN_CODES } from "@/lib/auth/permission-codes";
+import {
+  FLOW_PERMISSION_CODES,
+  SUBSCREEN_CODES,
+} from "@/lib/auth/permission-codes";
 import { can } from "@/lib/auth/permissions";
 import { FINANCIAL_ROLES, RECEIVABLES_ROLES } from "@/lib/auth/route-permissions";
 import type { RoleName } from "@/lib/auth/roles";
@@ -20,6 +23,7 @@ import { isDatabaseConfigured } from "@/lib/db/config";
 import {
   generateRevenueClosings,
   getRevenueClosingForPreInvoice,
+  isBillingReleaseReversal,
   revenueClosingTransitions,
   type RevenueClosingAdvanceAction,
 } from "@/lib/db/revenue";
@@ -42,6 +46,11 @@ import {
   buildNfseEmail,
   buildPreInvoiceEmail,
 } from "@/lib/automation/email/templates";
+import { applyEmailTemplate } from "@/lib/automation/email/apply-template";
+import {
+  nfseTemplateVars,
+  preInvoiceTemplateVars,
+} from "@/lib/automation/email/template-vars";
 import {
   getStorageProvider,
   isStorageConfigured,
@@ -83,6 +92,22 @@ class ActionError extends Error {
     message: string,
   ) {
     super(message);
+  }
+}
+
+/**
+ * Governança do Fluxo de Horas: reabrir/cancelar a liberação de faturamento
+ * (sair de CLOSED para trás) é EXCLUSIVO de quem tem
+ * `FATURAMENTO_REABRIR_LIBERACAO` edit na Matriz (FINANCE por padrão; nem
+ * ADMIN nem AREA_MANAGER recebem). O Gerente de Área libera, mas só o
+ * Financeiro devolve. Gate server-side; a UI apenas esconde o botão.
+ */
+async function ensureBillingReopenPermission(): Promise<void> {
+  if (!(await can(FLOW_PERMISSION_CODES.billingReopen, "edit"))) {
+    throw new ActionError(
+      "FORBIDDEN",
+      "Somente o Financeiro pode reabrir uma liberação de faturamento.",
+    );
   }
 }
 
@@ -384,6 +409,10 @@ export async function advanceRevenueClosing(input: {
     const user = await requireRole(FINANCIAL_ROLES);
     const parsed = parseInput(advanceInputSchema, input);
     const transition = revenueClosingTransitions[parsed.action];
+    // Reabrir a liberação (CLOSED → para trás) é só do Financeiro (Matriz).
+    if (isBillingReleaseReversal(parsed.action)) {
+      await ensureBillingReopenPermission();
+    }
     const dbUser = await resolveDbUser(user);
 
     // D4 (Onda B) + P16 (Onda 4): uma justificativa OBRIGATÓRIA é registrada em
@@ -508,8 +537,11 @@ export async function advanceRevenueClosing(input: {
     // (CLOSED → READY_TO_CLOSE), a única reversa que sai de CLOSED e destrava
     // o lançamento de horas da competência (Trava A). REVERT_TO_OPEN /
     // REVERT_TO_REVIEW não saem de CLOSED e não passam por aqui. Best-effort.
-    if (parsed.action === "REOPEN") {
-      await notifyRevenueClosingReopened(parsed.id);
+    if (isBillingReleaseReversal(parsed.action)) {
+      await notifyRevenueClosingReopened(parsed.id, {
+        justification,
+        reopenedByName: user.name,
+      });
     }
 
     revalidatePath(FINANCEIRO_PATH);
@@ -1230,7 +1262,12 @@ export async function sendPreInvoiceEmail(input: {
       lines: data.lines,
       generatedAt: new Date(),
     });
-    const preInvoiceEmail = buildPreInvoiceEmail({ preInvoice });
+    // ITEM 3: template personalizado (/app/admin/templates-email), fail-open.
+    const preInvoiceEmail = await applyEmailTemplate(
+      "PRE_INVOICE_ISSUED",
+      preInvoiceTemplateVars({ preInvoice }),
+      buildPreInvoiceEmail({ preInvoice }),
+    );
 
     // P4: anexa a planilha de horas por consultor apenas em fechamento por
     // projeto com a flag ligada. Fechamento por cliente (sem projectId) nunca
@@ -1993,8 +2030,9 @@ export async function retornarFaturamento(input: {
  * partiu, então liberar de novo funciona normalmente. Justificativa OBRIGATÓRIA
  * (reversa sensível, auditada). Bloqueada quando existe NFS-e ativa (a
  * transição reforça: cancele a NFS-e antes). O REOPEN destrava o lançamento de
- * horas da competência e notifica o Gestor de Área. Gated a FINANCIAL_ROLES
- * (quem libera — ADMIN/AREA_MANAGER — e o FINANCE). Auditoria dedicada
+ * horas da competência e notifica o Gestor de Área. Governança (Fluxo de
+ * Horas): exige `FATURAMENTO_REABRIR_LIBERACAO` edit (só FINANCE por padrão) —
+ * o Gerente de Área libera, mas não cancela a liberação. Auditoria dedicada
  * `RECEIVABLES_RELEASE_CANCELLED` além da auditoria da transição.
  */
 export async function cancelarLiberacao(input: {
@@ -2006,6 +2044,7 @@ export async function cancelarLiberacao(input: {
   try {
     ensureDatabase();
     const user = await requireRole(FINANCIAL_ROLES);
+    await ensureBillingReopenPermission();
     const parsed = parseInput(retornarFaturamentoSchema, input);
     const dbUser = await resolveDbUser(user);
     const justificativa = parsed.justificativa?.trim() ?? "";
@@ -2169,12 +2208,18 @@ export async function sendNfseIssuedEmail(input: {
     }
 
     const competenceLabel = `${String(document.revenueClosing.month).padStart(2, "0")}/${document.revenueClosing.year}`;
-    const nfseEmail = buildNfseEmail({
+    const nfseEmailInput = {
       clientName: document.client.name,
       competenceLabel,
       invoiceNumber: document.invoiceNumber,
       protocol: document.protocol,
-    });
+    };
+    // ITEM 3: template personalizado (/app/admin/templates-email), fail-open.
+    const nfseEmail = await applyEmailTemplate(
+      "NFSE_ISSUED",
+      nfseTemplateVars(nfseEmailInput),
+      buildNfseEmail(nfseEmailInput),
+    );
 
     // NFSE_ISSUED rule (/app/admin/notificacoes): recipients default to the
     // client contact. Off → do not send and do not log SENT.

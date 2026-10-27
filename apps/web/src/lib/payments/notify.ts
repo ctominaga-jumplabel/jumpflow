@@ -1,5 +1,7 @@
 import { getEmailTransport } from "@/lib/automation/email-transport";
 import { buildPaymentForecastEmail } from "@/lib/automation/email/templates";
+import { applyEmailTemplate } from "@/lib/automation/email/apply-template";
+import { paymentForecastTemplateVars } from "@/lib/automation/email/template-vars";
 import { resolveEventDelivery } from "@/lib/automation/notifications/event-delivery";
 
 export interface PaymentForecastEmailProjectLine {
@@ -26,7 +28,7 @@ export interface PaymentForecastEmailInput {
 }
 
 export async function sendPaymentForecastEmail(input: PaymentForecastEmailInput) {
-  const email = buildPaymentForecastEmail({
+  const emailInput = {
     consultantName: input.consultantName,
     month: input.month,
     year: input.year,
@@ -34,7 +36,13 @@ export async function sendPaymentForecastEmail(input: PaymentForecastEmailInput)
     expectedPaymentAt: input.expectedPaymentAt,
     responseDeadlineAt: input.responseDeadlineAt,
     projectLines: input.projectLines,
-  });
+  };
+  // ITEM 3: template personalizado (/app/admin/templates-email), fail-open.
+  const email = await applyEmailTemplate(
+    "PAYMENT_FORECAST",
+    paymentForecastTemplateVars(emailInput),
+    buildPaymentForecastEmail(emailInput),
+  );
 
   // PAYMENT_FORECAST rule (/app/admin/notificacoes) can turn this off or add
   // recipients; the consultant is the EVENT_TARGET.

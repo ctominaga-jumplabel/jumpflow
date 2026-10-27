@@ -40,6 +40,10 @@ const EVENT_HREF: Record<string, string> = {
   PRE_INVOICE_ISSUED: "/app/financeiro",
   NFSE_ISSUED: "/app/financeiro",
   PAYMENT_FORECAST: "/app/pagamentos",
+  CONSULTANT_INVOICE_REQUEST: "/app/minhas-notas",
+  PAYMENT_RELEASED_BY_PEOPLE: "/app/pagamentos",
+  SLA_DEADLINE_APPROACHING: "/app/sla",
+  SLA_OVERDUE: "/app/sla",
 };
 
 /** Short text body for a fragment: the prebuilt plain text, else block text. */

@@ -34,6 +34,8 @@ import {
   type NotificationFragment,
   type ResolvedRecipient,
 } from "@/lib/automation/notifications/dispatch";
+import { applyEmailTemplate } from "@/lib/automation/email/apply-template";
+import { feedDigestTemplateVars } from "@/lib/automation/email/template-vars";
 import { isDatabaseConfigured } from "@/lib/db/config";
 
 type FeedNotificationEvent =
@@ -90,11 +92,17 @@ async function dispatchFeedDigest(input: {
   /** Ids que compõem este digest — uma linha de log SENT por id. */
   itemIds: string[];
 }): Promise<void> {
-  const built = buildFeedDigestEmail({
+  const emailInput = {
     recipientName: input.recipient.name ?? "você",
     items: input.items,
     feedUrl: feedUrl(),
-  });
+  };
+  // ITEM 3: template personalizado do evento (fail-open → resumo padrão).
+  const built = await applyEmailTemplate(
+    input.event,
+    feedDigestTemplateVars(emailInput),
+    buildFeedDigestEmail(emailInput),
+  );
 
   const fragment: NotificationFragment = {
     recipient: input.recipient,

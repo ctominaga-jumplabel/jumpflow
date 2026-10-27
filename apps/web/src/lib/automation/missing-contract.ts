@@ -7,6 +7,7 @@
  */
 import { prisma } from "@jumpflow/database";
 import { buildContratosAusentesEmail } from "@/lib/automation/email/templates";
+import { contratosAusentesTemplateVars } from "@/lib/automation/email/template-vars";
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { emitNotification } from "./notifications/emit";
 
@@ -43,15 +44,17 @@ export async function runMissingContractSweep(input: {
     context: {},
     dedupeKey,
     buildFragment: (recipient) => {
-      const built = buildContratosAusentesEmail({
+      const emailInput = {
         recipientName: recipient.name ?? "equipe",
         projects,
         appUrl: input.appUrl,
-      });
+      };
+      const built = buildContratosAusentesEmail(emailInput);
       return {
         recipient,
         title: built.subject,
         prebuilt: built,
+        templateVars: contratosAusentesTemplateVars(emailInput),
         teamsText: `${projects.length} projeto(s) sem contrato comercial.`,
       };
     },

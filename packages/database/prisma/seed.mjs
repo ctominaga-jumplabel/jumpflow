@@ -1224,7 +1224,9 @@ const PERMISSION_CATALOG = [
   { code: "FINANCEIRO", name: "Financeiro", module: "Financeiro", sort: 110, view: FINANCIAL, create: FINANCIAL, edit: FINANCIAL },
   { code: "FINANCEIRO_COBRANCA", name: "Cobrança de projetos", module: "Financeiro", parent: "FINANCEIRO", sort: 111, view: FINANCIAL, edit: FINANCIAL },
   { code: "FINANCEIRO_FECHAMENTO", name: "Fechamento mensal", module: "Financeiro", parent: "FINANCEIRO", sort: 112, view: FINANCIAL, edit: FINANCIAL, active: false },
-  { code: "PAGAMENTOS", name: "Pagamentos", module: "Financeiro", sort: 113, view: FINANCIAL, edit: FINANCIAL },
+  // PEOPLE (DP) abre a tela para LIBERAR pagamentos (PAGAMENTOS_LIBERACAO_DP);
+  // não ganha edit na tela em si.
+  { code: "PAGAMENTOS", name: "Pagamentos", module: "Financeiro", sort: 113, view: FINANCIAL.concat("PEOPLE"), edit: FINANCIAL },
 
   { code: "ADMIN_ACESSOS", name: "Acessos", module: "Administração", sort: 120, view: ADMIN_ONLY, create: ADMIN_ONLY, edit: ADMIN_ONLY, del: ADMIN_ONLY },
   { code: "CONFIGURACOES_PERMISSOES", name: "Matriz de Permissões", module: "Administração", sort: 121, view: ADMIN_ONLY, edit: ADMIN_ONLY },
@@ -1263,6 +1265,18 @@ const PERMISSION_CATALOG = [
   { code: "FINANCEIRO_CONTAS_PAGAR", name: "Contas a Pagar", module: "Financeiro", parent: "FINANCEIRO", sort: 111, view: FINANCIAL, create: FINANCIAL, edit: FINANCIAL },
   { code: "FINANCEIRO_STATUS_FATURAMENTO", name: "Status de Faturamento", module: "Financeiro", parent: "FINANCEIRO", sort: 112, view: ["AREA_MANAGER", "FINANCE"] },
   { code: "CONFIGURACOES_MENU", name: "Ordem do Menu", module: "Administração", sort: 125, view: ADMIN_ONLY, edit: ADMIN_ONLY },
+  // --- Fluxo de Horas: governança + SLA (migração 20261027120000) ----------
+  // Reaberturas são SÓ do Financeiro por decisão de negócio: `noAdmin: true`
+  // desliga o ADMIN implícito (ele pode se conceder pela Matriz se precisar).
+  { code: "FATURAMENTO_REABRIR_LIBERACAO", name: "Reabrir faturamento liberado", module: "Financeiro", parent: "FINANCEIRO", sort: 113, view: ["FINANCE"], edit: ["FINANCE"], noAdmin: true },
+  { code: "PAGAMENTOS_LIBERACAO_DP", name: "Liberar pagamento (DP)", module: "Financeiro", parent: "PAGAMENTOS", sort: 114, view: ["PEOPLE", "FINANCE"], edit: ["PEOPLE"], adminActions: ["view", "edit"] },
+  { code: "PAGAMENTOS_ENVIO_NF", name: "Enviar solicitação de NF", module: "Financeiro", parent: "PAGAMENTOS", sort: 115, view: ["FINANCE"], edit: ["FINANCE"], adminActions: ["view", "edit"] },
+  { code: "PAGAMENTOS_REABRIR_LIBERACAO", name: "Reabrir liberação de pagamento", module: "Financeiro", parent: "PAGAMENTOS", sort: 116, view: ["FINANCE"], edit: ["FINANCE"], noAdmin: true },
+  { code: "CONFIGURACOES_TEMPLATES_EMAIL", name: "Templates de e-mail", module: "Administração", sort: 126, view: ADMIN_ONLY, edit: ADMIN_ONLY, adminActions: ["view", "edit"] },
+  // `adminActions` limita o ADMIN implícito às ações que a migração concede
+  // (mantém seed e migração idênticos). SLA: acompanhamento é só leitura.
+  { code: "SLA_ACOMPANHAMENTO", name: "Acompanhamento de SLA", module: "Operação", sort: 27, view: ["AREA_MANAGER", "PROJECT_MANAGER", "FINANCE", "PEOPLE"], adminActions: ["view"] },
+  { code: "SLA_CONFIGURACAO", name: "Configurar prazos de SLA", module: "Operação", parent: "SLA_ACOMPANHAMENTO", sort: 28, view: ["FINANCE"], edit: ["FINANCE"], adminActions: ["view", "edit"] },
 ];
 
 async function seedPermissions() {
@@ -1308,8 +1322,14 @@ async function seedRolePermissions() {
     // EP-M09: o CONSULTANT é negado em qualquer code fora do allow-list, mesmo
     // que apareça nos sets de papel — a navegação restrita do Consultor é a
     // fronteira. ADMIN nunca é afetado.
-    const has = (set, key) => {
-      if (key === "ADMIN") return true;
+    // `noAdmin`: code de exceção sem ADMIN implícito (ex.: reaberturas só do
+    // Financeiro). `adminActions`: restringe o ADMIN implícito a estas ações.
+    const has = (set, key, action) => {
+      if (key === "ADMIN") {
+        if (p.noAdmin) return false;
+        if (p.adminActions) return p.adminActions.includes(action);
+        return true;
+      }
       if (key === "CONSULTANT" && !CONSULTANT_ALLOWED_CODES.has(p.code)) {
         return false;
       }
@@ -1320,10 +1340,10 @@ async function seedRolePermissions() {
       const roleId = roleByKey.get(key);
       if (!roleId) continue;
       const data = {
-        canView: has(p.view, key),
-        canCreate: has(p.create, key),
-        canEdit: has(p.edit, key),
-        canDelete: has(p.del, key),
+        canView: has(p.view, key, "view"),
+        canCreate: has(p.create, key, "create"),
+        canEdit: has(p.edit, key, "edit"),
+        canDelete: has(p.del, key, "delete"),
       };
       await prisma.rolePermission.upsert({
         where: { roleId_permissionId: { roleId, permissionId } },
@@ -1371,12 +1391,49 @@ async function ensureNotificationRule(event, recipients, label) {
   console.log(`Seeded default notification rule: ${label}`);
 }
 
+// Acrescenta um destinatário a uma regra que JÁ existe (idempotente). Usado
+// quando um default muda depois de a regra ter sido criada (ensureNotificationRule
+// pula eventos que já têm regra). Só toca regras EMAIL GLOBAL que contêm o
+// destinatário-âncora (`whenHas`), i.e. a regra padrão — espelha a migração
+// 20261027120000_fluxo_horas_governanca_sla.
+async function ensureNotificationRecipient(event, whenHas, recipient, label) {
+  const rules = await prisma.notificationRule.findMany({
+    where: {
+      event,
+      scope: "GLOBAL",
+      channel: "EMAIL",
+      recipients: { some: { type: whenHas.type, address: whenHas.address } },
+    },
+    select: { id: true, recipients: { select: { type: true, address: true } } },
+  });
+  for (const rule of rules) {
+    const present = rule.recipients.some(
+      (r) => r.type === recipient.type && r.address === recipient.address,
+    );
+    if (present) continue;
+    await prisma.notificationRecipient.create({
+      data: { ruleId: rule.id, ...recipient },
+    });
+    console.log(`Added notification recipient: ${label}`);
+  }
+}
+
 async function seedNotificationDefaults() {
-  // Fechamento operacional → DP/People podem seguir com folha e pagamento.
+  // Fechamento operacional → DP/People seguem com folha e pagamento; o
+  // Financeiro também acompanha (reunião do fluxo de horas).
   await ensureNotificationRule(
     "OPERATION_CLOSED",
-    [{ type: "ROLE", channel: "EMAIL", address: "PEOPLE", name: "DP / People" }],
-    "OPERATION_CLOSED → ROLE PEOPLE (EMAIL)",
+    [
+      { type: "ROLE", channel: "EMAIL", address: "PEOPLE", name: "DP / People" },
+      { type: "ROLE", channel: "EMAIL", address: "FINANCE", name: "Financeiro" },
+    ],
+    "OPERATION_CLOSED → ROLE PEOPLE + FINANCE (EMAIL)",
+  );
+  await ensureNotificationRecipient(
+    "OPERATION_CLOSED",
+    { type: "ROLE", address: "PEOPLE" },
+    { type: "ROLE", channel: "EMAIL", address: "FINANCE", name: "Financeiro" },
+    "OPERATION_CLOSED + ROLE FINANCE",
   );
 
   // Liberação de horas (mensal) → DP/People + Financeiro (alimenta faturamento).
@@ -1490,6 +1547,75 @@ async function seedNotificationDefaults() {
     ],
     "PAYMENT_FORECAST → EVENT_TARGET (EMAIL)",
   );
+
+  // --- Fluxo de Horas: governança + SLA (migração 20261027120000) ---------
+  // Solicitação de NF ao consultor PJ (o Financeiro dispara) → o consultor.
+  await ensureNotificationRule(
+    "CONSULTANT_INVOICE_REQUEST",
+    [{ type: "EVENT_TARGET", channel: "EMAIL", address: null, name: "Consultor" }],
+    "CONSULTANT_INVOICE_REQUEST → EVENT_TARGET (EMAIL)",
+  );
+
+  // DP/People liberou os pagamentos → Financeiro pode solicitar as NFs.
+  await ensureNotificationRule(
+    "PAYMENT_RELEASED_BY_PEOPLE",
+    [{ type: "ROLE", channel: "EMAIL", address: "FINANCE", name: "Financeiro" }],
+    "PAYMENT_RELEASED_BY_PEOPLE → ROLE FINANCE (EMAIL)",
+  );
+
+  // Lembretes do job de SLA → áreas responsáveis pelas etapas.
+  const slaRecipients = [
+    { type: "ROLE", channel: "EMAIL", address: "AREA_MANAGER", name: "Gestores de área" },
+    { type: "ROLE", channel: "EMAIL", address: "PEOPLE", name: "DP / People" },
+    { type: "ROLE", channel: "EMAIL", address: "FINANCE", name: "Financeiro" },
+  ];
+  await ensureNotificationRule(
+    "SLA_DEADLINE_APPROACHING",
+    slaRecipients,
+    "SLA_DEADLINE_APPROACHING → ROLE AREA_MANAGER + PEOPLE + FINANCE (EMAIL)",
+  );
+  await ensureNotificationRule(
+    "SLA_OVERDUE",
+    slaRecipients,
+    "SLA_OVERDUE → ROLE AREA_MANAGER + PEOPLE + FINANCE (EMAIL)",
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SLA do fluxo de horas (espelha a migração 20261027120000). Convenção de
+// businessDays: COMPETENCE_MONTH_END = N-ésimo dia útil do mês seguinte (0 =
+// último dia útil do mês de competência); PAYMENT_DATE = N dias úteis ANTES do
+// pagamento (0 = no dia). Idempotente e NÃO sobrescreve ajustes da tela: cria
+// só o que falta.
+// ---------------------------------------------------------------------------
+const SLA_STAGE_DEFAULTS = [
+  { id: "sla_billing_timesheet_submission", process: "HOURS_TO_BILLING", stageKey: "TIMESHEET_SUBMISSION", area: "CONSULTANT", label: "Lançamento das horas pelo consultor", anchor: "COMPETENCE_MONTH_END", businessDays: 0, sortOrder: 10 },
+  { id: "sla_billing_manager_approval", process: "HOURS_TO_BILLING", stageKey: "MANAGER_APPROVAL", area: "OPERATION", label: "Aprovação das horas pelo gestor", anchor: "COMPETENCE_MONTH_END", businessDays: 1, sortOrder: 20 },
+  { id: "sla_billing_operation_closing", process: "HOURS_TO_BILLING", stageKey: "OPERATION_CLOSING", area: "OPERATION", label: "Fechamento operacional", anchor: "COMPETENCE_MONTH_END", businessDays: 1, sortOrder: 30 },
+  { id: "sla_billing_billing_release", process: "HOURS_TO_BILLING", stageKey: "BILLING_RELEASE", area: "OPERATION", label: "Liberação para faturamento", anchor: "COMPETENCE_MONTH_END", businessDays: 1, sortOrder: 40 },
+  { id: "sla_payment_timesheet_submission", process: "HOURS_TO_PAYMENT", stageKey: "TIMESHEET_SUBMISSION", area: "CONSULTANT", label: "Lançamento das horas pelo consultor", anchor: "COMPETENCE_MONTH_END", businessDays: 0, sortOrder: 10 },
+  { id: "sla_payment_manager_approval", process: "HOURS_TO_PAYMENT", stageKey: "MANAGER_APPROVAL", area: "OPERATION", label: "Aprovação das horas pelo gestor", anchor: "COMPETENCE_MONTH_END", businessDays: 1, sortOrder: 20 },
+  { id: "sla_payment_operation_closing", process: "HOURS_TO_PAYMENT", stageKey: "OPERATION_CLOSING", area: "OPERATION", label: "Fechamento operacional", anchor: "COMPETENCE_MONTH_END", businessDays: 1, sortOrder: 30 },
+  { id: "sla_payment_people_payment_release", process: "HOURS_TO_PAYMENT", stageKey: "PEOPLE_PAYMENT_RELEASE", area: "PEOPLE", label: "Liberação do pagamento pelo DP", anchor: "COMPETENCE_MONTH_END", businessDays: 4, sortOrder: 40 },
+  { id: "sla_payment_invoice_request", process: "HOURS_TO_PAYMENT", stageKey: "INVOICE_REQUEST", area: "FINANCE", label: "Solicitação da NF ao consultor", anchor: "PAYMENT_DATE", businessDays: 5, sortOrder: 50 },
+  { id: "sla_payment_invoice_receipt", process: "HOURS_TO_PAYMENT", stageKey: "INVOICE_RECEIPT", area: "CONSULTANT", label: "Envio da NF pelo consultor", anchor: "PAYMENT_DATE", businessDays: 2, sortOrder: 60 },
+  { id: "sla_payment_payment", process: "HOURS_TO_PAYMENT", stageKey: "PAYMENT", area: "FINANCE", label: "Pagamento ao consultor", anchor: "PAYMENT_DATE", businessDays: 0, sortOrder: 70 },
+];
+
+async function seedSlaDefaults() {
+  await prisma.slaSettings.upsert({
+    where: { id: "default" },
+    update: {},
+    create: { id: "default", paymentDay: 16, considerStateHolidays: false },
+  });
+  for (const stage of SLA_STAGE_DEFAULTS) {
+    await prisma.slaStage.upsert({
+      where: { process_stageKey: { process: stage.process, stageKey: stage.stageKey } },
+      update: {},
+      create: { ...stage, warningBusinessDays: 1, active: true },
+    });
+  }
+  console.log(`Seeded SLA settings + ${SLA_STAGE_DEFAULTS.length} SLA stages.`);
 }
 
 // Feriados nacionais brasileiros. Datas oficiais fixas + móveis (Sexta-feira
@@ -1559,6 +1685,7 @@ async function main() {
   await seedPermissions();
   await seedRolePermissions();
   await seedNotificationDefaults();
+  await seedSlaDefaults();
   await seedHolidayDefaults();
   await seedBootstrapAdmin();
   await seedBillingTypes();

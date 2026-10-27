@@ -33,6 +33,7 @@ describe("hoursXlsxColumns", () => {
     expect(headers).not.toContain("Valor faturado");
     expect(headers).toEqual([
       "Data",
+      "Dia",
       "Semana",
       "Consultor",
       "Cliente",
@@ -43,7 +44,36 @@ describe("hoursXlsxColumns", () => {
       "Status",
       "Enviado em",
       "Decidido em",
+      "Alerta",
     ]);
+  });
+
+  it("fills Dia and Alerta from the row's server-side exceptions", () => {
+    const columns = hoursXlsxColumns({ includeFinancials: false, statusLabel });
+    const byHeader = Object.fromEntries(columns.map((c) => [c.header, c]));
+    expect(byHeader["Dia"].value(hourRow)).toBe("Quarta");
+    expect(byHeader["Alerta"].value(hourRow)).toBe("");
+    const flagged: HoursReportRow = {
+      ...hourRow,
+      date: "2026-06-13",
+      exceptions: [
+        { kind: "WEEKEND", label: "Sábado", detail: "" },
+        { kind: "ACTIVITY", label: "Sobreaviso", detail: "" },
+      ],
+    };
+    expect(byHeader["Dia"].value(flagged)).toBe("Sábado");
+    expect(byHeader["Alerta"].value(flagged)).toBe("Sábado; Sobreaviso");
+  });
+
+  it("client layout only carries Alerta when opted in", () => {
+    const off = clientHoursXlsxColumns({ includeFinancials: false, statusLabel });
+    expect(off.map((c) => c.header)).not.toContain("Alerta");
+    const on = clientHoursXlsxColumns({
+      includeFinancials: true,
+      statusLabel,
+      includeAlerts: true,
+    });
+    expect(on.map((c) => c.header).at(-1)).toBe("Alerta");
   });
 
   it("appends monetary columns when financials are allowed", () => {

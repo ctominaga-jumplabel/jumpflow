@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { ArrowUpRight, Banknote } from "lucide-react";
+import { EntryExceptionCountBadge } from "@/components/ui/EntryExceptionAlert";
+import type { EntryExceptionSummary } from "@/lib/timesheet/entry-exceptions";
 import { SectionPanel } from "@/components/ui/SectionPanel";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ActionButton } from "@/components/ui/ActionButton";
@@ -18,6 +20,7 @@ const thClass =
 
 const toneByStatus: Record<ConsultantPaymentView["status"], StatusTone> = {
   OPEN: "neutral",
+  PEOPLE_RELEASED: "info",
   WAITING_FOR_INVOICE: "warning",
   INVOICE_RECEIVED: "info",
   INVOICE_VALIDATED: "info",
@@ -54,6 +57,8 @@ export interface ConsultantPayablesPanelProps {
   /** Competência filtrada; ausente = todos os pagamentos em aberto. */
   month?: number;
   year?: number;
+  /** Exceções dos lançamentos por paymentId (sinal para DP; não bloqueia). */
+  exceptionsByPayment?: Record<string, EntryExceptionSummary>;
 }
 
 /** Projetos distintos das linhas do pagamento (linhas de benefício não têm projeto). */
@@ -76,6 +81,7 @@ export function ConsultantPayablesPanel({
   payments,
   month,
   year,
+  exceptionsByPayment,
 }: ConsultantPayablesPanelProps) {
   const filtered = month != null && year != null;
   const open = payments.filter(
@@ -98,7 +104,7 @@ export function ConsultantPayablesPanel({
       description={
         filtered
           ? `Pagamentos da competência ${formatMonth(month, year)}, gerados ao liberar o DP no Fechamento Operacional.`
-          : "Pagamentos em aberto (todas as competências), gerados ao liberar o DP no Fechamento Operacional."
+          : "Pagamentos em aberto (todas as competências), gerados ao liberar o DP no Fechamento Operacional. Fluxo: Aguardando DP → Liberado pelo DP → Aguardando NF → pagamento."
       }
       action={
         <div className="flex flex-col items-end leading-tight">
@@ -186,6 +192,13 @@ export function ConsultantPayablesPanel({
                 >
                   <td className="px-4 py-3 font-medium text-strong">
                     {payment.consultantName}
+                    {exceptionsByPayment?.[payment.id] ? (
+                      <EntryExceptionCountBadge
+                        className="mt-1 flex w-fit"
+                        count={exceptionsByPayment[payment.id].count}
+                        lines={exceptionsByPayment[payment.id].lines}
+                      />
+                    ) : null}
                   </td>
                   <td className="px-4 py-3 text-medium">
                     {CONTRACT_LABELS[payment.contractType]}
@@ -206,10 +219,15 @@ export function ConsultantPayablesPanel({
                     <StatusBadge tone={toneByStatus[payment.status]}>
                       {consultantPaymentStatusLabels[payment.status]}
                     </StatusBadge>
+                    {payment.peopleReleasedAt ? (
+                      <p className="mt-1 text-xs text-soft">
+                        DP liberou {formatDate(payment.peopleReleasedAt)}
+                      </p>
+                    ) : null}
                   </td>
                   <td className="px-4 py-3 text-right">
                     <Link
-                      href={`/app/pagamentos?month=${payment.month}&year=${payment.year}`}
+                      href={`/app/pagamentos?month=${payment.month}&year=${payment.year}&status=${payment.status}`}
                       className={cn(
                         "inline-flex items-center gap-1 text-xs font-semibold text-brand-dark hover:underline",
                         focusRing,

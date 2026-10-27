@@ -21,6 +21,7 @@ import { Modal } from "@/components/ui/Modal";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { FeedbackBanner, useFeedback } from "@/components/ui/Feedback";
 import { BillingSignals } from "./BillingSignals";
+import { EntryExceptionCountBadge } from "@/components/ui/EntryExceptionAlert";
 import type {
   ApuracaoConsultantRow,
   CompetenceSendResult,
@@ -496,6 +497,10 @@ function ApuracaoProjectCard({
                       <span className="truncate font-medium text-strong">
                         {consultant.consultantName}
                       </span>
+                      <EntryExceptionCountBadge
+                        count={consultant.exceptionCount ?? 0}
+                        lines={consultant.exceptionLines ?? []}
+                      />
                     </span>
                   </td>
                   <td className="px-4 py-2.5 tabular-nums text-strong">

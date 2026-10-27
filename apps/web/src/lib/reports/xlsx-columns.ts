@@ -1,5 +1,6 @@
 import type { XlsxColumn } from "@/lib/export/xlsx";
 import type { HoursReportRow, ExpensesReportRow } from "@/lib/reports/types";
+import { formatEntryExceptions } from "@/lib/timesheet/entry-exceptions";
 
 /**
  * Column definitions for the Relatorios `.xlsx` exports (Onda 6). Mirror the
@@ -61,6 +62,12 @@ export interface ClientHoursXlsxOptions {
   includeFinancials: boolean;
   /** Resolve a status label (pt-BR). */
   statusLabel: (status: string) => string;
+  /**
+   * Anexa a coluna interna "Alerta" (fim de semana/feriado/atividade). Opt-in:
+   * este layout também vai ao CLIENTE (anexo da pré-fatura), onde o sinal
+   * interno do DP não deve aparecer.
+   */
+  includeAlerts?: boolean;
 }
 
 /**
@@ -90,7 +97,10 @@ export function clientHoursXlsxColumns(
     { header: "Data", value: (r) => weekdayPtBr(r.date), width: 12 },
     { header: "Horas", value: (r) => r.hours, numFmt: MONEY_FMT, width: 10 },
   ];
-  if (!opts.includeFinancials) return base;
+  const alert: XlsxColumn<HoursReportRow>[] = opts.includeAlerts
+    ? [ALERT_COLUMN]
+    : [];
+  if (!opts.includeFinancials) return [...base, ...alert];
   return [
     ...base,
     {
@@ -105,8 +115,16 @@ export function clientHoursXlsxColumns(
       numFmt: MONEY_FMT,
       width: 16,
     },
+    ...alert,
   ];
 }
+
+/** "Alerta": exceções do lançamento ("Sábado; Sobreaviso"), ou vazio. */
+const ALERT_COLUMN: XlsxColumn<HoursReportRow> = {
+  header: "Alerta",
+  value: (r) => formatEntryExceptions(r.exceptions),
+  width: 32,
+};
 
 /** Columns for the Hours report. Monetary columns appear only when allowed. */
 export function hoursXlsxColumns(
@@ -114,6 +132,7 @@ export function hoursXlsxColumns(
 ): XlsxColumn<HoursReportRow>[] {
   const base: XlsxColumn<HoursReportRow>[] = [
     { header: "Data", value: (r) => r.date, width: 12 },
+    { header: "Dia", value: (r) => weekdayPtBr(r.date), width: 10 },
     { header: "Semana", value: (r) => r.weekLabel, width: 26 },
     { header: "Consultor", value: (r) => r.consultantName, width: 22 },
     { header: "Cliente", value: (r) => r.clientName, width: 22 },
@@ -128,6 +147,7 @@ export function hoursXlsxColumns(
     { header: "Status", value: (r) => opts.statusLabel(r.status), width: 16 },
     { header: "Enviado em", value: (r) => r.submittedAt ?? "", width: 22 },
     { header: "Decidido em", value: (r) => r.decidedAt ?? "", width: 22 },
+    ALERT_COLUMN,
   ];
   if (!opts.includeFinancials) return base;
   return [

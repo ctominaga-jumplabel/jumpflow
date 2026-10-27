@@ -16,6 +16,7 @@ import {
   type TimesheetFilter,
 } from "@/lib/timesheet/filters";
 import type { HolidayLookup } from "@/lib/timesheet/holidays";
+import { getEntryExceptions } from "@/lib/timesheet/entry-exceptions";
 import {
   addDays,
   buildWeekDays,
@@ -837,6 +838,32 @@ export async function listHoursApprovalItems(
       ruleKey: approval.ruleKey ?? undefined,
       comment: approval.comment ?? undefined,
     });
+  }
+
+  // Sinal de exceção por dia (fim de semana/feriado/atividade): UMA consulta de
+  // feriados cobrindo todas as datas da fila, resolvida em memória por linha.
+  const entryMeta = new Map<string, { projectId: string; activityType: string }>();
+  for (const e of [...pendingEntries, ...decidedEntries]) {
+    entryMeta.set(e.id, { projectId: e.projectId, activityType: e.activityType });
+  }
+  const allDates = [...pendingEntries, ...decidedEntries].map((e) => e.date);
+  if (allDates.length > 0) {
+    const min = allDates.reduce((a, b) => (b < a ? b : a));
+    const max = allDates.reduce((a, b) => (b > a ? b : a));
+    const holidays = await getHolidayLookup(min, max);
+    for (const item of [...pending, ...history]) {
+      for (const day of item.entries ?? []) {
+        const meta = entryMeta.get(day.id);
+        if (!meta) continue;
+        const exceptions = getEntryExceptions({
+          date: day.date,
+          activityType: meta.activityType,
+          projectId: meta.projectId,
+          holidays,
+        });
+        if (exceptions.length > 0) day.exceptions = exceptions;
+      }
+    }
   }
 
   return [...pending, ...history];

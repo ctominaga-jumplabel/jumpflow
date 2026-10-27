@@ -30,6 +30,15 @@ export type RouteAccess = RoleName[] | "ALL";
 export { FINANCIAL_ROLES };
 
 /**
+ * Roles que ACESSAM `/app/pagamentos` (governança Fluxo de Horas): os
+ * financeiros + PEOPLE (DP), que libera os pagamentos e faz o cálculo de folha.
+ * O PEOPLE NÃO herda as ações financeiras da tela (banco, aprovar, pago, gerar,
+ * previsão) — elas seguem gated por FINANCIAL_ROLES nas server actions; as
+ * etapas do fluxo (liberar/solicitar NF/reabrir) são gated pela Matriz.
+ */
+export const PAYMENTS_ROUTE_ROLES: RoleName[] = [...FINANCIAL_ROLES, "PEOPLE"];
+
+/**
  * Roles que ACESSAM Contas a Receber/Pagar e a jornada de apuração/envio
  * (`/app/financeiro`, `/app/financeiro/apuracao`, home de 3 cards, rotas de
  * export receber/pagar/apuração). Melhorias v2 (2026-07-25): o AREA_MANAGER
@@ -195,7 +204,7 @@ interface RouteRule {
  * expands.
  */
 export const routePermissions: RouteRule[] = [
-  { prefix: "/app/pagamentos", access: FINANCIAL_ROLES },
+  { prefix: "/app/pagamentos", access: PAYMENTS_ROUTE_ROLES },
   // Self-service da NF do consultor (melhoria #3): o consultor vê e anexa a NF
   // dos PRÓPRIOS pagamentos. O read é escopado ao usuário logado (nunca ao
   // cliente), então a superfície é segura. Regra MAIS ESPECÍFICA que `/app`.
@@ -328,6 +337,10 @@ export const routePermissions: RouteRule[] = [
   // OPERATION_CLOSING_WRITE_ROLES nas server actions. Eixo independente do
   // financeiro. Regra específica antes da `/app` ampla.
   { prefix: "/app/operacao", access: OPERATION_CLOSING_READ_ROLES },
+  // SLA do fluxo de horas (item 5): leitura para gestão + FINANCE/PEOPLE (mesmo
+  // conjunto do fechamento operacional; a matriz SLA_ACOMPANHAMENTO refina). A
+  // configuração é action-gated por SLA_CONFIGURACAO (edit).
+  { prefix: "/app/sla", access: OPERATION_CLOSING_READ_ROLES },
   {
     // FINANCE participates in the expense approval chain (finance stage),
     // so it has access to the queue alongside the manager roles.

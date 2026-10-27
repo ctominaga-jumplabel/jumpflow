@@ -42,6 +42,7 @@ const PAGAMENTOS_PATH = "/app/pagamentos";
  */
 const CONSULTANT_INVOICE_MUTABLE_STATUSES: ConsultantPaymentStatus[] = [
   "OPEN",
+  "PEOPLE_RELEASED",
   "WAITING_FOR_INVOICE",
   "INVOICE_RECEIVED",
 ];
@@ -281,13 +282,15 @@ export async function uploadConsultantInvoice(
           });
         }
 
-        // Avança para NF Recebida SOMENTE a partir de Aberto/Aguardando NF
-        // (update condicional por status, à prova de corrida). Estados
-        // posteriores não são forçados.
+        // Avança para NF Recebida SOMENTE depois da liberação do DP
+        // (Liberado pelo DP / Aguardando NF) — update condicional por status,
+        // à prova de corrida. Em Aguardando DP (OPEN) a NF fica anexada mas o
+        // status NÃO avança (o DP ainda não liberou). Estados posteriores não
+        // são forçados.
         const advanced = await tx.consultantPayment.updateMany({
           where: {
             id: payment.id,
-            status: { in: ["OPEN", "WAITING_FOR_INVOICE"] },
+            status: { in: ["PEOPLE_RELEASED", "WAITING_FOR_INVOICE"] },
           },
           data: { status: "INVOICE_RECEIVED", invoiceReceivedAt: now },
         });

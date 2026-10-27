@@ -11,6 +11,11 @@ import { ActionButton } from "@/components/ui/ActionButton";
 import { FeedbackBanner, useFeedback } from "@/components/ui/Feedback";
 import { focusRing, focusRingInput } from "@/lib/styles";
 import { formatDate } from "@/lib/format";
+import { EntryExceptionAlert } from "@/components/ui/EntryExceptionAlert";
+import {
+  formatDayMonth,
+  weekdayLabelPt,
+} from "@/lib/timesheet/entry-exceptions";
 import type { ReceivablesDayGroup, ReceivablesEntry } from "@/lib/financial/receivables-journey-core";
 import { contractTypeLabels } from "@/lib/consultants/labels";
 import {
@@ -168,7 +173,7 @@ export function ReceivablesDayGroups({
           key={day.date}
           defaultOpen
           tone="soft"
-          title={`Dia ${formatDate(day.date)}`}
+          title={`Dia ${formatDate(day.date)} · ${weekdayLabelPt(day.date)}`}
           hint={`Total de horas do dia: ${toHHMM(day.totalHours)}`}
         >
           <div className="-mx-4 -my-4 overflow-x-auto">
@@ -218,13 +223,19 @@ export function ReceivablesDayGroups({
                         {entry.projectName}
                       </td>
                       <td className="px-4 py-2.5">
-                        <span
-                          className={cn(
-                            "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium",
-                            activityChipClass(entry.activityType),
-                          )}
-                        >
-                          {entry.activityLabel}
+                        <span className="inline-flex items-center gap-1.5">
+                          <span
+                            className={cn(
+                              "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium",
+                              activityChipClass(entry.activityType),
+                            )}
+                          >
+                            {entry.activityLabel}
+                          </span>
+                          <EntryExceptionAlert
+                            exceptions={entry.exceptions}
+                            dateLabel={formatDayMonth(entry.date)}
+                          />
                         </span>
                       </td>
                       <td className="px-4 py-2.5 tabular-nums text-strong">

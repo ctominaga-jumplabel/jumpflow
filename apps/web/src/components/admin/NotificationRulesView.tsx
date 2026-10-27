@@ -1,7 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useTransition } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { Mail, Plus, Trash2 } from "lucide-react";
 import {
   addRecipient,
   createRule,
@@ -32,6 +33,10 @@ const EVENT_LABELS: Record<NotificationEventKey, string> = {
   PRE_INVOICE_ISSUED: "Pré-fatura (cliente)",
   NFSE_ISSUED: "NFS-e emitida (cliente)",
   PAYMENT_FORECAST: "Previsão de pagamento (consultor)",
+  CONSULTANT_INVOICE_REQUEST: "Solicitação de NF (consultor)",
+  PAYMENT_RELEASED_BY_PEOPLE: "Pagamentos liberados pelo DP (Financeiro)",
+  SLA_DEADLINE_APPROACHING: "SLA: prazo de etapa se aproximando",
+  SLA_OVERDUE: "SLA: etapa com prazo vencido",
 };
 const EVENTS = Object.keys(EVENT_LABELS) as NotificationEventKey[];
 const SCOPES: NotificationScopeKey[] = ["GLOBAL", "PROJECT"];
@@ -237,6 +242,15 @@ function RuleCard({
         <Badge>{rule.channel === "EMAIL" ? "E-mail" : "Teams"}</Badge>
         {rule.groupByRecipient && <Badge>Agrupado</Badge>}
         <span className="ml-auto flex items-center gap-3">
+          {rule.channel === "EMAIL" && (
+            <Link
+              href={`/app/admin/templates-email?evento=${rule.event}`}
+              className="inline-flex items-center gap-1 text-xs font-semibold text-brand-dark underline-offset-2 hover:underline"
+              title="Ler e editar o e-mail enviado por este evento"
+            >
+              <Mail size={14} aria-hidden /> Editar template
+            </Link>
+          )}
           <label className="flex items-center gap-1.5 text-xs text-ink">
             <input
               type="checkbox"

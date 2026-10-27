@@ -14,6 +14,10 @@ import {
 } from "@/lib/db/operation-closing";
 import { resolveDbUser } from "@/lib/db/users";
 import { reconcileConsultantPaymentsForConsultants } from "@/lib/db/payments";
+import {
+  findReleasedPaymentsForProjectMonth,
+  notifyPeopleOfOperationReopened,
+} from "@/lib/db/payment-release";
 import type { ConsultantPaymentStatus } from "@/lib/payments/state-machine";
 import {
   pendingAlert,
@@ -293,8 +297,14 @@ export async function closeOperation(input: {
 }
 
 /**
- * Reopen a previously closed month (e.g. a late correction). Audited; the DP is
- * not re-notified automatically. Optimistic: only flips a CLOSED record.
+ * Reopen a previously closed month (e.g. a late correction). Audited.
+ * Optimistic: only flips a CLOSED record.
+ *
+ * Governança Fluxo de Horas: só a etapa a JUSANTE devolve. Se algum pagamento
+ * de consultor deste projeto/competência já foi LIBERADO pelo DP (ou além), a
+ * reabertura é BLOQUEADA — o Financeiro reabre a liberação em Pagamentos
+ * primeiro. Sem pagamentos liberados, reabre e avisa o DP (in-app): os
+ * pagamentos "Aguardando DP" serão recalculados no próximo fechamento.
  */
 export async function reopenOperation(input: {
   projectId: string;
@@ -348,6 +358,33 @@ export async function reopenOperation(input: {
           "Este fechamento já não está fechado.",
         );
       }
+      // Guard DENTRO da transação, depois de travar a linha do fechamento (o
+      // updateMany acima): uma liberação do DP concorrente trava a mesma linha
+      // (lib/db/payment-release), então ou ela já commitou e é vista aqui, ou
+      // vai esperar e encontrar o fechamento reaberto. Havendo pagamento
+      // liberado, o throw desfaz a reabertura.
+      const releasedPayments = await findReleasedPaymentsForProjectMonth(
+        {
+          projectId: parsed.projectId,
+          month: parsed.month,
+          year: parsed.year,
+        },
+        tx,
+      );
+      if (releasedPayments.length > 0) {
+        const names = releasedPayments
+          .slice(0, 5)
+          .map((p) => p.consultantName)
+          .join(", ");
+        const more =
+          releasedPayments.length > 5
+            ? ` e mais ${releasedPayments.length - 5}`
+            : "";
+        throw new ActionError(
+          "ALREADY_DECIDED",
+          `Não é possível reabrir: ${releasedPayments.length} pagamento(s) deste projeto/competência já foram liberados pelo DP (${names}${more}). Devolva pelo Financeiro/DP primeiro (reabrir a liberação em Pagamentos).`,
+        );
+      }
       await tx.auditEvent.create({
         data: buildAuditEventData({
           actorUserId: dbUser?.id ?? null,
@@ -360,7 +397,18 @@ export async function reopenOperation(input: {
       });
     });
 
+    // Avisa o DP (in-app, best-effort): os pagamentos ainda "Aguardando DP"
+    // deste projeto serão recalculados no próximo fechamento.
+    await notifyPeopleOfOperationReopened({
+      projectId: parsed.projectId,
+      month: parsed.month,
+      year: parsed.year,
+      justification,
+      actorName: user.name,
+    });
+
     revalidatePath(OPERACAO_PATH);
+    revalidatePath(PAGAMENTOS_PATH);
     return { ok: true, data: { id: existing.id } };
   } catch (error) {
     return toFailure(error);

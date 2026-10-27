@@ -158,6 +158,29 @@ export const SUBSCREEN_CODES = {
 } as const;
 
 /**
+ * Fluxo de Horas: governança + SLA (migration 20261027120000). Action-level
+ * codes checked by server actions (`can(code, "edit")` / `requirePermission`):
+ * - billingReopen: reabrir faturamento liberado (só FINANCE por padrão; nem
+ *   ADMIN recebe — pode se conceder pela Matriz). Child of FINANCEIRO.
+ * - paymentPeopleRelease: DP/People libera o pagamento (edit PEOPLE; view
+ *   FINANCE). Child of PAGAMENTOS.
+ * - paymentInvoiceRequest: Financeiro envia a solicitação de NF. Child of PAGAMENTOS.
+ * - paymentReopenRelease: reabrir a liberação do DP (só FINANCE). Child of PAGAMENTOS.
+ * - emailTemplates: tela de templates de e-mail (ADMIN).
+ * - slaTracking: tela de acompanhamento de SLA (view).
+ * - slaSettings: configurar prazos de SLA (ADMIN/FINANCE). Child of SLA_ACOMPANHAMENTO.
+ */
+export const FLOW_PERMISSION_CODES = {
+  billingReopen: "FATURAMENTO_REABRIR_LIBERACAO",
+  paymentPeopleRelease: "PAGAMENTOS_LIBERACAO_DP",
+  paymentInvoiceRequest: "PAGAMENTOS_ENVIO_NF",
+  paymentReopenRelease: "PAGAMENTOS_REABRIR_LIBERACAO",
+  emailTemplates: "CONFIGURACOES_TEMPLATES_EMAIL",
+  slaTracking: "SLA_ACOMPANHAMENTO",
+  slaSettings: "SLA_CONFIGURACAO",
+} as const;
+
+/**
  * Codes of the platform's NATIVE features — the ones seeded by
  * `PERMISSION_CATALOG` in `packages/database/prisma/seed.mjs` and checked by the
  * app (navigation gate, guards, server actions). In the admin CRUD they can be
@@ -250,6 +273,14 @@ export const SYSTEM_PERMISSION_CODES: ReadonlySet<string> = new Set([
   "PROJETOS_APROVACAO",
   "PROJETOS_RECEBIMENTOS",
   "PROJETOS_COBRANCA",
+  // Fluxo de Horas: governança + SLA (migration 20261027120000).
+  "FATURAMENTO_REABRIR_LIBERACAO",
+  "PAGAMENTOS_LIBERACAO_DP",
+  "PAGAMENTOS_ENVIO_NF",
+  "PAGAMENTOS_REABRIR_LIBERACAO",
+  "CONFIGURACOES_TEMPLATES_EMAIL",
+  "SLA_ACOMPANHAMENTO",
+  "SLA_CONFIGURACAO",
 ]);
 
 /** Whether `code` is a native (seeded) feature — immutable code, not deletable. */

@@ -22,6 +22,10 @@ import { getHolidayLookup } from "@/lib/db/timesheet";
 import { getOperationReadiness } from "@/lib/db/operation-closing";
 import type { OperationReadiness } from "@/lib/operations/closing";
 import type { HolidayLookup } from "@/lib/timesheet/holidays";
+import {
+  getEntryExceptions,
+  type EntryException,
+} from "@/lib/timesheet/entry-exceptions";
 
 import {
   classifyConsultantReadiness,
@@ -50,6 +54,12 @@ export interface CockpitException {
   /** Rótulo legível da atividade (ex.: "Sobreaviso"). */
   activityLabel: string;
   hasAttachment: boolean;
+  /**
+   * Sinal tipado (fim de semana, feriado project-aware, atividade fora do Dia
+   * Útil) de `getEntryExceptions`. Um "Dia Útil" num sábado/feriado também
+   * entra na lista do cockpit por este campo.
+   */
+  exceptions?: EntryException[];
 }
 
 /** Uma linha de consultor no accordion de um projeto. */
@@ -262,7 +272,16 @@ export async function getCockpitOverview(input: {
     );
 
     const hasAttachment = e.attachment != null;
-    if (isExceptionEntry({ activityType: e.activityType, hasAttachment })) {
+    const calendarExceptions = getEntryExceptions({
+      date: iso,
+      activityType: e.activityType,
+      projectId: e.projectId,
+      holidays: lookup,
+    });
+    if (
+      isExceptionEntry({ activityType: e.activityType, hasAttachment }) ||
+      calendarExceptions.length > 0
+    ) {
       let exByConsultant = exceptionsByProject.get(e.projectId);
       if (!exByConsultant) {
         exByConsultant = new Map();
@@ -274,6 +293,7 @@ export async function getCockpitOverview(input: {
         activityType: e.activityType,
         activityLabel: activityLabelOf(e.activityType),
         hasAttachment,
+        exceptions: calendarExceptions,
       });
       exByConsultant.set(e.consultantId, exList);
     }

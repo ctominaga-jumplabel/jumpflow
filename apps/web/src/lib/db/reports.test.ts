@@ -242,6 +242,8 @@ const h = vi.hoisted(() => {
   }
 
   const prismaMock = {
+    // Sinal de exceções (getHolidayLookup): sem feriados cadastrados.
+    holiday: { findMany: async () => [] },
     user: {
       findUnique: async ({ where }: { where: Where }) => {
         const u =

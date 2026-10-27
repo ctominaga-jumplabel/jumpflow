@@ -13,6 +13,7 @@
  */
 
 import type { PaginationMeta } from "@/lib/reports/types";
+import type { EntryException } from "@/lib/timesheet/entry-exceptions";
 
 /** Operational status of a project's month. Only two states; reopening → OPEN. */
 export type OperationClosingStatus = "OPEN" | "CLOSED";
@@ -244,8 +245,16 @@ export interface OperationEntryDetail {
   /** Whether the day is marked billable (visibility for the DP/apuração). */
   billable: boolean;
   hasAttachment: boolean;
-  /** True when this entry falls under {@link isExceptionEntry}. */
+  /**
+   * True when this entry falls under {@link isExceptionEntry} OR has a calendar
+   * exception (sábado/domingo/feriado — see `exceptions`).
+   */
   isException: boolean;
+  /**
+   * Sinal tipado (fim de semana, feriado, atividade fora do Dia Útil) de
+   * `getEntryExceptions`, calculado no servidor. Opcional para fixtures.
+   */
+  exceptions?: EntryException[];
 }
 
 /** A consultant's launches for the project's month, grouped for the apuração. */
@@ -298,8 +307,16 @@ export interface OperationDetailRow {
   hasAttachment: boolean;
   /** ISO datetime of the latest decision (approval/rejection), or null. */
   decidedAt: string | null;
-  /** True when this entry falls under {@link isExceptionEntry}. */
+  /**
+   * True when this entry falls under {@link isExceptionEntry} OR has a calendar
+   * exception (sábado/domingo/feriado — see `exceptions`).
+   */
   isException: boolean;
+  /**
+   * Sinal tipado (fim de semana, feriado, atividade fora do Dia Útil) de
+   * `getEntryExceptions`, calculado no servidor. Opcional para fixtures.
+   */
+  exceptions?: EntryException[];
 }
 
 /**

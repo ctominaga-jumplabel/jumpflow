@@ -31,6 +31,7 @@ import { PendingClosingsView } from "./receivables/PendingClosingsView";
 import { ExpensesFinancePanel } from "./ExpensesFinancePanel";
 import { ConsultantPayablesPanel } from "./ConsultantPayablesPanel";
 import type { ConsultantPaymentView } from "@/lib/payments/types";
+import type { EntryExceptionSummary } from "@/lib/timesheet/entry-exceptions";
 import { FinanceTabs } from "./FinanceTabs";
 
 /** Abas do Financeiro (`?tab=`), na ordem em que aparecem. */
@@ -87,6 +88,8 @@ export interface FinancialOverviewProps {
     payments: ConsultantPaymentView[];
     month?: number;
     year?: number;
+    /** Exceções dos lançamentos por paymentId (sinal para DP). */
+    exceptionsByPayment?: Record<string, EntryExceptionSummary>;
   };
   /**
    * Fila da aba "Pendentes de Fechamento" (competência corrente), quando há
@@ -103,6 +106,8 @@ export interface FinancialOverviewProps {
   canClosePending?: boolean;
   /** ADMIN/FINANCE pode RETORNAR faturamento (Faturado → Liberado). */
   canRevertPending?: boolean;
+  /** Matriz FATURAMENTO_REABRIR_LIBERACAO edit: pode CANCELAR a liberação. */
+  canCancelReleasePending?: boolean;
 }
 
 /**
@@ -131,6 +136,7 @@ export function FinancialOverview({
   pendingClosings,
   canClosePending = false,
   canRevertPending = false,
+  canCancelReleasePending = false,
 }: FinancialOverviewProps) {
   const overview: ReceivablesOverview = receivables ?? {
     days: [],
@@ -243,6 +249,7 @@ export function FinancialOverview({
           payments={consultantPayables.payments}
           month={consultantPayables.month}
           year={consultantPayables.year}
+          exceptionsByPayment={consultantPayables.exceptionsByPayment}
         />
       ) : null}
       <ExpensesFinancePanel
@@ -266,6 +273,7 @@ export function FinancialOverview({
       pendingCount={pendingClosings.pendingCount}
       canClose={canClosePending}
       canRevert={canRevertPending}
+      canCancelRelease={canCancelReleasePending}
       formAction="/app/financeiro"
       monthParam="pmonth"
       yearParam="pyear"

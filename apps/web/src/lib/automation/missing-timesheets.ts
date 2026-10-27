@@ -10,6 +10,8 @@ import { isDatabaseConfigured } from "@/lib/db/config";
 import { loadAutomationConfig } from "./config";
 import { getEmailTransport } from "./email-transport";
 import { buildMissingTimesheetEmail } from "./email/templates";
+import { applyEmailTemplate } from "./email/apply-template";
+import { missingTimesheetTemplateVars } from "./email/template-vars";
 import { resolveEventDelivery } from "./notifications/event-delivery";
 
 export interface MissingTimesheetResult {
@@ -277,11 +279,13 @@ export async function runMissingTimesheetReport(params: {
   let provider: string | null = null;
 
   try {
-    const email = buildMissingTimesheetEmail({
-      periodStart,
-      periodEnd,
-      rowCount: rows.length,
-    });
+    const emailInput = { periodStart, periodEnd, rowCount: rows.length };
+    // ITEM 3: template personalizado (fail-open); o CSV segue anexo sempre.
+    const email = await applyEmailTemplate(
+      "MISSING_TIMESHEET_REPORT",
+      missingTimesheetTemplateVars(emailInput),
+      buildMissingTimesheetEmail(emailInput),
+    );
     const sent = await getEmailTransport().send({
       to: recipients,
       subject: email.subject,

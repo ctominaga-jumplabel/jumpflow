@@ -900,8 +900,24 @@ export function buildConsultantInvoiceRequestEmail(input: {
    * setado) o e-mail apenas cita a tela no texto, sem botão.
    */
   notasUrl?: string;
+  /**
+   * Quebra por projeto (projeto, cliente, horas, valor) — SÓ REFERÊNCIA. O
+   * pagamento guarda UM valor de NF e os anexos não têm valor/projeto
+   * próprios, então o pedido continua sendo de UMA NF com o valor previsto
+   * total. Opcional/retrocompatível: ausente = sem tabela.
+   */
+  projects?: Array<{
+    projectName: string;
+    clientName: string;
+    hours: number;
+    amount: number;
+  }>;
+  /** true quando o valor por projeto foi rateado pelas horas (PJ fixo). */
+  projectAmountsProportional?: boolean;
 }): BuiltEmail {
   const competenceLabel = `${String(input.month).padStart(2, "0")}/${input.year}`;
+  const projects = input.projects ?? [];
+  const multiProject = projects.length > 1;
   const blocks: EmailBlock[] = [
     paragraph(`Olá, ${input.consultantName}.`),
     paragraph(
@@ -909,10 +925,44 @@ export function buildConsultantInvoiceRequestEmail(input: {
     ),
     kpi("Valor previsto", formatCurrency(input.expectedAmount), "info"),
     keyValueList([{ label: "Competência", value: competenceLabel }]),
+  ];
+
+  if (projects.length > 0) {
+    blocks.push(
+      dataTable(
+        ["Projeto", "Cliente", "Horas", "Valor"],
+        projects.map((p) => [
+          p.projectName,
+          p.clientName,
+          formatHours(p.hours),
+          formatCurrency(p.amount),
+        ]),
+        { alignRight: [2, 3] },
+      ),
+    );
+    if (input.projectAmountsProportional) {
+      blocks.push(
+        paragraph(
+          "Os valores por projeto foram rateados proporcionalmente às horas aprovadas de cada projeto.",
+        ),
+      );
+    }
+  }
+
+  if (multiProject) {
+    blocks.push(
+      callout(
+        `Você atuou em ${projects.length} projetos nesta competência. Emita UMA única NF com o valor previsto total; a tabela acima é a quebra por projeto, apenas para referência (pode constar na descrição da NF).`,
+        "info",
+      ),
+    );
+  }
+
+  blocks.push(
     paragraph(
       `Emita a NF com o valor previsto acima e anexe o arquivo (PDF ou XML) na plataforma, em "Minhas Notas". Caso haja divergência de valor, responda a este e-mail antes de emitir.`,
     ),
-  ];
+  );
 
   if (input.notasUrl) {
     blocks.push(button("Abrir Minhas Notas", input.notasUrl));

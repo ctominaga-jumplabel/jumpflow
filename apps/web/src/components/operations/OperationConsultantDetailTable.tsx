@@ -8,6 +8,11 @@ import { FeedbackBanner, useFeedback } from "@/components/ui/Feedback";
 import { SectionPanel } from "@/components/ui/SectionPanel";
 import { StatusBadge, type StatusTone } from "@/components/ui/StatusBadge";
 import { ReportPagination } from "@/components/reports/ReportPagination";
+import { EntryExceptionAlert } from "@/components/ui/EntryExceptionAlert";
+import {
+  formatDayMonth,
+  weekdayLabelPt,
+} from "@/lib/timesheet/entry-exceptions";
 import { formatHours } from "@/lib/format";
 import {
   activityLabelOf,
@@ -86,8 +91,15 @@ export function OperationConsultantDetailTable({
       key: "date",
       header: "Data",
       cell: (r) => (
-        <span className="whitespace-nowrap tabular-nums text-strong">
+        <span className="inline-flex items-center gap-1.5 whitespace-nowrap tabular-nums text-strong">
           {formatDay(r.date)}
+          <span className="text-xs text-soft">
+            {weekdayLabelPt(r.date).slice(0, 3)}
+          </span>
+          <EntryExceptionAlert
+            exceptions={r.exceptions}
+            dateLabel={formatDayMonth(r.date)}
+          />
         </span>
       ),
     },
@@ -113,13 +125,6 @@ export function OperationConsultantDetailTable({
       header: "Atividade",
       cell: (r) => (
         <span className="inline-flex items-center gap-1.5 text-medium">
-          {r.isException ? (
-            <AlertTriangle
-              size={13}
-              className="text-warning"
-              aria-label="Exceção (fora do Dia Útil ou com anexo)"
-            />
-          ) : null}
           {activityLabelOf(r.activityType)}
           {r.hasAttachment ? (
             <button
