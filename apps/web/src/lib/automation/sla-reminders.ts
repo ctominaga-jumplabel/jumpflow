@@ -104,7 +104,10 @@ export function selectReminderCandidates(input: {
       if (stage.status === "OVERDUE") event = "SLA_OVERDUE";
       else if (stage.status === "AT_RISK") event = "SLA_DEADLINE_APPROACHING";
       if (!event) continue;
-      const shared = `${ck}:${stage.stage.stageKey}:${stage.deadline}`;
+      // Prazos por item (SLA por projeto / janela de NF) fazem a mesma etapa
+      // divergir entre os processos: nesse caso cada processo avisa o seu.
+      const ownDeadlines = stage.items.some((i) => i.deadline);
+      const shared = `${ck}:${stage.stage.stageKey}:${stage.deadline}${ownDeadlines ? `:${process}` : ""}`;
       if (seen.has(shared)) continue;
       seen.add(shared);
       out.push({
@@ -121,7 +124,7 @@ export function selectReminderCandidates(input: {
 
 export function reminderTitle(c: SlaReminderCandidate): string {
   const label = c.stage.stage.label;
-  const when = formatDeadlineShort(c.stage.deadline);
+  const when = formatDeadlineShort(c.stage.criticalDeadline ?? c.stage.deadline);
   if (c.event === "SLA_OVERDUE") {
     const n = c.stage.businessDaysOverdue ?? 1;
     return `SLA atrasado: ${label} — ${n} dia${n === 1 ? "" : "s"} út${n === 1 ? "il" : "eis"} (prazo ${when})`;
@@ -140,7 +143,14 @@ export function buildReminderBlocks(c: SlaReminderCandidate, appUrl?: string): E
   const redacted = SLA_PAYMENT_STAGES.has(c.stage.stage.stageKey);
   const rows = pending
     .slice(0, SLA_REMINDER_MAX_ROWS)
-    .map((i) => [i.label, i.sublabel ?? "—", i.responsible ?? "—", i.detail ?? "Pendente"]);
+    .map((i) => [
+      i.label,
+      i.sublabel ?? "—",
+      i.responsible ?? "—",
+      i.deadline
+        ? `${i.detail ?? "Pendente"} (prazo ${formatDeadlineShort(i.deadline)} — ${i.deadlineNote ?? "prazo próprio"})`
+        : (i.detail ?? "Pendente"),
+    ]);
   const blocks: EmailBlock[] = [
     callout(
       c.event === "SLA_OVERDUE"
@@ -152,7 +162,12 @@ export function buildReminderBlocks(c: SlaReminderCandidate, appUrl?: string): E
       { label: "Processo", value: SLA_PROCESS_LABEL[c.process] },
       { label: "Competência", value: formatMonth(c.competence.month, c.competence.year) },
       { label: "Área responsável", value: SLA_AREA_LABEL[c.stage.stage.area] },
-      { label: "Prazo", value: formatDeadlineShort(c.stage.deadline) },
+      {
+        label: "Prazo",
+        value: c.stage.criticalDeadline
+          ? `${formatDeadlineShort(c.stage.criticalDeadline)} (pendência mais crítica; etapa ${formatDeadlineShort(c.stage.deadline)})`
+          : formatDeadlineShort(c.stage.deadline),
+      },
       { label: "Concluído", value: `${c.stage.done} de ${c.stage.total}` },
     ]),
     redacted

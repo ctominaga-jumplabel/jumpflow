@@ -1590,6 +1590,7 @@ model Project {
   consultantProjectRates      ConsultantProjectRate[]
   plannedProfiles             ProjectPlannedProfile[]
   coeSquads                   CoeSquad[]
+  slaRules                    SlaProjectRule[]
   createdAt                   DateTime                     @default(now())
   updatedAt                   DateTime                     @updatedAt
 
@@ -3146,20 +3147,31 @@ model ExpenseAttachment {
 /// privado com URL assinada). Segue o padrao de ExpenseAttachment. Cascade
 /// delete: remover o pagamento remove os anexos de NF.
 model ConsultantInvoiceAttachment {
-  id                  String            @id @default(cuid())
+  id                  String                  @id @default(cuid())
   consultantPaymentId String
-  consultantPayment   ConsultantPayment @relation(fields: [consultantPaymentId], references: [id], onDelete: Cascade)
+  consultantPayment   ConsultantPayment       @relation(fields: [consultantPaymentId], references: [id], onDelete: Cascade)
   fileName            String
   contentType         String
   size                Int
   storageBucket       String
   storageKey          String
   uploadedByUserId    String?
-  uploadedBy          User?             @relation("ConsultantInvoiceAttachmentUploader", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
-  createdAt           DateTime          @default(now())
+  uploadedBy          User?                   @relation("ConsultantInvoiceAttachmentUploader", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+  /// UPLOAD = enviado pela tela (consultor/Financeiro); EMAIL = anexo da
+  /// resposta do consultor ao e-mail de solicitacao de NF (Resend Inbound).
+  source              InvoiceAttachmentSource @default(UPLOAD)
+  inboundEmailId      String?
+  inboundEmail        InboundEmail?           @relation(fields: [inboundEmailId], references: [id], onDelete: SetNull)
+  createdAt           DateTime                @default(now())
 
   @@index([consultantPaymentId])
   @@index([uploadedByUserId])
+  @@index([inboundEmailId])
+}
+
+enum InvoiceAttachmentSource {
+  UPLOAD
+  EMAIL
 }
 
 /// Post do feed social interno (Melhoria #5, fatia 1). Autoria por User com
@@ -3655,4 +3667,142 @@ model SlaStage {
 
   @@unique([process, stageKey])
   @@index([process, active, sortOrder])
+}
+
+// ---------------------------------------------------------------------------
+// SLA: janelas de envio da NF e SLA por projeto
+// ---------------------------------------------------------------------------
+
+/// Como uma data de SLA e resolvida dentro do mes (competencia + monthOffset):
+/// - BUSINESS_DAY: N-esimo dia util do mes (N >= 1).
+/// - FIXED_DAY: dia D do calendario (limitado ao fim do mes); se nao for util,
+///   antecipa para o dia util anterior.
+enum SlaDateRuleKind {
+  BUSINESS_DAY
+  FIXED_DAY
+}
+
+/// Janela ADICIONAL de envio da NF pelo consultor (a janela 1 e a configuracao
+/// padrao: etapa INVOICE_RECEIPT + SlaSettings.paymentDay). "Se enviar ate a
+/// data de recebimento, o pagamento sai ate a data de pagamento". Datas sempre
+/// relativas a competencia (monthOffset 1 = mes seguinte). Auditado pela
+/// server action (SLA_CONFIG_UPDATED). updatedByUserId e referencia solta.
+model SlaInvoiceTier {
+  id                 String          @id @default(cuid())
+  label              String
+  receiptKind        SlaDateRuleKind
+  receiptValue       Int
+  receiptMonthOffset Int             @default(1)
+  paymentKind        SlaDateRuleKind
+  paymentValue       Int
+  paymentMonthOffset Int             @default(1)
+  sortOrder          Int             @default(0)
+  active             Boolean         @default(true)
+  updatedByUserId    String?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  @@index([active, sortOrder])
+}
+
+/// Modo do prazo de uma regra de SLA por projeto.
+/// - BUSINESS_DAYS: N dias uteis apos o fim do mes de competencia (mesma
+///   convencao de SlaAnchor.COMPETENCE_MONTH_END; 0 = ultimo dia util do mes).
+/// - FIXED_DAY: dia fixo do mes (competencia + monthOffset; 0 = o proprio mes).
+enum SlaProjectRuleMode {
+  BUSINESS_DAYS
+  FIXED_DAY
+}
+
+/// Prazo especifico de um projeto para uma etapa do processo Horas ->
+/// Faturamento (MANAGER_APPROVAL, OPERATION_CLOSING, BILLING_RELEASE).
+/// Substitui o prazo global da etapa apenas para os itens desse projeto.
+model SlaProjectRule {
+  id                  String             @id @default(cuid())
+  projectId           String
+  project             Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  stageKey            SlaStageKey
+  mode                SlaProjectRuleMode
+  businessDays        Int?
+  fixedDay            Int?
+  monthOffset         Int                @default(1)
+  warningBusinessDays Int                @default(1)
+  active              Boolean            @default(true)
+  notes               String?
+  updatedByUserId     String?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  @@unique([projectId, stageKey])
+  @@index([active])
+}
+
+// ---------------------------------------------------------------------------
+// Respostas a e-mails enviados (Resend Inbound)
+// ---------------------------------------------------------------------------
+
+/// Para onde vao as RESPOSTAS de um e-mail enviado pelo JumpFlow, por evento.
+/// recipients = [{ type: "STATIC" | "ROLE", address }] (e-mail literal ou
+/// RoleName). Sem linha ativa = o Reply-To nao e alterado.
+model EmailReplyRoute {
+  id              String            @id @default(cuid())
+  event           NotificationEvent @unique
+  recipients      Json
+  active          Boolean           @default(true)
+  updatedByUserId String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+}
+
+/// Um e-mail enviado que aceita resposta: o Reply-To aponta para
+/// `<prefixo>+<token>@<dominio de recebimento>` e o token liga a resposta ao
+/// evento/registro de origem (ex.: ConsultantPayment da solicitacao de NF).
+model OutboundEmailThread {
+  id            String            @id @default(cuid())
+  token         String            @unique
+  event         NotificationEvent
+  referenceType String?
+  referenceId   String?
+  subject       String?
+  sentTo        String?
+  createdAt     DateTime          @default(now())
+  replies       InboundEmail[]
+
+  @@index([referenceType, referenceId])
+}
+
+/// Status do encaminhamento de uma resposta recebida.
+enum InboundForwardStatus {
+  PENDING
+  FORWARDED
+  NO_RECIPIENTS
+  FAILED
+}
+
+/// Resposta recebida pelo Resend Inbound (webhook email.received). Idempotente
+/// por resendEmailId. Corpo guardado para visualizacao no Flow; anexos de NF
+/// viram ConsultantInvoiceAttachment (source = EMAIL).
+model InboundEmail {
+  id                 String                        @id @default(cuid())
+  resendEmailId      String                        @unique
+  threadId           String?
+  thread             OutboundEmailThread?          @relation(fields: [threadId], references: [id], onDelete: SetNull)
+  event              NotificationEvent?
+  referenceType      String?
+  referenceId        String?
+  fromAddress        String
+  toAddresses        String[]
+  subject            String?
+  textBody           String?                       @db.Text
+  htmlBody           String?                       @db.Text
+  attachmentsMeta    Json?
+  receivedAt         DateTime
+  forwardStatus      InboundForwardStatus          @default(PENDING)
+  forwardedTo        String[]
+  forwardError       String?
+  createdAt          DateTime                      @default(now())
+  invoiceAttachments ConsultantInvoiceAttachment[]
+
+  @@index([referenceType, referenceId])
+  @@index([threadId])
 }

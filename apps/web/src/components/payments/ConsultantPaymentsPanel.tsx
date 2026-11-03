@@ -6,6 +6,7 @@ import {
   CalendarClock,
   CheckCircle2,
   Download,
+  Eye,
   FileCheck2,
   Mail,
   Send,
@@ -50,6 +51,7 @@ import {
   sendPaymentForecast,
 } from "@/app/app/pagamentos/actions";
 import { InvoiceUploadForm } from "./InvoiceUploadForm";
+import { InvoiceFileViewer, PaymentEmailRepliesButton } from "./PaymentEmailReplies";
 
 /** Human labels for the "solicitar NF" outcomes (per-payment). */
 const invoiceRequestLabels: Record<string, string> = {
@@ -118,6 +120,8 @@ export interface ConsultantPaymentsPermissions {
   canReopenRelease: boolean;
   /** FINANCIAL_ROLES: NF, aprovação, banco, pago, previsão. */
   canOperateFinance: boolean;
+  /** PAGAMENTOS_RESPOSTAS_EMAIL view: respostas ao e-mail de NF. */
+  canViewEmailReplies?: boolean;
 }
 
 const DEFAULT_PERMISSIONS: ConsultantPaymentsPermissions = {
@@ -148,6 +152,9 @@ export function ConsultantPaymentsPanel({
   const canSelect = canPeopleRelease || canRequestInvoice;
   // Filtro rápido pelo stepper (client-side, sobre o mês carregado).
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
+  const [viewingInvoice, setViewingInvoice] = useState<
+    { id: string; fileName: string; contentType: string } | null
+  >(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // Modal de REABRIR LIBERAÇÃO (só Financeiro): justificativa obrigatória.
   const [reopenTarget, setReopenTarget] =
@@ -541,20 +548,41 @@ export function ConsultantPaymentsPanel({
             <p className="text-xs text-soft">Sem NF</p>
           )}
           {(canOperateFinance ? payment.invoiceAttachments : []).map((attachment) => (
-            <a
-              key={attachment.id}
-              href={`/api/pagamentos/nf?id=${encodeURIComponent(attachment.id)}`}
-              className={cn(
-                "flex items-center gap-1.5 text-xs font-medium text-brand-dark hover:underline",
-                focusRing,
-              )}
-            >
-              <Download aria-hidden="true" className="size-3.5 shrink-0" />
-              <span className="max-w-[12rem] truncate">
-                {attachment.fileName}
-              </span>
-            </a>
+            <div key={attachment.id} className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setViewingInvoice(attachment)}
+                title="Visualizar a NF"
+                className={cn(
+                  "flex min-w-0 items-center gap-1.5 text-xs font-medium text-brand-dark hover:underline",
+                  focusRing,
+                )}
+              >
+                <Eye aria-hidden="true" className="size-3.5 shrink-0" />
+                <span className="max-w-[10rem] truncate">{attachment.fileName}</span>
+              </button>
+              <a
+                href={`/api/pagamentos/nf?id=${encodeURIComponent(attachment.id)}`}
+                aria-label={`Baixar ${attachment.fileName}`}
+                className={cn("text-brand-dark", focusRing)}
+              >
+                <Download aria-hidden="true" className="size-3.5 shrink-0" />
+              </a>
+              {attachment.source === "EMAIL" ? (
+                <span className="rounded bg-surface-muted px-1 text-[10px] font-semibold uppercase text-soft">
+                  e-mail
+                </span>
+              ) : null}
+            </div>
           ))}
+          {permissions.canViewEmailReplies && payment.emailReplyCount > 0 ? (
+            <PaymentEmailRepliesButton
+              paymentId={payment.id}
+              consultantName={payment.consultantName}
+              count={payment.emailReplyCount}
+              onViewInvoice={setViewingInvoice}
+            />
+          ) : null}
           {payment.invoiceDivergence?.isDivergent ? (
             <StatusBadge tone="warning">
               <TriangleAlert aria-hidden="true" className="size-3.5" />
@@ -986,6 +1014,7 @@ export function ConsultantPaymentsPanel({
           </div>
         </SectionPanel>
       ) : null}
+      <InvoiceFileViewer file={viewingInvoice} onClose={() => setViewingInvoice(null)} />
     </div>
   );
 }

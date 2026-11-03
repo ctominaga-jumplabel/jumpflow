@@ -38,6 +38,12 @@ export interface EmailMessage {
    */
   html?: string;
   attachments?: EmailAttachment[];
+  /**
+   * Reply-To. Quando o evento tem destino de respostas configurado
+   * (EmailReplyRoute), aponta para o endereco de recebimento com token
+   * (lib/automation/email/reply-routing) ou direto para os destinatarios.
+   */
+  replyTo?: string[];
 }
 
 export interface EmailSendResult {
@@ -57,6 +63,7 @@ class ConsoleEmailTransport implements EmailTransport {
       to: message.to,
       subject: message.subject,
       hasHtml: Boolean(message.html),
+      replyTo: message.replyTo,
       attachments: message.attachments?.map((a) => ({
         filename: a.filename,
         bytes: a.content.length,
@@ -98,6 +105,7 @@ class ResendEmailTransport implements EmailTransport {
         subject: prepared.subject,
         text: prepared.text,
         ...(prepared.html ? { html: prepared.html } : {}),
+        ...(prepared.replyTo?.length ? { reply_to: prepared.replyTo } : {}),
         attachments: prepared.attachments?.map((a) => ({
           filename: a.filename,
           // Resend expects base64. Text (utf8, default) is encoded here; binary

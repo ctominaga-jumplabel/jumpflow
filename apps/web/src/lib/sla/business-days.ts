@@ -361,3 +361,92 @@ export function formatDeadlineShort(iso: IsoDate): string {
 export function weekdayShort(iso: IsoDate): string {
   return WEEKDAY_SHORT[weekdayOf(iso)];
 }
+
+// ---------------------------------------------------------------------------
+// Regras de data (janelas de NF e SLA por projeto)
+// ---------------------------------------------------------------------------
+
+export type SlaDateRuleKindKey = "BUSINESS_DAY" | "FIXED_DAY";
+
+/**
+ * Data dentro do mes `competencia + monthOffset` (0 = o proprio mes de
+ * competencia, 1 = o mes seguinte...). Espelha o enum SlaDateRuleKind.
+ */
+export interface SlaDateRule {
+  kind: SlaDateRuleKindKey;
+  /** BUSINESS_DAY: N-esimo dia util (>= 1). FIXED_DAY: dia do mes (1..31). */
+  value: number;
+  monthOffset: number;
+}
+
+/**
+ * Resolve a regra para uma data util:
+ * - BUSINESS_DAY: N-esimo dia util do mes (pode transbordar para o seguinte,
+ *   como {@link nthBusinessDayOfMonth}).
+ * - FIXED_DAY: dia D (limitado ao fim do mes). Nao util => antecipa para o dia
+ *   util anterior, sem sair do mes (dia 1 num sabado vira o 1o dia util).
+ */
+export function resolveDateRule(
+  rule: SlaDateRule,
+  competence: Competence,
+  calendar: BusinessCalendar,
+): IsoDate {
+  const month = shiftCompetence(competence, Math.trunc(rule.monthOffset));
+  const value = Math.max(1, Math.trunc(rule.value));
+  if (rule.kind === "BUSINESS_DAY") {
+    return nthBusinessDayOfMonth(month.year, month.month, value, calendar);
+  }
+  const nominal = isoDate(month.year, month.month, Math.min(value, daysInMonth(month.year, month.month)));
+  const previous = previousOrSameBusinessDay(nominal, calendar);
+  return previous < isoDate(month.year, month.month, 1)
+    ? nextOrSameBusinessDay(nominal, calendar)
+    : previous;
+}
+
+/** Texto curto da regra para a tela/e-mail (ex.: "5º dia útil do mês seguinte"). */
+export function describeDateRule(rule: SlaDateRule): string {
+  const offset = Math.trunc(rule.monthOffset);
+  const month =
+    offset === 0
+      ? "do mês de competência"
+      : offset === 1
+        ? "do mês seguinte"
+        : `de ${offset} meses após a competência`;
+  return rule.kind === "BUSINESS_DAY"
+    ? `${Math.max(1, Math.trunc(rule.value))}º dia útil ${month}`
+    : `dia ${Math.max(1, Math.trunc(rule.value))} ${month}`;
+}
+
+export type SlaProjectRuleModeKey = "BUSINESS_DAYS" | "FIXED_DAY";
+
+export interface ProjectRuleDeadlineInput {
+  mode: SlaProjectRuleModeKey;
+  businessDays: number | null;
+  fixedDay: number | null;
+  monthOffset: number;
+}
+
+/**
+ * Prazo de uma regra de SLA por projeto. BUSINESS_DAYS segue a convencao de
+ * COMPETENCE_MONTH_END (N dias uteis apos o fim do mes; 0 = ultimo dia util da
+ * competencia); FIXED_DAY trava o dia do mes (competencia + monthOffset).
+ */
+export function computeProjectRuleDeadline(
+  rule: ProjectRuleDeadlineInput,
+  competence: Competence,
+  calendar: BusinessCalendar,
+): IsoDate {
+  if (rule.mode === "FIXED_DAY") {
+    return resolveDateRule(
+      { kind: "FIXED_DAY", value: rule.fixedDay ?? 1, monthOffset: rule.monthOffset },
+      competence,
+      calendar,
+    );
+  }
+  return computeStageDeadline(
+    { anchor: "COMPETENCE_MONTH_END", businessDays: rule.businessDays ?? 0 },
+    competence,
+    { paymentDay: 1 },
+    calendar,
+  );
+}

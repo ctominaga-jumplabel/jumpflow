@@ -13,6 +13,7 @@ import {
   type InvitationErrorCode,
 } from "@/lib/db/invitations";
 import { getEmailTransport } from "@/lib/automation/email-transport";
+import { buildReplyTo } from "@/lib/automation/email/reply-routing";
 import { buildAccessInviteEmail } from "@/lib/automation/email/templates";
 import { applyEmailTemplate } from "@/lib/automation/email/apply-template";
 import { accessInviteTemplateVars } from "@/lib/automation/email/template-vars";
@@ -159,6 +160,11 @@ export async function inviteUser(
             subject: inviteEmail.subject,
             text: inviteEmail.text,
             html: inviteEmail.html,
+            replyTo: await buildReplyTo({
+              event: "ACCESS_INVITE",
+              subject: inviteEmail.subject,
+              sentTo: delivery.emails,
+            }),
           });
           revalidatePath(ROUTE);
           return {
@@ -266,6 +272,11 @@ export async function regenerateInvite(input: {
             subject: regenEmail.subject,
             text: regenEmail.text,
             html: regenEmail.html,
+            replyTo: await buildReplyTo({
+              event: "ACCESS_INVITE",
+              subject: regenEmail.subject,
+              sentTo: delivery.emails,
+            }),
           });
           revalidatePath(ROUTE);
           return {

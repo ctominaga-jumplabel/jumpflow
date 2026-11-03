@@ -116,6 +116,10 @@ export const PERMISSION_CATALOG_ALIGNMENT = [
   { code: "CONFIGURACOES_TEMPLATES_EMAIL", name: "Templates de e-mail", module: "Administração", parent: null, sortOrder: 126 },
   { code: "SLA_ACOMPANHAMENTO", name: "Acompanhamento de SLA", module: "Operação", parent: null, sortOrder: 27 },
   { code: "SLA_CONFIGURACAO", name: "Configurar prazos de SLA", module: "Operação", parent: "SLA_ACOMPANHAMENTO", sortOrder: 28 },
+  // SLA janelas de NF / por projeto + respostas de e-mail (migração 20261030120000).
+  { code: "SLA_PROJETOS", name: "SLA por projeto (faturamento)", module: "Operação", parent: "SLA_ACOMPANHAMENTO", sortOrder: 29 },
+  { code: "PAGAMENTOS_RESPOSTAS_EMAIL", name: "Respostas por e-mail da NF", module: "Financeiro", parent: "PAGAMENTOS", sortOrder: 117 },
+  { code: "CONFIGURACOES_RESPOSTAS_EMAIL", name: "Destino das respostas de e-mail", module: "Administração", parent: "CONFIGURACOES_TEMPLATES_EMAIL", sortOrder: 127 },
 ];
 
 async function main() {

@@ -22,6 +22,7 @@ import {
 import { resolveRecipients, type ResolveContext } from "./resolve";
 import { persistInAppNotifications } from "./in-app";
 import { applyEmailTemplateToFragments } from "../email/apply-template";
+import { buildReplyTo } from "../email/reply-routing";
 
 export type NotificationEventKey =
   | "HOURS_RELEASED"
@@ -126,7 +127,20 @@ export async function emitNotification(
     // ITEM 3: template personalizado do evento (fail-open → e-mail padrão).
     await applyEmailTemplateToFragments(input.event, fragments);
 
-    const results = await dispatchNotifications(fragments);
+    // Destino das respostas do evento (EmailReplyRoute), fail-open.
+    const replyTo = fragments.some((f) => f.recipient.channel === "EMAIL")
+      ? await buildReplyTo({
+          event: input.event,
+          referenceType: input.scope.type,
+          referenceId: input.scope.id ?? input.dedupeKey,
+          subject: fragments[0]?.prebuilt?.subject ?? fragments[0]?.title,
+          // So e-mails: o address de TEAMS e a URL (segredo) do webhook.
+          sentTo: fragments
+            .filter((f) => f.recipient.channel === "EMAIL")
+            .map((f) => f.recipient.address),
+        })
+      : undefined;
+    const results = await dispatchNotifications(fragments, { replyTo });
 
     // Item 3: persist an in-app copy for recipients that map to a real user.
     // Best-effort and isolated — never affects delivery, logging or the return.

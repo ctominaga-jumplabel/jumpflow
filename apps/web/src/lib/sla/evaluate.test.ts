@@ -27,6 +27,8 @@ const cal = slaCalendarFromHolidays(
 const config: SlaConfig = {
   settings: { ...SLA_SETTINGS_DEFAULTS },
   stages: SLA_STAGE_DEFAULTS.map((s) => ({ ...s })),
+  invoiceTiers: [],
+  projectRules: [],
 };
 const oct = { year: 2026, month: 10 };
 

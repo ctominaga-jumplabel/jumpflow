@@ -46,7 +46,15 @@ export interface ConsultantPaymentView {
    * (`/api/pagamentos/nf?id=...`); the endpoint re-checks ownership. Empty when
    * nothing is attached.
    */
-  invoiceAttachments: { id: string; fileName: string }[];
+  invoiceAttachments: {
+    id: string;
+    fileName: string;
+    contentType: string;
+    /** UPLOAD = tela; EMAIL = anexo da resposta ao e-mail de solicitação de NF. */
+    source: "UPLOAD" | "EMAIL";
+  }[];
+  /** Respostas recebidas ao e-mail de solicitação de NF (Resend Inbound). */
+  emailReplyCount: number;
   /**
    * NF-vs-expected comparison (melhoria #4). `null` until an amount is declared.
    * A divergence only ALERTS the UI (badge); it never blocks approval.
@@ -81,3 +89,21 @@ export const consultantPaymentStatusLabels: Record<
   PAID: "Pago",
   CANCELLED: "Cancelado",
 };
+
+/** Resposta ao e-mail de solicitação de NF (InboundEmail), para a tela de Pagamentos. */
+export interface PaymentEmailReplyView {
+  id: string;
+  fromAddress: string;
+  /** O remetente é o e-mail cadastrado do consultor do pagamento. */
+  fromConsultant: boolean;
+  subject: string | null;
+  receivedAt: string;
+  textBody: string | null;
+  htmlBody: string | null;
+  forwardStatus: "PENDING" | "FORWARDED" | "NO_RECIPIENTS" | "FAILED";
+  forwardedTo: string[];
+  /** Anexos recebidos (metadados) — os de NF também estão em `invoiceAttachments`. */
+  attachments: Array<{ filename: string | null; contentType: string | null; size: number | null; inline: boolean }>;
+  /** NFs registradas a partir desta resposta. */
+  invoiceAttachments: Array<{ id: string; fileName: string; contentType: string }>;
+}

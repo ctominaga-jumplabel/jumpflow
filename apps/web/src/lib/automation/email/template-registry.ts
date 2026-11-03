@@ -183,6 +183,10 @@ const VARIABLE_LABELS: Record<string, string> = {
   tabela_horas_extras: "Bloco: tabelas de hora extra",
   tabela_fechamentos: "Bloco: tabela de fechamentos",
   tabela_projetos: "Bloco: tabela de projetos",
+  tabela_prazos_nf: "Bloco: prazos de envio da NF e pagamento (SLA)",
+  resposta_email: "Bloco: aviso de que a NF pode ser enviada respondendo o e-mail",
+  "nf.prazo": "Prazo de envio da NF (janela padrão)",
+  "pagamento.data": "Data de pagamento (janela padrão)",
   tabela_interacoes: "Bloco: tabela de interações",
   tabela_feriados: "Bloco: tabela de feriados",
 };
@@ -886,15 +890,19 @@ const DEFINITIONS: Record<NotificationEventName, TemplateDefinition> = {
       "",
       "{{tabela_projetos}}",
       "",
+      "{{tabela_prazos_nf}}",
+      "",
       "{{nf.instrucao}}",
+      "",
+      "{{resposta_email}}",
       "",
       "[Abrir Minhas Notas]({{link}})",
       "",
       "Equipe {{app.nome}}",
     ),
     variables: vars(
-      ["consultor.nome", "destinatario.nome", "competencia", "valor.previsto", "projetos.quantidade", "nf.solicitacao", "nf.instrucao", "link"],
-      ["kpi_valor", "resumo", "tabela_projetos"],
+      ["consultor.nome", "destinatario.nome", "competencia", "valor.previsto", "projetos.quantidade", "nf.solicitacao", "nf.instrucao", "nf.prazo", "pagamento.data", "link"],
+      ["kpi_valor", "resumo", "tabela_projetos", "tabela_prazos_nf", "resposta_email"],
     ),
     sampleVars: () =>
       consultantInvoiceRequestTemplateVars({
@@ -907,6 +915,11 @@ const DEFINITIONS: Record<NotificationEventName, TemplateDefinition> = {
           { projectName: "Portal de Atendimento", clientName: "ACME S.A.", hours: 40, amount: 12000 },
           { projectName: "App Mobile", clientName: "Globex", hours: 32, amount: 9600 },
         ],
+        paymentWindows: [
+          { label: "Janela padrão", receiptDeadline: "2026-07-14", paymentDate: "2026-07-16" },
+          { label: "Janela 2", receiptDeadline: "2026-07-24", paymentDate: "2026-07-30" },
+        ],
+        acceptsReplyAttachment: true,
       }),
   },
 

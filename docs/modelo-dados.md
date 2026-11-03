@@ -546,6 +546,25 @@ convivem com o modelo MVP existente para permitir migracao gradual.
   EVENT_TARGET), `PAYMENT_RELEASED_BY_PEOPLE` (ROLE FINANCE),
   `SLA_DEADLINE_APPROACHING` e `SLA_OVERDUE` (ROLE AREA_MANAGER, PEOPLE,
   FINANCE). `OPERATION_CLOSED` passa a incluir ROLE FINANCE na regra padrao.
+- **SlaInvoiceTier** (migration 20261030120000): janelas ADICIONAIS de envio
+  da NF — `receipt*`/`payment*` (`SlaDateRuleKind` BUSINESS_DAY | FIXED_DAY,
+  valor, `monthOffset` relativo a competencia), `label`, `sortOrder`, `active`.
+  A janela 1 continua sendo INVOICE_RECEIPT/PAYMENT; a etapa PAYMENT de cada
+  pagamento vence na data da janela em que a NF chegou.
+- **SlaProjectRule**: prazo por (`projectId`, `stageKey`) do processo Horas ->
+  Faturamento (MANAGER_APPROVAL, OPERATION_CLOSING, BILLING_RELEASE), `mode`
+  `SlaProjectRuleMode` (BUSINESS_DAYS = convencao COMPETENCE_MONTH_END;
+  FIXED_DAY = `fixedDay` do mes competencia + `monthOffset`),
+  `warningBusinessDays`, `active`, `notes`. Cascade com o projeto.
+- **EmailReplyRoute**: destino das respostas por `NotificationEvent` (unico),
+  `recipients` JSON `[{type: STATIC|ROLE, address}]`, `active`.
+- **OutboundEmailThread**: `token` unico do Reply-To + evento e referencia
+  (`referenceType`/`referenceId`, ex.: ConsultantPayment).
+- **InboundEmail**: resposta recebida (Resend Inbound), idempotente por
+  `resendEmailId`; remetente, corpo texto/HTML, metadados dos anexos, status do
+  encaminhamento (`InboundForwardStatus`).
+- **ConsultantInvoiceAttachment** ganha `source` (`UPLOAD` | `EMAIL`) e
+  `inboundEmailId`.
 - Alteracoes de templates e prazos de SLA devem gerar `AuditEvent`.
 
 ### Integracoes Externas

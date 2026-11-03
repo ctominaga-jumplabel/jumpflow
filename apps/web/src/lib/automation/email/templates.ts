@@ -888,6 +888,49 @@ export function buildPaymentForecastEmail(input: {
 // ---------------------------------------------------------------------------
 // Solicitação de NF ao consultor PJ (interno → marca JumpFlow). Melhoria #1.
 // ---------------------------------------------------------------------------
+
+/** Uma janela do SLA de pagamento já resolvida em datas (yyyy-mm-dd). */
+export interface InvoicePaymentWindowLine {
+  label: string;
+  receiptDeadline: string;
+  paymentDate: string;
+  /** Janela padrão (etapas Envio da NF / Pagamento). */
+  primary?: boolean;
+}
+
+const WEEKDAY_LONG = ["domingo", "segunda", "terça", "quarta", "quinta", "sexta", "sábado"];
+
+/** `dd/mm/aaaa (sexta)` de uma data ISO date-only, sem fuso. */
+function formatIsoDay(iso: string): string {
+  const weekday = WEEKDAY_LONG[new Date(`${iso}T12:00:00.000Z`).getUTCDay()];
+  return `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)} (${weekday})`;
+}
+
+/**
+ * Tabela "Envie a NF até → Pagamento até" (item 4: SLAs de pagamento no
+ * e-mail de NF). null sem janelas.
+ */
+export function invoicePaymentWindowsBlock(
+  windows: InvoicePaymentWindowLine[] | undefined,
+): EmailBlock | null {
+  if (!windows || windows.length === 0) return null;
+  const table = dataTable(
+    ["Envie a NF até", "Pagamento até"],
+    windows.map((w) => [formatIsoDay(w.receiptDeadline), formatIsoDay(w.paymentDate)]),
+  );
+  const intro = paragraph(
+    windows.length > 1
+      ? "O pagamento depende da data em que recebermos a sua NF:"
+      : "Prazo para envio da NF e data de pagamento:",
+  );
+  return { html: intro.html + table.html, text: `${intro.text}\n${table.text}` };
+}
+
+export function invoiceReplyParagraph(): EmailBlock {
+  return paragraph(
+    "Você também pode responder a este e-mail com a NF anexada (PDF ou XML): ela é registrada automaticamente no seu pagamento.",
+  );
+}
 export function buildConsultantInvoiceRequestEmail(input: {
   consultantName: string;
   month: number;
@@ -914,6 +957,13 @@ export function buildConsultantInvoiceRequestEmail(input: {
   }>;
   /** true quando o valor por projeto foi rateado pelas horas (PJ fixo). */
   projectAmountsProportional?: boolean;
+  /**
+   * Janelas do SLA de pagamento (lib/sla/invoice-windows): "NF até X =>
+   * pagamento até Y". Ausente/vazio = sem tabela de prazos.
+   */
+  paymentWindows?: InvoicePaymentWindowLine[];
+  /** true quando a resposta a este e-mail com a NF anexada é capturada no Flow. */
+  acceptsReplyAttachment?: boolean;
 }): BuiltEmail {
   const competenceLabel = `${String(input.month).padStart(2, "0")}/${input.year}`;
   const projects = input.projects ?? [];
@@ -958,11 +1008,15 @@ export function buildConsultantInvoiceRequestEmail(input: {
     );
   }
 
+  const windowsBlock = invoicePaymentWindowsBlock(input.paymentWindows);
+  if (windowsBlock) blocks.push(windowsBlock);
+
   blocks.push(
     paragraph(
       `Emita a NF com o valor previsto acima e anexe o arquivo (PDF ou XML) na plataforma, em "Minhas Notas". Caso haja divergência de valor, responda a este e-mail antes de emitir.`,
     ),
   );
+  if (input.acceptsReplyAttachment) blocks.push(invoiceReplyParagraph());
 
   if (input.notasUrl) {
     blocks.push(button("Abrir Minhas Notas", input.notasUrl));

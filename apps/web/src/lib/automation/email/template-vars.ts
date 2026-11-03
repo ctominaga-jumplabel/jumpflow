@@ -25,6 +25,11 @@ import {
   paragraph,
   type EmailBlock,
 } from "./layout";
+import {
+  invoicePaymentWindowsBlock,
+  invoiceReplyParagraph,
+  type InvoicePaymentWindowLine,
+} from "./templates";
 import type {
   ApuracaoClienteEmailInput,
   FaturamentoPendenteLine,
@@ -547,8 +552,13 @@ export function consultantInvoiceRequestTemplateVars(input: {
   notasUrl?: string;
   projects?: Array<{ projectName: string; clientName: string; hours: number; amount: number }>;
   projectAmountsProportional?: boolean;
+  paymentWindows?: InvoicePaymentWindowLine[];
+  acceptsReplyAttachment?: boolean;
 }): TemplateVars {
   const competencia = competenceMMYYYY(input.month, input.year);
+  const firstWindow =
+    input.paymentWindows?.find((w) => w.primary) ?? input.paymentWindows?.[0];
+  const isoToBr = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
   const projects = input.projects ?? [];
   const onePerProject = projects.length > 1;
   return {
@@ -567,6 +577,11 @@ export function consultantInvoiceRequestTemplateVars(input: {
     link: input.notasUrl ?? "",
     kpi_valor: kpi("Valor previsto", formatCurrency(input.expectedAmount), "info"),
     resumo: keyValueList([{ label: "Competência", value: competencia }]),
+    // SLA de pagamento (janelas de envio da NF) — item 4.
+    "nf.prazo": firstWindow ? isoToBr(firstWindow.receiptDeadline) : "",
+    "pagamento.data": firstWindow ? isoToBr(firstWindow.paymentDate) : "",
+    tabela_prazos_nf: invoicePaymentWindowsBlock(input.paymentWindows),
+    resposta_email: input.acceptsReplyAttachment ? invoiceReplyParagraph() : null,
     // Tabela por projeto + nota de rateio + aviso de "uma NF por projeto",
     // exatamente como o builder (vazio quando não há projetos).
     tabela_projetos:

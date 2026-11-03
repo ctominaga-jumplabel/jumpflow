@@ -120,3 +120,70 @@ curl -fsS -H "Authorization: Bearer $CRON_SECRET" \
 ```
 
 Expressão cron (UTC): `0 11 * * 1-5`. Feriados são ignorados pelo próprio job.
+
+## Janelas de envio da NF (SLA de Pagamento)
+
+Aba **Configuração** → "Janelas de envio da NF". A **janela padrão** é a de
+sempre (NF até o prazo de "Envio da NF" → pagamento até o prazo de
+"Pagamento"). O Financeiro cadastra janelas seguintes (até 5): *se a NF chegar
+até X, o pagamento sai até Y* — cada data é o N-ésimo dia útil ou um dia fixo
+do mês (competência + 0/1/2 meses; dia fixo não útil é antecipado). Tabela
+`SlaInvoiceTier`, gravada junto com a configuração (auditada em
+`SLA_CONFIG_UPDATED`).
+
+- Na avaliação, a etapa **Pagamento** de cada pagamento vence na data da
+  janela em que a NF foi recebida (`invoiceReceivedAt`, dia em São Paulo); NF
+  após a última janela usa a data da última. A etapa **Envio da NF** continua
+  medida pela janela padrão (o consultor que perdeu a janela 1 aparece com
+  atraso). NF após a última janela: o pagamento vence no mesmo número de dias
+  úteis da janela padrão (envio → pagamento), contado do recebimento.
+- Com prazos por item, o status e a contagem da etapa seguem a pendência mais
+  crítica (mostrada no fluxo e nos lembretes).
+- O acompanhamento de "Horas → Pagamento" mostra as janelas da competência, e
+  o e-mail de solicitação de NF traz a tabela "Envie a NF até → Pagamento até"
+  (variáveis `{{tabela_prazos_nf}}`, `{{nf.prazo}}`, `{{pagamento.data}}`;
+  templates personalizados já salvos precisam incluir `{{tabela_prazos_nf}}`).
+
+## SLA por projeto (Horas → Faturamento)
+
+Aba **SLA por projeto** (permissão `SLA_PROJETOS`). Para um projeto e uma etapa
+(aprovação, fechamento operacional ou liberação para faturamento), o prazo
+pode ser em dias úteis após o fim do mês ou **travado num dia do mês** (do
+próprio mês de competência ou dos seguintes). Vale só para os itens daquele
+projeto no processo de faturamento; os demais seguem o prazo global. A etapa
+assume o pior status entre as pendências (um projeto com prazo próprio vencido
+deixa a etapa "Atrasado" mesmo antes do prazo global). Auditoria
+`SLA_PROJECT_RULE_UPSERTED` / `SLA_PROJECT_RULE_DELETED`.
+
+## Respostas aos e-mails (Resend Inbound)
+
+Em `/app/admin/templates-email`, cada evento tem "Respostas a este e-mail":
+e-mails específicos e/ou perfis (permissão `CONFIGURACOES_RESPOSTAS_EMAIL`).
+
+- **Com recebimento configurado** (`RESEND_INBOUND_DOMAIN`,
+  `RESEND_WEBHOOK_SECRET`, `RESEND_API_KEY`): o e-mail sai com Reply-To
+  `respostas+<token>@<domínio>`. O Resend recebe a resposta e chama
+  `POST /api/webhooks/resend/inbound` (`email.received`, assinatura Svix). O
+  Flow guarda a resposta (`InboundEmail`) e a encaminha, com anexos, aos
+  destinatários (Reply-To = consultor).
+- **Solicitação de NF**: as respostas são sempre registradas; sem destino
+  configurado, são encaminhadas ao perfil FINANCE. Anexos PDF/XML/imagem
+  (exceto imagens embutidas) viram NF do pagamento (`source = EMAIL`) e o
+  status avança para NF Recebida, como no upload — **só** quando o remetente é o
+  e-mail cadastrado do consultor e o pagamento ainda aceita NF do dono (até NF
+  Recebida). Fora disso a resposta fica para triagem do Financeiro. Falha no
+  meio do processamento devolve 500 e a reentrega do Resend retoma de onde
+  parou. Em Pagamentos (`PAGAMENTOS_RESPOSTAS_EMAIL`) aparecem "N respostas por
+  e-mail" (corpo em iframe isolado, sem scripts) e a prévia/abertura da NF.
+- **Sem recebimento configurado**: o Reply-To aponta direto para os
+  destinatários configurados; nada fica registrado no Flow.
+
+### Configuração no Resend (uma vez)
+
+1. Domains → adicionar o subdomínio de respostas (ex.:
+   `respostas.flow.jump.tec.br`) e habilitar **Receiving**; criar o registro
+   **MX** indicado no DNS.
+2. Webhooks → endpoint `$NEXT_PUBLIC_APP_URL/api/webhooks/resend/inbound`,
+   evento `email.received`; copiar o signing secret para
+   `RESEND_WEBHOOK_SECRET` no Railway.
+3. Definir `RESEND_INBOUND_DOMAIN` no Railway e fazer o deploy.

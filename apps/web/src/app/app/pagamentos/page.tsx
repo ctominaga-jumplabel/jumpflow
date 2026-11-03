@@ -4,7 +4,7 @@ import { ConsultantPaymentsPanel } from "@/components/payments/ConsultantPayment
 import { PaymentForecastPanel } from "@/components/payments/PaymentForecastPanel";
 import { requireRole } from "@/lib/auth/guards";
 import { FLOW_PERMISSION_CODES } from "@/lib/auth/permission-codes";
-import { canEach } from "@/lib/auth/permissions";
+import { can, canEach } from "@/lib/auth/permissions";
 import { canAccessSensitiveCost } from "@/lib/auth/sensitive-data";
 import {
   FINANCIAL_ROLES,
@@ -96,11 +96,13 @@ export default async function PagamentosPage({
     ],
     "edit",
   );
+  const canViewEmailReplies = await can(FLOW_PERMISSION_CODES.paymentEmailReplies, "view");
   const flowPermissions = {
     canPeopleRelease: flowGrants[FLOW_PERMISSION_CODES.paymentPeopleRelease],
     canRequestInvoice: flowGrants[FLOW_PERMISSION_CODES.paymentInvoiceRequest],
     canReopenRelease: flowGrants[FLOW_PERMISSION_CODES.paymentReopenRelease],
     canOperateFinance,
+    canViewEmailReplies,
   };
 
   const databaseConfigured = isDatabaseConfigured();

@@ -175,8 +175,12 @@ export function SlaPendingTable({ stages }: { stages: SlaStageEvaluation[] }) {
                   <td className="px-3 py-2.5">
                     <p className="text-medium">{stage.stage.label}</p>
                     <p className="text-xs text-soft">
-                      {SLA_AREA_LABEL[stage.stage.area]} · prazo {formatDeadlineShort(stage.deadline)}
+                      {SLA_AREA_LABEL[stage.stage.area]} · prazo{" "}
+                      {formatDeadlineShort(item.deadline ?? stage.deadline)}
                     </p>
+                    {item.deadlineNote ? (
+                      <p className="text-xs font-medium text-brand-strong">{item.deadlineNote}</p>
+                    ) : null}
                   </td>
                   <td className="hidden px-3 py-2.5 text-medium md:table-cell">{item.responsible ?? "—"}</td>
                   <td className="hidden px-3 py-2.5 text-xs text-medium lg:table-cell">{item.detail ?? "—"}</td>

@@ -6,6 +6,7 @@ import { TriangleAlert } from "lucide-react";
 import { saveSlaConfigAction } from "@/app/app/sla/actions";
 import { FeedbackBanner, useFeedback } from "@/components/ui/Feedback";
 import { SectionPanel } from "@/components/ui/SectionPanel";
+import { SlaInvoiceTiersEditor } from "@/components/sla/SlaInvoiceTiersEditor";
 import { formatMonth } from "@/lib/format";
 import {
   formatDeadlineShort,
@@ -13,6 +14,7 @@ import {
   type Competence,
   type SlaHolidayInput,
 } from "@/lib/sla/business-days";
+import { buildInvoiceWindows, invoiceWindowWarnings } from "@/lib/sla/invoice-windows";
 import {
   previewDeadlines,
   slaConfigUpdateSchema,
@@ -95,6 +97,12 @@ export function SlaConfigForm({
       warningBusinessDays: s.warningBusinessDays,
       active: s.active,
     })),
+    invoiceTiers: config.invoiceTiers.map((t) => ({
+      label: t.label,
+      receipt: t.receipt,
+      payment: t.payment,
+      active: t.active,
+    })),
   };
   const validation = slaConfigUpdateSchema.safeParse(payload);
   const validationError = validation.success ? null : (validation.error.issues[0]?.message ?? "Configuração inválida.");
@@ -106,7 +114,14 @@ export function SlaConfigForm({
   const warnings = useMemo(
     () =>
       validation.success
-        ? stageOrderWarnings(config, preview.map((p) => p.competence), calendar)
+        ? [
+            ...stageOrderWarnings(config, preview.map((p) => p.competence), calendar),
+            ...new Set(
+              preview.flatMap((p) =>
+                invoiceWindowWarnings(buildInvoiceWindows(config, p.competence, calendar)),
+              ),
+            ),
+          ]
         : [],
     [validation.success, config, preview, calendar],
   );
@@ -309,6 +324,13 @@ export function SlaConfigForm({
         );
       })}
 
+      <SlaInvoiceTiersEditor
+        config={config}
+        calendar={calendar}
+        competences={validation.success ? preview.map((p) => p.competence) : []}
+        onChange={(invoiceTiers) => setConfig((prev) => ({ ...prev, invoiceTiers }))}
+      />
+
       {validationError ? (
         <p role="alert" className="text-sm font-semibold text-danger">
           {validationError}
@@ -321,7 +343,7 @@ export function SlaConfigForm({
         >
           <p className="flex items-center gap-1.5 font-semibold">
             <TriangleAlert aria-hidden="true" className="size-4" />
-            Avisos de ordem dos prazos (não impedem salvar)
+            Avisos de ordem dos prazos e janelas de NF (não impedem salvar)
           </p>
           <ul className="mt-1 list-disc space-y-0.5 pl-5">
             {warnings.map((w) => (

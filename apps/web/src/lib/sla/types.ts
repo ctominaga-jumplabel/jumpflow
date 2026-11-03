@@ -5,7 +5,11 @@
  * 20261027120000 e so sao usados quando o banco nao esta disponivel (demo) ou a
  * tabela ainda esta vazia.
  */
-import type { SlaAnchorKey } from "./business-days";
+import type {
+  SlaAnchorKey,
+  SlaDateRule,
+  SlaProjectRuleModeKey,
+} from "./business-days";
 
 export type SlaProcessKey = "HOURS_TO_BILLING" | "HOURS_TO_PAYMENT";
 
@@ -102,9 +106,67 @@ export interface SlaSettingsConfig {
   considerStateHolidays: boolean;
 }
 
+/**
+ * Janela ADICIONAL de envio da NF (linha de SlaInvoiceTier): NF recebida ate
+ * `receipt` => pagamento ate `payment`. A janela 1 (padrao) e derivada das
+ * etapas INVOICE_RECEIPT/PAYMENT e nao e armazenada aqui.
+ */
+export interface SlaInvoiceTierConfig {
+  label: string;
+  receipt: SlaDateRule;
+  payment: SlaDateRule;
+  sortOrder: number;
+  active: boolean;
+}
+
+/** Etapas do processo Horas -> Faturamento que aceitam prazo por projeto. */
+export const SLA_PROJECT_RULE_STAGES = [
+  "MANAGER_APPROVAL",
+  "OPERATION_CLOSING",
+  "BILLING_RELEASE",
+] as const satisfies readonly SlaStageKeyName[];
+
+export type SlaProjectRuleStageKey = (typeof SLA_PROJECT_RULE_STAGES)[number];
+
+export function isProjectRuleStage(key: SlaStageKeyName): key is SlaProjectRuleStageKey {
+  return (SLA_PROJECT_RULE_STAGES as readonly string[]).includes(key);
+}
+
+export const SLA_PROJECT_RULE_MODE_LABEL: Record<SlaProjectRuleModeKey, string> = {
+  BUSINESS_DAYS: "Dias úteis após o fim do mês",
+  FIXED_DAY: "Dia fixo do mês",
+};
+
+/** Projeto selecionavel no cadastro de SLA por projeto. */
+export interface SlaProjectOption {
+  id: string;
+  name: string;
+  clientName: string;
+}
+
+/** Prazo especifico de um projeto para uma etapa (linha de SlaProjectRule). */
+export interface SlaProjectRuleConfig {
+  id: string;
+  projectId: string;
+  projectName: string;
+  clientName: string;
+  stageKey: SlaProjectRuleStageKey;
+  mode: SlaProjectRuleModeKey;
+  businessDays: number | null;
+  fixedDay: number | null;
+  monthOffset: number;
+  warningBusinessDays: number;
+  active: boolean;
+  notes: string | null;
+}
+
 export interface SlaConfig {
   settings: SlaSettingsConfig;
   stages: SlaStageConfig[];
+  /** Janelas adicionais de envio da NF (pode ser vazio). */
+  invoiceTiers: SlaInvoiceTierConfig[];
+  /** Prazos por projeto do processo Horas -> Faturamento (pode ser vazio). */
+  projectRules: SlaProjectRuleConfig[];
 }
 
 export const SLA_SETTINGS_DEFAULTS: SlaSettingsConfig = {

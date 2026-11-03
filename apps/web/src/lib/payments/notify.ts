@@ -1,4 +1,5 @@
 import { getEmailTransport } from "@/lib/automation/email-transport";
+import { buildReplyTo } from "@/lib/automation/email/reply-routing";
 import { buildPaymentForecastEmail } from "@/lib/automation/email/templates";
 import { applyEmailTemplate } from "@/lib/automation/email/apply-template";
 import { paymentForecastTemplateVars } from "@/lib/automation/email/template-vars";
@@ -58,5 +59,10 @@ export async function sendPaymentForecastEmail(input: PaymentForecastEmailInput)
     subject: email.subject,
     text: email.text,
     html: email.html,
+    replyTo: await buildReplyTo({
+      event: "PAYMENT_FORECAST",
+      subject: email.subject,
+      sentTo: delivery.emails,
+    }),
   });
 }

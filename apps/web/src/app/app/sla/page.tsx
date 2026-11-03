@@ -8,13 +8,18 @@ import { SlaConfigForm } from "@/components/sla/SlaConfigForm";
 import { SlaFlowStepper } from "@/components/sla/SlaFlowStepper";
 import { SlaHistoryTable } from "@/components/sla/SlaHistoryTable";
 import { SlaPendingTable } from "@/components/sla/SlaPendingTable";
+import { SlaProjectRulesPanel } from "@/components/sla/SlaProjectRulesPanel";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { SectionPanel } from "@/components/ui/SectionPanel";
 import { requirePermission } from "@/lib/auth/guards";
 import { FLOW_PERMISSION_CODES } from "@/lib/auth/permission-codes";
 import { can } from "@/lib/auth/permissions";
 import { isDatabaseConfigured } from "@/lib/db/config";
-import { loadSlaDashboard, resolveSlaViewerScope } from "@/lib/db/sla";
+import {
+  listSlaProjectOptions,
+  loadSlaDashboard,
+  resolveSlaViewerScope,
+} from "@/lib/db/sla";
 import { formatMonth } from "@/lib/format";
 import {
   competenceKey,
@@ -27,6 +32,7 @@ import {
   resolvePaymentDate,
   slaCalendarFromHolidays,
 } from "@/lib/sla/business-days";
+import { buildInvoiceWindows } from "@/lib/sla/invoice-windows";
 import {
   SLA_PROCESSES,
   SLA_PROCESS_LABEL,
@@ -51,6 +57,12 @@ export default async function SlaPage({
 }) {
   const user = await requirePermission(FLOW_PERMISSION_CODES.slaTracking, "view");
   const canEdit = await can(FLOW_PERMISSION_CODES.slaSettings, "edit");
+  const [canViewProjectRules, canCreateProjectRule, canEditProjectRule, canDeleteProjectRule] =
+    await Promise.all(
+      (["view", "create", "edit", "delete"] as const).map((action) =>
+        can(FLOW_PERMISSION_CODES.slaProjects, action),
+      ),
+    );
   // Itens das etapas de pagamento (nome, contrato, NF) so para quem ve
   // Pagamentos; os demais veem apenas os agregados dessas etapas.
   const canSeePayments = await can("PAGAMENTOS", "view");
@@ -64,15 +76,25 @@ export default async function SlaPage({
   const competence = parseCompetenceKey(first(params.m)) ?? previousCompetence(currentCompetence);
   const process = processFromSlug(first(params.p));
   const requestedTab = first(params.tab);
-  const tab = requestedTab === "configuracao" && canEdit ? "configuracao" : "acompanhamento";
+  const tab =
+    requestedTab === "configuracao" && canEdit
+      ? "configuracao"
+      : requestedTab === "projetos" && canViewProjectRules
+        ? "projetos"
+        : "acompanhamento";
 
-  const data = await loadSlaDashboard({ competence, now, scope });
+  const [data, projectOptions] = await Promise.all([
+    loadSlaDashboard({ competence, now, scope }),
+    canCreateProjectRule || canEditProjectRule ? listSlaProjectOptions() : Promise.resolve([]),
+  ]);
   const evaluation = data.evaluations[process];
   const calendar = slaCalendarFromHolidays(data.holidays, data.config.settings.considerStateHolidays);
   const paymentDate =
     process === "HOURS_TO_PAYMENT"
       ? resolvePaymentDate(competence, data.config.settings.paymentDay, calendar)
       : null;
+  const invoiceWindows =
+    process === "HOURS_TO_PAYMENT" ? buildInvoiceWindows(data.config, competence, calendar) : [];
 
   const ck = competenceKey(competence);
   const prev = competenceKey(previousCompetence(competence));
@@ -170,6 +192,28 @@ export default async function SlaPage({
 
       <SlaAreaCards areas={evaluation.areas} />
 
+      {invoiceWindows.length > 1 ? (
+        <SectionPanel
+          title="Janelas de envio da NF"
+          description="Data de pagamento conforme a data em que o consultor envia a NF."
+        >
+          <ul className="grid gap-2 px-5 py-4 sm:grid-cols-2 lg:grid-cols-3">
+            {invoiceWindows.map((w) => (
+              <li key={w.index} className="rounded-md border border-border px-3 py-2 text-sm">
+                <p className="text-xs font-semibold uppercase tracking-wide text-soft">
+                  {w.index}. {w.label}
+                </p>
+                <p className="text-medium">
+                  NF até <strong className="text-strong">{formatDeadlineShort(w.receiptDeadline)}</strong>
+                  {" → "}pagamento até{" "}
+                  <strong className="text-strong">{formatDeadlineShort(w.paymentDate)}</strong>
+                </p>
+              </li>
+            ))}
+          </ul>
+        </SectionPanel>
+      ) : null}
+
       <SectionPanel
         title="Pendências e atrasos"
         description="Itens por etapa com o responsável e o atalho para a tela onde a ação acontece."
@@ -212,23 +256,46 @@ export default async function SlaPage({
           Banco de dados não configurado: exibindo os prazos padrão sem itens.
         </p>
       ) : null}
-      {canEdit ? (
+      {canEdit || canViewProjectRules ? (
         <FinanceTabs
           defaultTabId={tab}
           ariaLabel="Visões do SLA"
           tabs={[
             { id: "acompanhamento", label: "Acompanhamento", content: tracking },
-            {
-              id: "configuracao",
-              label: "Configuração",
-              content: (
-                <SlaConfigForm
-                  initial={data.config}
-                  holidays={data.holidays}
-                  previewFrom={currentCompetence}
-                />
-              ),
-            },
+            ...(canEdit
+              ? [
+                  {
+                    id: "configuracao",
+                    label: "Configuração",
+                    content: (
+                      <SlaConfigForm
+                        initial={data.config}
+                        holidays={data.holidays}
+                        previewFrom={currentCompetence}
+                      />
+                    ),
+                  },
+                ]
+              : []),
+            ...(canViewProjectRules
+              ? [
+                  {
+                    id: "projetos",
+                    label: "SLA por projeto",
+                    content: (
+                      <SlaProjectRulesPanel
+                        config={data.config}
+                        projects={projectOptions}
+                        holidays={data.holidays}
+                        previewFrom={previousCompetence(currentCompetence)}
+                        canCreate={canCreateProjectRule}
+                        canEdit={canEditProjectRule}
+                        canDelete={canDeleteProjectRule}
+                      />
+                    ),
+                  },
+                ]
+              : []),
           ]}
         />
       ) : (

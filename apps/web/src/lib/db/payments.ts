@@ -12,6 +12,7 @@ import {
   type ProjectRateWindow,
 } from "@/lib/consultants/project-rate";
 import type { ConsultantPaymentStatus } from "@/lib/payments/state-machine";
+import type { PaymentEmailReplyView } from "@/lib/payments/types";
 import type {
   PaymentForecastView,
   ConsultantPaymentLineView,
@@ -26,6 +27,11 @@ import { buildConsultantInvoiceRequestEmail } from "@/lib/automation/email/templ
 import { applyEmailTemplate } from "@/lib/automation/email/apply-template";
 import { consultantInvoiceRequestTemplateVars } from "@/lib/automation/email/template-vars";
 import { resolveEventDelivery } from "@/lib/automation/notifications/event-delivery";
+import {
+  buildReplyTo,
+  isInboundConfigured,
+} from "@/lib/automation/email/reply-routing";
+import { loadInvoicePaymentWindows } from "@/lib/db/sla";
 
 type ConsultantContractType = "CLT" | "PJ" | "CLT_FLEX";
 import { sendPaymentForecastEmail } from "@/lib/payments/notify";
@@ -141,7 +147,7 @@ const paymentViewInclude = {
   // Real NF attachment ids (+ fileName) so the UI can link the signed-URL
   // download (melhoria #3). Newest first. The endpoint re-checks ownership.
   invoiceAttachments: {
-    select: { id: true, fileName: true },
+    select: { id: true, fileName: true, contentType: true, source: true },
     orderBy: { createdAt: "desc" as const },
   },
 } satisfies Prisma.ConsultantPaymentInclude;
@@ -179,7 +185,10 @@ function toPaymentView(row: PaymentRowForView): ConsultantPaymentView {
     invoiceAttachments: row.invoiceAttachments.map((attachment) => ({
       id: attachment.id,
       fileName: attachment.fileName,
+      contentType: attachment.contentType,
+      source: attachment.source,
     })),
+    emailReplyCount: 0,
     invoiceDivergence: buildInvoiceComparison({
       contractType: row.contractType,
       pjAmount,
@@ -225,8 +234,81 @@ export async function listConsultantPayments(input: {
     orderBy: [{ consultant: { name: "asc" } }],
   });
 
-  const views = rows.map(toPaymentView);
+  const views = await withEmailReplyCounts(rows.map(toPaymentView));
   return input.includeUnitRate ? views : views.map(withoutUnitRate);
+}
+
+/**
+ * Quantas respostas ao e-mail de solicitação de NF cada pagamento recebeu
+ * (InboundEmail ligado por referência, sem FK). Fail-open: erro => 0.
+ */
+async function withEmailReplyCounts(
+  views: ConsultantPaymentView[],
+): Promise<ConsultantPaymentView[]> {
+  if (views.length === 0) return views;
+  try {
+    const groups = await prisma.inboundEmail.groupBy({
+      by: ["referenceId"],
+      where: {
+        referenceType: "ConsultantPayment",
+        referenceId: { in: views.map((v) => v.id) },
+      },
+      _count: { _all: true },
+    });
+    const counts = new Map(groups.map((g) => [g.referenceId, g._count._all]));
+    return views.map((v) => ({ ...v, emailReplyCount: counts.get(v.id) ?? 0 }));
+  } catch (error) {
+    console.error("[pagamentos] email reply counts failed", error);
+    return views;
+  }
+}
+
+/** Respostas ao e-mail de NF de um pagamento, mais recentes primeiro. */
+export async function listPaymentEmailReplies(
+  paymentId: string,
+): Promise<PaymentEmailReplyView[] | null> {
+  const payment = await prisma.consultantPayment.findUnique({
+    where: { id: paymentId },
+    select: { id: true, consultant: { select: { email: true } } },
+  });
+  if (!payment) return null;
+  const consultantEmail = payment.consultant.email?.trim().toLowerCase() ?? "";
+  const rows = await prisma.inboundEmail.findMany({
+    where: { referenceType: "ConsultantPayment", referenceId: paymentId },
+    orderBy: { receivedAt: "desc" },
+    include: {
+      invoiceAttachments: {
+        select: { id: true, fileName: true, contentType: true },
+        orderBy: { createdAt: "asc" },
+      },
+    },
+  });
+  return rows.map((r) => {
+    const match = /<([^>]+)>/.exec(r.fromAddress);
+    const bare = (match ? match[1] : r.fromAddress).trim().toLowerCase();
+    const meta = Array.isArray(r.attachmentsMeta) ? r.attachmentsMeta : [];
+    return {
+      id: r.id,
+      fromAddress: r.fromAddress,
+      fromConsultant: Boolean(consultantEmail) && bare === consultantEmail,
+      subject: r.subject,
+      receivedAt: r.receivedAt.toISOString(),
+      textBody: r.textBody,
+      htmlBody: r.htmlBody,
+      forwardStatus: r.forwardStatus,
+      forwardedTo: r.forwardedTo,
+      attachments: meta.map((m) => {
+        const item = (m ?? {}) as Record<string, unknown>;
+        return {
+          filename: typeof item.filename === "string" ? item.filename : null,
+          contentType: typeof item.contentType === "string" ? item.contentType : null,
+          size: typeof item.size === "number" ? item.size : null,
+          inline: item.inline === true,
+        };
+      }),
+      invoiceAttachments: r.invoiceAttachments,
+    };
+  });
 }
 
 /**
@@ -1561,6 +1643,9 @@ export async function sendConsultantInvoiceRequest(input: {
     notasUrl,
     projects: breakdown.projects,
     projectAmountsProportional: breakdown.proportional,
+    // Item 4: SLAs de pagamento conforme a data de envio da NF.
+    paymentWindows: await loadInvoicePaymentWindows({ month: payment.month, year: payment.year }),
+    acceptsReplyAttachment: isInboundConfigured(),
   };
   // ITEM 3: template personalizado (/app/admin/templates-email), fail-open.
   const email = await applyEmailTemplate(
@@ -1579,6 +1664,15 @@ export async function sendConsultantInvoiceRequest(input: {
       subject: email.subject,
       text: email.text,
       html: email.html,
+      // Respostas (com a NF anexada) voltam pelo Resend Inbound e ficam no
+      // pagamento; também seguem para o destino configurado do evento.
+      replyTo: await buildReplyTo({
+        event: INVOICE_REQUEST_EMAIL_TYPE,
+        referenceType: "ConsultantPayment",
+        referenceId: payment.id,
+        subject: email.subject,
+        sentTo: delivery.emails,
+      }),
     });
     sentId = sent.id;
     provider = sent.provider;

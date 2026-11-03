@@ -1277,6 +1277,10 @@ const PERMISSION_CATALOG = [
   // (mantém seed e migração idênticos). SLA: acompanhamento é só leitura.
   { code: "SLA_ACOMPANHAMENTO", name: "Acompanhamento de SLA", module: "Operação", sort: 27, view: ["AREA_MANAGER", "PROJECT_MANAGER", "FINANCE", "PEOPLE"], adminActions: ["view"] },
   { code: "SLA_CONFIGURACAO", name: "Configurar prazos de SLA", module: "Operação", parent: "SLA_ACOMPANHAMENTO", sort: 28, view: ["FINANCE"], edit: ["FINANCE"], adminActions: ["view", "edit"] },
+  // --- SLA janelas de NF / por projeto + respostas de e-mail (migração 20261030120000)
+  { code: "SLA_PROJETOS", name: "SLA por projeto (faturamento)", module: "Operação", parent: "SLA_ACOMPANHAMENTO", sort: 29, view: ["FINANCE", "AREA_MANAGER"], create: ["FINANCE"], edit: ["FINANCE"], del: ["FINANCE"] },
+  { code: "PAGAMENTOS_RESPOSTAS_EMAIL", name: "Respostas por e-mail da NF", module: "Financeiro", parent: "PAGAMENTOS", sort: 117, view: ["FINANCE"], adminActions: ["view"] },
+  { code: "CONFIGURACOES_RESPOSTAS_EMAIL", name: "Destino das respostas de e-mail", module: "Administração", parent: "CONFIGURACOES_TEMPLATES_EMAIL", sort: 127, view: ADMIN_ONLY, edit: ADMIN_ONLY, adminActions: ["view", "edit"] },
 ];
 
 async function seedPermissions() {
