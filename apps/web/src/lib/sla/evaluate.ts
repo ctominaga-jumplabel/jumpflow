@@ -27,9 +27,11 @@
  *   Etapas de NF e o pagamento do dia 16 so se aplicam a PJ / CLT_FLEX.
  */
 import {
+  addBusinessDays,
   addCalendarDays,
   businessDaysBetween,
   competenceKey,
+  computeProjectRuleDeadline,
   computeStageDeadline,
   endOfDayInstant,
   isBusinessDay,
@@ -40,9 +42,11 @@ import {
   type Competence,
   type IsoDate,
 } from "./business-days";
+import { buildInvoiceWindows, windowForReceivedAt } from "./invoice-windows";
 import {
   SLA_AREAS,
   SLA_STAGE_ACTION_HREF,
+  isProjectRuleStage,
   stagesOfProcess,
   type SlaAreaKey,
   type SlaConfig,
@@ -86,6 +90,17 @@ export interface SlaItemFact {
   done: boolean;
   /** Instante ISO da conclusao (null quando pendente). */
   doneAt: string | null;
+  /**
+   * Prazo proprio do item quando difere do prazo da etapa (SLA por projeto ou
+   * janela de NF). Preenchido por `evaluateProcess`, nao pelos builders.
+   */
+  deadline?: IsoDate;
+  /** Aviso (dias uteis) proprio do item, junto com `deadline`. */
+  warningBusinessDays?: number;
+  /** Origem do prazo proprio (ex.: "SLA do projeto", "NF na janela 2"). */
+  deadlineNote?: string;
+  /** PAYMENT: instante de recebimento da NF (escolhe a janela de pagamento). */
+  invoiceReceivedAt?: string | null;
 }
 
 export interface SlaItemEvaluation extends SlaItemFact {
@@ -108,6 +123,11 @@ export interface SlaStageEvaluation {
   deadline: IsoDate;
   /** Instante ISO (fim do dia em Sao Paulo). */
   deadlineAt: string;
+  /**
+   * Prazo da pendencia mais critica quando difere do prazo da etapa (itens com
+   * prazo proprio); a contagem regressiva/atraso usa este prazo.
+   */
+  criticalDeadline?: IsoDate;
   /** Status agregado da etapa (pior caso entre itens pendentes). */
   status: SlaItemStatus;
   /** "faltam N dias uteis" (>= 0) — null quando ja venceu. */
@@ -193,6 +213,10 @@ export function classifyItem(
   if (!fact.applicable) {
     return { ...fact, status: "NOT_APPLICABLE", businessDaysLate: 0 };
   }
+  if (fact.deadline) {
+    deadline = fact.deadline;
+    warningBusinessDays = fact.warningBusinessDays ?? warningBusinessDays;
+  }
   if (fact.done) {
     if (!fact.doneAt) return { ...fact, status: "ON_TIME_DONE", businessDaysLate: 0 };
     const doneAt = new Date(fact.doneAt);
@@ -243,8 +267,23 @@ export function evaluateStage(input: {
         b.businessDaysLate - a.businessDaysLate ||
         a.label.localeCompare(b.label, "pt-BR"),
     );
-  const timing = pendingStatus(deadline, today, stage.warningBusinessDays, calendar);
-  return aggregateStage(stage, deadline, timing, items);
+  // Com prazos por item (SLA por projeto / janela de NF), a contagem regressiva
+  // segue a pendencia mais critica (menor prazo), coerente com o status.
+  const pendingItems = items.filter(
+    (i) => i.status === "OVERDUE" || i.status === "AT_RISK" || i.status === "PENDING_OK",
+  );
+  let critical = deadline;
+  let warning = stage.warningBusinessDays;
+  if (pendingItems.some((i) => i.deadline)) {
+    const first = [...pendingItems].sort((a, b) =>
+      (a.deadline ?? deadline).localeCompare(b.deadline ?? deadline),
+    )[0];
+    critical = first.deadline ?? deadline;
+    warning = first.warningBusinessDays ?? stage.warningBusinessDays;
+  }
+  const timing = pendingStatus(critical, today, warning, calendar);
+  const evaluation = aggregateStage(stage, deadline, timing, items);
+  return critical !== deadline ? { ...evaluation, criticalDeadline: critical } : evaluation;
 }
 
 /** Prazo/contagem regressiva de uma etapa ja avaliada (sem recalcular calendario). */
@@ -275,6 +314,12 @@ function aggregateStage(
   let status: SlaItemStatus;
   if (total === 0) status = "NOT_APPLICABLE";
   else if (pending === 0) status = counts.LATE_DONE > 0 ? "LATE_DONE" : "ON_TIME_DONE";
+  // Pior pendencia: com prazos por item (SLA por projeto / janela de NF) um
+  // item pode vencer antes ou depois da etapa. Sem prazo proprio, todos os
+  // pendentes tem o status do prazo da etapa (= timing.status).
+  else if (counts.OVERDUE > 0) status = "OVERDUE";
+  else if (counts.AT_RISK > 0) status = "AT_RISK";
+  else if (counts.PENDING_OK > 0) status = "PENDING_OK";
   else status = timing.status;
 
   return {
@@ -367,6 +412,72 @@ export function summarizeAreas(stages: readonly SlaStageEvaluation[]): SlaAreaSu
 
 export type SlaFactsByStage = Partial<Record<SlaStageKeyName, SlaItemFact[]>>;
 
+/**
+ * Prazos por item de um processo:
+ * - Horas -> Faturamento: regra ativa do projeto (SlaProjectRule) para a etapa
+ *   substitui o prazo da etapa nos itens daquele projeto.
+ * - Horas -> Pagamento, etapa PAYMENT: NF recebida numa janela adicional
+ *   (SlaInvoiceTier) => o pagamento vence na data dessa janela.
+ * Itens sem regra ficam como estao (prazo da etapa).
+ */
+export function applyItemDeadlines(input: {
+  process: SlaProcessKey;
+  stageKey: SlaStageKeyName;
+  competence: Competence;
+  config: SlaConfig;
+  calendar: BusinessCalendar;
+  facts: readonly SlaItemFact[];
+}): SlaItemFact[] {
+  const { process, stageKey, competence, config, calendar } = input;
+  if (process === "HOURS_TO_BILLING" && isProjectRuleStage(stageKey)) {
+    const rules = new Map(
+      (config.projectRules ?? [])
+        .filter((r) => r.active && r.stageKey === stageKey)
+        .map((r) => [r.projectId, r]),
+    );
+    if (rules.size === 0) return [...input.facts];
+    return input.facts.map((fact) => {
+      const projectId = fact.projectIds?.length === 1 ? fact.projectIds[0] : null;
+      const rule = projectId ? rules.get(projectId) : undefined;
+      if (!rule) return fact;
+      return {
+        ...fact,
+        deadline: computeProjectRuleDeadline(rule, competence, calendar),
+        warningBusinessDays: rule.warningBusinessDays,
+        deadlineNote: "SLA do projeto",
+      };
+    });
+  }
+  if (process === "HOURS_TO_PAYMENT" && stageKey === "PAYMENT") {
+    const windows = buildInvoiceWindows(config, competence, calendar);
+    if (windows.length < 2) return [...input.facts];
+    // NF depois da ultima janela: o atraso e do consultor, entao o Financeiro
+    // ganha o mesmo prazo da janela padrao (dias uteis entre envio e
+    // pagamento), contado do dia em que a NF chegou.
+    const primary = windows.find((w) => w.primary) ?? windows[0];
+    const lead = Math.max(0, businessDaysBetween(primary.receiptDeadline, primary.paymentDate, calendar));
+    return input.facts.map((fact) => {
+      if (!fact.invoiceReceivedAt) return fact;
+      const window = windowForReceivedAt(windows, fact.invoiceReceivedAt);
+      if (window?.primary) return fact;
+      if (window) {
+        return {
+          ...fact,
+          deadline: window.paymentDate,
+          deadlineNote: `NF na janela ${window.index} (${window.label})`,
+        };
+      }
+      const receivedDay = isoDateInSaoPaulo(new Date(fact.invoiceReceivedAt));
+      return {
+        ...fact,
+        deadline: addBusinessDays(receivedDay, lead, calendar),
+        deadlineNote: `NF após a última janela (${lead} dia(s) útil(eis) após o recebimento)`,
+      };
+    });
+  }
+  return [...input.facts];
+}
+
 export function evaluateProcess(input: {
   process: SlaProcessKey;
   competence: Competence;
@@ -382,7 +493,14 @@ export function evaluateProcess(input: {
       settings: input.config.settings,
       calendar: input.calendar,
       today: input.today,
-      facts: input.facts[stage.stageKey] ?? [],
+      facts: applyItemDeadlines({
+        process: input.process,
+        stageKey: stage.stageKey,
+        competence: input.competence,
+        config: input.config,
+        calendar: input.calendar,
+        facts: input.facts[stage.stageKey] ?? [],
+      }),
     }),
   );
   return {
@@ -468,6 +586,31 @@ export interface SlaRawPayment {
   approvedAt: string | null;
   confirmedPaidAt: string | null;
   updatedAt: string;
+}
+
+/**
+ * Ultimo prazo possivel da competencia (etapas, regras por projeto e janelas
+ * de NF): depois dele o status nao depende mais de "hoje".
+ */
+export function latestCompetenceDeadline(
+  config: SlaConfig,
+  competence: Competence,
+  calendar: BusinessCalendar,
+): IsoDate {
+  let latest = "0000-00-00";
+  for (const stage of config.stages) {
+    const d = computeStageDeadline(stage, competence, config.settings, calendar);
+    if (d > latest) latest = d;
+  }
+  for (const rule of config.projectRules ?? []) {
+    if (!rule.active) continue;
+    const d = computeProjectRuleDeadline(rule, competence, calendar);
+    if (d > latest) latest = d;
+  }
+  for (const w of buildInvoiceWindows(config, competence, calendar)) {
+    if (w.paymentDate > latest) latest = w.paymentDate;
+  }
+  return latest;
 }
 
 export interface SlaRawData {
@@ -748,6 +891,7 @@ export function buildPaymentFacts(raw: SlaRawData, stage: PaymentStage): SlaItem
         applicable,
         done,
         doneAt: done ? rule.doneAt(p) : null,
+        ...(stage === "PAYMENT" ? { invoiceReceivedAt: p.invoiceReceivedAt } : {}),
       };
     });
 }

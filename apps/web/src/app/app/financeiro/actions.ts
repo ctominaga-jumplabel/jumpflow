@@ -59,6 +59,7 @@ import {
   getEmailTransport,
   type EmailAttachment,
 } from "@/lib/automation/email-transport";
+import { buildReplyTo } from "@/lib/automation/email/reply-routing";
 import { buildWorkbook, defineSheet } from "@/lib/export/xlsx";
 import { getHoursReport } from "@/lib/db/reports";
 import { clientHoursXlsxColumns } from "@/lib/reports/xlsx-columns";
@@ -1310,6 +1311,13 @@ export async function sendPreInvoiceEmail(input: {
         subject: preInvoiceEmail.subject,
         text: preInvoiceEmail.text,
         html: preInvoiceEmail.html,
+        replyTo: await buildReplyTo({
+          event: "PRE_INVOICE_ISSUED",
+          referenceType: "Client",
+          referenceId: data.client.id,
+          subject: preInvoiceEmail.subject,
+          sentTo: toEmails,
+        }),
         ...(attachments.length > 0 ? { attachments } : {}),
       });
       messageId = sent.id;
@@ -2242,6 +2250,13 @@ export async function sendNfseIssuedEmail(input: {
         subject: nfseEmail.subject,
         text: nfseEmail.text,
         html: nfseEmail.html,
+        replyTo: await buildReplyTo({
+          event: "NFSE_ISSUED",
+          referenceType: "Client",
+          referenceId: document.clientId,
+          subject: nfseEmail.subject,
+          sentTo: toEmails,
+        }),
       });
       messageId = sent.id;
       provider = sent.provider;

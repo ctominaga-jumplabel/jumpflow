@@ -138,6 +138,17 @@ pode se conceder essas células pela Matriz.
 | `SLA_ACOMPANHAMENTO` | Acompanhamento de SLA | — (Operação) | view: ADMIN, AREA_MANAGER, PROJECT_MANAGER, FINANCE, PEOPLE |
 | `SLA_CONFIGURACAO` | Configurar prazos de SLA | `SLA_ACOMPANHAMENTO` | ADMIN, FINANCE view+edit |
 
+### SLA por projeto / janelas de NF + respostas de e-mail (migration `20261030120000`)
+
+| Code | Nome | Pai | Grants padrão |
+|---|---|---|---|
+| `SLA_PROJETOS` | SLA por projeto (faturamento) | `SLA_ACOMPANHAMENTO` | ADMIN, FINANCE view+create+edit+delete; AREA_MANAGER view |
+| `PAGAMENTOS_RESPOSTAS_EMAIL` | Respostas por e-mail da NF | `PAGAMENTOS` | ADMIN, FINANCE view |
+| `CONFIGURACOES_RESPOSTAS_EMAIL` | Destino das respostas de e-mail | `CONFIGURACOES_TEMPLATES_EMAIL` | ADMIN view+edit |
+
+As janelas de envio da NF fazem parte da configuração de SLA (`SLA_CONFIGURACAO`
+edit). O webhook de entrada não usa sessão: autentica pela assinatura Svix.
+
 Além disso, PEOPLE ganha `view` em `PAGAMENTOS`. Constantes TS em
 `FLOW_PERMISSION_CODES` (`apps/web/src/lib/auth/permission-codes.ts`); checagem
 no servidor com `can(code, "edit")` / `requirePermission(code, "edit")`.

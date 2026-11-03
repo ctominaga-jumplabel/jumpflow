@@ -17,6 +17,13 @@ import {
 } from "@/lib/automation/email/template-registry";
 import type { TemplateVarValue } from "@/lib/automation/email/template-renderer";
 import { isDatabaseConfigured } from "@/lib/db/config";
+import {
+  REPLY_CAPTURE_EVENTS,
+  inboundAddressPrefix,
+  inboundDomain,
+  isInboundConfigured,
+} from "@/lib/automation/email/reply-routing";
+import type { ReplyRoutingSettingsView } from "@/components/admin/EmailReplyRoutePanel";
 
 export const metadata: Metadata = { title: "Templates de E-mail" };
 export const dynamic = "force-dynamic";
@@ -92,6 +99,10 @@ export default async function TemplatesEmailPage({
 }) {
   await requirePermission(FLOW_PERMISSION_CODES.emailTemplates, "view");
   const canEdit = await can(FLOW_PERMISSION_CODES.emailTemplates, "edit");
+  const [canViewReplies, canEditReplies] = await Promise.all([
+    can(FLOW_PERMISSION_CODES.emailReplyRoutes, "view"),
+    can(FLOW_PERMISSION_CODES.emailReplyRoutes, "edit"),
+  ]);
   const { evento } = await searchParams;
 
   const header = (
@@ -115,17 +126,30 @@ export default async function TemplatesEmailPage({
     );
   }
 
-  const [{ listEmailTemplates }, { listNotificationRules }] = await Promise.all([
+  const [{ listEmailTemplates, listEmailReplyRoutes }, { listNotificationRules }] = await Promise.all([
     import("@/lib/db/email-templates"),
     import("@/lib/db/notification-rules"),
   ]);
-  const [templates, rules] = await Promise.all([
+  const [templates, rules, replyRoutes] = await Promise.all([
     listEmailTemplates().catch((error) => {
       console.error("[templates-email] list failed", error);
       return [];
     }),
     listNotificationRules().catch(() => []),
+    canViewReplies ? listEmailReplyRoutes().catch(() => []) : Promise.resolve([]),
   ]);
+  const domain = inboundDomain();
+  const replyRouting: ReplyRoutingSettingsView | null = canViewReplies
+    ? {
+        canEdit: canEditReplies,
+        inboundConfigured: isInboundConfigured(),
+        inboundAddressExample: domain ? `${inboundAddressPrefix()}+<código>@${domain}` : null,
+        captureEvents: [...REPLY_CAPTURE_EVENTS],
+        routes: Object.fromEntries(
+          replyRoutes.map((r) => [r.event, { active: r.active, recipients: r.recipients }]),
+        ),
+      }
+    : null;
   const byEvent = new Map(templates.map((t) => [t.event, t]));
 
   const events: EmailTemplateEventView[] = listTemplateDefinitions().map((def) => {
@@ -172,6 +196,7 @@ export default async function TemplatesEmailPage({
         groups={[...TEMPLATE_GROUPS]}
         initialEvent={initialEvent}
         canEdit={canEdit}
+        replyRouting={replyRouting}
       />
     </div>
   );

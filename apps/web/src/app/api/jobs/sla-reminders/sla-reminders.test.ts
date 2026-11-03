@@ -39,6 +39,9 @@ const h = vi.hoisted(() => {
         },
       ],
     },
+    // Sem janelas de NF adicionais nem SLA por projeto.
+    slaInvoiceTier: { findMany: async () => [] },
+    slaProjectRule: { findMany: async () => [] },
     holiday: {
       findMany: async () => [
         { date: new Date("2026-11-02T00:00:00.000Z"), name: "Finados", scope: "NATIONAL" },

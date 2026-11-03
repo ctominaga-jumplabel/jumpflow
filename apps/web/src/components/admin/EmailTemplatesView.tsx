@@ -11,6 +11,10 @@ import {
   sendEmailTemplateTest,
   type EmailTemplateDraft,
 } from "@/app/app/admin/templates-email/actions";
+import {
+  EmailReplyRoutePanel,
+  type ReplyRoutingSettingsView,
+} from "@/components/admin/EmailReplyRoutePanel";
 import { StatusBadge, type StatusTone } from "@/components/ui/StatusBadge";
 import { cn } from "@/lib/utils";
 
@@ -74,11 +78,14 @@ export function EmailTemplatesView({
   groups,
   initialEvent,
   canEdit,
+  replyRouting,
 }: {
   events: EmailTemplateEventView[];
   groups: string[];
   initialEvent: string;
   canEdit: boolean;
+  /** Destino das respostas (CONFIGURACOES_RESPOSTAS_EMAIL view); null = sem acesso. */
+  replyRouting?: ReplyRoutingSettingsView | null;
 }) {
   const [selected, setSelected] = useState(initialEvent);
   const [dirty, setDirty] = useState(false);
@@ -143,7 +150,7 @@ export function EmailTemplatesView({
         ))}
       </nav>
 
-      <div className="min-w-0">
+      <div className="min-w-0 space-y-6">
         {current.sendsEmail ? (
           <TemplateEditor
             key={current.event}
@@ -154,6 +161,9 @@ export function EmailTemplatesView({
         ) : (
           <NoEmailPanel ev={current} />
         )}
+        {current.sendsEmail && replyRouting ? (
+          <EmailReplyRoutePanel key={`reply-${current.event}`} event={current.event} settings={replyRouting} />
+        ) : null}
       </div>
     </div>
   );

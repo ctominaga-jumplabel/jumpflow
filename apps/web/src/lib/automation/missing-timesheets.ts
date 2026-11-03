@@ -9,6 +9,7 @@ import {
 import { isDatabaseConfigured } from "@/lib/db/config";
 import { loadAutomationConfig } from "./config";
 import { getEmailTransport } from "./email-transport";
+import { buildReplyTo } from "@/lib/automation/email/reply-routing";
 import { buildMissingTimesheetEmail } from "./email/templates";
 import { applyEmailTemplate } from "./email/apply-template";
 import { missingTimesheetTemplateVars } from "./email/template-vars";
@@ -291,6 +292,11 @@ export async function runMissingTimesheetReport(params: {
       subject: email.subject,
       text: email.text,
       html: email.html,
+      replyTo: await buildReplyTo({
+        event: "MISSING_TIMESHEET_REPORT",
+        subject: email.subject,
+        sentTo: recipients,
+      }),
       attachments: [
         {
           filename: `ausencia-lancamento-${referenceKey}.csv`,

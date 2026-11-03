@@ -42,6 +42,11 @@ export function SlaFlowStepper({ stages }: { stages: SlaStageEvaluation[] }) {
             <div className="text-xs text-medium">
               <p>
                 Prazo <span className="font-semibold tabular-nums">{formatDeadlineShort(s.deadline)}</span>
+                {s.criticalDeadline ? (
+                  <span className="block text-xs">
+                    Prazo por projeto/NF mais crítico: {formatDeadlineShort(s.criticalDeadline)}
+                  </span>
+                ) : null}
               </p>
               {s.status === "ON_TIME_DONE" || s.status === "LATE_DONE" || s.status === "NOT_APPLICABLE" ? null : (
                 <p

@@ -88,6 +88,8 @@ export interface DispatchOptions {
   webhookTransport?: WebhookTransport;
   /** Subject prefix for grouped digests. Defaults to "Resumo de notificações". */
   digestTitle?: string;
+  /** Reply-To dos e-mails (destino de respostas do evento). */
+  replyTo?: string[];
   /** Optional sink for delivery logging / idempotency. */
   recordDelivery?: (entry: DeliveryLogEntry) => Promise<void> | void;
 }
@@ -146,10 +148,17 @@ async function dispatchEmailGroup(
   fragments: NotificationFragment[],
   transport: EmailTransport,
   digestTitle: string,
+  replyTo?: string[],
 ): Promise<DispatchResult> {
   const { subject, html, text } = buildEmailBody(fragments, digestTitle);
   try {
-    const sent = await transport.send({ to: [recipient.address], subject, text, html });
+    const sent = await transport.send({
+      to: [recipient.address],
+      subject,
+      text,
+      html,
+      ...(replyTo?.length ? { replyTo } : {}),
+    });
     return {
       recipientKey: recipient.key,
       channel: "EMAIL",
@@ -231,7 +240,7 @@ export async function dispatchNotifications(
     const result =
       recipient.channel === "TEAMS"
         ? await dispatchTeamsGroup(recipient, group, webhookTransport, digestTitle)
-        : await dispatchEmailGroup(recipient, group, emailTransport, digestTitle);
+        : await dispatchEmailGroup(recipient, group, emailTransport, digestTitle, options.replyTo);
     results.push(result);
 
     if (options.recordDelivery) {

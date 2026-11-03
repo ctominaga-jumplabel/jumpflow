@@ -169,6 +169,13 @@ export const SUBSCREEN_CODES = {
  * - emailTemplates: tela de templates de e-mail (ADMIN).
  * - slaTracking: tela de acompanhamento de SLA (view).
  * - slaSettings: configurar prazos de SLA (ADMIN/FINANCE). Child of SLA_ACOMPANHAMENTO.
+ *   Inclui as janelas de envio da NF (SlaInvoiceTier).
+ * - slaProjects: SLA por projeto do faturamento (CRUD; ADMIN/FINANCE, view
+ *   AREA_MANAGER). Child of SLA_ACOMPANHAMENTO (migration 20261030120000).
+ * - paymentEmailReplies: ver respostas ao e-mail de NF (corpo + anexos vindos
+ *   por e-mail) em Pagamentos (ADMIN/FINANCE). Child of PAGAMENTOS.
+ * - emailReplyRoutes: configurar para onde vão as respostas dos e-mails
+ *   enviados (ADMIN). Child of CONFIGURACOES_TEMPLATES_EMAIL.
  */
 export const FLOW_PERMISSION_CODES = {
   billingReopen: "FATURAMENTO_REABRIR_LIBERACAO",
@@ -178,6 +185,9 @@ export const FLOW_PERMISSION_CODES = {
   emailTemplates: "CONFIGURACOES_TEMPLATES_EMAIL",
   slaTracking: "SLA_ACOMPANHAMENTO",
   slaSettings: "SLA_CONFIGURACAO",
+  slaProjects: "SLA_PROJETOS",
+  paymentEmailReplies: "PAGAMENTOS_RESPOSTAS_EMAIL",
+  emailReplyRoutes: "CONFIGURACOES_RESPOSTAS_EMAIL",
 } as const;
 
 /**
@@ -281,6 +291,10 @@ export const SYSTEM_PERMISSION_CODES: ReadonlySet<string> = new Set([
   "CONFIGURACOES_TEMPLATES_EMAIL",
   "SLA_ACOMPANHAMENTO",
   "SLA_CONFIGURACAO",
+  // SLA janelas de NF / por projeto + respostas de e-mail (migration 20261030120000).
+  "SLA_PROJETOS",
+  "PAGAMENTOS_RESPOSTAS_EMAIL",
+  "CONFIGURACOES_RESPOSTAS_EMAIL",
 ]);
 
 /** Whether `code` is a native (seeded) feature — immutable code, not deletable. */

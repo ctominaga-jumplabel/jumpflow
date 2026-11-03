@@ -14,7 +14,6 @@ import { isDatabaseConfigured } from "./config";
 import { resolveDbUser } from "./users";
 import {
   competenceKey,
-  computeStageDeadline,
   competenceOf,
   daysInMonth,
   isoDate,
@@ -32,6 +31,7 @@ import {
   buildSlaFacts,
   digestEvaluations,
   evaluateProcess,
+  latestCompetenceDeadline,
   scopeProcessEvaluation,
   type SlaCompetenceDigest,
   type SlaHistory,
@@ -39,12 +39,15 @@ import {
   type SlaRawData,
   type SlaViewerScope,
 } from "@/lib/sla/evaluate";
+import { buildInvoiceWindows, type InvoiceWindow } from "@/lib/sla/invoice-windows";
 import {
   SLA_PROCESSES,
   SLA_SETTINGS_DEFAULTS,
   SLA_STAGE_DEFAULTS,
+  isProjectRuleStage,
   type SlaConfig,
   type SlaProcessKey,
+  type SlaProjectOption,
   type SlaStageConfig,
 } from "@/lib/sla/types";
 
@@ -57,11 +60,21 @@ const day = (d: Date): IsoDate => d.toISOString().slice(0, 10);
  */
 export async function loadSlaConfig(): Promise<SlaConfig> {
   if (!isDatabaseConfigured()) {
-    return { settings: { ...SLA_SETTINGS_DEFAULTS }, stages: SLA_STAGE_DEFAULTS.map((s) => ({ ...s })) };
+    return {
+      settings: { ...SLA_SETTINGS_DEFAULTS },
+      stages: SLA_STAGE_DEFAULTS.map((s) => ({ ...s })),
+      invoiceTiers: [],
+      projectRules: [],
+    };
   }
-  const [settings, rows] = await Promise.all([
+  const [settings, rows, tiers, projectRules] = await Promise.all([
     prisma.slaSettings.findUnique({ where: { id: "default" } }),
     prisma.slaStage.findMany({ orderBy: [{ process: "asc" }, { sortOrder: "asc" }] }),
+    prisma.slaInvoiceTier.findMany({ orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] }),
+    prisma.slaProjectRule.findMany({
+      orderBy: [{ project: { name: "asc" } }, { stageKey: "asc" }],
+      include: { project: { select: { name: true, client: { select: { name: true } } } } },
+    }),
   ]);
   const byKey = new Map(rows.map((r) => [`${r.process}:${r.stageKey}`, r]));
   const stages: SlaStageConfig[] = SLA_STAGE_DEFAULTS.map((def) => {
@@ -84,6 +97,33 @@ export async function loadSlaConfig(): Promise<SlaConfig> {
       ? { paymentDay: settings.paymentDay, considerStateHolidays: settings.considerStateHolidays }
       : { ...SLA_SETTINGS_DEFAULTS },
     stages,
+    invoiceTiers: tiers.map((t) => ({
+      label: t.label,
+      receipt: { kind: t.receiptKind, value: t.receiptValue, monthOffset: t.receiptMonthOffset },
+      payment: { kind: t.paymentKind, value: t.paymentValue, monthOffset: t.paymentMonthOffset },
+      sortOrder: t.sortOrder,
+      active: t.active,
+    })),
+    projectRules: projectRules.flatMap((r) =>
+      isProjectRuleStage(r.stageKey)
+        ? [
+            {
+              id: r.id,
+              projectId: r.projectId,
+              projectName: r.project.name,
+              clientName: r.project.client.name,
+              stageKey: r.stageKey,
+              mode: r.mode,
+              businessDays: r.businessDays,
+              fixedDay: r.fixedDay,
+              monthOffset: r.monthOffset,
+              warningBusinessDays: r.warningBusinessDays,
+              active: r.active,
+              notes: r.notes,
+            },
+          ]
+        : [],
+    ),
   };
 }
 
@@ -110,7 +150,8 @@ export async function loadSlaHolidays(from: IsoDate, to: IsoDate): Promise<SlaHo
  * do tipo "N dias uteis apos o fim do mes" com N grande podem transbordar).
  */
 export function calendarRange(first: Competence, last: Competence): { from: IsoDate; to: IsoDate } {
-  const end = shiftCompetence(last, 2);
+  // +3: janelas de NF com monthOffset 2 e N-esimo dia util podem transbordar.
+  const end = shiftCompetence(last, 3);
   return {
     from: isoDate(first.year, first.month, 1),
     to: isoDate(end.year, end.month, daysInMonth(end.year, end.month)),
@@ -388,9 +429,7 @@ export function isCompetenceSettled(
   calendar: BusinessCalendar,
   today: IsoDate,
 ): boolean {
-  return config.stages.every(
-    (stage) => computeStageDeadline(stage, competence, config.settings, calendar) < today,
-  );
+  return latestCompetenceDeadline(config, competence, calendar) < today;
 }
 
 /**
@@ -516,4 +555,36 @@ export async function loadSlaDashboard(input: {
     history[process] = buildHistoryFromDigests(digests, process, input.scope);
   }
   return { config, today, competence: input.competence, evaluations, history, holidays };
+}
+
+/** Projetos elegiveis a SLA proprio (nao encerrados/cancelados), por nome. */
+export async function listSlaProjectOptions(): Promise<SlaProjectOption[]> {
+  if (!isDatabaseConfigured()) return [];
+  const rows = await prisma.project.findMany({
+    where: { status: { in: ["PROPOSAL", "ACTIVE", "PAUSED"] } },
+    select: { id: true, name: true, client: { select: { name: true } } },
+    orderBy: { name: "asc" },
+  });
+  return rows.map((r) => ({ id: r.id, name: r.name, clientName: r.client.name }));
+}
+
+/**
+ * Janelas de envio da NF (SLA de Pagamento) de uma competencia, ja em datas —
+ * para o e-mail de solicitacao de NF. Fail-open: erro => [] (e-mail sem tabela).
+ */
+export async function loadInvoicePaymentWindows(
+  competence: Competence,
+): Promise<InvoiceWindow[]> {
+  try {
+    const config = await loadSlaConfig();
+    const { calendar } = await loadSlaCalendar(
+      competence,
+      competence,
+      config.settings.considerStateHolidays,
+    );
+    return buildInvoiceWindows(config, competence, calendar);
+  } catch (error) {
+    console.error("[sla] failed to load invoice windows", error);
+    return [];
+  }
 }

@@ -4,6 +4,10 @@
  */
 import { prisma } from "@jumpflow/database";
 import type { NotificationEventName } from "@/lib/automation/email/template-registry";
+import {
+  parseStoredReplyRecipients,
+  type ReplyRecipient,
+} from "@/lib/automation/email/reply-routing-core";
 
 export interface EmailTemplateRow {
   id: string;
@@ -71,4 +75,22 @@ export async function upsertEmailTemplate(input: {
 
 export async function deleteEmailTemplate(event: NotificationEventName) {
   return prisma.emailTemplate.deleteMany({ where: { event } });
+}
+
+export interface EmailReplyRouteRow {
+  event: NotificationEventName;
+  active: boolean;
+  recipients: ReplyRecipient[];
+  updatedAt: string;
+}
+
+/** Destinos de resposta configurados (EmailReplyRoute), por evento. */
+export async function listEmailReplyRoutes(): Promise<EmailReplyRouteRow[]> {
+  const rows = await prisma.emailReplyRoute.findMany({ orderBy: { event: "asc" } });
+  return rows.map((r) => ({
+    event: r.event as NotificationEventName,
+    active: r.active,
+    recipients: parseStoredReplyRecipients(r.recipients),
+    updatedAt: r.updatedAt.toISOString(),
+  }));
 }

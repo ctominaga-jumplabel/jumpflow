@@ -14,6 +14,7 @@ import {
 } from "./business-days";
 import {
   SLA_PROCESS_LABEL,
+  SLA_PROJECT_RULE_STAGES,
   stagesOfProcess,
   type SlaConfig,
   type SlaProcessKey,
@@ -55,6 +56,42 @@ export const slaStageUpdateSchema = z.object({
   active: z.boolean(),
 });
 
+export const SLA_MAX_INVOICE_TIERS = 5;
+export const SLA_MAX_MONTH_OFFSET = 2;
+
+/** Regra de data (janela de NF): N-esimo dia util ou dia fixo do mes. */
+export const slaDateRuleSchema = z
+  .object({
+    kind: z.enum(["BUSINESS_DAY", "FIXED_DAY"]),
+    value: z.number().int("Use um número inteiro.").min(1, "Informe um dia a partir de 1."),
+    monthOffset: z
+      .number()
+      .int()
+      .min(0, "Mês inválido.")
+      .max(SLA_MAX_MONTH_OFFSET, `No máximo ${SLA_MAX_MONTH_OFFSET} meses após a competência.`),
+  })
+  .superRefine((rule, ctx) => {
+    const max = rule.kind === "FIXED_DAY" ? 31 : 23;
+    if (rule.value > max) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          rule.kind === "FIXED_DAY" ? "Dia do mês entre 1 e 31." : "Dia útil entre 1 e 23.",
+      });
+    }
+  });
+
+export const slaInvoiceTierSchema = z.object({
+  label: z
+    .string()
+    .trim()
+    .min(3, "Nome da janela muito curto.")
+    .max(60, "Nome da janela muito longo."),
+  receipt: slaDateRuleSchema,
+  payment: slaDateRuleSchema,
+  active: z.boolean(),
+});
+
 export const slaConfigUpdateSchema = z
   .object({
     settings: z.object({
@@ -66,6 +103,14 @@ export const slaConfigUpdateSchema = z
       considerStateHolidays: z.boolean(),
     }),
     stages: z.array(slaStageUpdateSchema).min(1).max(20),
+    /**
+     * Janelas adicionais de envio da NF (ordem = ordem da lista). Ausente =
+     * mantem as atuais (formulario antigo nao apaga janelas).
+     */
+    invoiceTiers: z
+      .array(slaInvoiceTierSchema)
+      .max(SLA_MAX_INVOICE_TIERS, `No máximo ${SLA_MAX_INVOICE_TIERS} janelas adicionais.`)
+      .optional(),
   })
   .superRefine((value, ctx) => {
     const seen = new Set<string>();
@@ -79,6 +124,63 @@ export const slaConfigUpdateSchema = z
   });
 
 export type SlaConfigUpdateInput = z.infer<typeof slaConfigUpdateSchema>;
+
+/** SLA por projeto (Horas -> Faturamento). */
+export const slaProjectRuleSchema = z
+  .object({
+    id: z.string().min(1).optional(),
+    projectId: z.string().min(1, "Selecione o projeto."),
+    stageKey: z.enum(SLA_PROJECT_RULE_STAGES),
+    mode: z.enum(["BUSINESS_DAYS", "FIXED_DAY"]),
+    businessDays: z
+      .number()
+      .int("Use dias inteiros.")
+      .min(0, "Dias úteis não podem ser negativos.")
+      .max(SLA_MAX_BUSINESS_DAYS, `Máximo de ${SLA_MAX_BUSINESS_DAYS} dias úteis.`)
+      .nullable()
+      .default(null),
+    fixedDay: z
+      .number()
+      .int("Use um dia inteiro.")
+      .min(1, "Dia do mês entre 1 e 31.")
+      .max(31, "Dia do mês entre 1 e 31.")
+      .nullable()
+      .default(null),
+    monthOffset: z
+      .number()
+      .int()
+      .min(0, "Mês inválido.")
+      .max(SLA_MAX_MONTH_OFFSET, `No máximo ${SLA_MAX_MONTH_OFFSET} meses após a competência.`)
+      .default(1),
+    warningBusinessDays: z
+      .number()
+      .int("Use dias inteiros.")
+      .min(0, "Aviso não pode ser negativo.")
+      .max(SLA_MAX_WARNING_DAYS, `Aviso de no máximo ${SLA_MAX_WARNING_DAYS} dias úteis.`),
+    active: z.boolean(),
+    notes: z
+      .string()
+      .trim()
+      .max(200, "Observação muito longa.")
+      .nullable()
+      .default(null)
+      .transform((v) => (v ? v : null)),
+  })
+  .superRefine((rule, ctx) => {
+    if (rule.mode === "BUSINESS_DAYS" && rule.businessDays === null) {
+      ctx.addIssue({ code: "custom", message: "Informe os dias úteis." });
+    }
+    if (rule.mode === "FIXED_DAY" && rule.fixedDay === null) {
+      ctx.addIssue({ code: "custom", message: "Informe o dia do mês." });
+    }
+  })
+  .transform((rule) =>
+    rule.mode === "BUSINESS_DAYS"
+      ? { ...rule, fixedDay: null, monthOffset: 1 }
+      : { ...rule, businessDays: null },
+  );
+
+export type SlaProjectRuleInput = z.infer<typeof slaProjectRuleSchema>;
 
 /** Previa: prazos de cada etapa ativa para as proximas competencias. */
 export interface SlaDeadlinePreview {
