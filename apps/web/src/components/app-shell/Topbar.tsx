@@ -4,7 +4,6 @@ import { useSyncExternalStore } from "react";
 import { LogOut, Maximize, Menu, Minimize } from "lucide-react";
 import type { AppUser } from "@/lib/auth/types";
 import { primaryRoleLabel } from "@/lib/auth/roles";
-import { StatusBadge } from "@/components/ui/StatusBadge";
 import { NotificationBell } from "./NotificationBell";
 import { ThemeToggle } from "./ThemeToggle";
 import type { NotificationView } from "@/lib/db/notifications";
@@ -39,7 +38,7 @@ function initialsFromName(name: string): string {
 
 /**
  * Top application bar: mobile menu, notifications, fullscreen toggle,
- * environment flag, user and logout. The mock search field was removed (P21).
+ * user and logout. The mock search field was removed (P21).
  */
 export function Topbar({
   user,
@@ -60,10 +59,6 @@ export function Topbar({
       </button>
 
       <div className="ml-auto flex items-center gap-2 sm:gap-3">
-        <StatusBadge tone="warning" className="hidden sm:inline-flex">
-          Ambiente MVP
-        </StatusBadge>
-
         <ThemeToggle className={cn(iconButton, focusRing)} />
 
         <FullscreenButton />
